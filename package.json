@@ -1,0 +1,37 @@
+{
+  "name": "@o3co/auth.policy-verifier",
+  "description": "No-DSL ABAC policy verifier with Collector pattern",
+  "version": "0.0.1",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@10.29.3",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#/*": "./src/*"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "debug": "tsx watch src/server/app.mts",
+    "start": "node dist/server/app.mjs"
+  },
+  "dependencies": {
+    "@o3co/js.util.log": "^0.5.0",
+    "@o3co/ts.hocon": "^0.1.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.14",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^25.1.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.2"
+  }
+}
