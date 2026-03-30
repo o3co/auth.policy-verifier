@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { ATTR_ROLES } from "#/engine/keys.mjs";
-import type { CollectorContext } from "#/engine/types.mjs";
+import type { CollectorContext, VerifierPayload } from "#/engine/types.mjs";
 import { StaticRoleCollector } from "../StaticRoleCollector.mjs";
 
 const stubContext: CollectorContext = {
-	payload: { scopes: [] } as any,
+	payload: { scopes: [] } satisfies VerifierPayload,
 	resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 	action: "read",
 };

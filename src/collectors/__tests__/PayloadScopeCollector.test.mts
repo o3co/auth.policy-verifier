@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { ATTR_SCOPES } from "#/engine/keys.mjs";
-import type { CollectorContext } from "#/engine/types.mjs";
+import type { CollectorContext, VerifierPayload } from "#/engine/types.mjs";
 import { PayloadScopeCollector } from "../PayloadScopeCollector.mjs";
 
 const makeContext = (scopes: string[]): CollectorContext => ({
-	payload: { scopes } as any,
+	payload: { scopes } satisfies VerifierPayload,
 	resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 	action: "read",
 });
@@ -19,7 +19,7 @@ describe("PayloadScopeCollector", () => {
 
 	it("returns empty array when scopes missing", async () => {
 		const ctx: CollectorContext = {
-			payload: {} as any,
+			payload: {} satisfies VerifierPayload,
 			resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 			action: "read",
 		};

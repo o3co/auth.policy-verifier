@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { RulePipeline } from "../RulePipeline.mjs";
-import type { CollectorContext, Rule, RuleCollector } from "../types.mjs";
+import type { CollectorContext, Rule, RuleCollector, VerifierPayload } from "../types.mjs";
 
 const stubContext: CollectorContext = {
-	payload: { scopes: [] } as any,
+	payload: { scopes: [] } satisfies VerifierPayload,
 	resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 	action: "read",
 };

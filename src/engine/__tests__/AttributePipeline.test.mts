@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { AttributePipeline } from "../AttributePipeline.mjs";
-import type { AttributeCollector, Attributes, CollectorContext } from "../types.mjs";
+import type {
+	AttributeCollector,
+	Attributes,
+	CollectorContext,
+	VerifierPayload,
+} from "../types.mjs";
 
 const stubContext: CollectorContext = {
-	payload: { scopes: [] } as any,
+	payload: { scopes: [] } satisfies VerifierPayload,
 	resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 	action: "read",
 };

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { CollectorContext } from "#/engine/types.mjs";
+import type { CollectorContext, VerifierPayload } from "#/engine/types.mjs";
 import { ResourceActionScopeRuleCollector } from "../ResourceActionScopeRuleCollector.mjs";
 
 const makeContext = (resourceType: string, action: string): CollectorContext => ({
-	payload: { scopes: [] } as any,
+	payload: { scopes: [] } satisfies VerifierPayload,
 	resource: { raw: `${resourceType}:1`, resourceType, resourceId: "1" },
 	action,
 });
@@ -22,7 +22,7 @@ describe("ResourceActionScopeRuleCollector", () => {
 
 	it("creates correct scope for nested resource types", async () => {
 		const ctx: CollectorContext = {
-			payload: { scopes: [] } as any,
+			payload: { scopes: [] } satisfies VerifierPayload,
 			resource: { raw: "project:1.member:2", resourceType: "project_member", resourceId: "2" },
 			action: "update",
 		};

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { CollectorContext } from "#/engine/types.mjs";
+import type { CollectorContext, VerifierPayload } from "#/engine/types.mjs";
 import { ResourceActionPermissionRuleCollector } from "../ResourceActionPermissionRuleCollector.mjs";
 
 describe("ResourceActionPermissionRuleCollector", () => {
@@ -7,7 +7,7 @@ describe("ResourceActionPermissionRuleCollector", () => {
 
 	it("creates a HasPermission rule with resource.perm:action", async () => {
 		const ctx: CollectorContext = {
-			payload: { scopes: [] } as any,
+			payload: { scopes: [] } satisfies VerifierPayload,
 			resource: { raw: "document:12345", resourceType: "document", resourceId: "12345" },
 			action: "read",
 		};
@@ -21,7 +21,7 @@ describe("ResourceActionPermissionRuleCollector", () => {
 
 	it("creates correct permission for nested resources", async () => {
 		const ctx: CollectorContext = {
-			payload: { scopes: [] } as any,
+			payload: { scopes: [] } satisfies VerifierPayload,
 			resource: { raw: "project:1.member", resourceType: "project_member" },
 			action: "update",
 		};

@@ -3,7 +3,7 @@ import type { AttributeCollector, Attributes, CollectorContext } from "#/engine/
 
 export class PayloadScopeCollector implements AttributeCollector {
 	async collect(context: CollectorContext): Promise<Attributes> {
-		const scopes = (context.payload as any).scopes ?? [];
+		const scopes = context.payload.scopes ?? [];
 		return new Map([[ATTR_SCOPES, Array.isArray(scopes) ? scopes : [scopes]]]);
 	}
 }

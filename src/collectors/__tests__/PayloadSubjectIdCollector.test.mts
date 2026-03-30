@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ATTR_CLIENT_ID, ATTR_USER_ID } from "#/engine/keys.mjs";
-import type { CollectorContext } from "#/engine/types.mjs";
+import type { CollectorContext, VerifierPayload } from "#/engine/types.mjs";
 import { PayloadSubjectIdCollector } from "../PayloadSubjectIdCollector.mjs";
 
 describe("PayloadSubjectIdCollector", () => {
@@ -8,7 +8,7 @@ describe("PayloadSubjectIdCollector", () => {
 
 	it("extracts userId from payload.user.id", async () => {
 		const ctx: CollectorContext = {
-			payload: { user: { id: "u1" }, scopes: [] } as any,
+			payload: { user: { id: "u1" }, scopes: [] } satisfies VerifierPayload,
 			resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 			action: "read",
 		};
@@ -18,7 +18,7 @@ describe("PayloadSubjectIdCollector", () => {
 
 	it("extracts clientId from payload.client.id", async () => {
 		const ctx: CollectorContext = {
-			payload: { client: { id: "c1" }, scopes: [] } as any,
+			payload: { client: { id: "c1" }, scopes: [] } satisfies VerifierPayload,
 			resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 			action: "read",
 		};
@@ -28,7 +28,7 @@ describe("PayloadSubjectIdCollector", () => {
 
 	it("returns empty map when neither user nor client present", async () => {
 		const ctx: CollectorContext = {
-			payload: { scopes: [] } as any,
+			payload: { scopes: [] } satisfies VerifierPayload,
 			resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 			action: "read",
 		};

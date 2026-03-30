@@ -21,4 +21,5 @@ export type {
 	Role,
 	Rule,
 	RuleCollector,
+	VerifierPayload,
 } from "./types.mjs";

@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 import type { AttributePipeline } from "#/engine/AttributePipeline.mjs";
 import { evaluate } from "#/engine/evaluate.mjs";
 import type { RulePipeline } from "#/engine/RulePipeline.mjs";
-import type { ResourceParser } from "#/engine/types.mjs";
+import type { ResourceParser, VerifierPayload } from "#/engine/types.mjs";
 
 export interface VerifyRouterConfig {
 	jwt: { secret: string; validate: boolean };
@@ -41,7 +41,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				}
 			}
 
-			const payload = {
+			const payload: VerifierPayload = {
 				...(jwt.decode(token) as jwt.JwtPayload),
 				token,
 				tokenType,

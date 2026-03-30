@@ -9,7 +9,7 @@ export interface ResourceParser {
 }
 
 export interface CollectorContext {
-	payload: JwtPayload;
+	payload: VerifierPayload;
 	resource: Resource;
 	action: string;
 	headers?: Record<string, string>;
@@ -42,3 +42,11 @@ export interface Role {
 import type { JwtPayload } from "jsonwebtoken";
 
 export type { JwtPayload };
+
+export interface VerifierPayload extends JwtPayload {
+	scopes?: string[];
+	user?: { id: string; [key: string]: unknown };
+	client?: { id: string; [key: string]: unknown };
+	token?: string;
+	tokenType?: string;
+}
