@@ -20,3 +20,6 @@ export {
 	ATTR_USER_ID,
 	ATTR_CLIENT_ID,
 } from "./keys.mjs";
+
+export { AttributePipeline } from "./AttributePipeline.mjs";
+export { RulePipeline } from "./RulePipeline.mjs";
