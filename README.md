@@ -1,8 +1,9 @@
 # auth.policy-verifier
 
-No-DSL ABAC policy verifier with Collector pattern.
+No-DSL ABAC policy engine. Runs as an HTTP service (`POST /verify`) or embeds as a library. Authorization logic is written in TypeScript via the Collector pattern, not a policy DSL.
 
-A lightweight authorization engine for early-stage projects. Runs as an HTTP service (`POST /verify`) or embeds as a library. Write Collectors in TypeScript, not policy DSL.
+- Replaceable with OPA or Cedar — `grpc.authz` supports all three as backends
+- Runs as an HTTP sidecar — swapping to a different policy engine is a config change, not a code change
 
 ## Quick Start
 
@@ -19,6 +20,7 @@ curl -X POST http://localhost:3000/verify \
 ```
 
 Response:
+
 ```json
 {"decision": "allow"}
 ```
