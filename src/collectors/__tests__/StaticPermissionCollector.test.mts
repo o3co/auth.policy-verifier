@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { StaticPermissionCollector } from "../StaticPermissionCollector.mjs";
+import { describe, expect, it } from "vitest";
 import { ATTR_PERMISSIONS } from "#/engine/keys.mjs";
 import type { CollectorContext } from "#/engine/types.mjs";
+import { StaticPermissionCollector } from "../StaticPermissionCollector.mjs";
 
 const stubContext: CollectorContext = {
 	payload: { scopes: [] } as any,
@@ -15,10 +15,7 @@ describe("StaticPermissionCollector", () => {
 			permissions: ["project:*.perm:read", "document:*.perm:write"],
 		});
 		const attrs = await collector.collect(stubContext);
-		expect(attrs.get(ATTR_PERMISSIONS)).toEqual([
-			"project:*.perm:read",
-			"document:*.perm:write",
-		]);
+		expect(attrs.get(ATTR_PERMISSIONS)).toEqual(["project:*.perm:read", "document:*.perm:write"]);
 	});
 
 	it("returns empty array when no permissions configured", async () => {

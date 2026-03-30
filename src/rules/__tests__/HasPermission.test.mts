@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { HasPermission } from "../HasPermission.mjs";
+import { describe, expect, it } from "vitest";
 import type { Attributes } from "#/engine/types.mjs";
+import { HasPermission } from "../HasPermission.mjs";
 
 describe("HasPermission", () => {
 	it("passes on exact match", () => {

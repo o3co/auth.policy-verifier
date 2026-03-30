@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { PayloadScopeCollector } from "../PayloadScopeCollector.mjs";
+import { describe, expect, it } from "vitest";
 import { ATTR_SCOPES } from "#/engine/keys.mjs";
 import type { CollectorContext } from "#/engine/types.mjs";
+import { PayloadScopeCollector } from "../PayloadScopeCollector.mjs";
 
 const makeContext = (scopes: string[]): CollectorContext => ({
 	payload: { scopes } as any,

@@ -32,9 +32,7 @@ export interface RuleCollector {
 	collect(context: CollectorContext): Promise<Rule[]>;
 }
 
-export type Decision =
-	| { decision: "allow" }
-	| { decision: "deny"; code: string; message: string };
+export type Decision = { decision: "allow" } | { decision: "deny"; code: string; message: string };
 
 export interface Role {
 	name: string;
@@ -42,4 +40,5 @@ export interface Role {
 }
 
 import type { JwtPayload } from "jsonwebtoken";
+
 export type { JwtPayload };

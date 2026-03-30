@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { PayloadSubjectIdCollector } from "../PayloadSubjectIdCollector.mjs";
-import { ATTR_USER_ID, ATTR_CLIENT_ID } from "#/engine/keys.mjs";
+import { describe, expect, it } from "vitest";
+import { ATTR_CLIENT_ID, ATTR_USER_ID } from "#/engine/keys.mjs";
 import type { CollectorContext } from "#/engine/types.mjs";
+import { PayloadSubjectIdCollector } from "../PayloadSubjectIdCollector.mjs";
 
 describe("PayloadSubjectIdCollector", () => {
 	const collector = new PayloadSubjectIdCollector();

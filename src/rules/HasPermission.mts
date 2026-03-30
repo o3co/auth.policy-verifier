@@ -1,5 +1,5 @@
-import type { Attributes, Role, Rule } from "#/engine/types.mjs";
 import { ATTR_PERMISSIONS, ATTR_ROLES } from "#/engine/keys.mjs";
+import type { Attributes, Role, Rule } from "#/engine/types.mjs";
 
 export class HasPermission implements Rule {
 	readonly ruleType = "permission";
@@ -29,10 +29,7 @@ export class HasPermission implements Rule {
 
 		if (permission.includes("*")) {
 			const [prefix, suffix] = permission.split("*");
-			return (
-				(!prefix || required.startsWith(prefix)) &&
-				(!suffix || required.endsWith(suffix))
-			);
+			return (!prefix || required.startsWith(prefix)) && (!suffix || required.endsWith(suffix));
 		}
 
 		return false;

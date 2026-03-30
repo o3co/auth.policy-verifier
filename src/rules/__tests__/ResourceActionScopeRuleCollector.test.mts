@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { ResourceActionScopeRuleCollector } from "../ResourceActionScopeRuleCollector.mjs";
+import { describe, expect, it } from "vitest";
 import type { CollectorContext } from "#/engine/types.mjs";
+import { ResourceActionScopeRuleCollector } from "../ResourceActionScopeRuleCollector.mjs";
 
 const makeContext = (resourceType: string, action: string): CollectorContext => ({
 	payload: { scopes: [] } as any,

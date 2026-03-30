@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { AttributePipeline } from "../AttributePipeline.mjs";
-import type { AttributeCollector, CollectorContext, Attributes } from "../types.mjs";
+import type { AttributeCollector, Attributes, CollectorContext } from "../types.mjs";
 
 const stubContext: CollectorContext = {
 	payload: { scopes: [] } as any,
@@ -52,7 +52,7 @@ describe("AttributePipeline", () => {
 	});
 
 	it("runs collectors in parallel", async () => {
-		let order: number[] = [];
+		const order: number[] = [];
 		const slow: AttributeCollector = {
 			collect: async () => {
 				await new Promise((r) => setTimeout(r, 50));

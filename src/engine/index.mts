@@ -1,25 +1,24 @@
-export type {
-	Resource,
-	ResourceParser,
-	CollectorContext,
-	Attributes,
-	AttributeCollector,
-	Rule,
-	RuleCollector,
-	Decision,
-	Role,
-	JwtPayload,
-} from "./types.mjs";
+export { AttributePipeline } from "./AttributePipeline.mjs";
 
 export { evaluate } from "./evaluate.mjs";
 
 export {
-	ATTR_SCOPES,
+	ATTR_CLIENT_ID,
 	ATTR_PERMISSIONS,
 	ATTR_ROLES,
+	ATTR_SCOPES,
 	ATTR_USER_ID,
-	ATTR_CLIENT_ID,
 } from "./keys.mjs";
-
-export { AttributePipeline } from "./AttributePipeline.mjs";
 export { RulePipeline } from "./RulePipeline.mjs";
+export type {
+	AttributeCollector,
+	Attributes,
+	CollectorContext,
+	Decision,
+	JwtPayload,
+	Resource,
+	ResourceParser,
+	Role,
+	Rule,
+	RuleCollector,
+} from "./types.mjs";

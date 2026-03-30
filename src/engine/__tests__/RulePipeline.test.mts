@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { RulePipeline } from "../RulePipeline.mjs";
-import type { RuleCollector, CollectorContext, Rule } from "../types.mjs";
+import type { CollectorContext, Rule, RuleCollector } from "../types.mjs";
 
 const stubContext: CollectorContext = {
 	payload: { scopes: [] } as any,

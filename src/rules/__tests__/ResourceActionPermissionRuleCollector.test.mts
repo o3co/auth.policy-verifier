@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { ResourceActionPermissionRuleCollector } from "../ResourceActionPermissionRuleCollector.mjs";
+import { describe, expect, it } from "vitest";
 import type { CollectorContext } from "#/engine/types.mjs";
+import { ResourceActionPermissionRuleCollector } from "../ResourceActionPermissionRuleCollector.mjs";
 
 describe("ResourceActionPermissionRuleCollector", () => {
 	const collector = new ResourceActionPermissionRuleCollector();

@@ -18,6 +18,6 @@
       "#/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*", "config/**/*"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }

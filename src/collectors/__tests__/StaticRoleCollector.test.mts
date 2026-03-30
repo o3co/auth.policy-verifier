@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { StaticRoleCollector } from "../StaticRoleCollector.mjs";
+import { describe, expect, it } from "vitest";
 import { ATTR_ROLES } from "#/engine/keys.mjs";
 import type { CollectorContext } from "#/engine/types.mjs";
+import { StaticRoleCollector } from "../StaticRoleCollector.mjs";
 
 const stubContext: CollectorContext = {
 	payload: { scopes: [] } as any,

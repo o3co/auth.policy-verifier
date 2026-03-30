@@ -1,12 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { evaluate } from "../evaluate.mjs";
 import type { Attributes, Rule } from "../types.mjs";
 
-const makeRule = (
-	ruleType: string,
-	code: string,
-	result: boolean,
-): Rule => ({
+const makeRule = (ruleType: string, code: string, result: boolean): Rule => ({
 	ruleType,
 	code,
 	message: `Failed: ${code}`,

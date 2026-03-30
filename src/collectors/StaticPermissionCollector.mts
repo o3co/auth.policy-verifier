@@ -1,5 +1,5 @@
-import type { Attributes, AttributeCollector, CollectorContext } from "#/engine/types.mjs";
 import { ATTR_PERMISSIONS } from "#/engine/keys.mjs";
+import type { AttributeCollector, Attributes, CollectorContext } from "#/engine/types.mjs";
 
 export class StaticPermissionCollector implements AttributeCollector {
 	private permissions: string[];

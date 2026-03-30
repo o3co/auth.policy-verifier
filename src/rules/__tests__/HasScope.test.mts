@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { HasScope } from "../HasScope.mjs";
+import { describe, expect, it } from "vitest";
 import type { Attributes } from "#/engine/types.mjs";
+import { HasScope } from "../HasScope.mjs";
 
 describe("HasScope", () => {
 	it("passes when scope matches exactly", () => {

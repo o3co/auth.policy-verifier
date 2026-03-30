@@ -1,5 +1,5 @@
-import type { Attributes, AttributeCollector, CollectorContext, Role } from "#/engine/types.mjs";
 import { ATTR_ROLES } from "#/engine/keys.mjs";
+import type { AttributeCollector, Attributes, CollectorContext, Role } from "#/engine/types.mjs";
 
 export class StaticRoleCollector implements AttributeCollector {
 	private roles: Role[];

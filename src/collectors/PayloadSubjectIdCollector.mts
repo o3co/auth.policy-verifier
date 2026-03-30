@@ -1,5 +1,5 @@
-import type { Attributes, AttributeCollector, CollectorContext } from "#/engine/types.mjs";
-import { ATTR_USER_ID, ATTR_CLIENT_ID } from "#/engine/keys.mjs";
+import { ATTR_CLIENT_ID, ATTR_USER_ID } from "#/engine/keys.mjs";
+import type { AttributeCollector, Attributes, CollectorContext } from "#/engine/types.mjs";
 
 export class PayloadSubjectIdCollector implements AttributeCollector {
 	async collect(context: CollectorContext): Promise<Attributes> {

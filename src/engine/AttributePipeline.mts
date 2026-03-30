@@ -1,12 +1,10 @@
-import type { Attributes, AttributeCollector, CollectorContext } from "./types.mjs";
+import type { AttributeCollector, Attributes, CollectorContext } from "./types.mjs";
 
 export class AttributePipeline {
 	constructor(private collectors: AttributeCollector[]) {}
 
 	async collect(context: CollectorContext): Promise<Attributes> {
-		const results = await Promise.all(
-			this.collectors.map((c) => c.collect(context)),
-		);
+		const results = await Promise.all(this.collectors.map((c) => c.collect(context)));
 		return merge(results);
 	}
 }

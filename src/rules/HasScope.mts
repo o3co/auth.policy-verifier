@@ -1,5 +1,5 @@
-import type { Attributes, Rule } from "#/engine/types.mjs";
 import { ATTR_SCOPES } from "#/engine/keys.mjs";
+import type { Attributes, Rule } from "#/engine/types.mjs";
 
 export class HasScope implements Rule {
 	readonly ruleType = "scope";
@@ -20,8 +20,7 @@ export class HasScope implements Rule {
 		required = required.toLowerCase();
 
 		const parts = scope.split(":");
-		const [perm, resource] =
-			parts.length === 1 ? ["read", parts[0]] : parts;
+		const [perm, resource] = parts.length === 1 ? ["read", parts[0]] : parts;
 
 		return required === `${perm}:${resource}`;
 	}
