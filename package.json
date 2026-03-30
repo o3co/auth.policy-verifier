@@ -16,7 +16,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "debug": "tsx watch src/server/app.mts",
-    "start": "node dist/server/app.mjs"
+    "start": "node dist/server/main.mjs"
   },
   "dependencies": {
     "@o3co/js.util.log": "^0.5.0",
