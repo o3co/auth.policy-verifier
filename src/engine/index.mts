@@ -11,6 +11,8 @@ export type {
 	JwtPayload,
 } from "./types.mjs";
 
+export { evaluate } from "./evaluate.mjs";
+
 export {
 	ATTR_SCOPES,
 	ATTR_PERMISSIONS,
