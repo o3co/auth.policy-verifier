@@ -1,0 +1,29 @@
+import { describe, it, expect } from "vitest";
+import { PayloadScopeCollector } from "../PayloadScopeCollector.mjs";
+import { ATTR_SCOPES } from "#/engine/keys.mjs";
+import type { CollectorContext } from "#/engine/types.mjs";
+
+const makeContext = (scopes: string[]): CollectorContext => ({
+	payload: { scopes } as any,
+	resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
+	action: "read",
+});
+
+describe("PayloadScopeCollector", () => {
+	const collector = new PayloadScopeCollector();
+
+	it("extracts scopes from payload", async () => {
+		const attrs = await collector.collect(makeContext(["read:user", "write:doc"]));
+		expect(attrs.get(ATTR_SCOPES)).toEqual(["read:user", "write:doc"]);
+	});
+
+	it("returns empty array when scopes missing", async () => {
+		const ctx: CollectorContext = {
+			payload: {} as any,
+			resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
+			action: "read",
+		};
+		const attrs = await collector.collect(ctx);
+		expect(attrs.get(ATTR_SCOPES)).toEqual([]);
+	});
+});
