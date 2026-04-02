@@ -57,7 +57,7 @@ Response:
 
 ## Configuration
 
-HOCON config file with environment variable overrides. The `configPath` option is required when using `createApp`.
+HOCON config file with environment variable overrides. Parse the config with `AppConfigSchema` and pass the result to `createApp`.
 
 | Variable | Description | Default |
 | --- | --- | --- |
@@ -102,14 +102,16 @@ export class MyRoleCollector implements AttributeCollector {
 ```typescript
 // main.mts
 import { resolve } from 'node:path'
-import { createApp } from '@o3co/auth.policy-verifier.express'
+import { parseFile } from '@o3co/ts.hocon'
+import { validate } from '@o3co/ts.hocon/zod'
+import { AppConfigSchema, createApp } from '@o3co/auth.policy-verifier.express'
 import { MyRoleCollector } from './collectors/MyRoleCollector.mjs'
 
-const app = await createApp({
-  configPath: resolve(import.meta.dirname, '../config/application.conf'),
-  collectors: { MyRoleCollector },
-})
-app.listen(3000)
+const configPath = resolve(import.meta.dirname, '../config/application.conf')
+const config = validate(parseFile(configPath), AppConfigSchema)
+
+const app = await createApp({ config, collectors: { MyRoleCollector } })
+app.listen(config.http.port, config.http.hostname)
 ```
 
 ```hocon

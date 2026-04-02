@@ -57,7 +57,7 @@ curl -X POST http://localhost:3000/verify \
 
 ## 設定
 
-HOCON 設定ファイル（環境変数でオーバーライド可能）。`createApp` を使用する際は `configPath` オプションが必須。
+HOCON 設定ファイル（環境変数でオーバーライド可能）。`AppConfigSchema` で設定をパースし、結果を `createApp` に渡す。
 
 | 変数 | 説明 | デフォルト |
 | --- | --- | --- |
@@ -102,14 +102,16 @@ export class MyRoleCollector implements AttributeCollector {
 ```typescript
 // main.mts
 import { resolve } from 'node:path'
-import { createApp } from '@o3co/auth.policy-verifier.express'
+import { parseFile } from '@o3co/ts.hocon'
+import { validate } from '@o3co/ts.hocon/zod'
+import { AppConfigSchema, createApp } from '@o3co/auth.policy-verifier.express'
 import { MyRoleCollector } from './collectors/MyRoleCollector.mjs'
 
-const app = await createApp({
-  configPath: resolve(import.meta.dirname, '../config/application.conf'),
-  collectors: { MyRoleCollector },
-})
-app.listen(3000)
+const configPath = resolve(import.meta.dirname, '../config/application.conf')
+const config = validate(parseFile(configPath), AppConfigSchema)
+
+const app = await createApp({ config, collectors: { MyRoleCollector } })
+app.listen(config.http.port, config.http.hostname)
 ```
 
 ```hocon
