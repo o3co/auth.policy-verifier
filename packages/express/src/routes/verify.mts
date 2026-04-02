@@ -1,5 +1,5 @@
 import express from "express";
-import { jwtVerify, decodeJwt } from "jose";
+import { type JWTPayload, decodeJwt, jwtVerify } from "jose";
 import {
 	type AttributePipeline,
 	evaluate,
@@ -32,9 +32,11 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				return;
 			}
 
+			let decoded: JWTPayload;
 			if (config.jwt.validate) {
 				try {
-					await jwtVerify(token, secretKey, { algorithms: ["HS256"] });
+					const result = await jwtVerify(token, secretKey, { algorithms: ["HS256"] });
+					decoded = result.payload;
 				} catch {
 					res.status(401).json({
 						decision: "deny",
@@ -43,18 +45,17 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 					});
 					return;
 				}
-			}
-
-			let decoded: Record<string, unknown>;
-			try {
-				decoded = decodeJwt(token);
-			} catch {
-				res.status(401).json({
-					decision: "deny",
-					code: "invalid_token",
-					message: "Invalid token",
-				});
-				return;
+			} else {
+				try {
+					decoded = decodeJwt(token);
+				} catch {
+					res.status(401).json({
+						decision: "deny",
+						code: "invalid_token",
+						message: "Invalid token",
+					});
+					return;
+				}
 			}
 
 			const payload: VerifierPayload = {
