@@ -8,7 +8,7 @@ import type {
 } from "../types.mjs";
 
 const stubContext: CollectorContext = {
-	payload: { scopes: [] } satisfies VerifierPayload,
+	payload: {} satisfies VerifierPayload,
 	resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 	action: "read",
 };
