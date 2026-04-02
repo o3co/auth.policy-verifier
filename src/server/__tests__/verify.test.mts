@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { PayloadScopeCollector } from "#/collectors/PayloadScopeCollector.mjs";
+import { RequestContextCollector } from "#/collectors/RequestContextCollector.mjs";
 import { AttributePipeline } from "#/engine/AttributePipeline.mjs";
 import { RulePipeline } from "#/engine/RulePipeline.mjs";
 import type { ResourceParser } from "#/engine/types.mjs";
@@ -19,6 +20,22 @@ function createTestApp(resourceParser?: ResourceParser) {
 			jwt: { secret: JWT_SECRET, validate: true },
 			resourceParser: resourceParser ?? new DotNotationResourceParser(),
 			attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
+			rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
+		}),
+	);
+	return app;
+}
+
+function createTestAppWithContext() {
+	const app = express();
+	app.use(
+		createVerifyRouter({
+			jwt: { secret: JWT_SECRET, validate: true },
+			resourceParser: new DotNotationResourceParser(),
+			attributePipeline: new AttributePipeline([
+				new PayloadScopeCollector(),
+				new RequestContextCollector(),
+			]),
 			rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
 		}),
 	);
@@ -66,6 +83,30 @@ describe("POST /verify", () => {
 
 		expect(res.status).toBe(401);
 		expect(res.body.code).toBe("invalid_token");
+	});
+
+	it("accepts context in request body without error", async () => {
+		const app = createTestAppWithContext();
+		const token = jwt.sign({ scope: "read:project" }, JWT_SECRET);
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read", context: { ip: "203.0.113.1" } });
+
+		expect(res.status).toBe(200);
+		expect(res.body.decision).toBe("allow");
+	});
+
+	it("works without context (backward compatible)", async () => {
+		const app = createTestAppWithContext();
+		const token = jwt.sign({ scope: "read:project" }, JWT_SECRET);
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.status).toBe(200);
+		expect(res.body.decision).toBe("allow");
 	});
 
 	it("returns 401 for expired JWT", async () => {

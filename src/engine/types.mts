@@ -13,6 +13,7 @@ export interface CollectorContext {
 	resource: Resource;
 	action: string;
 	headers?: Record<string, string>;
+	requestContext?: Record<string, unknown>;
 }
 
 export type Attributes = Map<string, unknown>;

@@ -4,6 +4,7 @@ import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
 import { PayloadScopeCollector } from "#/collectors/PayloadScopeCollector.mjs";
 import { PayloadSubjectIdCollector } from "#/collectors/PayloadSubjectIdCollector.mjs";
+import { RequestContextCollector } from "#/collectors/RequestContextCollector.mjs";
 import { StaticPermissionCollector } from "#/collectors/StaticPermissionCollector.mjs";
 import { StaticRoleCollector } from "#/collectors/StaticRoleCollector.mjs";
 import { AppConfigSchema } from "#/config/application.schema.mjs";
@@ -24,6 +25,7 @@ type RuleCollectorClass = new (config: any) => RuleCollector;
 const BUILTIN_COLLECTORS: Record<string, CollectorClass> = {
 	PayloadScopeCollector,
 	PayloadSubjectIdCollector,
+	RequestContextCollector,
 	StaticPermissionCollector,
 	StaticRoleCollector,
 };

@@ -4,6 +4,7 @@
 export {
 	PayloadScopeCollector,
 	PayloadSubjectIdCollector,
+	RequestContextCollector,
 	StaticPermissionCollector,
 	StaticRoleCollector,
 } from "./collectors/index.mjs";
@@ -22,6 +23,7 @@ export type {
 } from "./engine/index.mjs";
 export {
 	ATTR_CLIENT_ID,
+	ATTR_CLIENT_IP,
 	ATTR_PERMISSIONS,
 	ATTR_ROLES,
 	ATTR_SCOPES,

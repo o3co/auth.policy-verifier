@@ -47,11 +47,11 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				tokenType,
 			};
 
-			const { resource: rawResource, action } = req.body;
+			const { resource: rawResource, action, context: requestContext } = req.body;
 			const resource = config.resourceParser.parse(rawResource);
 			const requestId = req.get("x-request-id");
 			const headers = requestId ? { "x-request-id": requestId } : undefined;
-			const context = { payload, resource, action, headers };
+			const context = { payload, resource, action, headers, requestContext };
 
 			const [attrs, rules] = await Promise.all([
 				config.attributePipeline.collect(context),
