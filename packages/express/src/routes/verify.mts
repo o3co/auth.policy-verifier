@@ -45,8 +45,20 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				}
 			}
 
+			let decoded: Record<string, unknown>;
+			try {
+				decoded = decodeJwt(token);
+			} catch {
+				res.status(401).json({
+					decision: "deny",
+					code: "invalid_token",
+					message: "Invalid token",
+				});
+				return;
+			}
+
 			const payload: VerifierPayload = {
-				...decodeJwt(token),
+				...decoded,
 				token,
 				tokenType,
 			};

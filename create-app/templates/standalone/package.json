@@ -5,6 +5,9 @@
 	"license": "Apache-2.0",
 	"packageManager": "pnpm@10.29.3",
 	"type": "module",
+	"engines": {
+		"node": ">=22.0.0"
+	},
 	"scripts": {
 		"build": "tsc",
 		"start": "node dist/main.mjs",

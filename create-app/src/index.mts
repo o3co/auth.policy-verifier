@@ -67,17 +67,18 @@ export const main = (): void => {
 		process.exit(1);
 	}
 
-	// Reject path separators, dot segments, and invalid npm package names
-	if (/[/\\]/.test(projectName) || projectName === "." || projectName === "..") {
-		console.error("Error: Project name must not contain path separators or be '.' / '..'.");
-		process.exit(1);
-	}
-
-	// npm package names: lowercase, no spaces, no special chars except - . _ ~, max 214 chars
-	// scoped names (@scope/name) are also allowed
-	const npmNamePattern = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
-	if (projectName.length > 214 || !npmNamePattern.test(projectName)) {
-		console.error("Error: Project name must be a valid npm package name.");
+	// Project name is used as a directory name and npm package name (unscoped).
+	// Reject path separators, dot segments, and invalid characters.
+	const validName = /^[a-z0-9][a-z0-9-._~]*$/;
+	if (
+		projectName.length > 214 ||
+		projectName === "." ||
+		projectName === ".." ||
+		!validName.test(projectName)
+	) {
+		console.error(
+			"Error: Project name must be a valid unscoped npm package name (lowercase, no spaces or path separators).",
+		);
 		process.exit(1);
 	}
 
