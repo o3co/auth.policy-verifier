@@ -1,5 +1,3 @@
-import { parseFile } from "@o3co/ts.hocon";
-import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
 import {
 	type AttributeCollector,
@@ -19,7 +17,7 @@ import {
 	ResourceActionScopeRuleCollector,
 } from "@o3co/auth.policy-verifier.foundation";
 import { createHealthcheckRouter } from "@o3co/auth.utils/express";
-import { AppConfigSchema } from "./config/application.schema.mjs";
+import type { AppConfig } from "./config/application.schema.mjs";
 import { createVerifyRouter } from "./routes/verify.mjs";
 
 // biome-ignore lint/suspicious/noExplicitAny: collector constructors accept varied config shapes
@@ -41,14 +39,14 @@ const BUILTIN_RULE_COLLECTORS: Record<string, RuleCollectorClass> = {
 };
 
 export interface PolicyVerifierOptions {
-	configPath: string;
+	config: AppConfig;
 	collectors?: Record<string, CollectorClass>;
 	ruleCollectors?: Record<string, RuleCollectorClass>;
 	resourceParser?: ResourceParser;
 }
 
 export async function createApp(options: PolicyVerifierOptions): Promise<express.Express> {
-	const config = validate(parseFile(options.configPath), AppConfigSchema);
+	const { config } = options;
 
 	const collectorMap = { ...BUILTIN_COLLECTORS, ...options.collectors };
 	const ruleCollectorMap = { ...BUILTIN_RULE_COLLECTORS, ...options.ruleCollectors };

@@ -18,7 +18,9 @@
 		"@o3co/auth.policy-verifier.foundation": "workspace:*",
 		"@o3co/auth.policy-verifier.express": "workspace:*",
 		"@o3co/auth.utils": "^0.0.1",
-		"express": "^5.2.1"
+		"@o3co/ts.hocon": "^0.1.2",
+		"express": "^5.2.1",
+		"zod": "^4.3.6"
 	},
 	"devDependencies": {
 		"@types/node": "^25.1.0",

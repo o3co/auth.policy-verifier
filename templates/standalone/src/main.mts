@@ -2,19 +2,20 @@
  * Standalone entrypoint — creates and starts the policy-verifier server.
  */
 import { resolve } from "node:path";
+import { parseFile } from "@o3co/ts.hocon";
+import { validate } from "@o3co/ts.hocon/zod";
+import { AppConfigSchema, createApp } from "@o3co/auth.policy-verifier.express";
 import { createLogger, gracefulShutdown } from "@o3co/auth.utils";
-import { createApp } from "@o3co/auth.policy-verifier.express";
 
 const logger = createLogger("policy-verifier");
 
-const PORT = Number(process.env.HTTP_PORT ?? 3000);
-const HOSTNAME = process.env.HTTP_HOSTNAME ?? "0.0.0.0";
-
 const configPath = resolve(import.meta.dirname, "../config/application.conf");
-const app = await createApp({ configPath });
+const config = validate(parseFile(configPath), AppConfigSchema);
 
-const server = app.listen(PORT, HOSTNAME, () => {
-	logger.info(`listening on http://${HOSTNAME}:${PORT}`);
+const app = await createApp({ config });
+
+const server = app.listen(config.http.port, config.http.hostname, () => {
+	logger.info(`listening on http://${config.http.hostname}:${config.http.port}`);
 });
 
 gracefulShutdown(server);
