@@ -32,4 +32,18 @@ const versions = {
 
 writeFileSync(resolve(dest, "..", "versions.json"), `${JSON.stringify(versions, null, "\t")}\n`);
 
+// Inline tsconfig.base.json into the template's tsconfig.json so scaffolded
+// projects work standalone without the monorepo's base config.
+const baseTsconfig = JSON.parse(
+	readFileSync(resolve(__dirname, "../../tsconfig.base.json"), "utf-8"),
+);
+const templateTsconfigPath = resolve(dest, "tsconfig.json");
+const templateTsconfig = JSON.parse(readFileSync(templateTsconfigPath, "utf-8"));
+delete templateTsconfig.extends;
+templateTsconfig.compilerOptions = {
+	...baseTsconfig.compilerOptions,
+	...templateTsconfig.compilerOptions,
+};
+writeFileSync(templateTsconfigPath, `${JSON.stringify(templateTsconfig, null, "\t")}\n`);
+
 console.log("Templates copied to create-app/templates/standalone");

@@ -16,6 +16,7 @@ export interface VerifyRouterConfig {
 }
 
 export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
+	const secretKey = new TextEncoder().encode(config.jwt.secret);
 	const router = express.Router();
 	router.use(express.json());
 
@@ -33,7 +34,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 
 			if (config.jwt.validate) {
 				try {
-					await jwtVerify(token, new TextEncoder().encode(config.jwt.secret));
+					await jwtVerify(token, secretKey);
 				} catch {
 					res.status(401).json({
 						decision: "deny",

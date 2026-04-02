@@ -15,8 +15,6 @@ import {
 	RequestContextCollector,
 	StaticPermissionCollector,
 	StaticRoleCollector,
-	HasPermission,
-	HasScope,
 	ResourceActionPermissionRuleCollector,
 	ResourceActionScopeRuleCollector,
 } from "@o3co/auth.policy-verifier.foundation";
@@ -52,8 +50,8 @@ export interface PolicyVerifierOptions {
 export async function createApp(options: PolicyVerifierOptions): Promise<express.Express> {
 	const config = validate(parseFile(options.configPath), AppConfigSchema);
 
-	const collectorMap = { ...BUILTIN_COLLECTORS, ...options?.collectors };
-	const ruleCollectorMap = { ...BUILTIN_RULE_COLLECTORS, ...options?.ruleCollectors };
+	const collectorMap = { ...BUILTIN_COLLECTORS, ...options.collectors };
+	const ruleCollectorMap = { ...BUILTIN_RULE_COLLECTORS, ...options.ruleCollectors };
 
 	const attributeCollectors = config.attribute.collectors.map((entry) => {
 		const Cls = collectorMap[entry.collector];
@@ -71,7 +69,7 @@ export async function createApp(options: PolicyVerifierOptions): Promise<express
 		return new Cls(entry);
 	});
 
-	const resourceParser = options?.resourceParser ?? new DotNotationResourceParser();
+	const resourceParser = options.resourceParser ?? new DotNotationResourceParser();
 
 	const app = express();
 	app.use(config.http.pathPrefix, createHealthcheckRouter());
