@@ -1,7 +1,5 @@
 import { z } from "zod";
 
-const hoconBoolean = z.union([z.boolean(), z.stringbool()]);
-
 const collectorSchema = z
 	.object({
 		collector: z.string(),
@@ -17,7 +15,7 @@ export const AppConfigSchema = z.object({
 	oauth: z.object({
 		jwt: z.object({
 			secret: z.string(),
-			validate: hoconBoolean.default(true),
+			validate: z.boolean().default(true),
 		}),
 	}),
 	attribute: z.object({

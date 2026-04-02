@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
-import { parseFileAsync } from "@o3co/ts.hocon";
+import { parseFile } from "@o3co/ts.hocon";
+import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
 import { PayloadScopeCollector } from "#/collectors/PayloadScopeCollector.mjs";
 import { PayloadSubjectIdCollector } from "#/collectors/PayloadSubjectIdCollector.mjs";
@@ -40,8 +41,7 @@ export interface PolicyVerifierOptions {
 
 export async function createApp(options?: PolicyVerifierOptions): Promise<express.Express> {
 	const confPath = resolve(import.meta.dirname, "../../config/application.conf");
-	const hocon = await parseFileAsync(confPath);
-	const config = AppConfigSchema.parse(hocon.toObject());
+	const config = validate(parseFile(confPath), AppConfigSchema);
 
 	const collectorMap = { ...BUILTIN_COLLECTORS, ...options?.collectors };
 	const ruleCollectorMap = { ...BUILTIN_RULE_COLLECTORS, ...options?.ruleCollectors };
