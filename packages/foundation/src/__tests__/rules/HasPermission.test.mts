@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import type { Attributes } from "@o3co/auth.policy-verifier.core";
+import { describe, expect, it } from "vitest";
 import { HasPermission } from "#/rules/HasPermission.mjs";
 
 describe("HasPermission", () => {

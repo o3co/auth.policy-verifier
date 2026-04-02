@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { ATTR_CLIENT_ID, ATTR_USER_ID } from "@o3co/auth.policy-verifier.core";
 import type { CollectorContext, VerifierPayload } from "@o3co/auth.policy-verifier.core";
+import { ATTR_CLIENT_ID, ATTR_USER_ID } from "@o3co/auth.policy-verifier.core";
+import { describe, expect, it } from "vitest";
 import { PayloadSubjectIdCollector } from "#/collectors/PayloadSubjectIdCollector.mjs";
 
 describe("PayloadSubjectIdCollector", () => {

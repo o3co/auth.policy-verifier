@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { ATTR_PERMISSIONS } from "@o3co/auth.policy-verifier.core";
 import type { CollectorContext, VerifierPayload } from "@o3co/auth.policy-verifier.core";
+import { ATTR_PERMISSIONS } from "@o3co/auth.policy-verifier.core";
+import { describe, expect, it } from "vitest";
 import { StaticPermissionCollector } from "#/collectors/StaticPermissionCollector.mjs";
 
 const stubContext: CollectorContext = {

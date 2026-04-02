@@ -11,7 +11,11 @@
 			"types": "./dist/index.d.mts"
 		}
 	},
-	"files": ["dist", "LICENSE", "README.md"],
+	"files": [
+		"dist",
+		"LICENSE",
+		"README.md"
+	],
 	"scripts": {
 		"build": "tsc",
 		"test": "vitest run"

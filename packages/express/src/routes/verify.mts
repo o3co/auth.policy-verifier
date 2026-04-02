@@ -1,5 +1,3 @@
-import express from "express";
-import { type JWTPayload, decodeJwt, jwtVerify } from "jose";
 import {
 	type AttributePipeline,
 	evaluate,
@@ -7,6 +5,8 @@ import {
 	type RulePipeline,
 	type VerifierPayload,
 } from "@o3co/auth.policy-verifier.core";
+import express from "express";
+import { decodeJwt, type JWTPayload, jwtVerify } from "jose";
 
 export interface VerifyRouterConfig {
 	jwt: { secret: string; validate: boolean };

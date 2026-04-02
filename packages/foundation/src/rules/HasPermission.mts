@@ -1,5 +1,5 @@
-import { ATTR_PERMISSIONS, ATTR_ROLES } from "@o3co/auth.policy-verifier.core";
 import type { Attributes, Role, Rule } from "@o3co/auth.policy-verifier.core";
+import { ATTR_PERMISSIONS, ATTR_ROLES } from "@o3co/auth.policy-verifier.core";
 
 export class HasPermission implements Rule {
 	readonly ruleType = "permission";

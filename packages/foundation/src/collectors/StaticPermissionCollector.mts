@@ -1,5 +1,9 @@
+import type {
+	AttributeCollector,
+	Attributes,
+	CollectorContext,
+} from "@o3co/auth.policy-verifier.core";
 import { ATTR_PERMISSIONS } from "@o3co/auth.policy-verifier.core";
-import type { AttributeCollector, Attributes, CollectorContext } from "@o3co/auth.policy-verifier.core";
 
 export class StaticPermissionCollector implements AttributeCollector {
 	private permissions: string[];

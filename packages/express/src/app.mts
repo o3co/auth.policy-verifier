@@ -1,4 +1,3 @@
-import express from "express";
 import {
 	type AttributeCollector,
 	AttributePipeline,
@@ -11,12 +10,13 @@ import {
 	PayloadScopeCollector,
 	PayloadSubjectIdCollector,
 	RequestContextCollector,
-	StaticPermissionCollector,
-	StaticRoleCollector,
 	ResourceActionPermissionRuleCollector,
 	ResourceActionScopeRuleCollector,
+	StaticPermissionCollector,
+	StaticRoleCollector,
 } from "@o3co/auth.policy-verifier.foundation";
 import { createHealthcheckRouter } from "@o3co/auth.utils/express";
+import express from "express";
 import type { AppConfig } from "./config/application.schema.mjs";
 import { createVerifyRouter } from "./routes/verify.mjs";
 

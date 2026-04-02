@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import type { CollectorContext, VerifierPayload } from "@o3co/auth.policy-verifier.core";
+import { describe, expect, it } from "vitest";
 import { ResourceActionPermissionRuleCollector } from "#/rules/ResourceActionPermissionRuleCollector.mjs";
 
 describe("ResourceActionPermissionRuleCollector", () => {

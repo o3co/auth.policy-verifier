@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { ATTR_SCOPES } from "@o3co/auth.policy-verifier.core";
 import type { CollectorContext, VerifierPayload } from "@o3co/auth.policy-verifier.core";
+import { ATTR_SCOPES } from "@o3co/auth.policy-verifier.core";
+import { describe, expect, it } from "vitest";
 import { PayloadScopeCollector } from "#/collectors/PayloadScopeCollector.mjs";
 
 const makeContext = (scope?: string): CollectorContext => ({

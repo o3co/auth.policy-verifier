@@ -1,24 +1,25 @@
-import express from "express";
-import { SignJWT } from "jose";
-import request from "supertest";
-import { describe, expect, it } from "vitest";
-import { AttributePipeline, type ResourceParser, RulePipeline } from "@o3co/auth.policy-verifier.core";
+import {
+	AttributePipeline,
+	type ResourceParser,
+	RulePipeline,
+} from "@o3co/auth.policy-verifier.core";
 import {
 	DotNotationResourceParser,
 	PayloadScopeCollector,
 	RequestContextCollector,
 	ResourceActionScopeRuleCollector,
 } from "@o3co/auth.policy-verifier.foundation";
+import express from "express";
+import { SignJWT } from "jose";
+import request from "supertest";
+import { describe, expect, it } from "vitest";
 import { createVerifyRouter } from "#/routes/verify.mjs";
 
 const JWT_SECRET = "test-secret";
 const secretKey = new TextEncoder().encode(JWT_SECRET);
 
 async function signToken(payload: Record<string, unknown>): Promise<string> {
-	return new SignJWT(payload)
-		.setProtectedHeader({ alg: "HS256" })
-		.setIssuedAt()
-		.sign(secretKey);
+	return new SignJWT(payload).setProtectedHeader({ alg: "HS256" }).setIssuedAt().sign(secretKey);
 }
 
 function createTestApp(resourceParser?: ResourceParser) {
