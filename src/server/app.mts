@@ -14,7 +14,7 @@ import type { AttributeCollector, ResourceParser, RuleCollector } from "#/engine
 import { DotNotationResourceParser } from "#/resource/DotNotationResourceParser.mjs";
 import { ResourceActionPermissionRuleCollector } from "#/rules/ResourceActionPermissionRuleCollector.mjs";
 import { ResourceActionScopeRuleCollector } from "#/rules/ResourceActionScopeRuleCollector.mjs";
-import { createHealthcheckRouter } from "./routes/healthcheck.mjs";
+import { createHealthcheckRouter } from "@o3co/auth.utils/express";
 import { createVerifyRouter } from "./routes/verify.mjs";
 
 // biome-ignore lint/suspicious/noExplicitAny: collector constructors accept varied config shapes
