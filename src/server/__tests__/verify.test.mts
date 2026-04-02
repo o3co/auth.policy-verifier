@@ -85,7 +85,7 @@ describe("POST /verify", () => {
 		expect(res.body.code).toBe("invalid_token");
 	});
 
-	it("passes context to collectors", async () => {
+	it("accepts context in request body without error", async () => {
 		const app = createTestAppWithContext();
 		const token = jwt.sign({ scope: "read:project" }, JWT_SECRET);
 		const res = await request(app)
