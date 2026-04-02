@@ -1,0 +1,41 @@
+{
+	"name": "@o3co/auth.policy-verifier.express",
+	"version": "0.0.1",
+	"license": "Apache-2.0",
+	"type": "module",
+	"main": "./dist/index.mjs",
+	"types": "./dist/index.d.mts",
+	"exports": {
+		".": {
+			"import": "./dist/index.mjs",
+			"types": "./dist/index.d.mts"
+		}
+	},
+	"files": ["dist", "LICENSE", "README.md"],
+	"scripts": {
+		"build": "tsc",
+		"test": "vitest run"
+	},
+	"imports": {
+		"#/*": "./src/*"
+	},
+	"dependencies": {
+		"@o3co/auth.policy-verifier.core": "workspace:*",
+		"@o3co/auth.policy-verifier.foundation": "workspace:*",
+		"@o3co/auth.utils": "^0.0.1",
+		"@o3co/ts.hocon": "^0.1.2",
+		"jose": "^6.2.2",
+		"zod": "^4.3.6"
+	},
+	"peerDependencies": {
+		"express": "^5.0.0"
+	},
+	"devDependencies": {
+		"@types/express": "^5.0.6",
+		"@types/node": "^25.1.0",
+		"@types/supertest": "^7.2.0",
+		"express": "^5.2.1",
+		"supertest": "^7.2.2",
+		"vitest": "^4.1.2"
+	}
+}
