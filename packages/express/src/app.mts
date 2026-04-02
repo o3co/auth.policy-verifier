@@ -19,7 +19,7 @@ import {
 	ResourceActionScopeRuleCollector,
 } from "@o3co/auth.policy-verifier.foundation";
 import { createHealthcheckRouter } from "@o3co/auth.utils/express";
-import { AppConfigSchema } from "#/config/application.schema.mjs";
+import { AppConfigSchema } from "./config/application.schema.mjs";
 import { createVerifyRouter } from "./routes/verify.mjs";
 
 // biome-ignore lint/suspicious/noExplicitAny: collector constructors accept varied config shapes

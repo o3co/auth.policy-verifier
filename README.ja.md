@@ -169,4 +169,4 @@ pnpm -r test     # 全パッケージをテスト
 
 ## ライセンス
 
-Apache License 2.0 — Copyright 2024 1o1 Co. Ltd.
+Apache License 2.0 — Copyright 2026 1o1 Co. Ltd.

@@ -34,7 +34,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 
 			if (config.jwt.validate) {
 				try {
-					await jwtVerify(token, secretKey);
+					await jwtVerify(token, secretKey, { algorithms: ["HS256"] });
 				} catch {
 					res.status(401).json({
 						decision: "deny",
