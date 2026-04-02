@@ -29,7 +29,7 @@ describe("POST /verify", () => {
 	const app = createTestApp();
 
 	it("returns allow for valid token with matching scope", async () => {
-		const token = jwt.sign({ scopes: ["read:project"] }, JWT_SECRET);
+		const token = jwt.sign({ scope: "read:project" }, JWT_SECRET);
 		const res = await request(app)
 			.post("/verify")
 			.set("Authorization", `Bearer ${token}`)
@@ -40,7 +40,7 @@ describe("POST /verify", () => {
 	});
 
 	it("returns deny for valid token without matching scope", async () => {
-		const token = jwt.sign({ scopes: ["write:project"] }, JWT_SECRET);
+		const token = jwt.sign({ scope: "write:project" }, JWT_SECRET);
 		const res = await request(app)
 			.post("/verify")
 			.set("Authorization", `Bearer ${token}`)
@@ -69,7 +69,7 @@ describe("POST /verify", () => {
 	});
 
 	it("returns 401 for expired JWT", async () => {
-		const token = jwt.sign({ scopes: ["read:project"] }, JWT_SECRET, { expiresIn: -1 });
+		const token = jwt.sign({ scope: "read:project" }, JWT_SECRET, { expiresIn: -1 });
 		const res = await request(app)
 			.post("/verify")
 			.set("Authorization", `Bearer ${token}`)
