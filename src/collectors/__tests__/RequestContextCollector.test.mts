@@ -35,4 +35,19 @@ describe("RequestContextCollector", () => {
 		const attrs = await collector.collect(makeContext({ other: "value" }));
 		expect(attrs.size).toBe(0);
 	});
+
+	it("returns empty when ip is empty string", async () => {
+		const attrs = await collector.collect(makeContext({ ip: "" }));
+		expect(attrs.size).toBe(0);
+	});
+
+	it("returns empty when ip is whitespace only", async () => {
+		const attrs = await collector.collect(makeContext({ ip: "   " }));
+		expect(attrs.size).toBe(0);
+	});
+
+	it("trims whitespace from ip", async () => {
+		const attrs = await collector.collect(makeContext({ ip: " 10.0.0.1 " }));
+		expect(attrs.get(ATTR_CLIENT_IP)).toBe("10.0.0.1");
+	});
 });

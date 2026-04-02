@@ -8,8 +8,8 @@ export class RequestContextCollector implements AttributeCollector {
 	async collect(context: CollectorContext): Promise<Attributes> {
 		const attrs: Attributes = new Map();
 		const ip = context.requestContext?.ip;
-		if (typeof ip === "string") {
-			attrs.set(ATTR_CLIENT_IP, ip);
+		if (typeof ip === "string" && ip.trim()) {
+			attrs.set(ATTR_CLIENT_IP, ip.trim());
 		}
 		return attrs;
 	}

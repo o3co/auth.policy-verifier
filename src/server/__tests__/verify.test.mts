@@ -30,7 +30,7 @@ function createTestAppWithContext() {
 	const app = express();
 	app.use(
 		createVerifyRouter({
-			jwt: { secret: JWT_SECRET, validate: false },
+			jwt: { secret: JWT_SECRET, validate: true },
 			resourceParser: new DotNotationResourceParser(),
 			attributePipeline: new AttributePipeline([
 				new PayloadScopeCollector(),
