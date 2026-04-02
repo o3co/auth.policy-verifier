@@ -4,11 +4,11 @@ import type { AttributeCollector, Attributes, CollectorContext } from "#/engine/
 export class PayloadSubjectIdCollector implements AttributeCollector {
 	async collect(context: CollectorContext): Promise<Attributes> {
 		const attrs: Attributes = new Map();
-		if (context.payload.user?.id) {
-			attrs.set(ATTR_USER_ID, context.payload.user.id);
+		if (context.payload.sub) {
+			attrs.set(ATTR_USER_ID, context.payload.sub);
 		}
-		if (context.payload.client?.id) {
-			attrs.set(ATTR_CLIENT_ID, context.payload.client.id);
+		if (context.payload.azp) {
+			attrs.set(ATTR_CLIENT_ID, context.payload.azp);
 		}
 		return attrs;
 	}

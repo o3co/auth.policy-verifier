@@ -6,9 +6,9 @@ import { PayloadSubjectIdCollector } from "../PayloadSubjectIdCollector.mjs";
 describe("PayloadSubjectIdCollector", () => {
 	const collector = new PayloadSubjectIdCollector();
 
-	it("extracts userId from payload.user.id", async () => {
+	it("extracts userId from payload.sub", async () => {
 		const ctx: CollectorContext = {
-			payload: { user: { id: "u1" }, scopes: [] } satisfies VerifierPayload,
+			payload: { sub: "u1" } satisfies VerifierPayload,
 			resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 			action: "read",
 		};
@@ -16,9 +16,9 @@ describe("PayloadSubjectIdCollector", () => {
 		expect(attrs.get(ATTR_USER_ID)).toBe("u1");
 	});
 
-	it("extracts clientId from payload.client.id", async () => {
+	it("extracts clientId from payload.azp", async () => {
 		const ctx: CollectorContext = {
-			payload: { client: { id: "c1" }, scopes: [] } satisfies VerifierPayload,
+			payload: { azp: "c1" } satisfies VerifierPayload,
 			resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 			action: "read",
 		};
@@ -26,9 +26,9 @@ describe("PayloadSubjectIdCollector", () => {
 		expect(attrs.get(ATTR_CLIENT_ID)).toBe("c1");
 	});
 
-	it("returns empty map when neither user nor client present", async () => {
+	it("returns empty map when neither sub nor azp present", async () => {
 		const ctx: CollectorContext = {
-			payload: { scopes: [] } satisfies VerifierPayload,
+			payload: {} satisfies VerifierPayload,
 			resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 			action: "read",
 		};

@@ -44,9 +44,9 @@ import type { JwtPayload } from "jsonwebtoken";
 export type { JwtPayload };
 
 export interface VerifierPayload extends JwtPayload {
-	scopes?: string[];
-	user?: { id: string; [key: string]: unknown };
-	client?: { id: string; [key: string]: unknown };
+	sub?: string;
+	azp?: string;
+	scope?: string;
 	token?: string;
 	tokenType?: string;
 }

@@ -4,7 +4,7 @@ import type { CollectorContext, VerifierPayload } from "#/engine/types.mjs";
 import { StaticRoleCollector } from "../StaticRoleCollector.mjs";
 
 const stubContext: CollectorContext = {
-	payload: { scopes: [] } satisfies VerifierPayload,
+	payload: {} satisfies VerifierPayload,
 	resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 	action: "read",
 };
