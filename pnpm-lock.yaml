@@ -15,6 +15,12 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  create-app:
+    devDependencies:
+      '@types/node':
+        specifier: ^25.1.0
+        version: 25.5.0
+
   packages/core:
     devDependencies:
       '@types/node':

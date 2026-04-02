@@ -9,11 +9,9 @@
 	"files": ["dist", "templates"],
 	"scripts": {
 		"build": "tsc",
-		"prebuild": "node scripts/copy-templates.mjs",
-		"test": "vitest run"
+		"prebuild": "node scripts/copy-templates.mjs"
 	},
 	"devDependencies": {
-		"@types/node": "^25.1.0",
-		"vitest": "^4.1.2"
+		"@types/node": "^25.1.0"
 	}
 }
