@@ -22,7 +22,7 @@ install:
 
 .PHONY: clean
 clean:
-	rm -rf dist
+	pnpm -r exec rm -rf dist
 
 .PHONY: docker
 docker: docker/runtime

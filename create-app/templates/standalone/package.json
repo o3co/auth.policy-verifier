@@ -1,0 +1,28 @@
+{
+	"name": "@o3co/auth-policy-verifier-standalone",
+	"version": "0.0.0",
+	"private": true,
+	"license": "Apache-2.0",
+	"packageManager": "pnpm@10.29.3",
+	"type": "module",
+	"engines": {
+		"node": ">=22.0.0"
+	},
+	"scripts": {
+		"build": "tsc",
+		"start": "node dist/main.mjs",
+		"debug": "NODE_OPTIONS='--conditions=development' tsx watch src/main.mts"
+	},
+	"dependencies": {
+		"@o3co/auth.policy-verifier.core": "workspace:*",
+		"@o3co/auth.policy-verifier.foundation": "workspace:*",
+		"@o3co/auth.policy-verifier.express": "workspace:*",
+		"@o3co/auth.utils": "^0.0.1",
+		"express": "^5.2.1"
+	},
+	"devDependencies": {
+		"@types/node": "^25.1.0",
+		"tsx": "^4.21.0",
+		"typescript": "^5.9.3"
+	}
+}
