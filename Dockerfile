@@ -11,13 +11,13 @@ WORKDIR /home/node
 #############################################
 FROM node-base AS deps
 
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY package.json pnpm-workspace.yaml ./
 COPY packages/core/package.json packages/core/package.json
 COPY packages/foundation/package.json packages/foundation/package.json
 COPY packages/express/package.json packages/express/package.json
 COPY templates/standalone/package.json templates/standalone/package.json
 
-RUN pnpm install --frozen-lockfile
+RUN pnpm install
 
 #############################################
 FROM deps AS builder
@@ -35,13 +35,13 @@ FROM node-base AS runtime
 
 ENV NODE_ENV=production
 
-COPY --from=deps /home/node/package.json /home/node/pnpm-workspace.yaml /home/node/pnpm-lock.yaml ./
+COPY --from=deps /home/node/package.json /home/node/pnpm-workspace.yaml ./
 COPY --from=deps /home/node/packages/core/package.json packages/core/package.json
 COPY --from=deps /home/node/packages/foundation/package.json packages/foundation/package.json
 COPY --from=deps /home/node/packages/express/package.json packages/express/package.json
 COPY --from=deps /home/node/templates/standalone/package.json templates/standalone/package.json
 
-RUN pnpm install --frozen-lockfile --prod \
+RUN pnpm install --prod \
  && pnpm store prune
 
 COPY --from=builder /home/node/packages/core/dist/ packages/core/dist/
