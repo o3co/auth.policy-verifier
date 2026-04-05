@@ -11,3 +11,5 @@ export { ResourceActionPermissionRuleCollector } from "./rules/ResourceActionPer
 export { ResourceActionScopeRuleCollector } from "./rules/ResourceActionScopeRuleCollector.mjs";
 // Resource
 export { DotNotationResourceParser } from "./resource/DotNotationResourceParser.mjs";
+// Module
+export { builtinCollectorsModule } from "./module.mjs";

@@ -8,7 +8,7 @@ import {
 	PayloadScopeCollector,
 	RequestContextCollector,
 	ResourceActionScopeRuleCollector,
-} from "@o3co/auth.policy-verifier.foundation";
+} from "@o3co/auth.policy-verifier.builtins";
 import { createVerifyRouter } from "#/routes/verify.mjs";
 
 const JWT_SECRET = "test-secret";

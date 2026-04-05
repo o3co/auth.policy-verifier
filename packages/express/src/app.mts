@@ -17,7 +17,7 @@ import {
 	StaticRoleCollector,
 	ResourceActionPermissionRuleCollector,
 	ResourceActionScopeRuleCollector,
-} from "@o3co/auth.policy-verifier.foundation";
+} from "@o3co/auth.policy-verifier.builtins";
 import { createHealthcheckRouter } from "@o3co/auth.utils/express";
 import { AppConfigSchema } from "./config/application.schema.mjs";
 import { createVerifyRouter } from "./routes/verify.mjs";
