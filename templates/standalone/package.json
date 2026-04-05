@@ -11,6 +11,7 @@
 	"scripts": {
 		"build": "tsc",
 		"start": "node dist/main.mjs",
+		"test": "echo 'no tests configured'",
 		"debug": "NODE_OPTIONS='--conditions=development' tsx watch src/main.mts"
 	},
 	"dependencies": {
