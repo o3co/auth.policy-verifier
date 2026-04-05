@@ -1,5 +1,5 @@
 {
 	"@o3co/auth.policy-verifier.core": "0.0.1",
-	"@o3co/auth.policy-verifier.foundation": "0.0.1",
-	"@o3co/auth.policy-verifier.express": "0.0.1"
+	"@o3co/auth.policy-verifier.builtins": "0.0.1",
+	"@o3co/auth.policy-verifier.server": "0.0.1"
 }
