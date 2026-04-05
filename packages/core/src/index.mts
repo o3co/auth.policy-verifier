@@ -8,6 +8,8 @@ export {
 	ATTR_SCOPES,
 	ATTR_USER_ID,
 } from "./keys.mjs";
+export type { Module, ModuleContext, PathResolver } from "./modules/index.mjs";
+export { Registry } from "./modules/index.mjs";
 export { RulePipeline } from "./RulePipeline.mjs";
 export type {
 	AttributeCollector,
