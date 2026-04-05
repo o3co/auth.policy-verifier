@@ -1,2 +1,9 @@
 export { Registry } from "./Registry.mjs";
-export type { Module, ModuleContext, PathResolver } from "./types.mjs";
+export type {
+	AttributeCollectorFactory,
+	Module,
+	ModuleContext,
+	PathResolver,
+	ResourceParserFactory,
+	RuleCollectorFactory,
+} from "./types.mjs";

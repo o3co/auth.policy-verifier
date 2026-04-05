@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { Registry, type AttributeCollector, type RuleCollector, type ResourceParser } from "@o3co/auth.policy-verifier.core";
+import {
+	Registry,
+	type AttributeCollectorFactory,
+	type RuleCollectorFactory,
+	type ResourceParserFactory,
+} from "@o3co/auth.policy-verifier.core";
 import { builtinCollectorsModule } from "../module.mjs";
 
 describe("builtinCollectorsModule", () => {
@@ -7,10 +12,10 @@ describe("builtinCollectorsModule", () => {
 		expect(builtinCollectorsModule.name).toBe("builtin-collectors");
 	});
 
-	it("registers all builtin attribute collectors", async () => {
-		const attributeCollectorRegistry = new Registry<AttributeCollector>();
-		const ruleCollectorRegistry = new Registry<RuleCollector>();
-		const resourceParserRegistry = new Registry<ResourceParser>();
+	it("registers all builtin attribute collector factories", async () => {
+		const attributeCollectorRegistry = new Registry<AttributeCollectorFactory>();
+		const ruleCollectorRegistry = new Registry<RuleCollectorFactory>();
+		const resourceParserRegistry = new Registry<ResourceParserFactory>();
 
 		await builtinCollectorsModule.init({
 			pathResolver: (s: string) => s,
@@ -27,10 +32,10 @@ describe("builtinCollectorsModule", () => {
 		expect(attributeCollectorRegistry.has("StaticRoleCollector")).toBe(true);
 	});
 
-	it("registers all builtin rule collectors", async () => {
-		const attributeCollectorRegistry = new Registry<AttributeCollector>();
-		const ruleCollectorRegistry = new Registry<RuleCollector>();
-		const resourceParserRegistry = new Registry<ResourceParser>();
+	it("registers all builtin rule collector factories", async () => {
+		const attributeCollectorRegistry = new Registry<AttributeCollectorFactory>();
+		const ruleCollectorRegistry = new Registry<RuleCollectorFactory>();
+		const resourceParserRegistry = new Registry<ResourceParserFactory>();
 
 		await builtinCollectorsModule.init({
 			pathResolver: (s: string) => s,
@@ -44,10 +49,10 @@ describe("builtinCollectorsModule", () => {
 		expect(ruleCollectorRegistry.has("ResourceActionPermissionRuleCollector")).toBe(true);
 	});
 
-	it("registers DotNotationResourceParser", async () => {
-		const attributeCollectorRegistry = new Registry<AttributeCollector>();
-		const ruleCollectorRegistry = new Registry<RuleCollector>();
-		const resourceParserRegistry = new Registry<ResourceParser>();
+	it("registers DotNotationResourceParser factory", async () => {
+		const attributeCollectorRegistry = new Registry<AttributeCollectorFactory>();
+		const ruleCollectorRegistry = new Registry<RuleCollectorFactory>();
+		const resourceParserRegistry = new Registry<ResourceParserFactory>();
 
 		await builtinCollectorsModule.init({
 			pathResolver: (s: string) => s,
@@ -58,5 +63,29 @@ describe("builtinCollectorsModule", () => {
 		});
 
 		expect(resourceParserRegistry.has("DotNotationResourceParser")).toBe(true);
+	});
+
+	it("creates a working StaticPermissionCollector from factory with config", async () => {
+		const attributeCollectorRegistry = new Registry<AttributeCollectorFactory>();
+		const ruleCollectorRegistry = new Registry<RuleCollectorFactory>();
+		const resourceParserRegistry = new Registry<ResourceParserFactory>();
+
+		await builtinCollectorsModule.init({
+			pathResolver: (s: string) => s,
+			config: {},
+			attributeCollectorRegistry,
+			ruleCollectorRegistry,
+			resourceParserRegistry,
+		});
+
+		const factory = attributeCollectorRegistry.get("StaticPermissionCollector");
+		const collector = factory({ permissions: ["admin", "read"] });
+		const attrs = await collector.collect({
+			payload: {},
+			resource: { raw: "test", resourceType: "test" },
+			action: "read",
+		});
+
+		expect(attrs.get("permissions")).toEqual(["admin", "read"]);
 	});
 });

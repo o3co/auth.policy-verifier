@@ -8,14 +8,25 @@ import type { Registry } from "./Registry.mjs";
 export type PathResolver = (specifier: string) => string;
 
 /**
+ * Factory functions that accept a config entry and return an instance.
+ * Config entries come from the application HOCON config (e.g. { collector: "Name", ...extras }).
+ */
+// biome-ignore lint/suspicious/noExplicitAny: collector constructors accept varied config shapes
+export type AttributeCollectorFactory = (config: any) => AttributeCollector;
+// biome-ignore lint/suspicious/noExplicitAny: rule collector constructors accept varied config shapes
+export type RuleCollectorFactory = (config: any) => RuleCollector;
+// biome-ignore lint/suspicious/noExplicitAny: resource parser constructors accept varied config shapes
+export type ResourceParserFactory = (config: any) => ResourceParser;
+
+/**
  * Context provided to each Module during initialization.
  */
 export interface ModuleContext {
 	pathResolver: PathResolver;
 	config: Record<string, unknown>;
-	attributeCollectorRegistry: Registry<AttributeCollector>;
-	ruleCollectorRegistry: Registry<RuleCollector>;
-	resourceParserRegistry: Registry<ResourceParser>;
+	attributeCollectorRegistry: Registry<AttributeCollectorFactory>;
+	ruleCollectorRegistry: Registry<RuleCollectorFactory>;
+	resourceParserRegistry: Registry<ResourceParserFactory>;
 }
 
 /**

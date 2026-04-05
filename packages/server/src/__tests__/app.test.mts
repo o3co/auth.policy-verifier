@@ -14,17 +14,17 @@ async function signToken(payload: Record<string, unknown>): Promise<string> {
 		.sign(secretKey);
 }
 
-// Minimal test module that registers a scope collector and rule collector
+// Minimal test module that registers factories for a scope collector and rule collector
 const testModule: Module = {
 	name: "test-module",
 	async init(context) {
-		context.attributeCollectorRegistry.register("TestScopeCollector", {
+		context.attributeCollectorRegistry.register("TestScopeCollector", () => ({
 			async collect(ctx) {
 				const scopes = ((ctx.payload.scope as string) ?? "").split(" ");
 				return new Map([["scopes", scopes]]);
 			},
-		});
-		context.ruleCollectorRegistry.register("TestScopeRuleCollector", {
+		}));
+		context.ruleCollectorRegistry.register("TestScopeRuleCollector", () => ({
 			async collect(ctx) {
 				return [
 					{
@@ -38,12 +38,12 @@ const testModule: Module = {
 					},
 				];
 			},
-		});
-		context.resourceParserRegistry.register("SimpleParser", {
+		}));
+		context.resourceParserRegistry.register("SimpleParser", () => ({
 			parse(raw: string) {
 				return { raw, resourceType: raw, resourceId: undefined };
 			},
-		});
+		}));
 	},
 };
 

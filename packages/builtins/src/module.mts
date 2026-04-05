@@ -11,17 +11,18 @@ import { DotNotationResourceParser } from "./resource/DotNotationResourceParser.
 export const builtinCollectorsModule: Module = {
 	name: "builtin-collectors",
 	async init(context) {
-		context.attributeCollectorRegistry.register("PayloadScopeCollector", new PayloadScopeCollector());
-		context.attributeCollectorRegistry.register("PayloadSubjectIdCollector", new PayloadSubjectIdCollector());
-		context.attributeCollectorRegistry.register("RequestContextCollector", new RequestContextCollector());
-		// TODO: These collectors require config (permissions/roles) to be useful.
-		// Registered with empty defaults; config-driven instantiation is a future concern.
-		context.attributeCollectorRegistry.register("StaticPermissionCollector", new StaticPermissionCollector({ permissions: [] }));
-		context.attributeCollectorRegistry.register("StaticRoleCollector", new StaticRoleCollector({ roles: [] }));
+		// Attribute collector factories
+		context.attributeCollectorRegistry.register("PayloadScopeCollector", () => new PayloadScopeCollector());
+		context.attributeCollectorRegistry.register("PayloadSubjectIdCollector", () => new PayloadSubjectIdCollector());
+		context.attributeCollectorRegistry.register("RequestContextCollector", () => new RequestContextCollector());
+		context.attributeCollectorRegistry.register("StaticPermissionCollector", (config) => new StaticPermissionCollector(config));
+		context.attributeCollectorRegistry.register("StaticRoleCollector", (config) => new StaticRoleCollector(config));
 
-		context.ruleCollectorRegistry.register("ResourceActionScopeRuleCollector", new ResourceActionScopeRuleCollector());
-		context.ruleCollectorRegistry.register("ResourceActionPermissionRuleCollector", new ResourceActionPermissionRuleCollector());
+		// Rule collector factories
+		context.ruleCollectorRegistry.register("ResourceActionScopeRuleCollector", () => new ResourceActionScopeRuleCollector());
+		context.ruleCollectorRegistry.register("ResourceActionPermissionRuleCollector", () => new ResourceActionPermissionRuleCollector());
 
-		context.resourceParserRegistry.register("DotNotationResourceParser", new DotNotationResourceParser());
+		// Resource parser factories
+		context.resourceParserRegistry.register("DotNotationResourceParser", () => new DotNotationResourceParser());
 	},
 };
