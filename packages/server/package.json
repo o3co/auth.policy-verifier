@@ -1,5 +1,5 @@
 {
-	"name": "@o3co/auth.policy-verifier.express",
+	"name": "@o3co/auth.policy-verifier.server",
 	"version": "0.0.1",
 	"license": "Apache-2.0",
 	"type": "module",
@@ -21,20 +21,16 @@
 	},
 	"dependencies": {
 		"@o3co/auth.policy-verifier.core": "workspace:*",
-		"@o3co/auth.policy-verifier.builtins": "workspace:*",
 		"@o3co/auth.utils": "^0.0.2",
-		"@o3co/ts.hocon": "^0.1.2",
+		"express": "^5.0.0",
 		"jose": "^6.2.2",
 		"zod": "^4.3.6"
 	},
-	"peerDependencies": {
-		"express": "^5.0.0"
-	},
 	"devDependencies": {
+		"@o3co/auth.policy-verifier.builtins": "workspace:*",
 		"@types/express": "^5.0.6",
 		"@types/node": "^25.1.0",
 		"@types/supertest": "^7.2.0",
-		"express": "^5.2.1",
 		"supertest": "^7.2.2",
 		"vitest": "^4.1.2"
 	}

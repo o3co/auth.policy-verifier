@@ -11,12 +11,13 @@
 	"scripts": {
 		"build": "tsc",
 		"start": "node dist/main.mjs",
+		"test": "echo 'no tests configured'",
 		"debug": "NODE_OPTIONS='--conditions=development' tsx watch src/main.mts"
 	},
 	"dependencies": {
 		"@o3co/auth.policy-verifier.core": "workspace:*",
 		"@o3co/auth.policy-verifier.foundation": "workspace:*",
-		"@o3co/auth.policy-verifier.express": "workspace:*",
+		"@o3co/auth.policy-verifier.server": "workspace:*",
 		"@o3co/auth.utils": "^0.0.1",
 		"express": "^5.2.1"
 	},
