@@ -1,5 +1,5 @@
-import { ATTR_SCOPES } from "@o3co/auth.policy-verifier.core";
 import type { Attributes, Rule } from "@o3co/auth.policy-verifier.core";
+import { ATTR_SCOPES } from "@o3co/auth.policy-verifier.core";
 
 export class HasScope implements Rule {
 	readonly ruleType = "scope";

@@ -1,8 +1,12 @@
 // Copyright 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+import type {
+	AttributeCollector,
+	Attributes,
+	CollectorContext,
+} from "@o3co/auth.policy-verifier.core";
 import { ATTR_CLIENT_IP } from "@o3co/auth.policy-verifier.core";
-import type { AttributeCollector, Attributes, CollectorContext } from "@o3co/auth.policy-verifier.core";
 
 export class RequestContextCollector implements AttributeCollector {
 	async collect(context: CollectorContext): Promise<Attributes> {

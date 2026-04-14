@@ -4,25 +4,49 @@ import { PayloadSubjectIdCollector } from "./collectors/PayloadSubjectIdCollecto
 import { RequestContextCollector } from "./collectors/RequestContextCollector.mjs";
 import { StaticPermissionCollector } from "./collectors/StaticPermissionCollector.mjs";
 import { StaticRoleCollector } from "./collectors/StaticRoleCollector.mjs";
-import { ResourceActionScopeRuleCollector } from "./rules/ResourceActionScopeRuleCollector.mjs";
-import { ResourceActionPermissionRuleCollector } from "./rules/ResourceActionPermissionRuleCollector.mjs";
 import { DotNotationResourceParser } from "./resource/DotNotationResourceParser.mjs";
+import { ResourceActionPermissionRuleCollector } from "./rules/ResourceActionPermissionRuleCollector.mjs";
+import { ResourceActionScopeRuleCollector } from "./rules/ResourceActionScopeRuleCollector.mjs";
 
 export const builtinCollectorsModule: Module = {
 	name: "builtin-collectors",
 	async init(context) {
 		// Attribute collector factories
-		context.attributeCollectorRegistry.register("PayloadScopeCollector", () => new PayloadScopeCollector());
-		context.attributeCollectorRegistry.register("PayloadSubjectIdCollector", () => new PayloadSubjectIdCollector());
-		context.attributeCollectorRegistry.register("RequestContextCollector", () => new RequestContextCollector());
-		context.attributeCollectorRegistry.register("StaticPermissionCollector", (config) => new StaticPermissionCollector(config));
-		context.attributeCollectorRegistry.register("StaticRoleCollector", (config) => new StaticRoleCollector(config));
+		context.attributeCollectorRegistry.register(
+			"PayloadScopeCollector",
+			() => new PayloadScopeCollector(),
+		);
+		context.attributeCollectorRegistry.register(
+			"PayloadSubjectIdCollector",
+			() => new PayloadSubjectIdCollector(),
+		);
+		context.attributeCollectorRegistry.register(
+			"RequestContextCollector",
+			() => new RequestContextCollector(),
+		);
+		context.attributeCollectorRegistry.register(
+			"StaticPermissionCollector",
+			(config) => new StaticPermissionCollector(config),
+		);
+		context.attributeCollectorRegistry.register(
+			"StaticRoleCollector",
+			(config) => new StaticRoleCollector(config),
+		);
 
 		// Rule collector factories
-		context.ruleCollectorRegistry.register("ResourceActionScopeRuleCollector", () => new ResourceActionScopeRuleCollector());
-		context.ruleCollectorRegistry.register("ResourceActionPermissionRuleCollector", () => new ResourceActionPermissionRuleCollector());
+		context.ruleCollectorRegistry.register(
+			"ResourceActionScopeRuleCollector",
+			() => new ResourceActionScopeRuleCollector(),
+		);
+		context.ruleCollectorRegistry.register(
+			"ResourceActionPermissionRuleCollector",
+			() => new ResourceActionPermissionRuleCollector(),
+		);
 
 		// Resource parser factories
-		context.resourceParserRegistry.register("DotNotationResourceParser", () => new DotNotationResourceParser());
+		context.resourceParserRegistry.register(
+			"DotNotationResourceParser",
+			() => new DotNotationResourceParser(),
+		);
 	},
 };

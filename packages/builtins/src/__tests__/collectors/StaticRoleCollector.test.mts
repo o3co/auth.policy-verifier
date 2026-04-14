@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { ATTR_ROLES } from "@o3co/auth.policy-verifier.core";
 import type { CollectorContext, VerifierPayload } from "@o3co/auth.policy-verifier.core";
+import { ATTR_ROLES } from "@o3co/auth.policy-verifier.core";
+import { describe, expect, it } from "vitest";
 import { StaticRoleCollector } from "#/collectors/StaticRoleCollector.mjs";
 
 const stubContext: CollectorContext = {

@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest";
 import {
-	Registry,
 	type AttributeCollectorFactory,
-	type RuleCollectorFactory,
+	Registry,
 	type ResourceParserFactory,
+	type RuleCollectorFactory,
 } from "@o3co/auth.policy-verifier.core";
+import { describe, expect, it } from "vitest";
 import { builtinCollectorsModule } from "../module.mjs";
 
 describe("builtinCollectorsModule", () => {

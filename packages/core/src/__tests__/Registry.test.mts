@@ -17,9 +17,7 @@ describe("Registry", () => {
 
 	it("throws on get for unregistered name", () => {
 		const registry = new Registry<string>();
-		expect(() => registry.get("missing")).toThrow(
-			'Registry: "missing" is not registered',
-		);
+		expect(() => registry.get("missing")).toThrow('Registry: "missing" is not registered');
 	});
 
 	it("throws on duplicate registration", () => {
