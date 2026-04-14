@@ -1,9 +1,9 @@
 // Copyright 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
-import { ATTR_CLIENT_IP } from "@o3co/auth.policy-verifier.core";
 import type { CollectorContext, VerifierPayload } from "@o3co/auth.policy-verifier.core";
+import { ATTR_CLIENT_IP } from "@o3co/auth.policy-verifier.core";
+import { describe, expect, it } from "vitest";
 import { RequestContextCollector } from "#/collectors/RequestContextCollector.mjs";
 
 const makeContext = (requestContext?: Record<string, unknown>): CollectorContext => ({

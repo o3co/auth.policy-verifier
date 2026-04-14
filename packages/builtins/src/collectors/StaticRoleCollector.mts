@@ -1,5 +1,10 @@
+import type {
+	AttributeCollector,
+	Attributes,
+	CollectorContext,
+	Role,
+} from "@o3co/auth.policy-verifier.core";
 import { ATTR_ROLES } from "@o3co/auth.policy-verifier.core";
-import type { AttributeCollector, Attributes, CollectorContext, Role } from "@o3co/auth.policy-verifier.core";
 
 export class StaticRoleCollector implements AttributeCollector {
 	private roles: Role[];

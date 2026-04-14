@@ -272,10 +272,7 @@ describe("POST /verify — request body validation (#18)", () => {
 
 	async function makeRequest(body: Record<string, unknown>) {
 		const token = await signHS256Token({ scope: "read:project" });
-		return request(app)
-			.post("/verify")
-			.set("Authorization", `Bearer ${token}`)
-			.send(body);
+		return request(app).post("/verify").set("Authorization", `Bearer ${token}`).send(body);
 	}
 
 	it("returns 400 with invalid_request when resource is missing", async () => {

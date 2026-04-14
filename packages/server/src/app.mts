@@ -64,7 +64,9 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 		: { key: new Uint8Array(0), algorithms: [] as string[] };
 
 	if (!config.oauth.jwt.validate) {
-		console.warn("WARNING: JWT signature validation is disabled. Tokens will be accepted without verification.");
+		console.warn(
+			"WARNING: JWT signature validation is disabled. Tokens will be accepted without verification.",
+		);
 	}
 
 	// 7. Build Express app

@@ -2,11 +2,11 @@
  * Standalone entrypoint — creates and starts the policy-verifier server.
  */
 import { resolve } from "node:path";
+import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
+import { AppConfigSchema, createApp } from "@o3co/auth.policy-verifier.server";
 import { createLogger, gracefulShutdown } from "@o3co/auth.utils";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
-import { createApp, AppConfigSchema } from "@o3co/auth.policy-verifier.server";
-import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
 
 const logger = createLogger("policy-verifier");
 
@@ -18,9 +18,7 @@ const config = validate(
 const app = await createApp({
 	pathResolver: import.meta.resolve,
 	config,
-	modules: [
-		builtinCollectorsModule,
-	],
+	modules: [builtinCollectorsModule],
 });
 
 const server = app.listen(config.http.port, config.http.hostname, () => {
