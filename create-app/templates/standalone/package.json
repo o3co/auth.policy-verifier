@@ -1,6 +1,6 @@
 {
 	"name": "@o3co/auth-policy-verifier-standalone",
-	"version": "0.0.0",
+	"version": "0.1.0",
 	"private": true,
 	"license": "Apache-2.0",
 	"packageManager": "pnpm@10.29.3",
@@ -11,7 +11,7 @@
 	"scripts": {
 		"build": "tsc",
 		"start": "node dist/main.mjs",
-		"test": "echo 'no tests configured'",
+		"test": "vitest run",
 		"debug": "NODE_OPTIONS='--conditions=development' tsx watch src/main.mts"
 	},
 	"dependencies": {
@@ -24,7 +24,11 @@
 	},
 	"devDependencies": {
 		"@types/node": "^25.1.0",
+		"@types/supertest": "^7.2.0",
+		"jose": "^6.2.2",
+		"supertest": "^7.2.2",
 		"tsx": "^4.21.0",
-		"typescript": "^5.9.3"
+		"typescript": "^5.9.3",
+		"vitest": "^4.1.2"
 	}
 }
