@@ -6,10 +6,12 @@
 	"scripts": {
 		"build": "pnpm -r run build",
 		"test": "pnpm -r run test",
-		"lint": "biome check packages/ templates/ create-app/"
+		"lint": "biome check packages/ templates/ create-app/",
+		"docs": "typedoc"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.3.14",
+		"typedoc": "^0.28.19",
 		"typescript": "^5.9.3"
 	}
 }

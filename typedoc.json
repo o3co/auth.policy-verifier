@@ -1,0 +1,10 @@
+{
+  "entryPoints": ["packages/*/src/index.mts"],
+  "entryPointStrategy": "expand",
+  "out": "docs/api",
+  "exclude": ["**/__tests__/**", "**/node_modules/**", "**/templates/**", "**/create-app/**"],
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "name": "auth.policy-verifier API",
+  "tsconfig": "tsconfig.docs.json"
+}
