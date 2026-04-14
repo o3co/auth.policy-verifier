@@ -22,11 +22,15 @@
 		"directory": "packages/builtins"
 	},
 	"scripts": {
+		"prebuild": "rm -rf dist",
 		"build": "tsc",
 		"test": "vitest run"
 	},
 	"imports": {
-		"#/*": "./src/*"
+		"#/*": {
+			"development": "./src/*",
+			"default": "./dist/*"
+		}
 	},
 	"dependencies": {
 		"@o3co/auth.policy-verifier.core": "workspace:*"
