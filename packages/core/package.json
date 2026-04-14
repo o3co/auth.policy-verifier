@@ -1,0 +1,31 @@
+{
+	"name": "@o3co/auth.policy-verifier.core",
+	"version": "0.1.0",
+	"license": "Apache-2.0",
+	"type": "module",
+	"main": "./dist/index.mjs",
+	"types": "./dist/index.d.mts",
+	"exports": {
+		".": {
+			"import": "./dist/index.mjs",
+			"types": "./dist/index.d.mts"
+		}
+	},
+	"files": ["dist", "LICENSE", "README.md"],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/o3co/auth.policy-verifier.git",
+		"directory": "packages/core"
+	},
+	"scripts": {
+		"build": "tsc",
+		"test": "vitest run"
+	},
+	"imports": {
+		"#/*": "./src/*"
+	},
+	"devDependencies": {
+		"@types/node": "^25.1.0",
+		"vitest": "^4.1.2"
+	}
+}

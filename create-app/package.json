@@ -1,0 +1,17 @@
+{
+	"name": "create-o3co-policy-verifier",
+	"version": "0.0.0",
+	"license": "Apache-2.0",
+	"type": "module",
+	"bin": {
+		"create-o3co-policy-verifier": "./dist/cli.mjs"
+	},
+	"files": ["dist", "templates"],
+	"scripts": {
+		"build": "tsc",
+		"prebuild": "node scripts/copy-templates.mjs"
+	},
+	"devDependencies": {
+		"@types/node": "^25.1.0"
+	}
+}

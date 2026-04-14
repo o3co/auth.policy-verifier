@@ -1,0 +1,202 @@
+# auth.policy-verifier
+
+Attribute-based access control (ABAC) engine for microservice authorization. Receives a JWT + resource + action, evaluates collector-driven rules, and returns allow/deny. No policy DSL — authorization logic is composed in TypeScript.
+
+- Drop-in replaceable with OPA or Cedar — [grpc.authz](https://github.com/o3co/grpc.authz) supports all three as backends
+- Runs as an HTTP sidecar — swapping engines is a config change, not a code change
+- Configurable JWT verification — HS256, RS256, ES256, EdDSA with JWKS or direct public key
+
+## How It Works
+
+```text
+POST /verify
+Authorization: Bearer <jwt>
+{"resource": "project:1", "action": "read"}
+
+  ┌──────────────────────────────────────────────────┐
+  │                  /verify handler                  │
+  │                                                   │
+  │  1. Verify JWT (HS256 / RS256 / ES256 / EdDSA)   │
+  │                                                   │
+  │  2. AttributeCollectors (parallel)                │
+  │     ├─ PayloadScopeCollector → scopes from JWT    │
+  │     ├─ PayloadSubjectIdCollector → subject ID     │
+  │     └─ (custom collectors...)                     │
+  │                                                   │
+  │  3. RuleCollectors (parallel)                     │
+  │     ├─ ResourceActionScopeRuleCollector           │
+  │     │   → HasScope("read:project")                │
+  │     └─ (custom rule collectors...)                │
+  │                                                   │
+  │  4. Evaluate                                      │
+  │     OR within rule group, AND across groups        │
+  │                                                   │
+  │  → 200 {"decision": "allow"}                      │
+  │  → 403 {"decision": "deny", "code": "..."}       │
+  └──────────────────────────────────────────────────┘
+```
+
+## Features
+
+- **Collector pattern** — Attributes and rules are gathered by composable collectors, not a static policy file. Add custom collectors for any attribute source (database, external API, JWT claims).
+- **Configurable JWT verification** — HS256 (shared secret), RS256/ES256/EdDSA (JWKS URI or direct public key). Symmetric design with [auth.provider](https://github.com/o3co/auth.provider)'s JWT config.
+- **JWKS support** — Point `jwksUri` at auth.provider's `/.well-known/jwks.json` for automatic key rotation.
+- **Pluggable architecture** — Module system for registering custom collectors, rules, and resource parsers via factories.
+- **No DSL lock-in** — Authorization logic is TypeScript. No Rego, no Cedar policy language. If you outgrow this, swap to OPA or Cedar via grpc.authz — the REST API contract is the same.
+
+## Quick Start
+
+```bash
+npx create-o3co-policy-verifier my-policy-verifier
+cd my-policy-verifier
+pnpm install
+OAUTH_JWT_SECRET=your-secret pnpm start
+```
+
+```bash
+curl -X POST http://localhost:3000/verify \
+  -H "Authorization: Bearer <jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"resource": "project:1", "action": "read"}'
+```
+
+```json
+{"decision": "allow"}
+```
+
+## Architecture
+
+```text
+standalone → server   → core
+          → builtins  → core
+```
+
+- **core** — Types, `evaluate()`, `AttributePipeline`, `RulePipeline`, Module infrastructure. No runtime dependencies.
+- **builtins** — Built-in collectors (scope, permission, role, subject ID, request context), rules (HasScope, HasPermission), DotNotation resource parser. Does not depend on server.
+- **server** — Express HTTP server, `createApp()`, `POST /verify` route, JWT key resolution, config schema. Does not depend on builtins.
+- **standalone** — Composition root: reads HOCON config, selects modules, starts the server.
+
+## Packages
+
+| Package | npm | Description |
+| --- | --- | --- |
+| [`packages/core`](packages/core/) | `@o3co/auth.policy-verifier.core` | Types, evaluate, pipelines, Module infrastructure |
+| [`packages/builtins`](packages/builtins/) | `@o3co/auth.policy-verifier.builtins` | Built-in collectors, rules, resource parser |
+| [`packages/server`](packages/server/) | `@o3co/auth.policy-verifier.server` | Express server, `createApp`, `POST /verify`, JWT key resolver |
+| [`templates/standalone`](templates/standalone/) | — | Deployable server template (composition root) |
+| [`create-app`](create-app/) | `create-o3co-policy-verifier` | CLI scaffolder |
+
+## Evaluation Logic
+
+Rules are grouped by `ruleType` (e.g., "scope", "permission"):
+
+- **Within a group:** OR — any single passing rule satisfies the group
+- **Across groups:** AND — every group must be satisfied
+
+Empty rules → allow. This means if no rule collectors are configured, all requests are allowed.
+
+### Built-in Rule Types
+
+| Rule | Generated by | Matches |
+| --- | --- | --- |
+| `HasScope("read:project")` | `ResourceActionScopeRuleCollector` | JWT `scope` claim contains `read:project` |
+| `HasPermission("project:1.perm:read")` | `ResourceActionPermissionRuleCollector` | User permissions/roles include matching pattern (supports `*` wildcards) |
+
+## Configuration
+
+HOCON config with environment variable overrides:
+
+```hocon
+http {
+  port = 3000
+  port = ${?HTTP_PORT}
+}
+
+oauth {
+  jwt {
+    algorithm = "HS256"           # HS256 | RS256 | ES256 | EdDSA
+    algorithm = ${?OAUTH_JWT_ALGORITHM}
+    secret = ${?OAUTH_JWT_SECRET}           # HS256
+    jwksUri = ${?OAUTH_JWT_JWKS_URI}        # RS256/ES256/EdDSA — e.g. http://auth-provider/.well-known/jwks.json
+    publicKey = ${?OAUTH_JWT_PUBLIC_KEY}     # RS256/ES256/EdDSA — PEM string
+    publicKeyPath = ${?OAUTH_JWT_PUBLIC_KEY_PATH}  # or file path
+    validate = true
+    validate = ${?OAUTH_JWT_VALIDATE}
+  }
+}
+
+attribute {
+  collectors = [
+    { collector = "PayloadScopeCollector" }
+    { collector = "PayloadSubjectIdCollector" }
+  ]
+}
+
+rule {
+  collectors = [
+    { collector = "ResourceActionScopeRuleCollector" }
+  ]
+}
+
+resource {
+  parser = DotNotationResourceParser
+}
+```
+
+### Resource String Format (DotNotation)
+
+```text
+"project:1"               → resourceType: "project",         resourceId: "1"
+"project:1.member:2"      → resourceType: "project_member",  resourceId: "2"
+"project:1.member"        → resourceType: "project_member",  resourceId: undefined
+```
+
+## Connecting to auth.provider
+
+When auth.provider uses asymmetric JWT signing (RS256/ES256/EdDSA), point the policy-verifier's `jwksUri` at the provider's JWKS endpoint:
+
+```hocon
+oauth.jwt {
+  algorithm = "RS256"
+  jwksUri = "http://auth-provider:3000/.well-known/jwks.json"
+}
+```
+
+The policy-verifier fetches and caches the public keys automatically via jose's `createRemoteJWKSet`.
+
+For HS256, both services share the same secret:
+
+```hocon
+oauth.jwt {
+  algorithm = "HS256"
+  secret = ${OAUTH_JWT_SECRET}
+}
+```
+
+## Development
+
+```bash
+pnpm install
+pnpm -r build    # build all packages
+pnpm -r test     # test all packages
+```
+
+## Docker
+
+```bash
+npx create-o3co-policy-verifier my-verifier
+cd my-verifier
+docker build -t my-verifier .
+docker run -e OAUTH_JWT_SECRET=secret my-verifier
+```
+
+## Related Projects
+
+- [auth.provider](https://github.com/o3co/auth.provider) — OAuth 2.0 provider with DID authentication
+- [auth.proxy](https://github.com/o3co/auth.proxy) — Token validation reverse proxy
+- [grpc.authz](https://github.com/o3co/grpc.authz) — gRPC authorization middleware (calls this service for authorization decisions)
+- [auth](https://github.com/o3co/auth) — Architecture docs and E2E tests
+
+## License
+
+Apache License 2.0 — Copyright 2026 1o1 Co. Ltd.

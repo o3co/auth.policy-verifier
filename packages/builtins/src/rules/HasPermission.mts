@@ -1,0 +1,46 @@
+import { ATTR_PERMISSIONS, ATTR_ROLES } from "@o3co/auth.policy-verifier.core";
+import type { Attributes, Role, Rule } from "@o3co/auth.policy-verifier.core";
+
+export class HasPermission implements Rule {
+	readonly ruleType = "permission";
+	readonly code = "no_permission";
+	readonly message: string;
+
+	constructor(private permission: string) {
+		this.message = `User does not have required permission: ${permission}`;
+	}
+
+	verify(attrs: Attributes): boolean {
+		const direct = (attrs.get(ATTR_PERMISSIONS) as string[] | undefined) ?? [];
+		const fromRoles = ((attrs.get(ATTR_ROLES) as Role[] | undefined) ?? []).flatMap(
+			(role) => role.permissions,
+		);
+		const all = [...direct, ...fromRoles];
+
+		return all.some((p) => this.match(p, this.permission));
+	}
+
+	private match(permission: string, required: string): boolean {
+		permission = permission.toLowerCase();
+		required = required.toLowerCase();
+
+		if (permission === "*") return true;
+		if (permission === required) return true;
+
+		if (permission.includes("*")) {
+			// Reject any granted permission that contains more than one wildcard.
+			// With 2+ wildcards, split("*") produces 3+ parts, but the destructuring
+			// `const [prefix, suffix] = ...` silently drops everything after the second
+			// segment. For example, "a*c*b" is treated as "a*c" (endsWith "c" instead of
+			// "b"), which can grant broader access than intended. Returning false is the
+			// safe default: deny rather than over-grant. Single-wildcard permissions
+			// (e.g. "posts.*" or "*.read") continue to work as before.
+			if ((permission.match(/\*/g) ?? []).length > 1) return false;
+
+			const [prefix, suffix] = permission.split("*");
+			return (!prefix || required.startsWith(prefix)) && (!suffix || required.endsWith(suffix));
+		}
+
+		return false;
+	}
+}
