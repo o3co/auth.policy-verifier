@@ -267,6 +267,33 @@ describe("POST /verify — Bearer scheme validation (#17)", () => {
 	});
 });
 
+describe("POST /verify — scopeless JWT (DID grant) (#27)", () => {
+	const app = createTestApp();
+
+	it("returns allow for valid token without scope claim", async () => {
+		const token = await signHS256Token({ sub: "did:example:123" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.status).toBe(200);
+		expect(res.body.decision).toBe("allow");
+	});
+
+	it("still denies when scope claim is present but does not match", async () => {
+		const token = await signHS256Token({ sub: "did:example:123", scope: "write:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.status).toBe(403);
+		expect(res.body.decision).toBe("deny");
+		expect(res.body.code).toBe("invalid_scope");
+	});
+});
+
 describe("POST /verify — request body validation (#18)", () => {
 	const app = createTestApp();
 
