@@ -1,0 +1,156 @@
+/**
+ * Shared validation helpers for attribute-based rule constructors.
+ *
+ * Full implementations: requireAttrName, requireLiteralValue, requireOptionalGroup
+ * Stubs (not yet implemented): requireNumber, requireHomogeneousLiteralArray,
+ *   requireCompareOp, computeValuesKey, applyCompare
+ */
+
+export type LiteralValue = string | number | boolean;
+
+/**
+ * Returns a human-readable type label for use in error messages.
+ * Distinguishes null and undefined from other types instead of returning
+ * "object" or "undefined" from typeof.
+ */
+function describeType(value: unknown): string {
+	if (value === null) return "null";
+	if (value === undefined) return "undefined";
+	return typeof value;
+}
+
+export type CompareOp = "lt" | "le" | "gt" | "ge";
+
+export const COMPARE_OPS: readonly CompareOp[] = ["lt", "le", "gt", "ge"];
+
+/**
+ * Validates that a config field used as an attribute name is a non-empty string.
+ * @param className - The rule class name, used in error messages.
+ * @param fieldName - The config field name ("a" or "b"), used in error messages.
+ * @param value - The raw value to validate.
+ * @returns The validated non-empty string.
+ * @throws {Error} If value is not a non-empty string.
+ */
+export function requireAttrName(
+	className: string,
+	fieldName: "a" | "b",
+	value: unknown,
+): string {
+	if (typeof value !== "string") {
+		throw new Error(
+			`${className}: '${fieldName}' must be a non-empty string, got ${describeType(value)}`,
+		);
+	}
+	if (value.length === 0) {
+		throw new Error(`${className}: '${fieldName}' must be a non-empty string, got empty string`);
+	}
+	return value;
+}
+
+/**
+ * Validates that a config field used as a literal comparison value is a
+ * string, number, or boolean (i.e. a LiteralValue).
+ * @param className - The rule class name, used in error messages.
+ * @param fieldName - The config field name ("v"), used in error messages.
+ * @param value - The raw value to validate.
+ * @returns The validated LiteralValue.
+ * @throws {Error} If value is null, undefined, or any other type.
+ */
+export function requireLiteralValue(
+	className: string,
+	fieldName: "v",
+	value: unknown,
+): LiteralValue {
+	if (
+		typeof value === "string" ||
+		typeof value === "number" ||
+		typeof value === "boolean"
+	) {
+		return value;
+	}
+	throw new Error(
+		`${className}: '${fieldName}' must be string | number | boolean, got ${describeType(value)}`,
+	);
+}
+
+/**
+ * Validates a numeric comparison value. Rejects NaN; accepts Infinity/-Infinity.
+ * STUB — not yet implemented.
+ */
+export function requireNumber(
+	_className: string,
+	_fieldName: "v",
+	_value: unknown,
+): number {
+	throw new Error("not yet implemented: requireNumber");
+}
+
+/**
+ * Validates that a value is a non-empty, homogeneous array of LiteralValues
+ * (no null/undefined elements).
+ * STUB — not yet implemented.
+ */
+export function requireHomogeneousLiteralArray(
+	_className: string,
+	_value: unknown,
+): LiteralValue[] {
+	throw new Error("not yet implemented: requireHomogeneousLiteralArray");
+}
+
+/**
+ * Validates that a value is one of the allowed CompareOp strings.
+ * STUB — not yet implemented.
+ */
+export function requireCompareOp(_className: string, _value: unknown): CompareOp {
+	throw new Error("not yet implemented: requireCompareOp");
+}
+
+/**
+ * Validates an optional group string. Returns undefined when value is undefined;
+ * throws when value is a non-string or an empty string; otherwise returns the
+ * non-empty string.
+ * @param className - The rule class name, used in error messages.
+ * @param value - The raw value to validate.
+ * @returns The validated non-empty string, or undefined.
+ * @throws {Error} If value is a non-string or an empty string.
+ */
+export function requireOptionalGroup(
+	className: string,
+	value: unknown,
+): string | undefined {
+	if (value === undefined) {
+		return undefined;
+	}
+	if (typeof value !== "string") {
+		throw new Error(
+			`${className}: 'group' must be a non-empty string or undefined, got ${describeType(value)}`,
+		);
+	}
+	if (value.length === 0) {
+		throw new Error(
+			`${className}: 'group' must be a non-empty string or undefined, got empty string`,
+		);
+	}
+	return value;
+}
+
+/**
+ * Computes a stable cache/dedup key for an array of LiteralValues.
+ * Format: {type}:{count}:{hashPrefix} — SHA-256 over sorted String(x).join(",").
+ * STUB — not yet implemented.
+ */
+export function computeValuesKey(_values: LiteralValue[]): string {
+	throw new Error("not yet implemented: computeValuesKey");
+}
+
+/**
+ * Applies a numeric comparison operator.
+ * STUB — not yet implemented.
+ */
+export function applyCompare<T extends number>(
+	_op: CompareOp,
+	_left: T,
+	_right: T,
+): boolean {
+	throw new Error("not yet implemented: applyCompare");
+}
