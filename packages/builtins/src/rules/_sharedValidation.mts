@@ -43,19 +43,28 @@ export function requireAttrName(className: string, fieldName: "a" | "b", value: 
 
 /**
  * Validates that a config field used as a literal comparison value is a
- * string, number, or boolean (i.e. a LiteralValue).
+ * string, number, or boolean (i.e. a LiteralValue). NaN is rejected because
+ * its comparison semantics (`NaN !== NaN` is always true, `NaN === NaN` is
+ * always false) would silently invert Equal/NotEqual rules — a NotEqual(v=NaN)
+ * would always pass against any numeric attribute, weakening authorization.
  * @param className - The rule class name, used in error messages.
  * @param fieldName - The config field name ("v"), used in error messages.
  * @param value - The raw value to validate.
  * @returns The validated LiteralValue.
- * @throws {Error} If value is null, undefined, or any other type.
+ * @throws {Error} If value is null, undefined, of any other type, or NaN.
  */
 export function requireLiteralValue(
 	className: string,
 	fieldName: "v",
 	value: unknown,
 ): LiteralValue {
-	if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+	if (typeof value === "string" || typeof value === "boolean") {
+		return value;
+	}
+	if (typeof value === "number") {
+		if (Number.isNaN(value)) {
+			throw new Error(`${className}: '${fieldName}' must not be NaN`);
+		}
 		return value;
 	}
 	throw new Error(
@@ -83,11 +92,11 @@ export function requireNumber(className: string, fieldName: "v", value: unknown)
 
 /**
  * Validates that a value is a non-empty, homogeneous array of LiteralValues
- * (no null/undefined elements, all elements the same typeof).
+ * (no null/undefined elements, no NaN elements, all elements the same typeof).
  * @param className - The rule class name, used in error messages.
  * @param value - The raw value to validate.
  * @returns The validated LiteralValue array.
- * @throws {Error} If not an array, empty, contains invalid elements, or has mixed types.
+ * @throws {Error} If not an array, empty, contains invalid elements, has mixed types, or contains NaN.
  */
 export function requireHomogeneousLiteralArray(className: string, value: unknown): LiteralValue[] {
 	if (!Array.isArray(value)) {
@@ -110,6 +119,9 @@ export function requireHomogeneousLiteralArray(className: string, value: unknown
 			throw new Error(
 				`${className}: 'values' elements must be string | number | boolean, got ${t}`,
 			);
+		}
+		if (t === "number" && Number.isNaN(element)) {
+			throw new Error(`${className}: 'values' must not contain NaN`);
 		}
 		seenTypes.add(t);
 	}

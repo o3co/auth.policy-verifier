@@ -139,6 +139,14 @@ describe("AttrLiteralIn", () => {
 		);
 	});
 
+	it("throws when 'values' contains NaN", () => {
+		// A NaN element could never match any numeric attribute (NaN !== NaN)
+		// and would silently be a dead element in the set. Must fail-fast.
+		expect(() => new AttrLiteralIn({ a: "score", values: [1, Number.NaN, 3] })).toThrow(
+			/AttrLiteralIn.*must not contain NaN/,
+		);
+	});
+
 	// ---------------------------------------------------------------------------
 	// Construction errors: invalid 'group'
 	// ---------------------------------------------------------------------------

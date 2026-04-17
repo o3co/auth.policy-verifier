@@ -147,6 +147,14 @@ describe("AttrLiteralNotIn", () => {
 		);
 	});
 
+	it("throws when 'values' contains NaN", () => {
+		// A NaN element could never match any numeric attribute (NaN !== NaN),
+		// so including it in a "deny these" list is a silent policy mistake.
+		expect(() => new AttrLiteralNotIn({ a: "score", values: [1, Number.NaN, 3] })).toThrow(
+			/AttrLiteralNotIn.*must not contain NaN/,
+		);
+	});
+
 	// ---------------------------------------------------------------------------
 	// Construction errors: invalid 'group'
 	// ---------------------------------------------------------------------------

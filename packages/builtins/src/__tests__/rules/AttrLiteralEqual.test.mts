@@ -101,6 +101,13 @@ describe("AttrLiteralEqual", () => {
 		);
 	});
 
+	it("throws when 'v' is NaN", () => {
+		// NaN === NaN is always false, so AttrLiteralEqual({ v: NaN }) would be
+		// an always-deny rule. Must fail-fast at construction rather than ship
+		// a silently-broken predicate.
+		expect(() => new AttrLiteralEqual({ a: "score", v: Number.NaN })).toThrow(/must not be NaN/);
+	});
+
 	// ---------------------------------------------------------------------------
 	// Construction errors: invalid 'group'
 	// ---------------------------------------------------------------------------

@@ -81,6 +81,14 @@ describe("requireLiteralValue", () => {
 	it("throws with 'object' in message when value is an array (typeof [] === 'object')", () => {
 		expect(() => requireLiteralValue("MyClass", "v", [])).toThrow(/object/);
 	});
+
+	it("throws on NaN (NaN === NaN is false; would invert Equal/NotEqual rules)", () => {
+		// Regression guard for an authorization-weakening bug: with NaN accepted,
+		// AttrLiteralNotEqual({ v: NaN }) would always pass for any numeric
+		// attribute because `x !== NaN` is always true. Must fail-fast in
+		// construction instead.
+		expect(() => requireLiteralValue("MyClass", "v", Number.NaN)).toThrow(/must not be NaN/);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -176,6 +184,15 @@ describe("requireHomogeneousLiteralArray", () => {
 	it("throws with mixed types message for ['a', 1] (left-to-right Set insertion order)", () => {
 		expect(() => requireHomogeneousLiteralArray("MyClass", ["a", 1])).toThrow(
 			/mixed types \[string, number\]/,
+		);
+	});
+
+	it("throws when an element is NaN (would silently mismatch AttrLiteralIn/NotIn)", () => {
+		// Regression guard: AttrLiteralIn uses strict equality against each element;
+		// a NaN element could never match any attribute value because NaN !== NaN.
+		// Must fail-fast at construction rather than ship an always-false element.
+		expect(() => requireHomogeneousLiteralArray("MyClass", [1, Number.NaN, 3])).toThrow(
+			/must not contain NaN/,
 		);
 	});
 });

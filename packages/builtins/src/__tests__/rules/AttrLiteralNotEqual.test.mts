@@ -123,6 +123,13 @@ describe("AttrLiteralNotEqual", () => {
 		);
 	});
 
+	it("throws when 'v' is NaN", () => {
+		// x !== NaN is always true, so AttrLiteralNotEqual({ v: NaN }) would be
+		// an always-allow rule against any numeric attribute — silently
+		// weakening authorization. Must fail-fast at construction.
+		expect(() => new AttrLiteralNotEqual({ a: "score", v: Number.NaN })).toThrow(/must not be NaN/);
+	});
+
 	// ---------------------------------------------------------------------------
 	// Construction errors: invalid 'group'
 	// ---------------------------------------------------------------------------
