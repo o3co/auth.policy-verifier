@@ -58,6 +58,15 @@ describe("AttrMatchRule", () => {
 		expect(r1.ruleType).toContain("sub");
 	});
 
+	it("preserves the legacy ruleType prefix 'attr_match:' for backward compatibility", () => {
+		// AttrMatchRule is a deprecated wrapper around AttrPairEqual. To keep
+		// downstream consumers (e.g. dplaas.auth) working without code changes
+		// across this release, the default ruleType must remain `attr_match:{a}:{b}`
+		// rather than adopting AttrPairEqual's `attr_pair_equal:...` form.
+		const r = new AttrMatchRule({ a: "userId", b: "sub" });
+		expect(r.ruleType).toBe("attr_match:userId:sub");
+	});
+
 	it("uses the provided group override when set, to enable explicit grouping", () => {
 		// When callers want two comparisons to be OR'd together (e.g. match by
 		// either DID or email), they opt in by passing the same `group`.
@@ -71,12 +80,12 @@ describe("AttrMatchRule", () => {
 		expect(rule.code).toBe("attr_mismatch");
 	});
 
-	it("message describes the contract (both attrs must be equal)", () => {
-		// AttrMatchRule is now a deprecated alias of AttrPairEqual. The exact
-		// wording ("non-empty" phrasing etc.) is not part of the stable contract —
-		// only the presence of the attribute names and an "equal" phrase is.
+	it("message describes the contract (both attrs must be non-empty strings and equal)", () => {
+		// The message should make the rule's contract explicit, not just say "do not match",
+		// because verify() fails closed on missing, non-string, and empty inputs too.
 		expect(rule.message).toContain("x");
 		expect(rule.message).toContain("y");
+		expect(rule.message).toMatch(/non-empty/i);
 		expect(rule.message).toMatch(/equal/i);
 		expect(rule.message[0]).toBe(rule.message[0]?.toUpperCase());
 	});

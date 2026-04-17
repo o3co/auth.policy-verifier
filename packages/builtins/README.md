@@ -54,7 +54,7 @@ new HasScope(scope: string)
 
 ### AttrMatchRule
 
-**Deprecated.** Use [`AttrPairEqual`](#attrpairequal) instead. `AttrMatchRule` is a deprecated alias of `AttrPairEqual` and will be removed in a future major version. The type `AttrMatchRuleConfig` resolves to the same shape as `AttrPairEqualConfig`.
+**Deprecated.** Use [`AttrPairEqual`](#attrpairequal) instead. `AttrMatchRule` is kept as a thin wrapper class that extends `AttrPairEqual` and preserves the legacy `ruleType` (`attr_match:${a}:${b}`) and legacy `message` wording for backward compatibility. The type `AttrMatchRuleConfig` is a type alias of `AttrPairEqualConfig`. It will be removed in a future major version.
 
 ```ts
 new AttrMatchRule({ a: string, b: string, group?: string })
@@ -85,7 +85,7 @@ new AttrLiteralEqual({ a: string, v: string | number | boolean, group?: string }
 ```
 
 - `code`: `"attr_not_equal"`.
-- Default `ruleType`: `` `attr_literal_equal:${a}:${String(v)}` ``.
+- Default `ruleType`: `` `attr_literal_equal:${a}:${typeof v}:${String(v)}` ``. The `typeof v` segment prevents silent collisions between distinct-type literals that stringify the same way (e.g. `true` vs `"true"`).
 - Passes when `attrs.get(a)` is the same type and strictly equal to `v`. No type coercion.
 
 ### AttrLiteralNotEqual
@@ -95,7 +95,7 @@ new AttrLiteralNotEqual({ a: string, v: string | number | boolean, group?: strin
 ```
 
 - `code`: `"attr_equal"`.
-- Default `ruleType`: `` `attr_literal_not_equal:${a}:${String(v)}` ``.
+- Default `ruleType`: `` `attr_literal_not_equal:${a}:${typeof v}:${String(v)}` ``. The `typeof v` segment prevents silent collisions between distinct-type literals (same rationale as `AttrLiteralEqual`).
 - Passes when `attrs.get(a)` is the same type as `v` and strictly not equal to it. Missing or wrong-type attributes return `false` (safe-deny).
 
 ### AttrLiteralIn

@@ -169,12 +169,19 @@ export function requireOptionalGroup(className: string, value: unknown): string 
 
 /**
  * Computes a stable cache/dedup key for an array of LiteralValues.
- * Format: {type}:{count}:{hashPrefix} — SHA-256 over sorted String(x).join(",").
+ * Format: `{type}:{count}:{hashPrefix}` — SHA-256 over a canonical serialization
+ * of `values`. The canonical form is `values.map(v => JSON.stringify(String(v))).sort().join(",")`,
+ * which quotes and escapes each element before joining so that values containing
+ * commas (or other separator characters) cannot collide across different arrays
+ * (e.g. `["a,b", "c"]` vs `["a", "b,c"]`).
  * Caller must guarantee values is a non-empty homogeneous LiteralValue[].
  */
 export function computeValuesKey(values: LiteralValue[]): string {
 	const elementType = typeof values[0];
-	const joined = values.map(String).sort().join(",");
+	const joined = values
+		.map((v) => JSON.stringify(String(v)))
+		.sort()
+		.join(",");
 	const hash = createHash("sha256").update(joined).digest("hex").slice(0, 8);
 	return `${elementType}:${values.length}:${hash}`;
 }

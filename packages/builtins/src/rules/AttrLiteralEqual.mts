@@ -20,9 +20,15 @@ export interface AttrLiteralEqualConfig {
  * ## Grouping and the default ruleType
  *
  * The evaluator groups rules by `ruleType`, ORs within a group, and ANDs
- * across groups. The default `ruleType` is derived from `a` and `v` so that
- * distinct literal requirements are AND-combined by default:
- *   `attr_literal_equal:{a}:{String(v)}`
+ * across groups. The default `ruleType` is derived from `a`, `typeof v`, and
+ * `String(v)` so that distinct literal requirements are AND-combined by default:
+ *   `attr_literal_equal:{a}:{typeof v}:{String(v)}`
+ *
+ * The `typeof v` segment is required because `String(v)` collapses distinct-
+ * type literals that stringify the same way (e.g. `true` vs `"true"`, `1` vs
+ * `"1"`). Without it, two rules on the same attribute with different-type
+ * literals would share a `ruleType` and be OR-combined by the evaluator,
+ * silently weakening authorization.
  *
  * Pass a shared `group` string to two instances to opt into OR semantics
  * (e.g. "role is admin" OR "role is superuser" under one group).
@@ -37,7 +43,8 @@ export class AttrLiteralEqual implements Rule {
 		requireLiteralValue("AttrLiteralEqual", "v", config.v);
 		const group = requireOptionalGroup("AttrLiteralEqual", config.group);
 
-		this.ruleType = group ?? `attr_literal_equal:${config.a}:${String(config.v)}`;
+		this.ruleType =
+			group ?? `attr_literal_equal:${config.a}:${typeof config.v}:${String(config.v)}`;
 		this.message = `Attribute constraint not satisfied: ${config.a} must equal ${String(config.v)}.`;
 	}
 

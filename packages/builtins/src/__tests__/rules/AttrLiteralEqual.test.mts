@@ -118,27 +118,37 @@ describe("AttrLiteralEqual", () => {
 	});
 
 	// ---------------------------------------------------------------------------
-	// ruleType: default derived from 'a' and 'v'
+	// ruleType: default derived from 'a', 'typeof v', and 'String(v)'
 	// ---------------------------------------------------------------------------
 
-	it("derives default ruleType from a and v for a string literal", () => {
+	it("derives default ruleType including the type segment for a string literal", () => {
 		const rule = new AttrLiteralEqual({ a: "role", v: "admin" });
-		expect(rule.ruleType).toBe("attr_literal_equal:role:admin");
+		expect(rule.ruleType).toBe("attr_literal_equal:role:string:admin");
 	});
 
-	it("derives default ruleType from a and v for a number literal", () => {
+	it("derives default ruleType including the type segment for a number literal", () => {
 		const rule = new AttrLiteralEqual({ a: "age", v: 30 });
-		expect(rule.ruleType).toBe("attr_literal_equal:age:30");
+		expect(rule.ruleType).toBe("attr_literal_equal:age:number:30");
 	});
 
-	it("derives default ruleType from a and v for a boolean literal", () => {
+	it("derives default ruleType including the type segment for a boolean literal", () => {
 		const rule = new AttrLiteralEqual({ a: "verified", v: true });
-		expect(rule.ruleType).toBe("attr_literal_equal:verified:true");
+		expect(rule.ruleType).toBe("attr_literal_equal:verified:boolean:true");
 	});
 
 	it("distinct configs produce distinct default ruleTypes (AND semantics)", () => {
 		const r1 = new AttrLiteralEqual({ a: "role", v: "admin" });
 		const r2 = new AttrLiteralEqual({ a: "role", v: "editor" });
+		expect(r1.ruleType).not.toBe(r2.ruleType);
+	});
+
+	it("distinguishes literals by type in ruleType (e.g. boolean true vs string 'true')", () => {
+		// Regression guard: without the typeof-segment in ruleType, these two
+		// rules would share the same default ruleType and the evaluator would
+		// silently OR them together, weakening authorization. The type tag
+		// keeps them AND-combined as intended.
+		const r1 = new AttrLiteralEqual({ a: "status", v: true });
+		const r2 = new AttrLiteralEqual({ a: "status", v: "true" });
 		expect(r1.ruleType).not.toBe(r2.ruleType);
 	});
 

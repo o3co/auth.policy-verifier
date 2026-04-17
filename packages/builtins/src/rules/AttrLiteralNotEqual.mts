@@ -21,8 +21,14 @@ export interface AttrLiteralNotEqualConfig {
  * ## Grouping and the default ruleType
  *
  * The evaluator groups rules by `ruleType`, ORs within a group, and ANDs
- * across groups. The default `ruleType` is derived from `a` and `v`:
- *   `attr_literal_not_equal:{a}:{String(v)}`
+ * across groups. The default `ruleType` is derived from `a`, `typeof v`, and
+ * `String(v)`:
+ *   `attr_literal_not_equal:{a}:{typeof v}:{String(v)}`
+ *
+ * The `typeof v` segment prevents silent `ruleType` collisions between
+ * different-type literals that stringify the same way (e.g. `1` vs `"1"`),
+ * which would otherwise be OR-combined by the evaluator against the intent
+ * of two independent constraints. See AttrLiteralEqual for the same rationale.
  *
  * Pass a shared `group` string to two instances to opt into OR semantics.
  */
@@ -36,7 +42,8 @@ export class AttrLiteralNotEqual implements Rule {
 		requireLiteralValue("AttrLiteralNotEqual", "v", config.v);
 		const group = requireOptionalGroup("AttrLiteralNotEqual", config.group);
 
-		this.ruleType = group ?? `attr_literal_not_equal:${config.a}:${String(config.v)}`;
+		this.ruleType =
+			group ?? `attr_literal_not_equal:${config.a}:${typeof config.v}:${String(config.v)}`;
 		this.message = `Attribute constraint not satisfied: ${config.a} must not equal ${String(config.v)}.`;
 	}
 

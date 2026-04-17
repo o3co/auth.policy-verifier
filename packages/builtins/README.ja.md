@@ -54,7 +54,7 @@ new HasScope(scope: string)
 
 ### AttrMatchRule
 
-**非推奨。** 代わりに [`AttrPairEqual`](#attrpairequal) を使用してください。`AttrMatchRule` は `AttrPairEqual` の非推奨エイリアスであり、将来のメジャーバージョンで削除されます。型 `AttrMatchRuleConfig` は `AttrPairEqualConfig` と同じ構造に解決されます。
+**非推奨。** 代わりに [`AttrPairEqual`](#attrpairequal) を使用してください。`AttrMatchRule` は `AttrPairEqual` を継承した薄いラッパークラスとして残されており、後方互換のため旧来の `ruleType`（`attr_match:${a}:${b}`）と旧来の `message` 文言を保持します。型 `AttrMatchRuleConfig` は `AttrPairEqualConfig` の型エイリアスです。将来のメジャーバージョンで削除されます。
 
 ```ts
 new AttrMatchRule({ a: string, b: string, group?: string })
@@ -85,7 +85,7 @@ new AttrLiteralEqual({ a: string, v: string | number | boolean, group?: string }
 ```
 
 - `code`: `"attr_not_equal"`。
-- 既定の `ruleType`: `` `attr_literal_equal:${a}:${String(v)}` ``。
+- 既定の `ruleType`: `` `attr_literal_equal:${a}:${typeof v}:${String(v)}` ``。`typeof v` セグメントは、文字列化すると同じになる異型リテラル（例: `true` と `"true"`）が同じ `ruleType` に畳み込まれるのを防ぎます。
 - `attrs.get(a)` が `v` と同じ型で厳密等価のときに通過します。型の強制変換は行いません。
 
 ### AttrLiteralNotEqual
@@ -95,7 +95,7 @@ new AttrLiteralNotEqual({ a: string, v: string | number | boolean, group?: strin
 ```
 
 - `code`: `"attr_equal"`。
-- 既定の `ruleType`: `` `attr_literal_not_equal:${a}:${String(v)}` ``。
+- 既定の `ruleType`: `` `attr_literal_not_equal:${a}:${typeof v}:${String(v)}` ``。`typeof v` セグメントは異型リテラル間の衝突を防ぎます（`AttrLiteralEqual` と同じ理由）。
 - `attrs.get(a)` が `v` と同じ型で厳密等価でないときに通過します。欠落または型不一致は `false`（safe-deny）を返します。
 
 ### AttrLiteralIn

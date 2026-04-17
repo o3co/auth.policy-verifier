@@ -140,27 +140,34 @@ describe("AttrLiteralNotEqual", () => {
 	});
 
 	// ---------------------------------------------------------------------------
-	// ruleType: default derived from 'a' and 'v'
+	// ruleType: default derived from 'a', 'typeof v', and 'String(v)'
 	// ---------------------------------------------------------------------------
 
-	it("derives default ruleType from a and v for a string literal", () => {
+	it("derives default ruleType including the type segment for a string literal", () => {
 		const rule = new AttrLiteralNotEqual({ a: "role", v: "admin" });
-		expect(rule.ruleType).toBe("attr_literal_not_equal:role:admin");
+		expect(rule.ruleType).toBe("attr_literal_not_equal:role:string:admin");
 	});
 
-	it("derives default ruleType from a and v for a number literal", () => {
+	it("derives default ruleType including the type segment for a number literal", () => {
 		const rule = new AttrLiteralNotEqual({ a: "age", v: 30 });
-		expect(rule.ruleType).toBe("attr_literal_not_equal:age:30");
+		expect(rule.ruleType).toBe("attr_literal_not_equal:age:number:30");
 	});
 
-	it("derives default ruleType from a and v for a boolean literal", () => {
+	it("derives default ruleType including the type segment for a boolean literal", () => {
 		const rule = new AttrLiteralNotEqual({ a: "verified", v: true });
-		expect(rule.ruleType).toBe("attr_literal_not_equal:verified:true");
+		expect(rule.ruleType).toBe("attr_literal_not_equal:verified:boolean:true");
 	});
 
 	it("distinct configs produce distinct default ruleTypes (AND semantics)", () => {
 		const r1 = new AttrLiteralNotEqual({ a: "role", v: "admin" });
 		const r2 = new AttrLiteralNotEqual({ a: "role", v: "editor" });
+		expect(r1.ruleType).not.toBe(r2.ruleType);
+	});
+
+	it("distinguishes literals by type in ruleType (e.g. number 1 vs string '1')", () => {
+		// Regression guard: see AttrLiteralEqual test for the same rationale.
+		const r1 = new AttrLiteralNotEqual({ a: "flag", v: 1 });
+		const r2 = new AttrLiteralNotEqual({ a: "flag", v: "1" });
 		expect(r1.ruleType).not.toBe(r2.ruleType);
 	});
 

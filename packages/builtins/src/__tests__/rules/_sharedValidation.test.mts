@@ -289,6 +289,17 @@ describe("computeValuesKey", () => {
 		expect(computeValuesKey(["1"])).not.toBe(computeValuesKey([1]));
 	});
 
+	it("separator collision guard: ['a,b', 'c'] !== ['a', 'b,c'] (values containing commas do not collide)", () => {
+		// Regression guard: a naive implementation of the form
+		//   values.map(String).sort().join(",")
+		// would produce the same string "a,b,c" for both inputs and thus the
+		// same ruleType. That would cause the evaluator to OR what the caller
+		// meant as two independent set constraints, weakening authorization.
+		// The canonical form JSON.stringify-es each element before joining,
+		// so quotes/escapes disambiguate the element boundary.
+		expect(computeValuesKey(["a,b", "c"])).not.toBe(computeValuesKey(["a", "b,c"]));
+	});
+
 	it("pure / referentially transparent: two calls with the same input return the same string", () => {
 		const input = ["x", "y", "z"];
 		expect(computeValuesKey(input)).toBe(computeValuesKey(input));
