@@ -27,7 +27,6 @@ describe("builtinCollectorsModule", () => {
 
 		expect(attributeCollectorRegistry.has("PayloadScopeCollector")).toBe(true);
 		expect(attributeCollectorRegistry.has("PayloadSubjectIdCollector")).toBe(true);
-		expect(attributeCollectorRegistry.has("RequestContextCollector")).toBe(true);
 		expect(attributeCollectorRegistry.has("StaticPermissionCollector")).toBe(true);
 		expect(attributeCollectorRegistry.has("StaticRoleCollector")).toBe(true);
 	});

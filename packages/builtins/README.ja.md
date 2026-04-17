@@ -16,11 +16,14 @@ npm install @o3co/auth.policy-verifier.builtins
 | --- | --- | --- | --- |
 | `PayloadScopeCollector` | `payload.scope`（スペース区切り文字列） | `ATTR_SCOPES: string[]` | なし |
 | `PayloadSubjectIdCollector` | `payload.sub`、`payload.azp` | `ATTR_USER_ID`、`ATTR_CLIENT_ID` | なし |
-| `RequestContextCollector` | `context.requestContext.ip` | `ATTR_CLIENT_IP` | なし |
 | `StaticPermissionCollector` | — | `ATTR_PERMISSIONS: string[]` | `{ permissions: string[] }` |
 | `StaticRoleCollector` | — | `ATTR_ROLES: Role[]` | `{ roles: Role[] }` |
 
 `StaticPermissionCollector` と `StaticRoleCollector` は、リクエストのコンテキストに関わらず、コンストラクタに渡した値を常に出力します。
+
+### `requestContext` 向けの組み込みコレクターは提供しない
+
+本エンジンは `CollectorContext.requestContext` をそのまま attribute に展開するコレクターを提供しません。`requestContext` の形は利用側プロジェクトの transport/interceptor が定めるため、その解釈はプロジェクト側の責務です。必要なフィールドごとに焦点を絞った `AttributeCollector` を実装し、その中で値の型・形状を検証し、プロジェクト固有の定数キーで格納してください。詳細と具体例はリポジトリルートの `AGENTS.md` の Core Vocabulary Scope セクションを参照してください。
 
 ## Rules
 
@@ -88,7 +91,6 @@ import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
 | --- | --- | --- |
 | `attributeCollector` | `"PayloadScopeCollector"` | `() => new PayloadScopeCollector()` |
 | `attributeCollector` | `"PayloadSubjectIdCollector"` | `() => new PayloadSubjectIdCollector()` |
-| `attributeCollector` | `"RequestContextCollector"` | `() => new RequestContextCollector()` |
 | `attributeCollector` | `"StaticPermissionCollector"` | `(config) => new StaticPermissionCollector(config)` |
 | `attributeCollector` | `"StaticRoleCollector"` | `(config) => new StaticRoleCollector(config)` |
 | `ruleCollector` | `"ResourceActionScopeRuleCollector"` | `() => new ResourceActionScopeRuleCollector()` |

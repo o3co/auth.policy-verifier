@@ -17,7 +17,6 @@ import { promisify } from "node:util";
 import {
 	DotNotationResourceParser,
 	PayloadScopeCollector,
-	RequestContextCollector,
 	ResourceActionScopeRuleCollector,
 } from "@o3co/auth.policy-verifier.builtins";
 import {
@@ -55,22 +54,6 @@ function createTestApp(resourceParser?: ResourceParser) {
 			jwt: { key: hs256Key.key, algorithms: hs256Key.algorithms, validate: true },
 			resourceParser: resourceParser ?? new DotNotationResourceParser(),
 			attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
-			rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
-		}),
-	);
-	return app;
-}
-
-function createTestAppWithContext() {
-	const app = express();
-	app.use(
-		createVerifyRouter({
-			jwt: { key: hs256Key.key, algorithms: hs256Key.algorithms, validate: true },
-			resourceParser: new DotNotationResourceParser(),
-			attributePipeline: new AttributePipeline([
-				new PayloadScopeCollector(),
-				new RequestContextCollector(),
-			]),
 			rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
 		}),
 	);
@@ -121,7 +104,7 @@ describe("POST /verify", () => {
 	});
 
 	it("accepts context in request body without error", async () => {
-		const app = createTestAppWithContext();
+		const app = createTestApp();
 		const token = await signHS256Token({ scope: "read:project" });
 		const res = await request(app)
 			.post("/verify")
@@ -133,7 +116,7 @@ describe("POST /verify", () => {
 	});
 
 	it("works without context (backward compatible)", async () => {
-		const app = createTestAppWithContext();
+		const app = createTestApp();
 		const token = await signHS256Token({ scope: "read:project" });
 		const res = await request(app)
 			.post("/verify")

@@ -1,7 +1,6 @@
 import type { Module } from "@o3co/auth.policy-verifier.core";
 import { PayloadScopeCollector } from "./collectors/PayloadScopeCollector.mjs";
 import { PayloadSubjectIdCollector } from "./collectors/PayloadSubjectIdCollector.mjs";
-import { RequestContextCollector } from "./collectors/RequestContextCollector.mjs";
 import { StaticPermissionCollector } from "./collectors/StaticPermissionCollector.mjs";
 import { StaticRoleCollector } from "./collectors/StaticRoleCollector.mjs";
 import { DotNotationResourceParser } from "./resource/DotNotationResourceParser.mjs";
@@ -19,10 +18,6 @@ export const builtinCollectorsModule: Module = {
 		context.attributeCollectorRegistry.register(
 			"PayloadSubjectIdCollector",
 			() => new PayloadSubjectIdCollector(),
-		);
-		context.attributeCollectorRegistry.register(
-			"RequestContextCollector",
-			() => new RequestContextCollector(),
 		);
 		context.attributeCollectorRegistry.register(
 			"StaticPermissionCollector",
