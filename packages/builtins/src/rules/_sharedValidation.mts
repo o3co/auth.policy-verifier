@@ -1,9 +1,7 @@
+import { createHash } from "node:crypto";
+
 /**
  * Shared validation helpers for attribute-based rule constructors.
- *
- * Full implementations: requireAttrName, requireLiteralValue, requireOptionalGroup
- * Stubs (not yet implemented): requireNumber, requireHomogeneousLiteralArray,
- *   requireCompareOp, computeValuesKey, applyCompare
  */
 
 export type LiteralValue = string | number | boolean;
@@ -75,34 +73,91 @@ export function requireLiteralValue(
 
 /**
  * Validates a numeric comparison value. Rejects NaN; accepts Infinity/-Infinity.
- * STUB — not yet implemented.
+ * @param className - The rule class name, used in error messages.
+ * @param fieldName - The config field name ("v"), used in error messages.
+ * @param value - The raw value to validate.
+ * @returns The validated number.
+ * @throws {Error} If value is not a number, or if value is NaN.
  */
 export function requireNumber(
-	_className: string,
-	_fieldName: "v",
-	_value: unknown,
+	className: string,
+	fieldName: "v",
+	value: unknown,
 ): number {
-	throw new Error("not yet implemented: requireNumber");
+	if (typeof value !== "number") {
+		throw new Error(
+			`${className}: '${fieldName}' must be a number, got ${describeType(value)}`,
+		);
+	}
+	if (Number.isNaN(value)) {
+		throw new Error(`${className}: '${fieldName}' must not be NaN`);
+	}
+	return value;
 }
 
 /**
  * Validates that a value is a non-empty, homogeneous array of LiteralValues
- * (no null/undefined elements).
- * STUB — not yet implemented.
+ * (no null/undefined elements, all elements the same typeof).
+ * @param className - The rule class name, used in error messages.
+ * @param value - The raw value to validate.
+ * @returns The validated LiteralValue array.
+ * @throws {Error} If not an array, empty, contains invalid elements, or has mixed types.
  */
 export function requireHomogeneousLiteralArray(
-	_className: string,
-	_value: unknown,
+	className: string,
+	value: unknown,
 ): LiteralValue[] {
-	throw new Error("not yet implemented: requireHomogeneousLiteralArray");
+	if (!Array.isArray(value)) {
+		throw new Error(
+			`${className}: 'values' must be a non-empty array of string | number | boolean, got ${describeType(value)}`,
+		);
+	}
+	if (value.length === 0) {
+		throw new Error(`${className}: 'values' must be a non-empty array`);
+	}
+	const seenTypes = new Set<string>();
+	for (const element of value) {
+		if (element === null || element === undefined) {
+			throw new Error(
+				`${className}: 'values' elements must be string | number | boolean, got ${describeType(element)}`,
+			);
+		}
+		const t = typeof element;
+		if (t !== "string" && t !== "number" && t !== "boolean") {
+			throw new Error(
+				`${className}: 'values' elements must be string | number | boolean, got ${t}`,
+			);
+		}
+		seenTypes.add(t);
+	}
+	if (seenTypes.size > 1) {
+		const typeList = [...seenTypes].join(", ");
+		throw new Error(
+			`${className}: 'values' must be a homogeneous array of string | number | boolean; got mixed types [${typeList}]`,
+		);
+	}
+	return value as LiteralValue[];
 }
 
 /**
  * Validates that a value is one of the allowed CompareOp strings.
- * STUB — not yet implemented.
+ * @param className - The rule class name, used in error messages.
+ * @param value - The raw value to validate.
+ * @returns The validated CompareOp.
+ * @throws {Error} If value is not a string or not one of the allowed operators.
  */
-export function requireCompareOp(_className: string, _value: unknown): CompareOp {
-	throw new Error("not yet implemented: requireCompareOp");
+export function requireCompareOp(className: string, value: unknown): CompareOp {
+	if (typeof value !== "string") {
+		throw new Error(
+			`${className}: 'op' must be one of ${COMPARE_OPS.join(" | ")}, got ${describeType(value)}`,
+		);
+	}
+	if (!(COMPARE_OPS as readonly string[]).includes(value)) {
+		throw new Error(
+			`${className}: 'op' must be one of ${COMPARE_OPS.join(" | ")}, got '${value}'`,
+		);
+	}
+	return value as CompareOp;
 }
 
 /**
@@ -137,20 +192,27 @@ export function requireOptionalGroup(
 /**
  * Computes a stable cache/dedup key for an array of LiteralValues.
  * Format: {type}:{count}:{hashPrefix} — SHA-256 over sorted String(x).join(",").
- * STUB — not yet implemented.
+ * Caller must guarantee values is a non-empty homogeneous LiteralValue[].
  */
-export function computeValuesKey(_values: LiteralValue[]): string {
-	throw new Error("not yet implemented: computeValuesKey");
+export function computeValuesKey(values: LiteralValue[]): string {
+	const elementType = typeof values[0];
+	const joined = values.map(String).sort().join(",");
+	const hash = createHash("sha256").update(joined).digest("hex").slice(0, 8);
+	return `${elementType}:${values.length}:${hash}`;
 }
 
 /**
- * Applies a numeric comparison operator.
- * STUB — not yet implemented.
+ * Applies a numeric comparison operator between left and right.
  */
-export function applyCompare<T extends number>(
-	_op: CompareOp,
-	_left: T,
-	_right: T,
-): boolean {
-	throw new Error("not yet implemented: applyCompare");
+export function applyCompare<T extends number>(op: CompareOp, left: T, right: T): boolean {
+	switch (op) {
+		case "lt":
+			return left < right;
+		case "le":
+			return left <= right;
+		case "gt":
+			return left > right;
+		case "ge":
+			return left >= right;
+	}
 }
