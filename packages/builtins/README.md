@@ -16,11 +16,14 @@ All collectors implement `AttributeCollector`.
 | --- | --- | --- | --- |
 | `PayloadScopeCollector` | `payload.scope` (space-separated string) | `ATTR_SCOPES: string[]` | none |
 | `PayloadSubjectIdCollector` | `payload.sub`, `payload.azp` | `ATTR_USER_ID`, `ATTR_CLIENT_ID` | none |
-| `RequestContextCollector` | `context.requestContext.ip` | `ATTR_CLIENT_IP` | none |
 | `StaticPermissionCollector` | — | `ATTR_PERMISSIONS: string[]` | `{ permissions: string[] }` |
 | `StaticRoleCollector` | — | `ATTR_ROLES: Role[]` | `{ roles: Role[] }` |
 
 `StaticPermissionCollector` and `StaticRoleCollector` always emit the values supplied at construction time, regardless of request context.
+
+### No built-in collector for `requestContext`
+
+The engine does not ship a collector that expands `CollectorContext.requestContext` into attributes. The shape of `requestContext` is defined by each consuming project's transport/interceptor, so interpreting it is a project concern. Write a focused `AttributeCollector` for each field you need to promote — validate its shape there, and store it under a project-specific constant key. See [AGENTS.md — Core Vocabulary Scope](../../AGENTS.md#core-vocabulary-scope) for the rationale and a worked example.
 
 ## Rules
 
@@ -88,7 +91,6 @@ import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
 | --- | --- | --- |
 | `attributeCollector` | `"PayloadScopeCollector"` | `() => new PayloadScopeCollector()` |
 | `attributeCollector` | `"PayloadSubjectIdCollector"` | `() => new PayloadSubjectIdCollector()` |
-| `attributeCollector` | `"RequestContextCollector"` | `() => new RequestContextCollector()` |
 | `attributeCollector` | `"StaticPermissionCollector"` | `(config) => new StaticPermissionCollector(config)` |
 | `attributeCollector` | `"StaticRoleCollector"` | `(config) => new StaticRoleCollector(config)` |
 | `ruleCollector` | `"ResourceActionScopeRuleCollector"` | `() => new ResourceActionScopeRuleCollector()` |

@@ -93,14 +93,15 @@ interface ModuleContext {
 
 ### 定数
 
+`ATTR_*` 定数は OAuth 2.0 / OIDC および RBAC の標準語彙に限定しています。これらはこのエンジンを利用するすべてのサービスが共通して扱う概念（JWT クレーム、OAuth スコープ、RBAC のロール・パーミッション）です。業務ドメイン固有の属性キーは core ではなく、利用側サービスに属します。利用側は独自のキー定数を定義し、同じ `Attributes` マップを介して読み書きします。
+
 | 定数 | 値 | 説明 |
 | --- | --- | --- |
 | `ATTR_SCOPES` | `"scopes"` | OAuth スコープの属性キー |
 | `ATTR_PERMISSIONS` | `"permissions"` | 明示的なパーミッションの属性キー |
 | `ATTR_ROLES` | `"roles"` | ロールの属性キー |
-| `ATTR_USER_ID` | `"userId"` | サブジェクトユーザー ID の属性キー |
-| `ATTR_CLIENT_ID` | `"clientId"` | クライアント ID（`azp`）の属性キー |
-| `ATTR_CLIENT_IP` | `"clientIp"` | クライアント IP アドレスの属性キー |
+| `ATTR_USER_ID` | `"userId"` | サブジェクトユーザー ID（JWT `sub`）の属性キー |
+| `ATTR_CLIENT_ID` | `"clientId"` | クライアント ID（JWT `azp`）の属性キー |
 
 ## 使い方
 

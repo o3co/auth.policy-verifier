@@ -2,7 +2,6 @@ export { AttributePipeline } from "./AttributePipeline.mjs";
 export { evaluate } from "./evaluate.mjs";
 export {
 	ATTR_CLIENT_ID,
-	ATTR_CLIENT_IP,
 	ATTR_PERMISSIONS,
 	ATTR_ROLES,
 	ATTR_SCOPES,
