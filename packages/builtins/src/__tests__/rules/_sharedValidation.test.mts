@@ -47,6 +47,16 @@ describe("requireAttrName", () => {
 	it("throws with 'null' in message when value is null", () => {
 		expect(() => requireAttrName("MyClass", "a", null)).toThrow(/null/);
 	});
+
+	it("throws when value contains ':' (reserved as ruleType separator)", () => {
+		// Regression guard for an authorization-weakening bug: with ':' allowed,
+		// (a="x:y", b="z") and (a="x", b="y:z") would both produce the same
+		// `attr_pair_equal:x:y:z` default ruleType and be silently OR-combined
+		// by the evaluator. Fail-fast at construction instead.
+		expect(() => requireAttrName("MyClass", "a", "name:space")).toThrow(
+			/must not contain ':'.*got 'name:space'/,
+		);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -282,8 +292,17 @@ describe("computeValuesKey", () => {
 		expect(computeValuesKey(["b", "a"])).toBe(computeValuesKey(["a", "b"]));
 	});
 
-	it("count discrimination: ['a'] !== ['a', 'a'] (count segment changes)", () => {
-		expect(computeValuesKey(["a"])).not.toBe(computeValuesKey(["a", "a"]));
+	it("count discrimination: ['a'] !== ['a', 'b'] (distinct content → distinct key)", () => {
+		expect(computeValuesKey(["a"])).not.toBe(computeValuesKey(["a", "b"]));
+	});
+
+	it("dedup parity: ['a'] === ['a', 'a'] (duplicates do not affect the Set-based rule behavior, so they must not affect ruleType either)", () => {
+		// AttrLiteralIn / AttrLiteralNotIn use `new Set(values)` for verify(),
+		// so duplicate elements have no semantic effect. The ruleType must
+		// mirror that — otherwise two logically-equivalent rules would be
+		// placed in different evaluator groups and be AND-combined, when
+		// the caller intended them to be OR-combined (shared ruleType).
+		expect(computeValuesKey(["a"])).toBe(computeValuesKey(["a", "a"]));
 	});
 
 	it("content discrimination: ['a', 'b'] !== ['a', 'c'] (hash differs)", () => {

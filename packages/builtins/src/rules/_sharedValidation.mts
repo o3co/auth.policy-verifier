@@ -22,12 +22,17 @@ export type CompareOp = "lt" | "le" | "gt" | "ge";
 export const COMPARE_OPS: readonly CompareOp[] = ["lt", "le", "gt", "ge"];
 
 /**
- * Validates that a config field used as an attribute name is a non-empty string.
+ * Validates that a config field used as an attribute name is a non-empty string
+ * that does not contain the `:` separator character used in derived `ruleType`
+ * strings. Allowing `:` would let distinct configs collide on the same
+ * `ruleType` (e.g. `(a="x:y", b="z")` and `(a="x", b="y:z")` both produce
+ * `attr_pair_equal:x:y:z`), which the evaluator would silently OR together
+ * and weaken authorization.
  * @param className - The rule class name, used in error messages.
  * @param fieldName - The config field name ("a" or "b"), used in error messages.
  * @param value - The raw value to validate.
  * @returns The validated non-empty string.
- * @throws {Error} If value is not a non-empty string.
+ * @throws {Error} If value is not a non-empty string, or contains `:`.
  */
 export function requireAttrName(className: string, fieldName: "a" | "b", value: unknown): string {
 	if (typeof value !== "string") {
@@ -37,6 +42,11 @@ export function requireAttrName(className: string, fieldName: "a" | "b", value: 
 	}
 	if (value.length === 0) {
 		throw new Error(`${className}: '${fieldName}' must be a non-empty string, got empty string`);
+	}
+	if (value.includes(":")) {
+		throw new Error(
+			`${className}: '${fieldName}' must not contain ':' (reserved as ruleType separator), got '${value}'`,
+		);
 	}
 	return value;
 }
@@ -182,20 +192,24 @@ export function requireOptionalGroup(className: string, value: unknown): string 
 /**
  * Computes a stable cache/dedup key for an array of LiteralValues.
  * Format: `{type}:{count}:{hashPrefix}` — SHA-256 over a canonical serialization
- * of `values`. The canonical form is `values.map(v => JSON.stringify(String(v))).sort().join(",")`,
- * which quotes and escapes each element before joining so that values containing
- * commas (or other separator characters) cannot collide across different arrays
- * (e.g. `["a,b", "c"]` vs `["a", "b,c"]`).
+ * of `values`. The canonical form first deduplicates `values` (to mirror the
+ * Set-based semantics of AttrLiteralIn / AttrLiteralNotIn — duplicates do not
+ * change the rule's behavior, so they must not change its `ruleType`), then
+ * applies `JSON.stringify(String(v))` to each remaining element before sorting
+ * and joining with `,`. The per-element quoting prevents separator collisions
+ * across different arrays (e.g. `["a,b", "c"]` vs `["a", "b,c"]`).
+ * The `{count}` segment reflects the post-dedup element count.
  * Caller must guarantee values is a non-empty homogeneous LiteralValue[].
  */
 export function computeValuesKey(values: LiteralValue[]): string {
 	const elementType = typeof values[0];
-	const joined = values
+	const unique = [...new Set(values)];
+	const joined = unique
 		.map((v) => JSON.stringify(String(v)))
 		.sort()
 		.join(",");
 	const hash = createHash("sha256").update(joined).digest("hex").slice(0, 8);
-	return `${elementType}:${values.length}:${hash}`;
+	return `${elementType}:${unique.length}:${hash}`;
 }
 
 /**

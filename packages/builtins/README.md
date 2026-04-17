@@ -2,6 +2,8 @@
 
 Built-in attribute collectors, rule collectors, and resource parser for auth.policy-verifier.
 
+**Runtime:** Node.js 22+. This package uses `node:crypto` for stable rule-type hashing; browser / edge runtime support is tracked as future work.
+
 ## Install
 
 ```bash
@@ -105,8 +107,8 @@ new AttrLiteralIn({ a: string, values: (string | number | boolean)[], group?: st
 ```
 
 - `code`: `"attr_not_in_set"`.
-- Default `ruleType`: `` `attr_literal_in:${a}:${type}:${count}:${hashPrefix}` `` — where `hashPrefix` is the first 8 hex characters of a SHA-256 over the sorted, stringified values (e.g. `attr_literal_in:role:string:2:a1b2c3d4`). Two instances with the same `a` and logically equivalent `values` (order-independent) share the same `ruleType` and are OR-combined by the evaluator.
-- `values` must be a non-empty, homogeneous array (`string[]`, `number[]`, or `boolean[]`). Passes when `attrs.get(a)` is in the set.
+- Default `ruleType`: `` `attr_literal_in:${a}:${type}:${count}:${hashPrefix}` `` — where `count` is the post-deduplication element count and `hashPrefix` is the first 8 hex characters of a SHA-256 over the deduplicated, sorted, stringified values. Two instances with the same `a` and logically equivalent `values` (duplicates and order do not matter) share the same `ruleType` and are OR-combined by the evaluator.
+- `values` must be a non-empty, homogeneous array (`string[]`, `number[]`, or `boolean[]`). Passes when `attrs.get(a)` is in the set. Duplicate elements in `values` are ignored (the rule uses `Set` semantics internally).
 
 ### AttrLiteralNotIn
 
@@ -115,8 +117,8 @@ new AttrLiteralNotIn({ a: string, values: (string | number | boolean)[], group?:
 ```
 
 - `code`: `"attr_in_set"`.
-- Default `ruleType`: `` `attr_literal_not_in:${a}:${type}:${count}:${hashPrefix}` `` — same stable hash scheme as `AttrLiteralIn`.
-- `values` must be a non-empty, homogeneous array. Passes when `attrs.get(a)` is NOT in the set.
+- Default `ruleType`: `` `attr_literal_not_in:${a}:${type}:${count}:${hashPrefix}` `` — same stable, deduplication-aware hash scheme as `AttrLiteralIn`.
+- `values` must be a non-empty, homogeneous array. Passes when `attrs.get(a)` is NOT in the set. Duplicate elements in `values` are ignored.
 
 ### AttrLiteralCompare
 

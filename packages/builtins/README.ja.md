@@ -2,6 +2,8 @@
 
 auth.policy-verifier 向けの組み込み attribute collector、rule collector、および resource parser です。
 
+**Runtime:** Node.js 22+。本パッケージは `ruleType` の安定ハッシュ用に `node:crypto` を利用します。browser / edge ランタイム対応は今後の課題として別 issue で追跡します。
+
 ## インストール
 
 ```bash
@@ -105,8 +107,8 @@ new AttrLiteralIn({ a: string, values: (string | number | boolean)[], group?: st
 ```
 
 - `code`: `"attr_not_in_set"`。
-- 既定の `ruleType`: `` `attr_literal_in:${a}:${type}:${count}:${hashPrefix}` `` — `hashPrefix` は `values` をソートして文字列化した内容に対する SHA-256 の先頭 8 桁（例: `attr_literal_in:role:string:2:a1b2c3d4`）。同じ `a` と内容上等価な `values`（順序非依存）を持つ 2 つのインスタンスは同じ `ruleType` を持ち、評価器で OR 結合されます。
-- `values` は非空かつ同種の配列（`string[]`、`number[]`、`boolean[]` のいずれか）でなければなりません。`attrs.get(a)` が集合に含まれるときに通過します。
+- 既定の `ruleType`: `` `attr_literal_in:${a}:${type}:${count}:${hashPrefix}` `` — `count` は重複除去後の要素数、`hashPrefix` は重複除去かつソート済みの `values` を文字列化した内容に対する SHA-256 の先頭 8 桁。同じ `a` と内容上等価な `values`（順序・重複を無視）を持つ 2 つのインスタンスは同じ `ruleType` を持ち、評価器で OR 結合されます。
+- `values` は非空かつ同種の配列（`string[]`、`number[]`、`boolean[]` のいずれか）でなければなりません。`attrs.get(a)` が集合に含まれるときに通過します。`values` 内の重複要素は Rule の挙動に影響しません（内部では `Set` として扱われます）。
 
 ### AttrLiteralNotIn
 
@@ -115,8 +117,8 @@ new AttrLiteralNotIn({ a: string, values: (string | number | boolean)[], group?:
 ```
 
 - `code`: `"attr_in_set"`。
-- 既定の `ruleType`: `` `attr_literal_not_in:${a}:${type}:${count}:${hashPrefix}` `` — `AttrLiteralIn` と同じ安定ハッシュ方式。
-- `values` は非空かつ同種の配列。`attrs.get(a)` が集合に含まれないときに通過します。
+- 既定の `ruleType`: `` `attr_literal_not_in:${a}:${type}:${count}:${hashPrefix}` `` — `AttrLiteralIn` と同じ、重複除去済みの安定ハッシュ方式。
+- `values` は非空かつ同種の配列。`attrs.get(a)` が集合に含まれないときに通過します。`values` 内の重複要素は Rule の挙動に影響しません。
 
 ### AttrLiteralCompare
 
