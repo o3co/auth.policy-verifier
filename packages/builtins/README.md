@@ -52,6 +52,16 @@ new HasScope(scope: string)
 - A bare scope string `"resource"` in `ATTR_SCOPES` is normalized to `"read:resource"` before comparison.
 - Matching is case-insensitive exact match after normalization.
 
+### AttrMatchRule
+
+```ts
+new AttrMatchRule({ a: string, b: string })
+```
+
+- `ruleType`: `"attr_match"`, `code`: `"attr_mismatch"`.
+- Passes when both `attrs.get(a)` and `attrs.get(b)` are non-empty strings and equal. Any other case returns `false` (fail closed).
+- Pure predicate — does not read `CollectorContext`. Consuming projects provide the two values to compare through upstream `AttributeCollector`s and wire the rule through their own `RuleCollector`.
+
 ## Rule Collectors
 
 | Name | Derives permission/scope | Returns |
