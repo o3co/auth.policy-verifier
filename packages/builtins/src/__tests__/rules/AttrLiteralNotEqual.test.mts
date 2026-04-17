@@ -84,9 +84,9 @@ describe("AttrLiteralNotEqual", () => {
 	// ---------------------------------------------------------------------------
 
 	it("throws when 'a' is undefined", () => {
-		expect(
-			() => new AttrLiteralNotEqual({ a: undefined as unknown as string, v: "x" }),
-		).toThrow(/AttrLiteralNotEqual.*'a'.*(non-empty string|got undefined)/);
+		expect(() => new AttrLiteralNotEqual({ a: undefined as unknown as string, v: "x" })).toThrow(
+			/AttrLiteralNotEqual.*'a'.*(non-empty string|got undefined)/,
+		);
 	});
 
 	it("throws when 'a' is an empty string", () => {
@@ -96,9 +96,9 @@ describe("AttrLiteralNotEqual", () => {
 	});
 
 	it("throws when 'a' is a non-string (number 42)", () => {
-		expect(
-			() => new AttrLiteralNotEqual({ a: 42 as unknown as string, v: "x" }),
-		).toThrow(/AttrLiteralNotEqual.*'a'.*got number/);
+		expect(() => new AttrLiteralNotEqual({ a: 42 as unknown as string, v: "x" })).toThrow(
+			/AttrLiteralNotEqual.*'a'.*got number/,
+		);
 	});
 
 	// ---------------------------------------------------------------------------
@@ -106,21 +106,21 @@ describe("AttrLiteralNotEqual", () => {
 	// ---------------------------------------------------------------------------
 
 	it("throws when 'v' is null", () => {
-		expect(
-			() => new AttrLiteralNotEqual({ a: "role", v: null as unknown as string }),
-		).toThrow(/AttrLiteralNotEqual.*'v'.*got null/);
+		expect(() => new AttrLiteralNotEqual({ a: "role", v: null as unknown as string })).toThrow(
+			/AttrLiteralNotEqual.*'v'.*got null/,
+		);
 	});
 
 	it("throws when 'v' is undefined", () => {
-		expect(
-			() => new AttrLiteralNotEqual({ a: "role", v: undefined as unknown as string }),
-		).toThrow(/AttrLiteralNotEqual.*'v'.*got undefined/);
+		expect(() => new AttrLiteralNotEqual({ a: "role", v: undefined as unknown as string })).toThrow(
+			/AttrLiteralNotEqual.*'v'.*got undefined/,
+		);
 	});
 
 	it("throws when 'v' is a plain object ({})", () => {
-		expect(
-			() => new AttrLiteralNotEqual({ a: "role", v: {} as unknown as string }),
-		).toThrow(/AttrLiteralNotEqual.*'v'.*got object/);
+		expect(() => new AttrLiteralNotEqual({ a: "role", v: {} as unknown as string })).toThrow(
+			/AttrLiteralNotEqual.*'v'.*got object/,
+		);
 	});
 
 	// ---------------------------------------------------------------------------
@@ -135,8 +135,7 @@ describe("AttrLiteralNotEqual", () => {
 
 	it("throws when 'group' is present but is a non-string (number 42)", () => {
 		expect(
-			() =>
-				new AttrLiteralNotEqual({ a: "role", v: "admin", group: 42 as unknown as string }),
+			() => new AttrLiteralNotEqual({ a: "role", v: "admin", group: 42 as unknown as string }),
 		).toThrow(/AttrLiteralNotEqual.*'group'.*got number/);
 	});
 

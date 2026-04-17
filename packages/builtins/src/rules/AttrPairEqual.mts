@@ -1,8 +1,5 @@
 import type { Attributes, Rule } from "@o3co/auth.policy-verifier.core";
-import {
-	requireAttrName,
-	requireOptionalGroup,
-} from "./_sharedValidation.mjs";
+import { requireAttrName, requireOptionalGroup } from "./_sharedValidation.mjs";
 
 export interface AttrPairEqualConfig {
 	a: string;
@@ -41,7 +38,7 @@ export class AttrPairEqual implements Rule {
 		const group = requireOptionalGroup("AttrPairEqual", config.group);
 
 		this.ruleType = group ?? `attr_pair_equal:${config.a}:${config.b}`;
-		this.message = `Attribute constraint not satisfied: ${config.a} must equal ${config.b} (both must be non-empty strings).`;
+		this.message = `Attribute constraint not satisfied: ${config.a} must equal ${config.b}.`;
 	}
 
 	verify(attrs: Attributes): boolean {

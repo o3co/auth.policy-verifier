@@ -78,9 +78,9 @@ describe("AttrLiteralIn", () => {
 	// ---------------------------------------------------------------------------
 
 	it("throws when 'a' is undefined", () => {
-		expect(
-			() => new AttrLiteralIn({ a: undefined as unknown as string, values: ["x"] }),
-		).toThrow(/AttrLiteralIn.*'a'.*(non-empty string|got undefined)/);
+		expect(() => new AttrLiteralIn({ a: undefined as unknown as string, values: ["x"] })).toThrow(
+			/AttrLiteralIn.*'a'.*(non-empty string|got undefined)/,
+		);
 	});
 
 	it("throws when 'a' is an empty string", () => {
@@ -90,9 +90,9 @@ describe("AttrLiteralIn", () => {
 	});
 
 	it("throws when 'a' is a non-string (number 42)", () => {
-		expect(
-			() => new AttrLiteralIn({ a: 42 as unknown as string, values: ["x"] }),
-		).toThrow(/AttrLiteralIn.*'a'.*got number/);
+		expect(() => new AttrLiteralIn({ a: 42 as unknown as string, values: ["x"] })).toThrow(
+			/AttrLiteralIn.*'a'.*got number/,
+		);
 	});
 
 	// ---------------------------------------------------------------------------
@@ -106,41 +106,37 @@ describe("AttrLiteralIn", () => {
 	});
 
 	it("throws when 'values' is not an array (a string)", () => {
-		expect(
-			() => new AttrLiteralIn({ a: "role", values: "admin" as unknown as string[] }),
-		).toThrow(/AttrLiteralIn.*'values'/);
-	});
-
-	it("throws when 'values' is an empty array", () => {
-		expect(() => new AttrLiteralIn({ a: "role", values: [] })).toThrow(
+		expect(() => new AttrLiteralIn({ a: "role", values: "admin" as unknown as string[] })).toThrow(
 			/AttrLiteralIn.*'values'/,
 		);
 	});
 
+	it("throws when 'values' is an empty array", () => {
+		expect(() => new AttrLiteralIn({ a: "role", values: [] })).toThrow(/AttrLiteralIn.*'values'/);
+	});
+
 	it("throws when 'values' contains null", () => {
-		expect(
-			() => new AttrLiteralIn({ a: "role", values: [null as unknown as string] }),
-		).toThrow(/AttrLiteralIn.*'values'/);
+		expect(() => new AttrLiteralIn({ a: "role", values: [null as unknown as string] })).toThrow(
+			/AttrLiteralIn.*'values'/,
+		);
 	});
 
 	it("throws when 'values' contains undefined", () => {
 		expect(
-			() =>
-				new AttrLiteralIn({ a: "role", values: [undefined as unknown as string] }),
+			() => new AttrLiteralIn({ a: "role", values: [undefined as unknown as string] }),
 		).toThrow(/AttrLiteralIn.*'values'/);
 	});
 
 	it("throws when 'values' contains mixed types (string and number)", () => {
-		expect(
-			() => new AttrLiteralIn({ a: "role", values: ["a", 1] as unknown as string[] }),
-		).toThrow(/AttrLiteralIn.*'values'.*mixed/);
+		expect(() => new AttrLiteralIn({ a: "role", values: ["a", 1] as unknown as string[] })).toThrow(
+			/AttrLiteralIn.*'values'.*mixed/,
+		);
 	});
 
 	it("throws when 'values' contains an object element", () => {
-		expect(
-			() =>
-				new AttrLiteralIn({ a: "role", values: [{}] as unknown as string[] }),
-		).toThrow(/AttrLiteralIn.*'values'/);
+		expect(() => new AttrLiteralIn({ a: "role", values: [{}] as unknown as string[] })).toThrow(
+			/AttrLiteralIn.*'values'/,
+		);
 	});
 
 	// ---------------------------------------------------------------------------
@@ -148,15 +144,14 @@ describe("AttrLiteralIn", () => {
 	// ---------------------------------------------------------------------------
 
 	it("throws when 'group' is present but is an empty string", () => {
-		expect(
-			() => new AttrLiteralIn({ a: "role", values: ["admin"], group: "" }),
-		).toThrow(/AttrLiteralIn.*'group'.*empty string/);
+		expect(() => new AttrLiteralIn({ a: "role", values: ["admin"], group: "" })).toThrow(
+			/AttrLiteralIn.*'group'.*empty string/,
+		);
 	});
 
 	it("throws when 'group' is present but is a non-string (number 42)", () => {
 		expect(
-			() =>
-				new AttrLiteralIn({ a: "role", values: ["admin"], group: 42 as unknown as string }),
+			() => new AttrLiteralIn({ a: "role", values: ["admin"], group: 42 as unknown as string }),
 		).toThrow(/AttrLiteralIn.*'group'.*got number/);
 	});
 

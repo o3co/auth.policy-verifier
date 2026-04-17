@@ -29,11 +29,7 @@ export const COMPARE_OPS: readonly CompareOp[] = ["lt", "le", "gt", "ge"];
  * @returns The validated non-empty string.
  * @throws {Error} If value is not a non-empty string.
  */
-export function requireAttrName(
-	className: string,
-	fieldName: "a" | "b",
-	value: unknown,
-): string {
+export function requireAttrName(className: string, fieldName: "a" | "b", value: unknown): string {
 	if (typeof value !== "string") {
 		throw new Error(
 			`${className}: '${fieldName}' must be a non-empty string, got ${describeType(value)}`,
@@ -59,11 +55,7 @@ export function requireLiteralValue(
 	fieldName: "v",
 	value: unknown,
 ): LiteralValue {
-	if (
-		typeof value === "string" ||
-		typeof value === "number" ||
-		typeof value === "boolean"
-	) {
+	if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
 		return value;
 	}
 	throw new Error(
@@ -79,15 +71,9 @@ export function requireLiteralValue(
  * @returns The validated number.
  * @throws {Error} If value is not a number, or if value is NaN.
  */
-export function requireNumber(
-	className: string,
-	fieldName: "v",
-	value: unknown,
-): number {
+export function requireNumber(className: string, fieldName: "v", value: unknown): number {
 	if (typeof value !== "number") {
-		throw new Error(
-			`${className}: '${fieldName}' must be a number, got ${describeType(value)}`,
-		);
+		throw new Error(`${className}: '${fieldName}' must be a number, got ${describeType(value)}`);
 	}
 	if (Number.isNaN(value)) {
 		throw new Error(`${className}: '${fieldName}' must not be NaN`);
@@ -103,10 +89,7 @@ export function requireNumber(
  * @returns The validated LiteralValue array.
  * @throws {Error} If not an array, empty, contains invalid elements, or has mixed types.
  */
-export function requireHomogeneousLiteralArray(
-	className: string,
-	value: unknown,
-): LiteralValue[] {
+export function requireHomogeneousLiteralArray(className: string, value: unknown): LiteralValue[] {
 	if (!Array.isArray(value)) {
 		throw new Error(
 			`${className}: 'values' must be a non-empty array of string | number | boolean, got ${describeType(value)}`,
@@ -153,9 +136,7 @@ export function requireCompareOp(className: string, value: unknown): CompareOp {
 		);
 	}
 	if (!(COMPARE_OPS as readonly string[]).includes(value)) {
-		throw new Error(
-			`${className}: 'op' must be one of ${COMPARE_OPS.join(" | ")}, got '${value}'`,
-		);
+		throw new Error(`${className}: 'op' must be one of ${COMPARE_OPS.join(" | ")}, got '${value}'`);
 	}
 	return value as CompareOp;
 }
@@ -169,10 +150,7 @@ export function requireCompareOp(className: string, value: unknown): CompareOp {
  * @returns The validated non-empty string, or undefined.
  * @throws {Error} If value is a non-string or an empty string.
  */
-export function requireOptionalGroup(
-	className: string,
-	value: unknown,
-): string | undefined {
+export function requireOptionalGroup(className: string, value: unknown): string | undefined {
 	if (value === undefined) {
 		return undefined;
 	}

@@ -167,8 +167,7 @@ describe("AttrLiteralCompare", () => {
 
 	it("throws when 'a' is undefined", () => {
 		expect(
-			() =>
-				new AttrLiteralCompare({ a: undefined as unknown as string, op: "gt", v: 0 }),
+			() => new AttrLiteralCompare({ a: undefined as unknown as string, op: "gt", v: 0 }),
 		).toThrow(/AttrLiteralCompare.*'a'.*(non-empty string|got undefined)/);
 	});
 
@@ -179,9 +178,9 @@ describe("AttrLiteralCompare", () => {
 	});
 
 	it("throws when 'a' is a non-string (number 42)", () => {
-		expect(
-			() => new AttrLiteralCompare({ a: 42 as unknown as string, op: "gt", v: 0 }),
-		).toThrow(/AttrLiteralCompare.*'a'.*got number/);
+		expect(() => new AttrLiteralCompare({ a: 42 as unknown as string, op: "gt", v: 0 })).toThrow(
+			/AttrLiteralCompare.*'a'.*got number/,
+		);
 	});
 
 	// ---------------------------------------------------------------------------
@@ -190,36 +189,31 @@ describe("AttrLiteralCompare", () => {
 
 	it("throws when 'v' is missing (undefined)", () => {
 		expect(
-			() =>
-				new AttrLiteralCompare({ a: "score", op: "gt", v: undefined as unknown as number }),
+			() => new AttrLiteralCompare({ a: "score", op: "gt", v: undefined as unknown as number }),
 		).toThrow(/AttrLiteralCompare.*'v'/);
 	});
 
 	it("throws when 'v' is null", () => {
 		expect(
-			() =>
-				new AttrLiteralCompare({ a: "score", op: "gt", v: null as unknown as number }),
+			() => new AttrLiteralCompare({ a: "score", op: "gt", v: null as unknown as number }),
 		).toThrow(/AttrLiteralCompare.*'v'/);
 	});
 
 	it("throws when 'v' is a string", () => {
 		expect(
-			() =>
-				new AttrLiteralCompare({ a: "score", op: "gt", v: "10" as unknown as number }),
+			() => new AttrLiteralCompare({ a: "score", op: "gt", v: "10" as unknown as number }),
 		).toThrow(/AttrLiteralCompare.*'v'/);
 	});
 
 	it("throws when 'v' is a boolean", () => {
 		expect(
-			() =>
-				new AttrLiteralCompare({ a: "score", op: "gt", v: true as unknown as number }),
+			() => new AttrLiteralCompare({ a: "score", op: "gt", v: true as unknown as number }),
 		).toThrow(/AttrLiteralCompare.*'v'/);
 	});
 
 	it("throws when 'v' is a plain object", () => {
 		expect(
-			() =>
-				new AttrLiteralCompare({ a: "score", op: "gt", v: {} as unknown as number }),
+			() => new AttrLiteralCompare({ a: "score", op: "gt", v: {} as unknown as number }),
 		).toThrow(/AttrLiteralCompare.*'v'/);
 	});
 
@@ -271,9 +265,9 @@ describe("AttrLiteralCompare", () => {
 	// ---------------------------------------------------------------------------
 
 	it("throws when 'group' is present but is an empty string", () => {
-		expect(
-			() => new AttrLiteralCompare({ a: "score", op: "gt", v: 0, group: "" }),
-		).toThrow(/AttrLiteralCompare.*'group'.*empty string/);
+		expect(() => new AttrLiteralCompare({ a: "score", op: "gt", v: 0, group: "" })).toThrow(
+			/AttrLiteralCompare.*'group'.*empty string/,
+		);
 	});
 
 	it("throws when 'group' is present but is a non-string (number 42)", () => {

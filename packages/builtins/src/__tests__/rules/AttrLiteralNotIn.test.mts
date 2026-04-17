@@ -96,9 +96,9 @@ describe("AttrLiteralNotIn", () => {
 	});
 
 	it("throws when 'a' is a non-string (number 42)", () => {
-		expect(
-			() => new AttrLiteralNotIn({ a: 42 as unknown as string, values: ["x"] }),
-		).toThrow(/AttrLiteralNotIn.*'a'.*got number/);
+		expect(() => new AttrLiteralNotIn({ a: 42 as unknown as string, values: ["x"] })).toThrow(
+			/AttrLiteralNotIn.*'a'.*got number/,
+		);
 	});
 
 	// ---------------------------------------------------------------------------
@@ -124,15 +124,14 @@ describe("AttrLiteralNotIn", () => {
 	});
 
 	it("throws when 'values' contains null", () => {
-		expect(
-			() => new AttrLiteralNotIn({ a: "role", values: [null as unknown as string] }),
-		).toThrow(/AttrLiteralNotIn.*'values'/);
+		expect(() => new AttrLiteralNotIn({ a: "role", values: [null as unknown as string] })).toThrow(
+			/AttrLiteralNotIn.*'values'/,
+		);
 	});
 
 	it("throws when 'values' contains undefined", () => {
 		expect(
-			() =>
-				new AttrLiteralNotIn({ a: "role", values: [undefined as unknown as string] }),
+			() => new AttrLiteralNotIn({ a: "role", values: [undefined as unknown as string] }),
 		).toThrow(/AttrLiteralNotIn.*'values'/);
 	});
 
@@ -143,10 +142,9 @@ describe("AttrLiteralNotIn", () => {
 	});
 
 	it("throws when 'values' contains an object element", () => {
-		expect(
-			() =>
-				new AttrLiteralNotIn({ a: "role", values: [{}] as unknown as string[] }),
-		).toThrow(/AttrLiteralNotIn.*'values'/);
+		expect(() => new AttrLiteralNotIn({ a: "role", values: [{}] as unknown as string[] })).toThrow(
+			/AttrLiteralNotIn.*'values'/,
+		);
 	});
 
 	// ---------------------------------------------------------------------------
@@ -154,15 +152,14 @@ describe("AttrLiteralNotIn", () => {
 	// ---------------------------------------------------------------------------
 
 	it("throws when 'group' is present but is an empty string", () => {
-		expect(
-			() => new AttrLiteralNotIn({ a: "role", values: ["admin"], group: "" }),
-		).toThrow(/AttrLiteralNotIn.*'group'.*empty string/);
+		expect(() => new AttrLiteralNotIn({ a: "role", values: ["admin"], group: "" })).toThrow(
+			/AttrLiteralNotIn.*'group'.*empty string/,
+		);
 	});
 
 	it("throws when 'group' is present but is a non-string (number 42)", () => {
 		expect(
-			() =>
-				new AttrLiteralNotIn({ a: "role", values: ["admin"], group: 42 as unknown as string }),
+			() => new AttrLiteralNotIn({ a: "role", values: ["admin"], group: 42 as unknown as string }),
 		).toThrow(/AttrLiteralNotIn.*'group'.*got number/);
 	});
 

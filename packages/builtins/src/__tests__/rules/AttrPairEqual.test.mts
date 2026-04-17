@@ -100,21 +100,21 @@ describe("AttrPairEqual", () => {
 	// ---------------------------------------------------------------------------
 
 	it("throws when 'a' is undefined", () => {
-		expect(
-			() => new AttrPairEqual({ a: undefined as unknown as string, b: "owner" }),
-		).toThrow(/AttrPairEqual.*'a'.*(non-empty string|got undefined)/);
+		expect(() => new AttrPairEqual({ a: undefined as unknown as string, b: "owner" })).toThrow(
+			/AttrPairEqual.*'a'.*(non-empty string|got undefined)/,
+		);
 	});
 
 	it("throws when 'a' is a non-string (number 42)", () => {
-		expect(
-			() => new AttrPairEqual({ a: 42 as unknown as string, b: "owner" }),
-		).toThrow(/AttrPairEqual.*'a'.*got number/);
+		expect(() => new AttrPairEqual({ a: 42 as unknown as string, b: "owner" })).toThrow(
+			/AttrPairEqual.*'a'.*got number/,
+		);
 	});
 
 	it("throws when 'a' is an empty string", () => {
-		expect(
-			() => new AttrPairEqual({ a: "", b: "owner" }),
-		).toThrow(/AttrPairEqual.*'a'.*empty string/);
+		expect(() => new AttrPairEqual({ a: "", b: "owner" })).toThrow(
+			/AttrPairEqual.*'a'.*empty string/,
+		);
 	});
 
 	// ---------------------------------------------------------------------------
@@ -122,21 +122,21 @@ describe("AttrPairEqual", () => {
 	// ---------------------------------------------------------------------------
 
 	it("throws when 'b' is undefined", () => {
-		expect(
-			() => new AttrPairEqual({ a: "subject", b: undefined as unknown as string }),
-		).toThrow(/AttrPairEqual.*'b'.*(non-empty string|got undefined)/);
+		expect(() => new AttrPairEqual({ a: "subject", b: undefined as unknown as string })).toThrow(
+			/AttrPairEqual.*'b'.*(non-empty string|got undefined)/,
+		);
 	});
 
 	it("throws when 'b' is a non-string (number 42)", () => {
-		expect(
-			() => new AttrPairEqual({ a: "subject", b: 42 as unknown as string }),
-		).toThrow(/AttrPairEqual.*'b'.*got number/);
+		expect(() => new AttrPairEqual({ a: "subject", b: 42 as unknown as string })).toThrow(
+			/AttrPairEqual.*'b'.*got number/,
+		);
 	});
 
 	it("throws when 'b' is an empty string", () => {
-		expect(
-			() => new AttrPairEqual({ a: "subject", b: "" }),
-		).toThrow(/AttrPairEqual.*'b'.*empty string/);
+		expect(() => new AttrPairEqual({ a: "subject", b: "" })).toThrow(
+			/AttrPairEqual.*'b'.*empty string/,
+		);
 	});
 
 	// ---------------------------------------------------------------------------
@@ -150,9 +150,9 @@ describe("AttrPairEqual", () => {
 	});
 
 	it("throws when 'group' is present but is an empty string", () => {
-		expect(
-			() => new AttrPairEqual({ a: "subject", b: "owner", group: "" }),
-		).toThrow(/AttrPairEqual.*'group'.*empty string/);
+		expect(() => new AttrPairEqual({ a: "subject", b: "owner", group: "" })).toThrow(
+			/AttrPairEqual.*'group'.*empty string/,
+		);
 	});
 
 	// ---------------------------------------------------------------------------

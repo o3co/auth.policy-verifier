@@ -11,7 +11,10 @@ export { DotNotationResourceParser } from "./resource/DotNotationResourceParser.
 export { AttrLiteralCompare, type AttrLiteralCompareConfig } from "./rules/AttrLiteralCompare.mjs";
 export { AttrLiteralEqual, type AttrLiteralEqualConfig } from "./rules/AttrLiteralEqual.mjs";
 export { AttrLiteralIn, type AttrLiteralInConfig } from "./rules/AttrLiteralIn.mjs";
-export { AttrLiteralNotEqual, type AttrLiteralNotEqualConfig } from "./rules/AttrLiteralNotEqual.mjs";
+export {
+	AttrLiteralNotEqual,
+	type AttrLiteralNotEqualConfig,
+} from "./rules/AttrLiteralNotEqual.mjs";
 export { AttrLiteralNotIn, type AttrLiteralNotInConfig } from "./rules/AttrLiteralNotIn.mjs";
 export { AttrMatchRule, type AttrMatchRuleConfig } from "./rules/AttrMatchRule.mjs";
 export { AttrPairCompare, type AttrPairCompareConfig } from "./rules/AttrPairCompare.mjs";

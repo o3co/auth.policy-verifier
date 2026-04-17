@@ -1,8 +1,5 @@
 import type { Attributes, Rule } from "@o3co/auth.policy-verifier.core";
-import {
-	requireAttrName,
-	requireOptionalGroup,
-} from "./_sharedValidation.mjs";
+import { requireAttrName, requireOptionalGroup } from "./_sharedValidation.mjs";
 
 export interface AttrPairNotEqualConfig {
 	a: string;

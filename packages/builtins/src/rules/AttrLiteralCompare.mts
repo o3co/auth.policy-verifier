@@ -1,7 +1,7 @@
 import type { Attributes, Rule } from "@o3co/auth.policy-verifier.core";
 import {
-	type CompareOp,
 	applyCompare,
+	type CompareOp,
 	requireAttrName,
 	requireCompareOp,
 	requireNumber,
@@ -40,8 +40,7 @@ export class AttrLiteralCompare implements Rule {
 		requireCompareOp("AttrLiteralCompare", config.op);
 		const group = requireOptionalGroup("AttrLiteralCompare", config.group);
 
-		this.ruleType =
-			group ?? `attr_literal_compare:${config.a}:${config.op}:${String(config.v)}`;
+		this.ruleType = group ?? `attr_literal_compare:${config.a}:${config.op}:${String(config.v)}`;
 		this.message = `Attribute constraint not satisfied: ${config.a} must be ${config.op} ${String(config.v)}.`;
 	}
 

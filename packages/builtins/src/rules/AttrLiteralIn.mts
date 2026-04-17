@@ -1,7 +1,7 @@
 import type { Attributes, Rule } from "@o3co/auth.policy-verifier.core";
 import {
-	type LiteralValue,
 	computeValuesKey,
+	type LiteralValue,
 	requireAttrName,
 	requireHomogeneousLiteralArray,
 	requireOptionalGroup,

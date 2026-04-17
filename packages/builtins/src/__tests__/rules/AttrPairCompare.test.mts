@@ -266,8 +266,7 @@ describe("AttrPairCompare", () => {
 
 	it("throws when 'a' is undefined", () => {
 		expect(
-			() =>
-				new AttrPairCompare({ a: undefined as unknown as string, op: "gt", b: "threshold" }),
+			() => new AttrPairCompare({ a: undefined as unknown as string, op: "gt", b: "threshold" }),
 		).toThrow(/AttrPairCompare.*'a'.*(non-empty string|got undefined)/);
 	});
 
@@ -278,9 +277,9 @@ describe("AttrPairCompare", () => {
 	});
 
 	it("throws when 'a' is an empty string", () => {
-		expect(
-			() => new AttrPairCompare({ a: "", op: "gt", b: "threshold" }),
-		).toThrow(/AttrPairCompare.*'a'.*empty string/);
+		expect(() => new AttrPairCompare({ a: "", op: "gt", b: "threshold" })).toThrow(
+			/AttrPairCompare.*'a'.*empty string/,
+		);
 	});
 
 	// ---------------------------------------------------------------------------
@@ -289,21 +288,20 @@ describe("AttrPairCompare", () => {
 
 	it("throws when 'b' is undefined", () => {
 		expect(
-			() =>
-				new AttrPairCompare({ a: "score", op: "gt", b: undefined as unknown as string }),
+			() => new AttrPairCompare({ a: "score", op: "gt", b: undefined as unknown as string }),
 		).toThrow(/AttrPairCompare.*'b'.*(non-empty string|got undefined)/);
 	});
 
 	it("throws when 'b' is a non-string (number 42)", () => {
-		expect(
-			() => new AttrPairCompare({ a: "score", op: "gt", b: 42 as unknown as string }),
-		).toThrow(/AttrPairCompare.*'b'.*got number/);
+		expect(() => new AttrPairCompare({ a: "score", op: "gt", b: 42 as unknown as string })).toThrow(
+			/AttrPairCompare.*'b'.*got number/,
+		);
 	});
 
 	it("throws when 'b' is an empty string", () => {
-		expect(
-			() => new AttrPairCompare({ a: "score", op: "gt", b: "" }),
-		).toThrow(/AttrPairCompare.*'b'.*empty string/);
+		expect(() => new AttrPairCompare({ a: "score", op: "gt", b: "" })).toThrow(
+			/AttrPairCompare.*'b'.*empty string/,
+		);
 	});
 
 	// ---------------------------------------------------------------------------
@@ -312,22 +310,19 @@ describe("AttrPairCompare", () => {
 
 	it("throws when 'op' is missing (undefined)", () => {
 		expect(
-			() =>
-				new AttrPairCompare({ a: "score", op: undefined as unknown as "lt", b: "threshold" }),
+			() => new AttrPairCompare({ a: "score", op: undefined as unknown as "lt", b: "threshold" }),
 		).toThrow(/AttrPairCompare.*'op'/);
 	});
 
 	it("throws when 'op' is not a string (number 42)", () => {
 		expect(
-			() =>
-				new AttrPairCompare({ a: "score", op: 42 as unknown as "lt", b: "threshold" }),
+			() => new AttrPairCompare({ a: "score", op: 42 as unknown as "lt", b: "threshold" }),
 		).toThrow(/AttrPairCompare.*'op'/);
 	});
 
 	it("throws when 'op' is an invalid string ('eq')", () => {
 		expect(
-			() =>
-				new AttrPairCompare({ a: "score", op: "eq" as unknown as "lt", b: "threshold" }),
+			() => new AttrPairCompare({ a: "score", op: "eq" as unknown as "lt", b: "threshold" }),
 		).toThrow(/AttrPairCompare.*'op'/);
 	});
 
@@ -348,9 +343,9 @@ describe("AttrPairCompare", () => {
 	});
 
 	it("throws when 'group' is present but is an empty string", () => {
-		expect(
-			() => new AttrPairCompare({ a: "score", op: "gt", b: "threshold", group: "" }),
-		).toThrow(/AttrPairCompare.*'group'.*empty string/);
+		expect(() => new AttrPairCompare({ a: "score", op: "gt", b: "threshold", group: "" })).toThrow(
+			/AttrPairCompare.*'group'.*empty string/,
+		);
 	});
 
 	// ---------------------------------------------------------------------------

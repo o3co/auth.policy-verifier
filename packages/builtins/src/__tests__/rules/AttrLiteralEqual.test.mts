@@ -112,8 +112,8 @@ describe("AttrLiteralEqual", () => {
 	});
 
 	it("throws when 'group' is present but is a non-string (number 42)", () => {
-		expect(() =>
-			new AttrLiteralEqual({ a: "role", v: "admin", group: 42 as unknown as string }),
+		expect(
+			() => new AttrLiteralEqual({ a: "role", v: "admin", group: 42 as unknown as string }),
 		).toThrow(/AttrLiteralEqual.*'group'.*got number/);
 	});
 
