@@ -23,7 +23,7 @@ npm install @o3co/auth.policy-verifier.builtins
 
 ### `requestContext` 向けの組み込みコレクターは提供しない
 
-本エンジンは `CollectorContext.requestContext` をそのまま attribute に展開するコレクターを提供しません。`requestContext` の形は利用側プロジェクトの transport/interceptor が定めるため、その解釈はプロジェクト側の責務です。必要なフィールドごとに焦点を絞った `AttributeCollector` を実装し、その中で値の型・形状を検証し、プロジェクト固有の定数キーで格納してください。詳細と具体例はリポジトリルートの `AGENTS.md` の Core Vocabulary Scope セクションを参照してください。
+本エンジンは `CollectorContext.requestContext` をそのまま attribute に展開するコレクターを提供しません。`requestContext` の形は利用側プロジェクトの transport/interceptor が定めるため、その解釈はプロジェクト側の責務です。必要なフィールドごとに焦点を絞った `AttributeCollector` を実装し、その中で値の型・形状を検証し、プロジェクト固有の定数キーで格納してください。詳細と具体例は [AGENTS.md — Core Vocabulary Scope](../../AGENTS.md#core-vocabulary-scope) を参照してください。
 
 ## Rules
 

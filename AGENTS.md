@@ -31,7 +31,7 @@ This contract guarantees that rules are pure functions of attributes: testable i
 
 - `ATTR_*` constants are restricted to well-known OAuth 2.0 / OIDC and RBAC concepts: scopes, permissions, roles, subject user id (JWT `sub`), client id (JWT `azp`). These are concepts every consumer of the ABAC engine shares, and they originate from transport-neutral standards (not tied to a specific interceptor or wire format).
 - Domain-specific attribute keys (business identifiers, tenant flags, protocol-specific fields) **must not** be added to core. They belong to the consuming service, which declares its own constants and reads/writes the same `Attributes` map.
-- Core **does not** assume a shape for `CollectorContext.requestContext` or `CollectorContext.headers`. These fields are free-form containers whose contents are defined by the interceptor/transport layer of each consuming project. Core provides only the hook — consumers provide the interpretation via their own `AttributeCollector` implementations.
+- Core **does not** assume a shape for `CollectorContext.requestContext`. This field is a free-form container whose contents are defined by the interceptor/transport layer of each consuming project. Core provides only the hook — consumers provide the interpretation via their own `AttributeCollector` implementations.
 
 When tempted to add a new `ATTR_*` or a built-in collector that reads a specific `requestContext` key, stop and ask:
 

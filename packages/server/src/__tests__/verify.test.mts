@@ -20,8 +20,13 @@ import {
 	ResourceActionScopeRuleCollector,
 } from "@o3co/auth.policy-verifier.builtins";
 import {
+	type AttributeCollector,
 	AttributePipeline,
+	type Attributes,
+	type CollectorContext,
 	type ResourceParser,
+	type Rule,
+	type RuleCollector,
 	RulePipeline,
 } from "@o3co/auth.policy-verifier.core";
 import express from "express";
@@ -125,6 +130,79 @@ describe("POST /verify", () => {
 
 		expect(res.status).toBe(200);
 		expect(res.body.decision).toBe("allow");
+	});
+
+	// Verifies the end-to-end wiring: HTTP body.context → CollectorContext.requestContext →
+	// project-specific AttributeCollector → Attributes → Rule.verify(attrs). This mirrors
+	// the worked example in AGENTS.md (Core Vocabulary Scope > Writing Project-Specific
+	// Attribute Collectors) and guards against silent regressions in the route's
+	// requestContext plumbing.
+	const ATTR_SUBSCRIBER_DID = "subscriberDid" as const;
+
+	class SubscriberDidCollector implements AttributeCollector {
+		async collect(context: CollectorContext): Promise<Attributes> {
+			const attrs: Attributes = new Map();
+			const v = context.requestContext?.subscriber_did;
+			if (typeof v === "string" && v.length > 0) {
+				attrs.set(ATTR_SUBSCRIBER_DID, v);
+			}
+			return attrs;
+		}
+	}
+
+	class RequireSubscriberDidCollector implements RuleCollector {
+		async collect(): Promise<Rule[]> {
+			return [
+				{
+					ruleType: "subscriber_did",
+					code: "missing_subscriber_did",
+					message: "subscriber_did is required",
+					verify: (attrs) => typeof attrs.get(ATTR_SUBSCRIBER_DID) === "string",
+				},
+			];
+		}
+	}
+
+	function createAppWithSubscriberDid() {
+		const app = express();
+		app.use(
+			createVerifyRouter({
+				jwt: { key: hs256Key.key, algorithms: hs256Key.algorithms, validate: true },
+				resourceParser: new DotNotationResourceParser(),
+				attributePipeline: new AttributePipeline([new SubscriberDidCollector()]),
+				rulePipeline: new RulePipeline([new RequireSubscriberDidCollector()]),
+			}),
+		);
+		return app;
+	}
+
+	it("routes body.context → requestContext → AttributeCollector → attrs (allow)", async () => {
+		const app = createAppWithSubscriberDid();
+		const token = await signHS256Token({});
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({
+				resource: "project:1",
+				action: "read",
+				context: { subscriber_did: "did:dplaas:r1:org:alice" },
+			});
+
+		expect(res.status).toBe(200);
+		expect(res.body.decision).toBe("allow");
+	});
+
+	it("routes body.context → requestContext → AttributeCollector → attrs (deny when absent)", async () => {
+		const app = createAppWithSubscriberDid();
+		const token = await signHS256Token({});
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.status).toBe(403);
+		expect(res.body.decision).toBe("deny");
+		expect(res.body.code).toBe("missing_subscriber_did");
 	});
 
 	it("returns 401 for expired JWT", async () => {

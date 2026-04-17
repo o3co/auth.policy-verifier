@@ -23,7 +23,7 @@ All collectors implement `AttributeCollector`.
 
 ### No built-in collector for `requestContext`
 
-The engine does not ship a collector that expands `CollectorContext.requestContext` into attributes. The shape of `requestContext` is defined by each consuming project's transport/interceptor, so interpreting it is a project concern. Write a focused `AttributeCollector` for each field you need to promote — validate its shape there, and store it under a project-specific constant key. See the Core Vocabulary Scope section in the repository root `AGENTS.md` for the rationale and a worked example.
+The engine does not ship a collector that expands `CollectorContext.requestContext` into attributes. The shape of `requestContext` is defined by each consuming project's transport/interceptor, so interpreting it is a project concern. Write a focused `AttributeCollector` for each field you need to promote — validate its shape there, and store it under a project-specific constant key. See [AGENTS.md — Core Vocabulary Scope](../../AGENTS.md#core-vocabulary-scope) for the rationale and a worked example.
 
 ## Rules
 
