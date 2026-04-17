@@ -47,13 +47,33 @@ describe("AttrMatchRule", () => {
 		expect(rule.verify(attrs)).toBe(false);
 	});
 
-	it("has ruleType 'attr_match' and code 'attr_mismatch'", () => {
-		expect(rule.ruleType).toBe("attr_match");
+	it("derives ruleType from the pair of attribute keys by default", () => {
+		// Distinct pairs must produce distinct ruleType values. Otherwise
+		// evaluate() would OR them together within a single group, which
+		// weakens "require both comparisons to pass" intent.
+		const r1 = new AttrMatchRule({ a: "userId", b: "sub" });
+		const r2 = new AttrMatchRule({ a: "orgId", b: "org" });
+		expect(r1.ruleType).not.toBe(r2.ruleType);
+		expect(r1.ruleType).toContain("userId");
+		expect(r1.ruleType).toContain("sub");
+	});
+
+	it("uses the provided group override when set, to enable explicit grouping", () => {
+		// When callers want two comparisons to be OR'd together (e.g. match by
+		// either DID or email), they opt in by passing the same `group`.
+		const r1 = new AttrMatchRule({ a: "x", b: "y", group: "identity" });
+		const r2 = new AttrMatchRule({ a: "e", b: "f", group: "identity" });
+		expect(r1.ruleType).toBe("identity");
+		expect(r2.ruleType).toBe("identity");
+	});
+
+	it("has code 'attr_mismatch'", () => {
 		expect(rule.code).toBe("attr_mismatch");
 	});
 
-	it("message mentions both attribute keys", () => {
+	it("message mentions both attribute keys and starts with a capital letter", () => {
 		expect(rule.message).toContain("x");
 		expect(rule.message).toContain("y");
+		expect(rule.message[0]).toBe(rule.message[0]?.toUpperCase());
 	});
 });

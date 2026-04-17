@@ -3,31 +3,51 @@ import type { Attributes, Rule } from "@o3co/auth.policy-verifier.core";
 export interface AttrMatchRuleConfig {
 	a: string;
 	b: string;
+	/**
+	 * Optional grouping key used as `ruleType`. See the class comment for
+	 * how this interacts with the evaluator's OR-within-group /
+	 * AND-across-groups semantics.
+	 */
+	group?: string;
 }
 
 /**
  * Rule that passes when two named attributes are present, are non-empty
  * strings, and are equal. A pure predicate over the attributes map —
- * callers provide both attribute keys via configuration, and the rule
- * neither reads nor closes over `CollectorContext`.
+ * `verify(attrs)` does not touch `CollectorContext` and does not close
+ * over request state.
  *
- * Typical use: a consuming project's `RuleCollector` collects the two
- * values to compare through its own `AttributeCollector`s (for example,
- * a JWT-subject collector and a request-context-field collector) and
- * produces an `AttrMatchRule` parameterised with their keys.
+ * ## Grouping and the default ruleType
+ *
+ * The evaluator groups rules by `ruleType`, ORs within a group, and ANDs
+ * across groups. If every `AttrMatchRule` shared one fixed `ruleType`,
+ * two instances collected for different comparisons (e.g. subject vs.
+ * subscriber AND tenant vs. request-tenant) would be OR'd together and
+ * authorization would weaken silently.
+ *
+ * To default to the safe reading of "each distinct pair of attributes
+ * is a separate AND-combined requirement", `ruleType` is derived from
+ * `a` and `b` when `group` is not given: `attr_match:{a}:{b}`.
+ *
+ * When callers actually want two comparisons to be OR-combined
+ * (alternative identities, for example), they opt in explicitly by
+ * passing the same `group` to both rule instances.
  */
 export class AttrMatchRule implements Rule {
-	readonly ruleType = "attr_match";
+	readonly ruleType: string;
 	readonly code = "attr_mismatch";
 	readonly message: string;
 
 	constructor(private readonly config: AttrMatchRuleConfig) {
-		this.message = `attributes ${config.a} and ${config.b} do not match`;
+		this.ruleType = config.group ?? `attr_match:${config.a}:${config.b}`;
+		this.message = `Attributes ${config.a} and ${config.b} do not match.`;
 	}
 
 	verify(attrs: Attributes): boolean {
 		const a = attrs.get(this.config.a);
 		const b = attrs.get(this.config.b);
-		return typeof a === "string" && a.length > 0 && typeof b === "string" && a === b;
+		if (typeof a !== "string" || a.length === 0) return false;
+		if (typeof b !== "string" || b.length === 0) return false;
+		return a === b;
 	}
 }

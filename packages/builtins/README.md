@@ -55,12 +55,13 @@ new HasScope(scope: string)
 ### AttrMatchRule
 
 ```ts
-new AttrMatchRule({ a: string, b: string })
+new AttrMatchRule({ a: string, b: string, group?: string })
 ```
 
-- `ruleType`: `"attr_match"`, `code`: `"attr_mismatch"`.
-- Passes when both `attrs.get(a)` and `attrs.get(b)` are non-empty strings and equal. Any other case returns `false` (fail closed).
+- `code`: `"attr_mismatch"`.
+- Passes when `attrs.get(a)` and `attrs.get(b)` are both non-empty strings and equal. Any other case returns `false` (fail closed).
 - Pure predicate — does not read `CollectorContext`. Consuming projects provide the two values to compare through upstream `AttributeCollector`s and wire the rule through their own `RuleCollector`.
+- `ruleType` defaults to `"attr_match:${a}:${b}"`. The evaluator ORs rules within a `ruleType` and ANDs across different `ruleType`s, so the default ensures two independent comparisons are AND-combined (required together). Pass `group` explicitly when you want two comparisons to be OR-combined (for example, "identify by DID or by email") — both rules then share the provided `group` as their `ruleType`.
 
 ## Rule Collectors
 
