@@ -52,6 +52,17 @@ new HasScope(scope: string)
 - `ATTR_SCOPES` 内のプレフィックスなし scope 文字列（例: `"resource"`）は、比較前に `"read:resource"` へ正規化されます。
 - 正規化後に大文字・小文字を区別しない完全一致で比較します。
 
+### AttrMatchRule
+
+```ts
+new AttrMatchRule({ a: string, b: string, group?: string })
+```
+
+- `code`: `"attr_mismatch"`。
+- `attrs.get(a)` と `attrs.get(b)` がいずれも非空文字列かつ等しいときに `true` を返します。それ以外はすべて `false`（fail closed）。
+- 純粋な述語です。`CollectorContext` を参照しません。比較対象の値はプロジェクト側の上流 `AttributeCollector` が attrs に格納し、プロジェクト側の `RuleCollector` でこの Rule を構築します。
+- `ruleType` の既定値は `"attr_match:${a}:${b}"` です。評価器は `ruleType` 内で OR、`ruleType` 間で AND を取るので、この既定値により異なる2つの比較は AND（両方必要）として扱われます。2つの比較を OR 結合したい場合（例「DID または email で一致」）は、両方の Rule に同じ `group` を指定してください。その `group` 値が `ruleType` として使われます。
+
 ## Rule Collectors
 
 | 名前 | 導出する permission / scope | 返り値 |

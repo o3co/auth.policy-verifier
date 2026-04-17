@@ -8,6 +8,7 @@ export { builtinCollectorsModule } from "./module.mjs";
 // Resource
 export { DotNotationResourceParser } from "./resource/DotNotationResourceParser.mjs";
 // Rules
+export { AttrMatchRule, type AttrMatchRuleConfig } from "./rules/AttrMatchRule.mjs";
 export { HasPermission } from "./rules/HasPermission.mjs";
 export { HasScope } from "./rules/HasScope.mjs";
 export { ResourceActionPermissionRuleCollector } from "./rules/ResourceActionPermissionRuleCollector.mjs";
