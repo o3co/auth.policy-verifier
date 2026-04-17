@@ -93,14 +93,15 @@ A module registers collector and parser factories into the provided registries d
 
 ### Constants
 
+The `ATTR_*` constants are limited to well-known OAuth 2.0 / OIDC and RBAC vocabulary: concepts every consumer of the ABAC engine shares (JWT claims, OAuth scopes, RBAC roles and permissions). Domain-specific attribute keys belong to the consuming service, not to core. Consumers declare their own constants and read/write the same `Attributes` map.
+
 | Constant | Value | Description |
 | --- | --- | --- |
 | `ATTR_SCOPES` | `"scopes"` | Attribute key for OAuth scopes |
 | `ATTR_PERMISSIONS` | `"permissions"` | Attribute key for explicit permissions |
 | `ATTR_ROLES` | `"roles"` | Attribute key for roles |
-| `ATTR_USER_ID` | `"userId"` | Attribute key for the subject user ID |
-| `ATTR_CLIENT_ID` | `"clientId"` | Attribute key for the client ID (`azp`) |
-| `ATTR_CLIENT_IP` | `"clientIp"` | Attribute key for the client IP address |
+| `ATTR_USER_ID` | `"userId"` | Attribute key for the subject user ID (JWT `sub`) |
+| `ATTR_CLIENT_ID` | `"clientId"` | Attribute key for the client ID (JWT `azp`) |
 
 ## Usage Example
 
