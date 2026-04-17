@@ -41,7 +41,7 @@ export class AttrPairEqual implements Rule {
 		const group = requireOptionalGroup("AttrPairEqual", config.group);
 
 		this.ruleType = group ?? `attr_pair_equal:${config.a}:${config.b}`;
-		this.message = `Attribute constraint not satisfied: ${config.a} must equal ${config.b}.`;
+		this.message = `Attribute constraint not satisfied: ${config.a} must equal ${config.b} (both must be non-empty strings).`;
 	}
 
 	verify(attrs: Attributes): boolean {
