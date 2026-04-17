@@ -40,7 +40,7 @@ export class AttrMatchRule implements Rule {
 
 	constructor(private readonly config: AttrMatchRuleConfig) {
 		this.ruleType = config.group ?? `attr_match:${config.a}:${config.b}`;
-		this.message = `Attributes ${config.a} and ${config.b} do not match.`;
+		this.message = `Attribute constraint not satisfied: ${config.a} and ${config.b} must both be non-empty strings and equal.`;
 	}
 
 	verify(attrs: Attributes): boolean {

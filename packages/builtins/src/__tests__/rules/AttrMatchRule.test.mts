@@ -71,9 +71,13 @@ describe("AttrMatchRule", () => {
 		expect(rule.code).toBe("attr_mismatch");
 	});
 
-	it("message mentions both attribute keys and starts with a capital letter", () => {
+	it("message describes the contract (both attrs must be non-empty strings and equal)", () => {
+		// The message should make the rule's contract explicit, not just say "do not match",
+		// because verify() fails closed on missing, non-string, and empty inputs too.
 		expect(rule.message).toContain("x");
 		expect(rule.message).toContain("y");
+		expect(rule.message).toMatch(/non-empty/i);
+		expect(rule.message).toMatch(/equal/i);
 		expect(rule.message[0]).toBe(rule.message[0]?.toUpperCase());
 	});
 });
