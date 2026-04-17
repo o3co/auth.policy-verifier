@@ -2,6 +2,8 @@
 
 Types, evaluation engine, and module infrastructure for auth.policy-verifier. This package defines the interfaces that collectors, rules, and modules implement.
 
+**Runtime:** Node.js 22+. This package (and the rest of `auth.policy-verifier`) is Node-only today; browser / edge runtime support is tracked as future work.
+
 ## Install
 
 ```bash

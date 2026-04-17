@@ -2,3 +2,4 @@ packages:
   - "packages/*"
   - "templates/*"
   - "create-app"
+  - "tests/*"

@@ -2,6 +2,8 @@
 
 auth.policy-verifier の型定義・評価エンジン・モジュール基盤。コレクター、ルール、モジュールが実装すべきインターフェースを定義するパッケージです。
 
+**Runtime:** Node.js 22+。本パッケージを含む `auth.policy-verifier` 群は現時点で Node.js 専用です。browser / edge ランタイム対応は今後の課題として別 issue で追跡します。
+
 ## インストール
 
 ```bash

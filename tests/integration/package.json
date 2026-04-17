@@ -1,0 +1,20 @@
+{
+	"name": "@o3co/auth.policy-verifier.integration-tests",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"engines": {
+		"node": ">=22.0.0"
+	},
+	"scripts": {
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@o3co/auth.policy-verifier.core": "workspace:*",
+		"@o3co/auth.policy-verifier.builtins": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/node": "^25.1.0",
+		"vitest": "^4.1.2"
+	}
+}
