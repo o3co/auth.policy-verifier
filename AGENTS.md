@@ -66,6 +66,35 @@ export class SubscriberDidCollector implements AttributeCollector {
 
 The rule then reads `attrs.get(ATTR_SUBSCRIBER_DID)` without ever touching `CollectorContext`.
 
+## Release Process
+
+Releases are triggered by pushing a `v*` tag to GitHub. There is no manual publish step; `.github/workflows/release.yml` handles the rest.
+
+### Flow
+
+1. Create and push a version tag: `git tag v0.2.1 && git push origin v0.2.1`
+2. GitHub Actions (`release.yml`) is triggered by the `v*` tag push
+3. The workflow rewrites every package's `package.json` `version` to match the tag (via `pnpm -r exec pnpm version`), builds, typechecks, tests, then runs `pnpm -r publish --access public --provenance` across the monorepo
+4. A GitHub Release is published with auto-generated notes
+
+### Implications
+
+- **All packages share a single version** derived from the tag. Do not set per-package versions in `package.json` manually; the workflow overwrites them.
+- **`package.json` `version` is effectively a placeholder** (`0.0.0`). It exists because npm requires the field, but the real version comes from the tag at publish time.
+- **Idempotent re-runs:** if a given version already exists on npm, the workflow skips publishing and only (re)publishes the GitHub Release.
+- **Tag format must be `vX.Y.Z`** (leading `v`). The workflow strips the `v` prefix when computing the npm version.
+
+### For Agents / Contributors
+
+When asked to "release 0.2.1" or similar:
+
+1. Ensure all changes are merged to `main` (releases are cut from `main`, not feature branches)
+2. Verify the change set warrants the requested version bump (breaking change → major, feature → minor, fix → patch)
+3. Propose the tag command to the user; do not push tags without explicit user approval (tag push is irreversible from an npm-publish perspective once the workflow succeeds)
+4. After the tag is pushed, watch the Actions run: `gh run watch` or `gh run list --workflow=release.yml`
+
+Do not edit `package.json` `version` fields as part of a release PR — the workflow handles versioning.
+
 ## Module Resolution
 
 Each package uses Node.js [subpath imports](https://nodejs.org/api/packages.html#subpath-imports) with a conditional `development` / `default` mapping:
