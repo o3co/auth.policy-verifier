@@ -20,8 +20,7 @@ export { AttrMatchRule, type AttrMatchRuleConfig } from "./rules/AttrMatchRule.m
 export { AttrPairCompare, type AttrPairCompareConfig } from "./rules/AttrPairCompare.mjs";
 export { AttrPairEqual, type AttrPairEqualConfig } from "./rules/AttrPairEqual.mjs";
 export { AttrPairNotEqual, type AttrPairNotEqualConfig } from "./rules/AttrPairNotEqual.mjs";
-export { HasPermission } from "./rules/HasPermission.mjs";
-export { HasScope } from "./rules/HasScope.mjs";
-// Rule Collectors
 export { ResourceActionPermissionRuleCollector } from "./rules/collectors/ResourceActionPermissionRuleCollector.mjs";
 export { ResourceActionScopeRuleCollector } from "./rules/collectors/ResourceActionScopeRuleCollector.mjs";
+export { HasPermission } from "./rules/HasPermission.mjs";
+export { HasScope } from "./rules/HasScope.mjs";
