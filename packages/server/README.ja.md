@@ -182,6 +182,6 @@ const app = await createApp({
 
 ## 関連
 
-- [`@o3co/auth.policy-verifier.core`](../core/README.md) — 型定義、`evaluate`、`AttributePipeline`、`RulePipeline`、Module インフラ
-- [`@o3co/auth.policy-verifier.builtins`](../builtins/README.md) — 組み込みコレクターとパーサー
-- [auth.policy-verifier ルート README](../../README.md) — アーキテクチャ概要・設定リファレンス・Docker
+- [`@o3co/auth.policy-verifier.core`](../core/README.ja.md) — 型定義、`evaluate`、`AttributePipeline`、`RulePipeline`、Module インフラ
+- [`@o3co/auth.policy-verifier.builtins`](../builtins/README.ja.md) — 組み込みコレクターとパーサー
+- [auth.policy-verifier ルート README](../../README.ja.md) — アーキテクチャ概要・設定リファレンス・Docker
