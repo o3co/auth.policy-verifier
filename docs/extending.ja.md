@@ -81,6 +81,7 @@ export class UserLevelAtLeast implements Rule {
 - コンストラクタで設定を検証する（fail fast）。`verify()` はホットパスのため、設定を再検証しないこと。
 - `verify()` は欠落・非数値属性に対して `false` を返す（safe-deny）。例外は投げない。
 - 既定の `ruleType` に threshold を含めているので、`new UserLevelAtLeast({ threshold: 3 })` と `new UserLevelAtLeast({ threshold: 5 })` は異なるグループを生成し、AND 結合されます。OR 結合させたい場合（例「レベル ≥ 3 または別の基準」）は、両方に同じ `group` 文字列を渡してください。
+- `Infinity` は `Number.isNaN` チェックを通過します（組み込みの `requireNumber` 規約と一致）。しかし `level >= Infinity` は有限の `level` に対して常に `false` になるため、`threshold: Infinity` は静かに常時拒否する Rule を生成します。この挙動が問題になる場合は、設定層でドメイン境界を検証してください。
 
 ## カスタム AttributeCollector の書き方
 

@@ -81,6 +81,7 @@ Notes:
 - Config is validated at construction time (fail fast). `verify()` is hot-path — it should not re-validate config.
 - `verify()` returns `false` for missing or non-number attributes (safe-deny). It does not throw.
 - The default `ruleType` includes the threshold so `new UserLevelAtLeast({ threshold: 3 })` and `new UserLevelAtLeast({ threshold: 5 })` produce distinct groups and are AND-combined. If you want them OR-combined (e.g. "level ≥ 3 OR some other ladder rung"), pass a shared `group` string to both.
+- `Infinity` passes the `Number.isNaN` check (matching the builtin `requireNumber` convention), but `level >= Infinity` is `false` for every finite level — so `threshold: Infinity` produces a rule that silently always-denies. Validate domain bounds at your configuration layer if this matters.
 
 ## Writing a custom AttributeCollector
 
