@@ -161,6 +161,8 @@ export const customModule: Module = {
 
 Pass `customModule` to `createApp` in the standalone entrypoint. See the root README for the full wiring example.
 
+For the full extension guide — including how to author custom `Rule` implementations, `ruleType` grouping semantics, and guidance on when to write custom logic vs. use [`@o3co/auth.policy-verifier.builtins`](../builtins/README.md) — see [`docs/extending.md`](../../docs/extending.md).
+
 ## See Also
 
 - [Root README](../../README.md) — full setup, configuration, and server usage

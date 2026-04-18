@@ -1,6 +1,6 @@
 import type { CollectorContext, VerifierPayload } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
-import { ResourceActionScopeRuleCollector } from "#/rules/ResourceActionScopeRuleCollector.mjs";
+import { ResourceActionScopeRuleCollector } from "#/rules/collectors/ResourceActionScopeRuleCollector.mjs";
 
 const makeContext = (resourceType: string, action: string, scope?: string): CollectorContext => ({
 	payload: { ...(scope !== undefined ? { scope } : {}) } satisfies VerifierPayload,

@@ -1,5 +1,5 @@
 import type { CollectorContext, Rule, RuleCollector } from "@o3co/auth.policy-verifier.core";
-import { HasScope } from "./HasScope.mjs";
+import { HasScope } from "../HasScope.mjs";
 
 /**
  * Generates a HasScope rule derived from the request action and resource type.

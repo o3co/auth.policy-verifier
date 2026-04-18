@@ -211,5 +211,6 @@ import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
 
 ## See Also
 
+- [Extension guide (`docs/extending.md`)](../../docs/extending.md) — how to write custom `Rule` and `AttributeCollector` implementations; positioning of `builtins` as a basic set
 - [`@o3co/auth.policy-verifier.core`](../core/README.md) — core interfaces and attribute constants
 - [auth.policy-verifier root README](../../README.md) — full setup and configuration reference

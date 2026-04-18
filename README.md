@@ -77,7 +77,7 @@ standalone → server   → core
 ```
 
 - **core** — Types, `evaluate()`, `AttributePipeline`, `RulePipeline`, Module infrastructure. No runtime dependencies.
-- **builtins** — Built-in collectors (scope, permission, role, subject ID, request context), rules (HasScope, HasPermission), DotNotation resource parser. Does not depend on server.
+- **builtins** — Built-in collectors (scope, permission, role, subject ID), rules (HasScope, HasPermission, attribute comparison rules), DotNotation resource parser. Does not depend on server. See [`docs/extending.md`](docs/extending.md) for writing custom rules and collectors.
 - **server** — Express HTTP server, `createApp()`, `POST /verify` route, JWT key resolution, config schema. Does not depend on builtins.
 - **standalone** — Composition root: reads HOCON config, selects modules, starts the server.
 

@@ -4,8 +4,8 @@ import { PayloadSubjectIdCollector } from "./collectors/PayloadSubjectIdCollecto
 import { StaticPermissionCollector } from "./collectors/StaticPermissionCollector.mjs";
 import { StaticRoleCollector } from "./collectors/StaticRoleCollector.mjs";
 import { DotNotationResourceParser } from "./resource/DotNotationResourceParser.mjs";
-import { ResourceActionPermissionRuleCollector } from "./rules/ResourceActionPermissionRuleCollector.mjs";
-import { ResourceActionScopeRuleCollector } from "./rules/ResourceActionScopeRuleCollector.mjs";
+import { ResourceActionPermissionRuleCollector } from "./rules/collectors/ResourceActionPermissionRuleCollector.mjs";
+import { ResourceActionScopeRuleCollector } from "./rules/collectors/ResourceActionScopeRuleCollector.mjs";
 
 export const builtinCollectorsModule: Module = {
 	name: "builtin-collectors",

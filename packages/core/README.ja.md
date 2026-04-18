@@ -161,8 +161,10 @@ export const customModule: Module = {
 
 `customModule` をスタンドアロンエントリーポイントの `createApp` に渡してください。完全なセットアップ例はルートの README を参照してください。
 
+カスタム `Rule` の書き方、`ruleType` のグルーピング規約、独自ロジックを書くべきときと [`@o3co/auth.policy-verifier.builtins`](../builtins/README.ja.md) を使うべきときの判断基準などを含む完全な拡張ガイドは [`docs/extending.ja.md`](../../docs/extending.ja.md) を参照してください。
+
 ## 関連
 
-- [ルート README](../../README.md) — セットアップ全体、設定、サーバー利用方法
-- [`@o3co/auth.policy-verifier.builtins`](../builtins/README.md) — 組み込みコレクター、ルール、リソースパーサー
-- [`@o3co/auth.policy-verifier.server`](../server/README.md) — Express HTTP サーバーと `createApp`
+- [ルート README](../../README.ja.md) — セットアップ全体、設定、サーバー利用方法
+- [`@o3co/auth.policy-verifier.builtins`](../builtins/README.ja.md) — 組み込みコレクター、ルール、リソースパーサー
+- [`@o3co/auth.policy-verifier.server`](../server/README.ja.md) — Express HTTP サーバーと `createApp`
