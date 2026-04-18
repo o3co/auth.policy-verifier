@@ -60,7 +60,7 @@ export class UserLevelAtLeast implements Rule {
 
   constructor(private readonly config: UserLevelAtLeastConfig) {
     if (typeof config.threshold !== "number" || Number.isNaN(config.threshold)) {
-      throw new Error("UserLevelAtLeast: 'threshold' must be a finite number");
+      throw new Error("UserLevelAtLeast: 'threshold' must be a number and not NaN");
     }
     // 異なる threshold の 2 インスタンスが AND 結合される（OR ではない）ように、
     // threshold を ruleType にエンコードする。
