@@ -22,5 +22,6 @@ export { AttrPairEqual, type AttrPairEqualConfig } from "./rules/AttrPairEqual.m
 export { AttrPairNotEqual, type AttrPairNotEqualConfig } from "./rules/AttrPairNotEqual.mjs";
 export { HasPermission } from "./rules/HasPermission.mjs";
 export { HasScope } from "./rules/HasScope.mjs";
+// Rule Collectors
 export { ResourceActionPermissionRuleCollector } from "./rules/collectors/ResourceActionPermissionRuleCollector.mjs";
 export { ResourceActionScopeRuleCollector } from "./rules/collectors/ResourceActionScopeRuleCollector.mjs";

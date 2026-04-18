@@ -211,5 +211,6 @@ import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
 
 ## 関連
 
-- [`@o3co/auth.policy-verifier.core`](../core/README.md) — コアインターフェースと attribute 定数
-- [auth.policy-verifier ルート README](../../README.md) — 完全なセットアップと設定のリファレンス
+- [拡張ガイド (`docs/extending.ja.md`)](../../docs/extending.ja.md) — カスタム `Rule` / `AttributeCollector` の書き方と、`builtins` が基本セットとして位置づけられている理由
+- [`@o3co/auth.policy-verifier.core`](../core/README.ja.md) — コアインターフェースと attribute 定数
+- [auth.policy-verifier ルート README](../../README.ja.md) — 完全なセットアップと設定のリファレンス
