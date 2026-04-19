@@ -2,7 +2,7 @@ import type { Module } from "@o3co/auth.policy-verifier.core";
 import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { AppConfigSchema, createApp } from "#/index.mjs";
+import { AppConfigSchema, builtinKeyResolversModule, createApp } from "#/index.mjs";
 
 const JWT_SECRET = "test-secret";
 const secretKey = new TextEncoder().encode(JWT_SECRET);
@@ -56,7 +56,7 @@ describe("createApp", () => {
 		const app = await createApp({
 			pathResolver: (s: string) => s,
 			config: testConfig,
-			modules: [testModule],
+			modules: [testModule, builtinKeyResolversModule],
 		});
 
 		const token = await signToken({ scope: "read:project" });
@@ -73,7 +73,7 @@ describe("createApp", () => {
 		const app = await createApp({
 			pathResolver: (s: string) => s,
 			config: testConfig,
-			modules: [testModule],
+			modules: [testModule, builtinKeyResolversModule],
 		});
 
 		const token = await signToken({ scope: "write:project" });
@@ -97,7 +97,7 @@ describe("createApp", () => {
 			createApp({
 				pathResolver: (s: string) => s,
 				config: badConfig,
-				modules: [testModule],
+				modules: [testModule, builtinKeyResolversModule],
 			}),
 		).rejects.toThrow('Registry: "NonExistent" is not registered');
 	});
@@ -106,7 +106,7 @@ describe("createApp", () => {
 		const app = await createApp({
 			pathResolver: (s: string) => s,
 			config: testConfig,
-			modules: [testModule],
+			modules: [testModule, builtinKeyResolversModule],
 		});
 
 		const res = await request(app).get("/healthcheck");
@@ -125,7 +125,7 @@ describe("createApp", () => {
 		const app = await createApp({
 			pathResolver: (s: string) => s,
 			config: noKeyConfig,
-			modules: [testModule],
+			modules: [testModule, builtinKeyResolversModule],
 		});
 
 		// Token is decoded (not verified) — use the same secret but validation is skipped

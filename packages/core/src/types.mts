@@ -8,6 +8,16 @@ export interface ResourceParser {
 	parse(raw: string): Resource;
 }
 
+/**
+ * Abstract JWT key resolver. The concrete `key` type is determined by the
+ * consuming JWT library (e.g. jose's `KeyObject | CryptoKey | Uint8Array | JWTVerifyGetKey`).
+ * Core keeps it `unknown` so new algorithms can be introduced without touching core.
+ */
+export interface KeyResolver {
+	key: unknown;
+	algorithms: string[];
+}
+
 export interface CollectorContext {
 	payload: VerifierPayload;
 	resource: Resource;

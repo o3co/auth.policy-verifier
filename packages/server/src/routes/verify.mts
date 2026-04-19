@@ -6,11 +6,14 @@ import {
 	type VerifierPayload,
 } from "@o3co/auth.policy-verifier.core";
 import express from "express";
-import { decodeJwt, type JWTPayload, type JWTVerifyGetKey, jwtVerify, type KeyObject } from "jose";
+import { decodeJwt, type JWTPayload, jwtVerify } from "jose";
 
 export interface VerifyRouterConfig {
 	jwt: {
-		key: KeyObject | CryptoKey | Uint8Array | JWTVerifyGetKey;
+		// The `key` is produced by a KeyResolverFactory; its concrete type depends on
+		// the algorithm (e.g. KeyObject for HS256, JWTVerifyGetKey for JWKS, etc.).
+		// The route narrows it via cast when calling jwtVerify.
+		key: unknown;
 		algorithms: string[];
 		validate: boolean;
 	};

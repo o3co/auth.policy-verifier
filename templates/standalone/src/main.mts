@@ -3,7 +3,11 @@
  */
 import { resolve } from "node:path";
 import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
-import { AppConfigSchema, createApp } from "@o3co/auth.policy-verifier.server";
+import {
+	AppConfigSchema,
+	builtinKeyResolversModule,
+	createApp,
+} from "@o3co/auth.policy-verifier.server";
 import { createLogger, gracefulShutdown } from "@o3co/auth.utils";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
@@ -18,7 +22,7 @@ const config = validate(
 const app = await createApp({
 	pathResolver: import.meta.resolve,
 	config,
-	modules: [builtinCollectorsModule],
+	modules: [builtinCollectorsModule, builtinKeyResolversModule],
 });
 
 const server = app.listen(config.http.port, config.http.hostname, () => {

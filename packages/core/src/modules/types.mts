@@ -1,4 +1,4 @@
-import type { AttributeCollector, ResourceParser, RuleCollector } from "../types.mjs";
+import type { AttributeCollector, KeyResolver, ResourceParser, RuleCollector } from "../types.mjs";
 import type { Registry } from "./Registry.mjs";
 
 /**
@@ -17,6 +17,12 @@ export type AttributeCollectorFactory = (config: any) => AttributeCollector;
 export type RuleCollectorFactory = (config: any) => RuleCollector;
 // biome-ignore lint/suspicious/noExplicitAny: resource parser constructors accept varied config shapes
 export type ResourceParserFactory = (config: any) => ResourceParser;
+/**
+ * Factory that produces a KeyResolver for a given JWT algorithm.
+ * Async because some resolvers import PEM files or fetch JWKS metadata.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: key resolver factories accept algorithm-specific config shapes
+export type KeyResolverFactory = (config: any) => Promise<KeyResolver>;
 
 /**
  * Context provided to each Module during initialization.
@@ -27,6 +33,7 @@ export interface ModuleContext {
 	attributeCollectorRegistry: Registry<AttributeCollectorFactory>;
 	ruleCollectorRegistry: Registry<RuleCollectorFactory>;
 	resourceParserRegistry: Registry<ResourceParserFactory>;
+	keyResolverRegistry: Registry<KeyResolverFactory>;
 }
 
 /**

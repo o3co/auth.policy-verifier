@@ -47,9 +47,11 @@ import { myModule } from "./my-module.mts";
 const app = await createApp({
   pathResolver: import.meta.resolve,
   config,
-  modules: [builtinCollectorsModule, myModule],
+  modules: [builtinCollectorsModule, builtinKeyResolversModule, myModule],
 });
 ```
+
+`builtinKeyResolversModule`（`@o3co/auth.policy-verifier.server` から import）は `HS256` / `RS256` / `ES256` / `EdDSA` の JWT 鍵解決に必須です。
 
 ## npm スクリプト
 

@@ -69,10 +69,11 @@ interface ModuleContext {
   attributeCollectorRegistry: Registry<AttributeCollectorFactory>
   ruleCollectorRegistry: Registry<RuleCollectorFactory>
   resourceParserRegistry: Registry<ResourceParserFactory>
+  keyResolverRegistry: Registry<KeyResolverFactory>
 }
 ```
 
-モジュールは `init` 内でコレクターやパーサーのファクトリーをレジストリに登録します。設定値は `config` を通じて渡されます。
+モジュールは `init` 内でコレクター・パーサー・鍵リゾルバーのファクトリーをレジストリに登録します。設定値は `config` を通じて渡されます。
 
 ### 型一覧
 
@@ -92,6 +93,8 @@ interface ModuleContext {
 | `AttributeCollectorFactory` | config から `AttributeCollector` を生成するファクトリー関数 |
 | `RuleCollectorFactory` | config から `RuleCollector` を生成するファクトリー関数 |
 | `ResourceParserFactory` | config から `ResourceParser` を生成するファクトリー関数 |
+| `KeyResolver` | `{ key: unknown; algorithms: string[] }` — 抽象的な JWT 鍵マテリアル。具体的な `key` の型は利用する JWT ライブラリ（デフォルト server では jose）側が決める |
+| `KeyResolverFactory` | アルゴリズムごとに `KeyResolver` を生成するファクトリー関数 `(config: any) => Promise<KeyResolver>` |
 
 ### 定数
 

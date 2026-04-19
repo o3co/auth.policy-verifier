@@ -1,5 +1,6 @@
 import {
 	type AttributeCollectorFactory,
+	type KeyResolverFactory,
 	Registry,
 	type ResourceParserFactory,
 	type RuleCollectorFactory,
@@ -16,6 +17,7 @@ describe("builtinCollectorsModule", () => {
 		const attributeCollectorRegistry = new Registry<AttributeCollectorFactory>();
 		const ruleCollectorRegistry = new Registry<RuleCollectorFactory>();
 		const resourceParserRegistry = new Registry<ResourceParserFactory>();
+		const keyResolverRegistry = new Registry<KeyResolverFactory>();
 
 		await builtinCollectorsModule.init({
 			pathResolver: (s: string) => s,
@@ -23,6 +25,7 @@ describe("builtinCollectorsModule", () => {
 			attributeCollectorRegistry,
 			ruleCollectorRegistry,
 			resourceParserRegistry,
+			keyResolverRegistry,
 		});
 
 		expect(attributeCollectorRegistry.has("PayloadScopeCollector")).toBe(true);
@@ -35,6 +38,7 @@ describe("builtinCollectorsModule", () => {
 		const attributeCollectorRegistry = new Registry<AttributeCollectorFactory>();
 		const ruleCollectorRegistry = new Registry<RuleCollectorFactory>();
 		const resourceParserRegistry = new Registry<ResourceParserFactory>();
+		const keyResolverRegistry = new Registry<KeyResolverFactory>();
 
 		await builtinCollectorsModule.init({
 			pathResolver: (s: string) => s,
@@ -42,6 +46,7 @@ describe("builtinCollectorsModule", () => {
 			attributeCollectorRegistry,
 			ruleCollectorRegistry,
 			resourceParserRegistry,
+			keyResolverRegistry,
 		});
 
 		expect(ruleCollectorRegistry.has("ResourceActionScopeRuleCollector")).toBe(true);
@@ -52,6 +57,7 @@ describe("builtinCollectorsModule", () => {
 		const attributeCollectorRegistry = new Registry<AttributeCollectorFactory>();
 		const ruleCollectorRegistry = new Registry<RuleCollectorFactory>();
 		const resourceParserRegistry = new Registry<ResourceParserFactory>();
+		const keyResolverRegistry = new Registry<KeyResolverFactory>();
 
 		await builtinCollectorsModule.init({
 			pathResolver: (s: string) => s,
@@ -59,6 +65,7 @@ describe("builtinCollectorsModule", () => {
 			attributeCollectorRegistry,
 			ruleCollectorRegistry,
 			resourceParserRegistry,
+			keyResolverRegistry,
 		});
 
 		expect(resourceParserRegistry.has("DotNotationResourceParser")).toBe(true);
@@ -68,6 +75,7 @@ describe("builtinCollectorsModule", () => {
 		const attributeCollectorRegistry = new Registry<AttributeCollectorFactory>();
 		const ruleCollectorRegistry = new Registry<RuleCollectorFactory>();
 		const resourceParserRegistry = new Registry<ResourceParserFactory>();
+		const keyResolverRegistry = new Registry<KeyResolverFactory>();
 
 		await builtinCollectorsModule.init({
 			pathResolver: (s: string) => s,
@@ -75,6 +83,7 @@ describe("builtinCollectorsModule", () => {
 			attributeCollectorRegistry,
 			ruleCollectorRegistry,
 			resourceParserRegistry,
+			keyResolverRegistry,
 		});
 
 		const factory = attributeCollectorRegistry.get("StaticPermissionCollector");

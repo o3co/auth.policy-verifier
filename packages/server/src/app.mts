@@ -1,6 +1,7 @@
 import {
 	type AttributeCollectorFactory,
 	AttributePipeline,
+	type KeyResolverFactory,
 	type Module,
 	type PathResolver,
 	Registry,
@@ -11,7 +12,6 @@ import {
 import { createHealthcheckRouter } from "@o3co/auth.utils/express";
 import express from "express";
 import type { AppConfig } from "./config/application.schema.mjs";
-import { createKeyResolver } from "./jwt/index.mjs";
 import { createVerifyRouter } from "./routes/verify.mjs";
 
 export interface CreateAppOptions {
@@ -27,6 +27,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	const attributeCollectorRegistry = new Registry<AttributeCollectorFactory>();
 	const ruleCollectorRegistry = new Registry<RuleCollectorFactory>();
 	const resourceParserRegistry = new Registry<ResourceParserFactory>();
+	const keyResolverRegistry = new Registry<KeyResolverFactory>();
 
 	// 2. Initialize modules — each registers factory functions
 	const context = {
@@ -35,6 +36,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 		attributeCollectorRegistry,
 		ruleCollectorRegistry,
 		resourceParserRegistry,
+		keyResolverRegistry,
 	};
 
 	for (const mod of modules) {
@@ -57,10 +59,10 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	const resourceParserFactory = resourceParserRegistry.get(config.resource.parser);
 	const resourceParser = resourceParserFactory(config.resource);
 
-	// 6. Build key resolver from JWT config
+	// 6. Build key resolver from JWT config via the registry.
 	// When validate=false, decodeJwt is used instead of jwtVerify, so no key material is needed.
 	const keyResolver = config.oauth.jwt.validate
-		? await createKeyResolver(config.oauth.jwt)
+		? await keyResolverRegistry.get(config.oauth.jwt.algorithm)(config.oauth.jwt)
 		: { key: new Uint8Array(0), algorithms: [] as string[] };
 
 	if (!config.oauth.jwt.validate) {
