@@ -1,5 +1,10 @@
 # auth.policy-verifier
 
+[![CI](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@o3co/auth.policy-verifier.core)](https://www.npmjs.com/package/@o3co/auth.policy-verifier.core)
+[![codecov](https://codecov.io/gh/o3co/auth.policy-verifier/graph/badge.svg)](https://codecov.io/gh/o3co/auth.policy-verifier)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
 マイクロサービス認可のための属性ベースアクセス制御 (ABAC) エンジン。JWT + リソース + アクションを受け取り、Collector 駆動のルールを評価して allow/deny を返す。ポリシー DSL 不要 — 認可ロジックは TypeScript で組み立てる。
 
 - OPA や Cedar にドロップイン置き換え可能 — [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) は共通の `VerifierEndpoint` インターフェース経由で本サービス、OPA、Cedar Agent のいずれにもルーティング可能
@@ -202,6 +207,16 @@ docker run -e OAUTH_JWT_SECRET=secret my-verifier
 - [auth.proxy](https://github.com/o3co/auth.proxy) — トークン検証リバースプロキシ
 - [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) — gRPC / ConnectRPC 向け protobuf method option 認可 interceptor (認可判定にこのサービスを呼び出す)
 - [auth](https://github.com/o3co/auth) — アーキテクチャドキュメントと E2E テスト
+
+## カバレッジ
+
+package 単位のカバレッジは Codecov で flag ごとに分けて追跡しています:
+
+- [core](https://codecov.io/gh/o3co/auth.policy-verifier?flag=core) — エンジンコア
+- [builtins](https://codecov.io/gh/o3co/auth.policy-verifier?flag=builtins) — 組み込み collector / rule
+- [server](https://codecov.io/gh/o3co/auth.policy-verifier?flag=server) — HTTP サーバ層
+
+ローカル実行は `pnpm run test:coverage` で、各 package の `coverage/` 以下にレポートが出力されます。
 
 ## ライセンス
 

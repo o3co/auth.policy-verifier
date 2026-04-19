@@ -1,0 +1,45 @@
+coverage:
+  status:
+    project:
+      core:
+        flags: [core]
+        target: auto
+        threshold: 1%
+      builtins:
+        flags: [builtins]
+        target: auto
+        threshold: 1%
+      server:
+        flags: [server]
+        target: auto
+        threshold: 2%
+    patch:
+      default: false
+
+flags:
+  core:
+    paths:
+      - packages/core/src/
+    carryforward: true
+  builtins:
+    paths:
+      - packages/builtins/src/
+    carryforward: true
+  server:
+    paths:
+      - packages/server/src/
+    carryforward: true
+
+comment:
+  layout: "header, diff, flags, files, footer"
+  behavior: default
+  require_changes: false
+
+ignore:
+  - "**/__tests__/**"
+  - "**/dist/**"
+  - "templates/**"
+  - "create-app/**"
+  - "tests/**"
+  - "packages/foundation/**"
+  - "packages/express/**"
