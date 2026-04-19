@@ -44,6 +44,12 @@ Authorization: Bearer <jwt>
 - **プラグイン可能なアーキテクチャ** — Module システムでカスタム Collector、ルール、リソースパーサーをファクトリ経由で登録。
 - **DSL ロックインなし** — 認可ロジックは TypeScript。Rego も Cedar ポリシー言語も不要。スケールアウトが必要になれば grpc.authz 経由で OPA や Cedar に差し替え可能 — REST API 契約は同じ。
 
+## いつ選ぶか
+
+- ポリシーを書くのは開発者で、DSL を学習したくない → **これ**
+- ポリシーを非開発者が編集する、または形式検証が必要 → **[Cedar](https://www.cedarpolicy.com/)**
+- 組織全体のポリシー基盤として広範な built-in operator 群が必要 → **[OPA](https://www.openpolicyagent.org/)**
+
 ## Quick Start
 
 ```bash

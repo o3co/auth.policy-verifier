@@ -49,6 +49,12 @@ Authorization: Bearer <jwt>
 - **Pluggable architecture** — Module system for registering custom collectors, rules, and resource parsers via factories.
 - **No DSL lock-in** — Authorization logic is TypeScript. No Rego, no Cedar policy language. If you outgrow this, swap to OPA or Cedar via grpc.authz — the REST API contract is the same.
 
+## When to choose this
+
+- Policy authors are developers, and you don't want to learn a DSL → **this**
+- Policies are edited by non-developers, or you need formal verification → **[Cedar](https://www.cedarpolicy.com/)**
+- You need org-wide policy infrastructure with a large built-in operator surface → **[OPA](https://www.openpolicyagent.org/)**
+
 ## Quick Start
 
 ```bash
