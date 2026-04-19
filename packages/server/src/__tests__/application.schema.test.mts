@@ -34,23 +34,20 @@ describe("AppConfigSchema — JWT algorithm validation", () => {
 		}
 	});
 
-	it.each(["RS256", "ES256", "EdDSA"])(
-		"rejects %s without any key source",
-		(algorithm) => {
-			const result = AppConfigSchema.safeParse({
-				oauth: { jwt: { algorithm, validate: true } },
-				...baseBody,
-			});
-			expect(result.success).toBe(false);
-			if (!result.success) {
-				expect(
-					result.error.issues.some((i) =>
-						i.message.includes(`jwksUri or publicKey/publicKeyPath is required for ${algorithm}`),
-					),
-				).toBe(true);
-			}
-		},
-	);
+	it.each(["RS256", "ES256", "EdDSA"])("rejects %s without any key source", (algorithm) => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: { algorithm, validate: true } },
+			...baseBody,
+		});
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(
+				result.error.issues.some((i) =>
+					i.message.includes(`jwksUri or publicKey/publicKeyPath is required for ${algorithm}`),
+				),
+			).toBe(true);
+		}
+	});
 
 	it("accepts unknown algorithm names (validated at registry lookup, not at schema)", () => {
 		// User-registered algorithms are responsible for their own config validation
