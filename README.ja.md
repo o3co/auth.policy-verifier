@@ -2,7 +2,7 @@
 
 マイクロサービス認可のための属性ベースアクセス制御 (ABAC) エンジン。JWT + リソース + アクションを受け取り、Collector 駆動のルールを評価して allow/deny を返す。ポリシー DSL 不要 — 認可ロジックは TypeScript で組み立てる。
 
-- OPA や Cedar にドロップイン置き換え可能 — [grpc.authz](https://github.com/o3co/grpc.authz) は3つすべてをバックエンドとしてサポート
+- OPA や Cedar にドロップイン置き換え可能 — [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) は共通の `VerifierEndpoint` インターフェース経由で本サービス、OPA、Cedar Agent のいずれにもルーティング可能
 - HTTP サイドカーとして動作 — エンジンの差し替えはコード変更ではなく設定変更で完了
 - JWT 検証アルゴリズム設定可能 — HS256, RS256, ES256, EdDSA。JWKS または公開鍵直接指定に対応。
 
@@ -42,7 +42,7 @@ Authorization: Bearer <jwt>
 - **JWT 検証アルゴリズム設定可能** — HS256（共有シークレット）、RS256/ES256/EdDSA（JWKS URI または公開鍵直接指定）。[auth.provider](https://github.com/o3co/auth.provider) の JWT 設定と対称設計。
 - **JWKS サポート** — `jwksUri` を auth.provider の `/.well-known/jwks.json` に向ければ鍵ローテーションに自動対応。
 - **プラグイン可能なアーキテクチャ** — Module システムでカスタム Collector、ルール、リソースパーサーをファクトリ経由で登録。
-- **DSL ロックインなし** — 認可ロジックは TypeScript。Rego も Cedar ポリシー言語も不要。スケールアウトが必要になれば grpc.authz 経由で OPA や Cedar に差し替え可能 — REST API 契約は同じ。
+- **DSL ロックインなし** — 認可ロジックは TypeScript。Rego も Cedar ポリシー言語も不要。スケールアウトが必要になれば [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) 経由で OPA や Cedar に差し替え可能 — interceptor がバックエンドを抽象化する。
 
 ## いつ選ぶか
 
@@ -200,7 +200,7 @@ docker run -e OAUTH_JWT_SECRET=secret my-verifier
 
 - [auth.provider](https://github.com/o3co/auth.provider) — DID 認証対応 OAuth 2.0 プロバイダー
 - [auth.proxy](https://github.com/o3co/auth.proxy) — トークン検証リバースプロキシ
-- [grpc.authz](https://github.com/o3co/grpc.authz) — gRPC 認可ミドルウェア (認可判定にこのサービスを呼び出す)
+- [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) — gRPC / ConnectRPC 向け protobuf method option 認可 interceptor (認可判定にこのサービスを呼び出す)
 - [auth](https://github.com/o3co/auth) — アーキテクチャドキュメントと E2E テスト
 
 ## ライセンス

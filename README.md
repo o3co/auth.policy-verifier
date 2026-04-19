@@ -7,7 +7,7 @@
 
 Attribute-based access control (ABAC) engine for microservice authorization. Receives a JWT + resource + action, evaluates collector-driven rules, and returns allow/deny. No policy DSL — authorization logic is composed in TypeScript.
 
-- Drop-in replaceable with OPA or Cedar — [grpc.authz](https://github.com/o3co/grpc.authz) supports all three as backends
+- Drop-in replaceable with OPA or Cedar — [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) can route to this service, OPA, or Cedar Agent via a common `VerifierEndpoint` interface
 - Runs as an HTTP sidecar — swapping engines is a config change, not a code change
 - Configurable JWT verification — HS256, RS256, ES256, EdDSA with JWKS or direct public key
 
@@ -47,7 +47,7 @@ Authorization: Bearer <jwt>
 - **Configurable JWT verification** — HS256 (shared secret), RS256/ES256/EdDSA (JWKS URI or direct public key). Symmetric design with [auth.provider](https://github.com/o3co/auth.provider)'s JWT config.
 - **JWKS support** — Point `jwksUri` at auth.provider's `/.well-known/jwks.json` for automatic key rotation.
 - **Pluggable architecture** — Module system for registering custom collectors, rules, and resource parsers via factories.
-- **No DSL lock-in** — Authorization logic is TypeScript. No Rego, no Cedar policy language. If you outgrow this, swap to OPA or Cedar via grpc.authz — the REST API contract is the same.
+- **No DSL lock-in** — Authorization logic is TypeScript. No Rego, no Cedar policy language. If you outgrow this, swap to OPA or Cedar via [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) — the interceptor abstracts over the backend.
 
 ## When to choose this
 
@@ -205,7 +205,7 @@ docker run -e OAUTH_JWT_SECRET=secret my-verifier
 
 - [auth.provider](https://github.com/o3co/auth.provider) — OAuth 2.0 provider with DID authentication
 - [auth.proxy](https://github.com/o3co/auth.proxy) — Token validation reverse proxy
-- [grpc.authz](https://github.com/o3co/grpc.authz) — gRPC authorization middleware (calls this service for authorization decisions)
+- [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) — protobuf method option authorization interceptors for gRPC / ConnectRPC (calls this service for authorization decisions)
 - [auth](https://github.com/o3co/auth) — Architecture docs and E2E tests
 
 ## License
