@@ -32,4 +32,28 @@ jobs:
       - run: pnpm run lint
       - run: pnpm run build
       - run: pnpm -r --if-present run typecheck
-      - run: pnpm run test
+      - run: pnpm run test:coverage
+
+      - name: Upload coverage to Codecov (core)
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: packages/core/coverage/coverage-final.json
+          flags: core
+          fail_ci_if_error: false
+
+      - name: Upload coverage to Codecov (builtins)
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: packages/builtins/coverage/coverage-final.json
+          flags: builtins
+          fail_ci_if_error: false
+
+      - name: Upload coverage to Codecov (server)
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: packages/server/coverage/coverage-final.json
+          flags: server
+          fail_ci_if_error: false
