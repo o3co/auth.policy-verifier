@@ -40,6 +40,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: packages/core/coverage/coverage-final.json
           flags: core
+          disable_search: true
           fail_ci_if_error: false
 
       - name: Upload coverage to Codecov (builtins)
@@ -48,6 +49,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: packages/builtins/coverage/coverage-final.json
           flags: builtins
+          disable_search: true
           fail_ci_if_error: false
 
       - name: Upload coverage to Codecov (server)
@@ -56,4 +58,5 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: packages/server/coverage/coverage-final.json
           flags: server
+          disable_search: true
           fail_ci_if_error: false
