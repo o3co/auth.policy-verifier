@@ -10,8 +10,8 @@ import { HasScope } from "../HasScope.mjs";
  * capability ceiling — not what the session **has been granted**. Whether the
  * operation is ultimately permitted is determined by the full rule pipeline
  * (other collectors, resource-owner policy, etc.). This collector enforces the
- * ceiling only: the requested `{action}:{resourceType}` must be present in
- * the scopes asserted by the token.
+ * ceiling only: it produces a `HasScope` rule for the requested
+ * `{action}:{resourceType}`, which must be satisfied by the token's scopes.
  *
  * ## Behavior for scopeless tokens
  *
@@ -25,8 +25,8 @@ import { HasScope } from "../HasScope.mjs";
  * contributes nothing — prefer collectors that derive rules from identity
  * claims (e.g. DID, `sub`, role) instead.
  *
- * See o3co/auth.provider#56 for background on why the IdP asserts identity,
- * not permissions.
+ * See https://github.com/o3co/auth.provider/issues/56 for background on why
+ * the IdP asserts identity, not permissions.
  */
 export class ResourceActionScopeRuleCollector implements RuleCollector {
 	async collect(context: CollectorContext): Promise<Rule[]> {
