@@ -9,6 +9,7 @@
 	"scripts": {
 		"build": "pnpm -r run build",
 		"test": "pnpm -r run test",
+		"test:coverage": "pnpm -r --if-present run test:coverage",
 		"lint": "biome check packages/ templates/ create-app/ tests/",
 		"docs": "typedoc"
 	},
