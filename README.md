@@ -208,6 +208,16 @@ docker run -e OAUTH_JWT_SECRET=secret my-verifier
 - [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) — protobuf method option authorization interceptors for gRPC / ConnectRPC (calls this service for authorization decisions)
 - [auth](https://github.com/o3co/auth) — Architecture docs and E2E tests
 
+## Coverage
+
+Per-package coverage is tracked on Codecov and broken down by flag:
+
+- [core](https://codecov.io/gh/o3co/auth.policy-verifier?flag=core) — engine core
+- [builtins](https://codecov.io/gh/o3co/auth.policy-verifier?flag=builtins) — built-in collectors and rules
+- [server](https://codecov.io/gh/o3co/auth.policy-verifier?flag=server) — HTTP server layer
+
+Run locally with `pnpm run test:coverage` to generate reports under each package's `coverage/`.
+
 ## License
 
 Apache License 2.0 — Copyright 2026 1o1 Co. Ltd.
