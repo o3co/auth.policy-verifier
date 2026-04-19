@@ -8,11 +8,7 @@ export default defineConfig({
 			reporter: ["text", "json", "json-summary"],
 			reportsDirectory: "./coverage",
 			include: ["src/**/*.mts"],
-			exclude: [
-				"src/**/__tests__/**",
-				"src/**/*.d.mts",
-				"dist/**",
-			],
+			exclude: ["src/**/__tests__/**", "src/**/*.d.mts", "dist/**"],
 			all: true,
 		},
 	},
