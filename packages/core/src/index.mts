@@ -9,6 +9,7 @@ export {
 } from "./keys.mjs";
 export type {
 	AttributeCollectorFactory,
+	KeyResolverFactory,
 	Module,
 	ModuleContext,
 	PathResolver,
@@ -22,6 +23,7 @@ export type {
 	Attributes,
 	CollectorContext,
 	Decision,
+	KeyResolver,
 	Resource,
 	ResourceParser,
 	Role,

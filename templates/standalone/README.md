@@ -47,9 +47,11 @@ import { myModule } from "./my-module.mts";
 const app = await createApp({
   pathResolver: import.meta.resolve,
   config,
-  modules: [builtinCollectorsModule, myModule],
+  modules: [builtinCollectorsModule, builtinKeyResolversModule, myModule],
 });
 ```
+
+`builtinKeyResolversModule` (from `@o3co/auth.policy-verifier.server`) must be present for the app to resolve JWT keys for `HS256` / `RS256` / `ES256` / `EdDSA`.
 
 ## npm Scripts
 

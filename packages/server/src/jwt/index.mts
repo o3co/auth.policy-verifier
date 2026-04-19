@@ -12,4 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-export { createKeyResolver, type JwtKeyConfig, type KeyResolver } from "./createKeyResolver.mjs";
+export {
+	builtinKeyResolversModule,
+	EdDSAKeyResolverFactory,
+	ES256KeyResolverFactory,
+	HS256KeyResolverFactory,
+	RS256KeyResolverFactory,
+} from "./builtinKeyResolversModule.mjs";

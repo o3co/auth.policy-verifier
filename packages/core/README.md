@@ -69,10 +69,11 @@ interface ModuleContext {
   attributeCollectorRegistry: Registry<AttributeCollectorFactory>
   ruleCollectorRegistry: Registry<RuleCollectorFactory>
   resourceParserRegistry: Registry<ResourceParserFactory>
+  keyResolverRegistry: Registry<KeyResolverFactory>
 }
 ```
 
-A module registers collector and parser factories into the provided registries during `init`. Configuration is passed through `config`.
+A module registers collector, parser, and key resolver factories into the provided registries during `init`. Configuration is passed through `config`.
 
 ### Types
 
@@ -92,6 +93,8 @@ A module registers collector and parser factories into the provided registries d
 | `AttributeCollectorFactory` | Factory function that produces an `AttributeCollector` from config |
 | `RuleCollectorFactory` | Factory function that produces a `RuleCollector` from config |
 | `ResourceParserFactory` | Factory function that produces a `ResourceParser` from config |
+| `KeyResolver` | `{ key: unknown; algorithms: string[] }` — abstract JWT key material; concrete `key` type is owned by the consuming JWT library (jose in the default server) |
+| `KeyResolverFactory` | Factory function `(config: any) => Promise<KeyResolver>` that produces a `KeyResolver` for a given algorithm |
 
 ### Constants
 

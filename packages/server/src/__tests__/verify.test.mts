@@ -33,17 +33,13 @@ import express from "express";
 import { exportSPKI, SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { createKeyResolver } from "#/jwt/createKeyResolver.mjs";
+import { HS256KeyResolverFactory, RS256KeyResolverFactory } from "#/jwt/index.mjs";
 import { createVerifyRouter } from "#/routes/verify.mjs";
 
 const generateKeyPairAsync = promisify(generateKeyPair);
 
 const JWT_SECRET = "test-secret";
-const hs256Key = await createKeyResolver({
-	algorithm: "HS256",
-	secret: JWT_SECRET,
-	validate: true,
-});
+const hs256Key = await HS256KeyResolverFactory({ secret: JWT_SECRET });
 
 async function signHS256Token(payload: Record<string, unknown>): Promise<string> {
 	return new SignJWT(payload)
@@ -225,11 +221,7 @@ describe("POST /verify with RS256", () => {
 	it("returns 200 allow for valid RS256 token", async () => {
 		const { privateKey, publicKey } = await generateKeyPairAsync("rsa", { modulusLength: 2048 });
 		const publicKeyPem = await exportSPKI(publicKey as unknown as CryptoKey);
-		const rs256Resolver = await createKeyResolver({
-			algorithm: "RS256",
-			publicKey: publicKeyPem,
-			validate: true,
-		});
+		const rs256Resolver = await RS256KeyResolverFactory({ publicKey: publicKeyPem });
 
 		const app = express();
 		app.use(
@@ -261,11 +253,7 @@ describe("POST /verify with RS256", () => {
 			modulusLength: 2048,
 		});
 		const publicKeyPem = await exportSPKI(publicKey as unknown as CryptoKey);
-		const rs256Resolver = await createKeyResolver({
-			algorithm: "RS256",
-			publicKey: publicKeyPem,
-			validate: true,
-		});
+		const rs256Resolver = await RS256KeyResolverFactory({ publicKey: publicKeyPem });
 
 		const app = express();
 		app.use(

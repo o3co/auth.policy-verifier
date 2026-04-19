@@ -14,7 +14,11 @@
  * the allow/deny paths in isolation.
  */
 import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
-import { AppConfigSchema, createApp } from "@o3co/auth.policy-verifier.server";
+import {
+	AppConfigSchema,
+	builtinKeyResolversModule,
+	createApp,
+} from "@o3co/auth.policy-verifier.server";
 import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
@@ -49,7 +53,7 @@ describe("standalone smoke", () => {
 		const app = await createApp({
 			pathResolver: (s: string) => s,
 			config: baseConfig,
-			modules: [builtinCollectorsModule],
+			modules: [builtinCollectorsModule, builtinKeyResolversModule],
 		});
 
 		const res = await request(app).get("/healthcheck");
@@ -60,7 +64,7 @@ describe("standalone smoke", () => {
 		const app = await createApp({
 			pathResolver: (s: string) => s,
 			config: baseConfig,
-			modules: [builtinCollectorsModule],
+			modules: [builtinCollectorsModule, builtinKeyResolversModule],
 		});
 
 		// PayloadScopeCollector extracts "read:document" from the JWT scope claim.
@@ -80,7 +84,7 @@ describe("standalone smoke", () => {
 		const app = await createApp({
 			pathResolver: (s: string) => s,
 			config: baseConfig,
-			modules: [builtinCollectorsModule],
+			modules: [builtinCollectorsModule, builtinKeyResolversModule],
 		});
 
 		// Token has "write:document" but action is "read", so HasScope("read:document") fails.

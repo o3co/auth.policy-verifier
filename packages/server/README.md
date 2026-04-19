@@ -139,7 +139,11 @@ HTTP/1.1 500 Internal Server Error
 import { resolve } from 'node:path'
 import { parseFile } from '@o3co/ts.hocon'
 import { validate } from '@o3co/ts.hocon/zod'
-import { createApp, AppConfigSchema } from '@o3co/auth.policy-verifier.server'
+import {
+  createApp,
+  AppConfigSchema,
+  builtinKeyResolversModule,
+} from '@o3co/auth.policy-verifier.server'
 import { builtinCollectorsModule } from '@o3co/auth.policy-verifier.builtins'
 
 const config = validate(
@@ -150,7 +154,7 @@ const config = validate(
 const app = await createApp({
   pathResolver: import.meta.resolve,
   config,
-  modules: [builtinCollectorsModule],
+  modules: [builtinCollectorsModule, builtinKeyResolversModule],
 })
 
 app.listen(config.http.port, config.http.hostname, () => {
@@ -176,9 +180,11 @@ const customModule: Module = {
 const app = await createApp({
   pathResolver: import.meta.resolve,
   config,
-  modules: [builtinCollectorsModule, customModule],
+  modules: [builtinCollectorsModule, builtinKeyResolversModule, customModule],
 })
 ```
+
+`builtinKeyResolversModule` registers HS256 / RS256 / ES256 / EdDSA factories into the `keyResolverRegistry`. Compose it alongside your custom modules; omit it only if you provide your own key resolver module.
 
 ## See Also
 
