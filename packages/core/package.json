@@ -27,7 +27,8 @@
 	"scripts": {
 		"prebuild": "rimraf dist",
 		"build": "tsc",
-		"test": "vitest run"
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage"
 	},
 	"imports": {
 		"#/*": {
