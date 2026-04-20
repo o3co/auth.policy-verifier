@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import {
 	type AttributeCollectorFactory,
 	AttributePipeline,
@@ -14,12 +17,24 @@ import express from "express";
 import type { AppConfig } from "./config/application.schema.mjs";
 import { createVerifyRouter } from "./routes/verify.mjs";
 
+/** Options accepted by `createApp`. */
 export interface CreateAppOptions {
 	pathResolver: PathResolver;
 	config: AppConfig;
 	modules: Module[];
 }
 
+/**
+ * Builds the Express app with registries initialized by the supplied modules.
+ *
+ * Flow: (1) create registries, (2) run `mod.init` sequentially so later modules
+ * can see earlier ones' registrations, (3) resolve concrete collectors /
+ * resource parser / key resolver from config, (4) mount the `/verify` router
+ * and healthcheck under the configured path prefix.
+ *
+ * `config.oauth.jwt.validate = false` disables signature verification and only
+ * decodes the token. This is a development-only switch; a warning is logged.
+ */
 export async function createApp(options: CreateAppOptions): Promise<express.Express> {
 	const { pathResolver, config, modules } = options;
 

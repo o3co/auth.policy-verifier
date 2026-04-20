@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import type { Module } from "@o3co/auth.policy-verifier.core";
 import { SignJWT } from "jose";
 import request from "supertest";

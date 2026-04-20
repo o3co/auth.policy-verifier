@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import type {
 	AttributeCollector,
 	Attributes,
@@ -6,6 +9,11 @@ import type {
 } from "@o3co/auth.policy-verifier.core";
 import { ATTR_ROLES } from "@o3co/auth.policy-verifier.core";
 
+/**
+ * Attribute collector that returns a configured constant role list under
+ * `ATTR_ROLES`, independent of the JWT payload. Each role bundles a name and
+ * the permissions it implies.
+ */
 export class StaticRoleCollector implements AttributeCollector {
 	private roles: Role[];
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import { cpSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -5,6 +8,11 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = resolve(__dirname, "../templates/standalone");
 
+/**
+ * Reads the embedded `versions.json` produced by the prebuild script. Returns
+ * an empty map if the file is absent (e.g. running from source without
+ * prebuild), so callers must treat "not found" as a separate branch.
+ */
 const getPackageVersions = (): Record<string, string> => {
 	const versionFile = resolve(__dirname, "../templates/versions.json");
 	if (existsSync(versionFile)) {
@@ -13,6 +21,14 @@ const getPackageVersions = (): Record<string, string> => {
 	return {};
 };
 
+/**
+ * Copies the bundled standalone template into `targetDir`, rewrites
+ * `package.json` with the new `projectName`, and replaces every `workspace:*`
+ * dependency with the concrete published version from `versions.json`.
+ *
+ * Throws if the template directory is missing (unprebuilt) or if any
+ * workspace dependency is not pinned in `versions.json`.
+ */
 export const scaffold = (targetDir: string, projectName: string): void => {
 	if (!existsSync(TEMPLATES_DIR)) {
 		throw new Error(
@@ -57,7 +73,11 @@ export const scaffold = (targetDir: string, projectName: string): void => {
 	writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 };
 
-// CLI entry point
+/**
+ * CLI entry point: reads the project name from argv, validates it as an
+ * unscoped npm package name, ensures the target directory does not exist,
+ * and scaffolds the template. Exits with non-zero on any validation failure.
+ */
 export const main = (): void => {
 	const args = process.argv.slice(2);
 	const projectName = args[0];

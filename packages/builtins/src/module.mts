@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import type { Module } from "@o3co/auth.policy-verifier.core";
 import { PayloadScopeCollector } from "./collectors/PayloadScopeCollector.mjs";
 import { PayloadSubjectIdCollector } from "./collectors/PayloadSubjectIdCollector.mjs";
@@ -7,6 +10,11 @@ import { DotNotationResourceParser } from "./resource/DotNotationResourceParser.
 import { ResourceActionPermissionRuleCollector } from "./rules/collectors/ResourceActionPermissionRuleCollector.mjs";
 import { ResourceActionScopeRuleCollector } from "./rules/collectors/ResourceActionScopeRuleCollector.mjs";
 
+/**
+ * `Module` that registers the built-in attribute collectors, rule collectors,
+ * and resource parser with a policy-verifier server. Import and pass to
+ * `createApp({ modules: [builtinCollectorsModule, ...] })`.
+ */
 export const builtinCollectorsModule: Module = {
 	name: "builtin-collectors",
 	async init(context) {
