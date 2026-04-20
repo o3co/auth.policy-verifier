@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import type { AttributeCollector, KeyResolver, ResourceParser, RuleCollector } from "../types.mjs";
 import type { Registry } from "./Registry.mjs";
 
@@ -11,10 +14,13 @@ export type PathResolver = (specifier: string) => string;
  * Factory functions that accept a config entry and return an instance.
  * Config entries come from the application HOCON config (e.g. { collector: "Name", ...extras }).
  */
+/** Produces an `AttributeCollector` from its HOCON config entry. */
 // biome-ignore lint/suspicious/noExplicitAny: collector constructors accept varied config shapes
 export type AttributeCollectorFactory = (config: any) => AttributeCollector;
+/** Produces a `RuleCollector` from its HOCON config entry. */
 // biome-ignore lint/suspicious/noExplicitAny: rule collector constructors accept varied config shapes
 export type RuleCollectorFactory = (config: any) => RuleCollector;
+/** Produces a `ResourceParser` from its HOCON config entry. */
 // biome-ignore lint/suspicious/noExplicitAny: resource parser constructors accept varied config shapes
 export type ResourceParserFactory = (config: any) => ResourceParser;
 /**

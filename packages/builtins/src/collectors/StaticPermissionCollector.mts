@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import type {
 	AttributeCollector,
 	Attributes,
@@ -5,6 +8,11 @@ import type {
 } from "@o3co/auth.policy-verifier.core";
 import { ATTR_PERMISSIONS } from "@o3co/auth.policy-verifier.core";
 
+/**
+ * Attribute collector that returns a configured constant permission list under
+ * `ATTR_PERMISSIONS`, independent of the JWT payload. Useful for
+ * environments where permissions are static per deployment.
+ */
 export class StaticPermissionCollector implements AttributeCollector {
 	private permissions: string[];
 

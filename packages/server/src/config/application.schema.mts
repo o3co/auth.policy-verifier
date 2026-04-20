@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import { z } from "zod";
 
 const collectorSchema = z
@@ -6,6 +9,17 @@ const collectorSchema = z
 	})
 	.passthrough();
 
+/**
+ * Zod schema for the HOCON-loaded application configuration. Validates the
+ * shape of `http`, `oauth.jwt`, `attribute.collectors`, `rule.collectors`, and
+ * `resource.parser`. `.passthrough()` on nested objects lets custom collector
+ * and factory configs add their own fields without schema edits.
+ *
+ * Built-in JWT algorithms (HS256 / RS256 / ES256 / EdDSA) carry extra
+ * `superRefine` validation for their required key material. Unknown algorithm
+ * names pass schema validation and are expected to validate themselves in
+ * their `KeyResolverFactory`.
+ */
 export const AppConfigSchema = z.object({
 	http: z
 		.object({
@@ -59,4 +73,5 @@ export const AppConfigSchema = z.object({
 		.default(() => ({ parser: "DotNotationResourceParser" })),
 });
 
+/** Type inferred from `AppConfigSchema`. Consumed by `createApp`. */
 export type AppConfig = z.infer<typeof AppConfigSchema>;

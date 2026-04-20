@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import type { Attributes } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 import { HasScope } from "#/rules/HasScope.mjs";

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import {
 	type AttributePipeline,
 	evaluate,
@@ -8,6 +11,7 @@ import {
 import express from "express";
 import { decodeJwt, type JWTPayload, jwtVerify } from "jose";
 
+/** Config for `createVerifyRouter`. The `jwt.key` type is library-specific and is narrowed at call-time. */
 export interface VerifyRouterConfig {
 	jwt: {
 		// The `key` is produced by a KeyResolverFactory; its concrete type depends on
@@ -22,6 +26,13 @@ export interface VerifyRouterConfig {
 	rulePipeline: RulePipeline;
 }
 
+/**
+ * Builds the Express router that serves `POST /verify`.
+ *
+ * Request: `Authorization: Bearer <jwt>`, body `{ resource: string, action: string, context?: object }`.
+ * Response: `{ decision: "allow" }` (200), `{ decision: "deny", code, message }` (403),
+ * or 400 for bad request / 401 for auth errors / 500 for unexpected.
+ */
 export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	const router = express.Router();
 	router.use(express.json());

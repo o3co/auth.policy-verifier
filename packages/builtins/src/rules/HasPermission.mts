@@ -1,6 +1,20 @@
+// SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import type { Attributes, Role, Rule } from "@o3co/auth.policy-verifier.core";
 import { ATTR_PERMISSIONS, ATTR_ROLES } from "@o3co/auth.policy-verifier.core";
 
+/**
+ * Rule that passes when the subject holds the required permission, either
+ * directly via `ATTR_PERMISSIONS` or transitively through a role in
+ * `ATTR_ROLES`.
+ *
+ * Matching is case-insensitive. A granted permission of `"*"` wildcards
+ * everything. A granted permission may contain a single `*` used as prefix,
+ * suffix, or middle separator (e.g. `"posts.*"`, `"*.read"`, `"posts.*.read"`);
+ * multiple wildcards are explicitly rejected because the two-part split would
+ * silently drop segments and over-grant.
+ */
 export class HasPermission implements Rule {
 	readonly ruleType = "permission";
 	readonly code = "no_permission";

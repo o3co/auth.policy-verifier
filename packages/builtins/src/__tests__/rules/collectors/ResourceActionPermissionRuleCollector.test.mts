@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import type { CollectorContext, VerifierPayload } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 import { ResourceActionPermissionRuleCollector } from "#/rules/collectors/ResourceActionPermissionRuleCollector.mjs";
