@@ -89,39 +89,97 @@ export const scaffold = (targetDir: string, projectName: string): void => {
 	writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 };
 
+interface ParsedArgs {
+	projectName: string;
+	dir: string | undefined;
+}
+
+const parseArgs = (args: string[]): ParsedArgs => {
+	const positionals: string[] = [];
+	let dir: string | undefined;
+	let dirSeen = false;
+
+	for (let i = 0; i < args.length; i++) {
+		const a = args[i];
+		if (a === "--dir") {
+			if (dirSeen) throw new Error("--dir specified more than once");
+			if (i + 1 >= args.length) throw new Error("--dir requires a value");
+			dir = args[i + 1];
+			dirSeen = true;
+			i++;
+		} else if (a.startsWith("--dir=")) {
+			if (dirSeen) throw new Error("--dir specified more than once");
+			dir = a.slice("--dir=".length);
+			dirSeen = true;
+		} else if (a.startsWith("-")) {
+			throw new Error(`unknown flag: ${a}`);
+		} else {
+			positionals.push(a);
+		}
+	}
+
+	if (positionals.length === 0) throw new Error("missing <project-name>");
+	if (positionals.length > 1) throw new Error("too many positional arguments");
+
+	return { projectName: positionals[0], dir };
+};
+
+const deriveDirName = (projectName: string, dir: string | undefined): string => {
+	if (dir !== undefined) return dir;
+	if (projectName.startsWith("@")) {
+		const pkgPart = projectName.split("/")[1];
+		if (!pkgPart) {
+			// Unreachable when projectName has passed isValidProjectName (SCOPED_NAME_RE
+			// guarantees a non-empty package segment after the single "/"). Guarded here
+			// so refactors that reorder validation cannot silently produce undefined.
+			throw new Error(`invariant: unvalidated scoped name ${projectName}`);
+		}
+		return pkgPart;
+	}
+	return projectName;
+};
+
 /**
- * CLI entry point: reads the project name from argv, validates it as an
- * unscoped npm package name, ensures the target directory does not exist,
- * and scaffolds the template. Exits with non-zero on any validation failure.
+ * CLI entry point: parses argv, validates project name and optional --dir flag,
+ * ensures the target directory does not exist, and scaffolds the template.
+ * Exits with non-zero on any validation failure.
  */
 export const main = (): void => {
 	const args = process.argv.slice(2);
-	const projectName = args[0];
 
-	if (!projectName) {
-		console.error("Usage: create-o3co-policy-verifier <project-name>");
-		process.exit(1);
-	}
-
-	// Project name is used as a directory name and npm package name (unscoped).
-	// Reject path separators, dot segments, and invalid characters.
-	const validName = /^[a-z0-9][a-z0-9-._~]*$/;
-	if (
-		projectName.length > 214 ||
-		projectName === "." ||
-		projectName === ".." ||
-		!validName.test(projectName)
-	) {
+	let parsed: ParsedArgs;
+	try {
+		parsed = parseArgs(args);
+	} catch (e) {
+		console.error(`Error: ${(e as Error).message}`);
+		console.error("Usage: create-o3co-policy-verifier <project-name> [--dir <dir-name>]");
 		console.error(
-			"Error: Project name must be a valid unscoped npm package name (lowercase, no spaces or path separators).",
+			"<project-name> must be a valid npm package name (scoped like @scope/pkg, or unscoped).",
 		);
 		process.exit(1);
 	}
 
-	const targetDir = resolve(process.cwd(), projectName);
+	const { projectName, dir } = parsed;
+
+	if (!isValidProjectName(projectName)) {
+		console.error(
+			"Error: <project-name> must be a valid npm package name (scoped like @scope/pkg, or unscoped; max 214 chars; no backslashes; no extra '/' beyond the single scope separator).",
+		);
+		process.exit(1);
+	}
+
+	if (dir !== undefined && !isValidDirName(dir)) {
+		console.error(
+			"Error: --dir must be a valid unscoped package name (no '/', '\\', '@'; not '.' or '..'; max 214 chars).",
+		);
+		process.exit(1);
+	}
+
+	const dirName = deriveDirName(projectName, dir);
+	const targetDir = resolve(process.cwd(), dirName);
 
 	if (existsSync(targetDir)) {
-		console.error(`Error: Directory '${projectName}' already exists.`);
+		console.error(`Error: Directory '${dirName}' already exists.`);
 		process.exit(1);
 	}
 
@@ -130,7 +188,7 @@ export const main = (): void => {
 
 	console.log(`\nDone! Created ${projectName} at ${targetDir}`);
 	console.log(`\nNext steps:`);
-	console.log(`  cd ${projectName}`);
+	console.log(`  cd ${dirName}`);
 	console.log("  npm install");
 	console.log("  npm run debug");
 };
