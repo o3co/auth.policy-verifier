@@ -18,7 +18,7 @@
 		"@o3co/auth.policy-verifier.core": "workspace:*",
 		"@o3co/auth.policy-verifier.builtins": "workspace:*",
 		"@o3co/auth.policy-verifier.server": "workspace:*",
-		"@o3co/auth.utils": "^0.0.2",
+		"@o3co/auth.utils": "^0.0.3",
 		"@o3co/ts.hocon": "^1.1.0",
 		"express": "^5.2.1"
 	},
