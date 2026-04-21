@@ -5,30 +5,58 @@ CLI scaffolder for auth.policy-verifier. Generates a new standalone server proje
 ## Usage
 
 ```sh
-npx create-o3co-policy-verifier <project-name>
+npx create-o3co-policy-verifier <project-name> [--dir <dir-name>]
 ```
 
-The scaffolder creates a directory named `<project-name>` in the current working directory, then prints next-step instructions:
+`<project-name>` may be either a scoped npm name (`@scope/pkg`) or an unscoped name (`pkg`).
 
-```
-cd <project-name>
+Unscoped example:
+
+```sh
+npx create-o3co-policy-verifier my-verifier
+cd my-verifier
 npm install
 npm run debug
 ```
 
+Scoped example (directory defaults to the package portion):
+
+```sh
+npx create-o3co-policy-verifier @my-org/auth.policy-verifier
+cd auth.policy-verifier
+npm install
+npm run debug
+```
+
+Override the directory name with `--dir`:
+
+```sh
+npx create-o3co-policy-verifier @my-org/auth.policy-verifier --dir verifier
+cd verifier
+```
+
 ## What It Does
 
-1. Validates `<project-name>` against npm package name rules (see below).
-2. Copies `templates/standalone/` to the target directory, excluding `node_modules/` and `dist/`.
-3. Rewrites `package.json`: sets `name` to `<project-name>`, removes `private`, and replaces `workspace:*` dependency versions with the published semver versions from `templates/versions.json`.
-4. Prints next-step instructions.
+1. Validates `<project-name>` (see Validation Rules).
+2. Derives the target directory name: `--dir <value>` if given, else the unscoped part of a scoped name, else the name itself.
+3. Copies `templates/standalone/` to the target directory, excluding `node_modules/` and `dist/`.
+4. Rewrites `package.json`: sets `name` to `<project-name>` verbatim (scope-preserving), removes `private`, and replaces `workspace:*` dependency versions with published semver versions from `templates/versions.json`.
+5. Prints next-step instructions.
 
 ## Validation Rules
 
-- Must match `^[a-z0-9][a-z0-9-._~]*$` (valid unscoped npm package name)
-- Maximum 214 characters
-- Must not be `.` or `..`
-- Target directory must not already exist
+`<project-name>` must match one of:
+
+- Unscoped: `^[a-z0-9][a-z0-9-._~]*$`
+- Scoped: `^@[a-z0-9][a-z0-9-._~]*/[a-z0-9][a-z0-9-._~]*$`
+
+Both forms must be non-empty, not `.` or `..`, and ≤ 214 characters.
+
+`--dir <value>` must match the unscoped pattern above (same constraints).
+
+## Known Limitations
+
+The bundled template's `README.md` / `README.ja.md` still carry the upstream title `@o3co/auth-policy-verifier-standalone`. When generating a scoped project, that title will not match your `package.json` name; edit it manually if it matters for your use case.
 
 ## Generated Structure
 

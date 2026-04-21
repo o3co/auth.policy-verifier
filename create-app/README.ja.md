@@ -5,30 +5,58 @@ auth.policy-verifier 用の CLI スキャフォルダーです。組み込みテ
 ## 使い方
 
 ```sh
-npx create-o3co-policy-verifier <project-name>
+npx create-o3co-policy-verifier <project-name> [--dir <dir-name>]
 ```
 
-スキャフォルダーはカレントディレクトリに `<project-name>` という名前のディレクトリを作成し、次のステップを表示します。
+`<project-name>` はスコープ付き npm 名 (`@scope/pkg`) とスコープなしの名前 (`pkg`) のどちらでも指定できます。
 
-```
-cd <project-name>
+スコープなしの例:
+
+```sh
+npx create-o3co-policy-verifier my-verifier
+cd my-verifier
 npm install
 npm run debug
 ```
 
+スコープ付きの例（ディレクトリ名はパッケージ部分がデフォルト）:
+
+```sh
+npx create-o3co-policy-verifier @my-org/auth.policy-verifier
+cd auth.policy-verifier
+npm install
+npm run debug
+```
+
+`--dir` でディレクトリ名を明示指定:
+
+```sh
+npx create-o3co-policy-verifier @my-org/auth.policy-verifier --dir verifier
+cd verifier
+```
+
 ## 処理内容
 
-1. `<project-name>` を npm パッケージ名のルールに従って検証する（下記参照）。
-2. `templates/standalone/` をターゲットディレクトリにコピーする（`node_modules/` と `dist/` は除外）。
-3. `package.json` を書き換える: `name` を `<project-name>` に設定し、`private` を削除し、`workspace:*` の依存バージョンを `templates/versions.json` に記録された公開済み semver に置き換える。
-4. 次のステップを表示する。
+1. `<project-name>` を検証する（バリデーションルール参照）。
+2. 生成先ディレクトリ名を決定する: `--dir <value>` が指定されていればその値、そうでなければスコープ付き名のパッケージ部分、最終的には入力値そのもの。
+3. `templates/standalone/` を生成先ディレクトリにコピーする（`node_modules/` と `dist/` は除外）。
+4. `package.json` を書き換える: `name` を `<project-name>` をそのまま設定し（スコープを保持）、`private` を削除し、`workspace:*` のバージョン参照を `templates/versions.json` の公開 semver バージョンに置き換える。
+5. 次のステップの手順を表示する。
 
 ## バリデーションルール
 
-- `^[a-z0-9][a-z0-9-._~]*$` に一致すること（有効なスコープなし npm パッケージ名）
-- 最大 214 文字
-- `.` または `..` であってはならない
-- ターゲットディレクトリが既に存在してはならない
+`<project-name>` は以下のいずれかに一致する必要があります:
+
+- スコープなし: `^[a-z0-9][a-z0-9-._~]*$`
+- スコープ付き: `^@[a-z0-9][a-z0-9-._~]*/[a-z0-9][a-z0-9-._~]*$`
+
+いずれも空文字・`.`・`..` は不可、最大 214 文字。
+
+`--dir <value>` はスコープなしのパターンと同じ制約です。
+
+## 既知の制約
+
+内包されているテンプレートの `README.md` / `README.ja.md` の見出しは `@o3co/auth-policy-verifier-standalone` のままです。スコープ付きでプロジェクトを生成した場合、この見出しは生成された `package.json` の `name` と一致しません。必要に応じて手動で修正してください。
 
 ## 生成される構造
 
