@@ -39,9 +39,10 @@ cd verifier
 
 1. Validates `<project-name>` (see Validation Rules).
 2. Derives the target directory name: `--dir <value>` if given, else the unscoped part of a scoped name, else the name itself.
-3. Copies `templates/standalone/` to the target directory, excluding `node_modules/` and `dist/`.
-4. Rewrites `package.json`: sets `name` to `<project-name>` verbatim (scope-preserving), removes `private`, and replaces `workspace:*` dependency versions with published semver versions from `templates/versions.json`.
-5. Prints next-step instructions.
+3. Aborts with an error if the target directory already exists.
+4. Copies `templates/standalone/` to the target directory, excluding `node_modules/` and `dist/`.
+5. Rewrites `package.json`: sets `name` to `<project-name>` verbatim (scope-preserving), removes `private`, and replaces `workspace:*` dependency versions with published semver versions from `templates/versions.json`.
+6. Prints next-step instructions.
 
 ## Validation Rules
 

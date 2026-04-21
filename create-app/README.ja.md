@@ -39,9 +39,10 @@ cd verifier
 
 1. `<project-name>` を検証する（バリデーションルール参照）。
 2. 生成先ディレクトリ名を決定する: `--dir <value>` が指定されていればその値、そうでなければスコープ付き名のパッケージ部分、最終的には入力値そのもの。
-3. `templates/standalone/` を生成先ディレクトリにコピーする（`node_modules/` と `dist/` は除外）。
-4. `package.json` を書き換える: `name` を `<project-name>` をそのまま設定し（スコープを保持）、`private` を削除し、`workspace:*` のバージョン参照を `templates/versions.json` の公開 semver バージョンに置き換える。
-5. 次のステップの手順を表示する。
+3. 生成先ディレクトリがすでに存在する場合はエラーを出力して終了する。
+4. `templates/standalone/` を生成先ディレクトリにコピーする（`node_modules/` と `dist/` は除外）。
+5. `package.json` を書き換える: `name` を `<project-name>` をそのまま設定し（スコープを保持）、`private` を削除し、`workspace:*` のバージョン参照を `templates/versions.json` の公開 semver バージョンに置き換える。
+6. 次のステップの手順を表示する。
 
 ## バリデーションルール
 
