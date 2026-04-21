@@ -154,9 +154,6 @@ export const main = (): void => {
 	} catch (e) {
 		console.error(`Error: ${(e as Error).message}`);
 		console.error("Usage: create-o3co-policy-verifier <project-name> [--dir <dir-name>]");
-		console.error(
-			"<project-name> must be a valid npm package name (scoped like @scope/pkg, or unscoped).",
-		);
 		process.exit(1);
 	}
 
