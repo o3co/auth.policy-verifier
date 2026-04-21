@@ -45,9 +45,7 @@ describe("scaffold", () => {
 			const deps = pkg[section];
 			if (!deps) continue;
 			for (const [name, version] of Object.entries(deps)) {
-				expect(version, `${section}.${name} should not be workspace:*`).not.toBe(
-					"workspace:*",
-				);
+				expect(version, `${section}.${name} should not be workspace:*`).not.toBe("workspace:*");
 			}
 		}
 	});
@@ -103,12 +101,14 @@ describe("isValidProjectName", () => {
 });
 
 describe("isValidDirName", () => {
-	it.each([["my-verifier"], ["auth.policy-verifier"], ["a"], ["foo_bar~baz.1"]])(
-		"accepts %s",
-		(name) => {
-			expect(isValidDirName(name)).toBe(true);
-		},
-	);
+	it.each([
+		["my-verifier"],
+		["auth.policy-verifier"],
+		["a"],
+		["foo_bar~baz.1"],
+	])("accepts %s", (name) => {
+		expect(isValidDirName(name)).toBe(true);
+	});
 
 	it.each([
 		[""],
@@ -190,9 +190,7 @@ describe("main (argv parsing and directory derivation)", () => {
 	it("scoped name with --dir=<val>: dir = val, pkg.name = full scoped", () => {
 		const r = runMain(["@piratis-blossoms/auth.policy-verifier", "--dir=verifier2"]);
 		expect(r.exitCode).toBe(0);
-		const pkg = JSON.parse(
-			readFileSync(join(workdir, "verifier2", "package.json"), "utf-8"),
-		);
+		const pkg = JSON.parse(readFileSync(join(workdir, "verifier2", "package.json"), "utf-8"));
 		expect(pkg.name).toBe("@piratis-blossoms/auth.policy-verifier");
 	});
 
