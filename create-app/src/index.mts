@@ -21,6 +21,22 @@ const getPackageVersions = (): Record<string, string> => {
 	return {};
 };
 
+const UNSCOPED_NAME_RE = /^[a-z0-9][a-z0-9-._~]*$/;
+const SCOPED_NAME_RE = /^@[a-z0-9][a-z0-9-._~]*\/[a-z0-9][a-z0-9-._~]*$/;
+const MAX_NAME_LEN = 214;
+
+export const isValidProjectName = (name: string): boolean => {
+	if (name.length === 0 || name.length > MAX_NAME_LEN) return false;
+	if (name === "." || name === "..") return false;
+	return UNSCOPED_NAME_RE.test(name) || SCOPED_NAME_RE.test(name);
+};
+
+export const isValidDirName = (name: string): boolean => {
+	if (name.length === 0 || name.length > MAX_NAME_LEN) return false;
+	if (name === "." || name === "..") return false;
+	return UNSCOPED_NAME_RE.test(name);
+};
+
 /**
  * Copies the bundled standalone template into `targetDir`, rewrites
  * `package.json` with the new `projectName`, and replaces every `workspace:*`
