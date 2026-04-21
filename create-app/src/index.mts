@@ -112,6 +112,7 @@ const parseArgs = (args: string[]): ParsedArgs => {
 			dir = a.slice("--dir=".length);
 			dirSeen = true;
 		} else if (a.startsWith("-")) {
+			// Treats `--` and any --unknown as an unknown flag.
 			throw new Error(`unknown flag: ${a}`);
 		} else {
 			positionals.push(a);
