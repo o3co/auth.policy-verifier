@@ -11,7 +11,18 @@ OAUTH_JWT_SECRET=your-secret pnpm run start
 
 ## Configuration
 
-Configuration is read from `config/application.conf` (HOCON format). Individual values can be overridden with environment variables.
+Configuration is loaded in HOCON format in this order:
+
+1. `config/application.conf` — base config
+2. `config/{ENV}.conf` — overlay for the current environment
+
+`ENV = CONFIG_ENV || NODE_ENV || "development"`. Values in the overlay
+take precedence over `application.conf`. The scaffold ships with
+`development.conf` and `production.conf`. To add another environment,
+create a file such as `config/staging.conf` and set `CONFIG_ENV=staging`.
+A missing `{ENV}.conf` is a boot-time error.
+
+Individual values can also be overridden with environment variables.
 
 | Variable | Default | Description |
 |---|---|---|

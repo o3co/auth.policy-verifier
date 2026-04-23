@@ -11,7 +11,18 @@ OAUTH_JWT_SECRET=your-secret pnpm run start
 
 ## 設定
 
-設定は `config/application.conf`（HOCON 形式）から読み込まれます。個々の値は環境変数で上書きできます。
+設定は HOCON 形式で、次の順序で読み込まれます。
+
+1. `config/application.conf` — ベース設定
+2. `config/{ENV}.conf` — 現在の環境の overlay
+
+`ENV = CONFIG_ENV || NODE_ENV || "development"` で決まります。overlay の値は
+`application.conf` を上書きします。scaffold には `development.conf` と
+`production.conf` が同梱されています。別の環境を追加する場合は
+`config/staging.conf` のようにファイルを追加し、`CONFIG_ENV=staging` を設定してください。
+`{ENV}.conf` が存在しない場合は起動時エラーになります。
+
+個々の値は環境変数でも上書きできます。
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
