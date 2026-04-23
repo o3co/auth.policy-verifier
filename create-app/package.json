@@ -1,14 +1,27 @@
 {
-	"name": "create-o3co-policy-verifier",
+	"name": "@o3co/create-auth-policy-verifier",
 	"version": "0.0.0",
-	"private": true,
+	"description": "Scaffold a new o3co/auth.policy-verifier project from the standalone template",
 	"license": "Apache-2.0",
 	"type": "module",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/o3co/auth.policy-verifier.git",
+		"directory": "create-app"
+	},
 	"engines": {
 		"node": ">=22.0.0"
 	},
+	"main": "./dist/index.mjs",
+	"types": "./dist/index.d.mts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.mts",
+			"import": "./dist/index.mjs"
+		}
+	},
 	"bin": {
-		"create-o3co-policy-verifier": "./dist/cli.mjs"
+		"create-auth-policy-verifier": "./dist/cli.mjs"
 	},
 	"files": [
 		"dist",
