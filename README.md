@@ -5,6 +5,8 @@
 [![codecov](https://codecov.io/gh/o3co/auth.policy-verifier/graph/badge.svg)](https://codecov.io/gh/o3co/auth.policy-verifier)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
+> This repository handles **authorization decision** in the three-layer separation of concerns ([authentication & token issuance](https://github.com/o3co/auth.provider) / authorization decision / [authorization enforcement](https://github.com/o3co/protobuf.interceptors)) of the [auth](https://github.com/o3co/auth) stack.
+
 Attribute-based access control (ABAC) engine for microservice authorization. Receives a JWT + resource + action, evaluates collector-driven rules, and returns allow/deny. No policy DSL — authorization logic is composed in TypeScript.
 
 - Drop-in replaceable with OPA or Cedar — [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) can route to this service, OPA, or Cedar Agent via a common `VerifierEndpoint` interface
