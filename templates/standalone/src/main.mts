@@ -14,7 +14,7 @@ import {
 import { createLogger, gracefulShutdown } from "@o3co/auth.utils";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
-import { resolveConfigPaths } from "./configPath.mjs";
+import { resolveConfigPaths } from "./configPath.js";
 
 const logger = createLogger("policy-verifier");
 

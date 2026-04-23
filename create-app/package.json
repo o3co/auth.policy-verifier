@@ -30,6 +30,7 @@
 	"scripts": {
 		"build": "tsc",
 		"prebuild": "node scripts/copy-templates.mjs",
+		"pretest": "node scripts/copy-templates.mjs",
 		"test": "vitest run"
 	},
 	"devDependencies": {
