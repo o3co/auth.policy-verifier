@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { resolveConfigPaths } from "../configPath.mts";
+import { resolveConfigPaths } from "../configPath.js";
 
 describe("resolveConfigPaths", () => {
 	it("accepts a configDirPath with a trailing slash", () => {
