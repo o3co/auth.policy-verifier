@@ -1,11 +1,11 @@
-# create-o3co-policy-verifier
+# @o3co/create-auth-policy-verifier
 
 auth.policy-verifier 用の CLI スキャフォルダーです。組み込みテンプレートから新しいスタンドアロンサーバープロジェクトを生成します。
 
 ## 使い方
 
 ```sh
-npx create-o3co-policy-verifier <project-name> [--dir <dir-name>]
+npx @o3co/create-auth-policy-verifier <project-name> [--dir <dir-name>]
 ```
 
 `<project-name>` はスコープ付き npm 名 (`@scope/pkg`) とスコープなしの名前 (`pkg`) のどちらでも指定できます。
@@ -13,7 +13,7 @@ npx create-o3co-policy-verifier <project-name> [--dir <dir-name>]
 スコープなしの例:
 
 ```sh
-npx create-o3co-policy-verifier my-verifier
+npx @o3co/create-auth-policy-verifier my-verifier
 cd my-verifier
 npm install
 npm run debug
@@ -22,7 +22,7 @@ npm run debug
 スコープ付きの例（ディレクトリ名はパッケージ部分がデフォルト）:
 
 ```sh
-npx create-o3co-policy-verifier @my-org/auth.policy-verifier
+npx @o3co/create-auth-policy-verifier @my-org/auth.policy-verifier
 cd auth.policy-verifier
 npm install
 npm run debug
@@ -31,7 +31,7 @@ npm run debug
 `--dir` でディレクトリ名を明示指定:
 
 ```sh
-npx create-o3co-policy-verifier @my-org/auth.policy-verifier --dir verifier
+npx @o3co/create-auth-policy-verifier @my-org/auth.policy-verifier --dir verifier
 cd verifier
 ```
 
@@ -80,7 +80,7 @@ cd verifier
 スキャフォルダーは内部実装をエクスポートしており、プログラムから利用できます。
 
 ```ts
-import { scaffold, main } from "create-o3co-policy-verifier";
+import { scaffold, main } from "@o3co/create-auth-policy-verifier";
 ```
 
 | エクスポート | シグネチャ | 説明 |

@@ -1,6 +1,6 @@
 # @o3co/auth-policy-verifier-standalone
 
-auth.policy-verifier のデプロイ可能なサーバーテンプレートです。このパッケージはコンポジションルートとして機能し、設定の読み込み・モジュールのロード・Express サーバーの起動を担います。`create-o3co-policy-verifier` によって生成されます。
+auth.policy-verifier のデプロイ可能なサーバーテンプレートです。このパッケージはコンポジションルートとして機能し、設定の読み込み・モジュールのロード・Express サーバーの起動を担います。`@o3co/create-auth-policy-verifier` によって生成されます。
 
 ## 使い方
 
@@ -81,4 +81,4 @@ make dev
 
 - [`@o3co/auth.policy-verifier.server`](../../packages/server) — Express アプリファクトリと設定スキーマ
 - [`@o3co/auth.policy-verifier.builtins`](../../packages/builtins) — 組み込みコレクター実装
-- [`create-o3co-policy-verifier`](../../create-app) — このテンプレートを生成する CLI スキャフォルダー
+- [`@o3co/create-auth-policy-verifier`](../../create-app) — このテンプレートを生成する CLI スキャフォルダー

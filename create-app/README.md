@@ -1,11 +1,11 @@
-# create-o3co-policy-verifier
+# @o3co/create-auth-policy-verifier
 
 CLI scaffolder for auth.policy-verifier. Generates a new standalone server project from the built-in template.
 
 ## Usage
 
 ```sh
-npx create-o3co-policy-verifier <project-name> [--dir <dir-name>]
+npx @o3co/create-auth-policy-verifier <project-name> [--dir <dir-name>]
 ```
 
 `<project-name>` may be either a scoped npm name (`@scope/pkg`) or an unscoped name (`pkg`).
@@ -13,7 +13,7 @@ npx create-o3co-policy-verifier <project-name> [--dir <dir-name>]
 Unscoped example:
 
 ```sh
-npx create-o3co-policy-verifier my-verifier
+npx @o3co/create-auth-policy-verifier my-verifier
 cd my-verifier
 npm install
 npm run debug
@@ -22,7 +22,7 @@ npm run debug
 Scoped example (directory defaults to the package portion):
 
 ```sh
-npx create-o3co-policy-verifier @my-org/auth.policy-verifier
+npx @o3co/create-auth-policy-verifier @my-org/auth.policy-verifier
 cd auth.policy-verifier
 npm install
 npm run debug
@@ -31,7 +31,7 @@ npm run debug
 Override the directory name with `--dir`:
 
 ```sh
-npx create-o3co-policy-verifier @my-org/auth.policy-verifier --dir verifier
+npx @o3co/create-auth-policy-verifier @my-org/auth.policy-verifier --dir verifier
 cd verifier
 ```
 
@@ -80,7 +80,7 @@ The bundled template's `README.md` / `README.ja.md` still carry the upstream tit
 The scaffolder also exports its internals for programmatic use:
 
 ```ts
-import { scaffold, main } from "create-o3co-policy-verifier";
+import { scaffold, main } from "@o3co/create-auth-policy-verifier";
 ```
 
 | Export | Signature | Description |

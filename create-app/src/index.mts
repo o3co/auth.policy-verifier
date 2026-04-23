@@ -153,7 +153,7 @@ export const main = (): void => {
 		parsed = parseArgs(args);
 	} catch (e) {
 		console.error(`Error: ${(e as Error).message}`);
-		console.error("Usage: create-o3co-policy-verifier <project-name> [--dir <dir-name>]");
+		console.error("Usage: @o3co/create-auth-policy-verifier <project-name> [--dir <dir-name>]");
 		process.exit(1);
 	}
 

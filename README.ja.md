@@ -60,7 +60,7 @@ Authorization: Bearer <jwt>
 ## Quick Start
 
 ```bash
-npx create-o3co-policy-verifier my-policy-verifier
+npx @o3co/create-auth-policy-verifier my-policy-verifier
 cd my-policy-verifier
 pnpm install
 OAUTH_JWT_SECRET=your-secret pnpm start
@@ -97,7 +97,7 @@ standalone → server   → core
 | [`packages/builtins`](packages/builtins/) | `@o3co/auth.policy-verifier.builtins` | 組み込み Collector、ルール、リソースパーサー |
 | [`packages/server`](packages/server/) | `@o3co/auth.policy-verifier.server` | Express サーバー、`createApp`、`POST /verify`、JWT 鍵リゾルバ |
 | [`templates/standalone`](templates/standalone/) | — | デプロイ可能なサーバーテンプレート (コンポジションルート) |
-| [`create-app`](create-app/) | `create-o3co-policy-verifier` | CLI スキャフォルダー |
+| [`create-app`](create-app/) | `@o3co/create-auth-policy-verifier` | CLI スキャフォルダー |
 
 ## 評価ロジック
 
@@ -197,7 +197,7 @@ pnpm -r test     # 全テスト実行
 ## Docker
 
 ```bash
-npx create-o3co-policy-verifier my-verifier
+npx @o3co/create-auth-policy-verifier my-verifier
 cd my-verifier
 docker build -t my-verifier .
 docker run -e OAUTH_JWT_SECRET=secret my-verifier
