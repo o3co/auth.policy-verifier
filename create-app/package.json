@@ -12,6 +12,14 @@
 	"engines": {
 		"node": ">=22.0.0"
 	},
+	"main": "./dist/index.mjs",
+	"types": "./dist/index.d.mts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.mts",
+			"import": "./dist/index.mjs"
+		}
+	},
 	"bin": {
 		"create-auth-policy-verifier": "./dist/cli.mjs"
 	},
