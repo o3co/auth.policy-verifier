@@ -2,7 +2,7 @@
 
 auth.policy-verifier 向けの組み込み attribute collector、rule collector、および resource parser です。
 
-**Runtime:** Node.js 22+。本パッケージは `ruleType` の安定ハッシュ用に `node:crypto` を利用します。browser / edge ランタイム対応は今後の課題として別 issue で追跡します。
+**Runtime:** Runtime-agnostic。`BigInt` と `Map.groupBy` をサポートする任意のモダン JavaScript ランタイムで動作します — Node.js 22+（`engines.node` で宣言しており、古い Node ではインストール時にブロックされます）、モダンブラウザ、Cloudflare Workers、Deno、Bun、Vercel Edge 等。同梱の `server` パッケージは引き続き Node 専用です。
 
 ## インストール
 
@@ -107,7 +107,7 @@ new AttrLiteralIn({ a: string, values: (string | number | boolean)[], group?: st
 ```
 
 - `code`: `"attr_not_in_set"`。
-- 既定の `ruleType`: `` `attr_literal_in:${a}:${type}:${count}:${hashPrefix}` `` — `count` は重複除去後の要素数、`hashPrefix` は重複除去かつソート済みの `values` を文字列化した内容に対する SHA-256 の先頭 8 桁。同じ `a` と内容上等価な `values`（順序・重複を無視）を持つ 2 つのインスタンスは同じ `ruleType` を持ち、評価器で OR 結合されます。
+- 既定の `ruleType`: `` `attr_literal_in:${a}:${type}:${count}:${hashPrefix}` `` — `count` は重複除去後の要素数、`hashPrefix` は重複除去かつソート済みの `values` を文字列化した内容に対する FNV-1a 64-bit ハッシュの 16 桁 16 進表記です。ハッシュは非暗号学的ですが、64-bit 幅により現実的な policy サイズで偶発的・意図的な衝突はいずれもほぼ起きません。`node:*` 依存はなく、ブラウザ／エッジランタイムでも読み込めます。同じ `a` と内容上等価な `values`（順序・重複を無視）を持つ 2 つのインスタンスは同じ `ruleType` を持ち、評価器で OR 結合されます。
 - `values` は非空かつ同種の配列（`string[]`、`number[]`、`boolean[]` のいずれか）でなければなりません。`attrs.get(a)` が集合に含まれるときに通過します。`values` 内の重複要素は Rule の挙動に影響しません（内部では `Set` として扱われます）。
 
 ### AttrLiteralNotIn

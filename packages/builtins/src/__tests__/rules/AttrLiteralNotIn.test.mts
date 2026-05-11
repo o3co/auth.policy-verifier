@@ -180,7 +180,7 @@ describe("AttrLiteralNotIn", () => {
 
 	it("derives default ruleType containing the attribute name and valuesKey", () => {
 		const rule = new AttrLiteralNotIn({ a: "role", values: ["admin", "editor"] });
-		expect(rule.ruleType).toMatch(/^attr_literal_not_in:role:string:2:[0-9a-f]{8}$/);
+		expect(rule.ruleType).toMatch(/^attr_literal_not_in:role:string:2:[0-9a-f]{16}$/);
 	});
 
 	it("two instances with same 'a' but different values produce different ruleTypes", () => {
