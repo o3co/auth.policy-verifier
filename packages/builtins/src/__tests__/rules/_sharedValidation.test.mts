@@ -6,6 +6,7 @@ import {
 	applyCompare,
 	COMPARE_OPS,
 	computeValuesKey,
+	fnv1a64,
 	requireAttrName,
 	requireCompareOp,
 	requireHomogeneousLiteralArray,
@@ -283,12 +284,61 @@ describe("requireOptionalGroup", () => {
 });
 
 // ---------------------------------------------------------------------------
+// fnv1a64
+// ---------------------------------------------------------------------------
+
+describe("fnv1a64", () => {
+	it("returns 16 lowercase hex characters", () => {
+		expect(fnv1a64("hello")).toMatch(/^[0-9a-f]{16}$/);
+	});
+
+	it("zero-pads short outputs to 16 characters", () => {
+		// Empty string hashes to the FNV offset basis (0xcbf29ce484222325).
+		// Any input whose hash happens to fit in fewer than 16 hex digits
+		// must still be padded — assert via length.
+		expect(fnv1a64("").length).toBe(16);
+		expect(fnv1a64("a").length).toBe(16);
+	});
+
+	it("is deterministic: the same input produces the same output", () => {
+		expect(fnv1a64("abc")).toBe(fnv1a64("abc"));
+	});
+
+	it("differentiates inputs: distinct strings produce distinct outputs (sanity check)", () => {
+		expect(fnv1a64("a")).not.toBe(fnv1a64("b"));
+	});
+
+	it("matches the FNV-1a 64-bit reference vector for the empty string (0xcbf29ce484222325)", () => {
+		// Per http://www.isthe.com/chongo/tech/comp/fnv/ the FNV-1a 64-bit
+		// hash of an empty input is the offset basis itself. This pins the
+		// constants and the BigInt arithmetic so an accidental edit (e.g.
+		// swapping prime / basis, or dropping the 64-bit mask) is detected
+		// even when other tests still pass on derived data.
+		expect(fnv1a64("")).toBe("cbf29ce484222325");
+	});
+
+	it("matches the published FNV-1a 64-bit reference vector for 'foobar' (0x85944171f73967e8)", () => {
+		// Second pinning vector from the FNV reference test set, defending
+		// against any single-constant typo that empty-string alone would miss.
+		expect(fnv1a64("foobar")).toBe("85944171f73967e8");
+	});
+
+	it("does not collide on the 32-bit FNV-1a counterexample ('v0jxp73609' vs 'jtrl7v0818102')", () => {
+		// These two short strings collide under FNV-1a 32-bit (both → 0x832c03b4),
+		// which was the empirical evidence used during code review to reject the
+		// 32-bit variant. Pin that they remain distinct under the 64-bit hash so
+		// any future width regression is caught immediately.
+		expect(fnv1a64("v0jxp73609")).not.toBe(fnv1a64("jtrl7v0818102"));
+	});
+});
+
+// ---------------------------------------------------------------------------
 // computeValuesKey
 // ---------------------------------------------------------------------------
 
 describe("computeValuesKey", () => {
-	it("returns a string matching /{type}:{count}:{8-hex-chars}/ format", () => {
-		expect(computeValuesKey(["admin"])).toMatch(/^(string|number|boolean):[0-9]+:[0-9a-f]{8}$/);
+	it("returns a string matching /{type}:{count}:{16-hex-chars}/ format", () => {
+		expect(computeValuesKey(["admin"])).toMatch(/^(string|number|boolean):[0-9]+:[0-9a-f]{16}$/);
 	});
 
 	it("sort determinism: same content in different order produces the same key", () => {

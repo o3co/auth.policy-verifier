@@ -2,7 +2,7 @@
 
 Built-in attribute collectors, rule collectors, and resource parser for auth.policy-verifier.
 
-**Runtime:** Node.js 22+. This package uses `node:crypto` for stable rule-type hashing; browser / edge runtime support is tracked as future work.
+**Runtime:** Runtime-agnostic. Loads in any modern JavaScript runtime that supports `BigInt` and `Map.groupBy` — Node.js 22+ (declared via `engines.node` so older Node installs are blocked at install time), modern browsers, Cloudflare Workers, Deno, Bun, Vercel Edge, etc. The `server` companion package remains Node-only.
 
 ## Install
 
@@ -107,7 +107,7 @@ new AttrLiteralIn({ a: string, values: (string | number | boolean)[], group?: st
 ```
 
 - `code`: `"attr_not_in_set"`.
-- Default `ruleType`: `` `attr_literal_in:${a}:${type}:${count}:${hashPrefix}` `` — where `count` is the post-deduplication element count and `hashPrefix` is the first 8 hex characters of a SHA-256 over the deduplicated, sorted, stringified values. Two instances with the same `a` and logically equivalent `values` (duplicates and order do not matter) share the same `ruleType` and are OR-combined by the evaluator.
+- Default `ruleType`: `` `attr_literal_in:${a}:${type}:${count}:${hashPrefix}` `` — where `count` is the post-deduplication element count and `hashPrefix` is a 16-hex-character FNV-1a 64-bit hash over the deduplicated, sorted, stringified values. The hash is non-cryptographic but the 64-bit width makes accidental and adversarial collisions vanishingly unlikely for any realistic policy size; the package has no `node:*` dependency and loads in browser / edge runtimes. Two instances with the same `a` and logically equivalent `values` (duplicates and order do not matter) share the same `ruleType` and are OR-combined by the evaluator.
 - `values` must be a non-empty, homogeneous array (`string[]`, `number[]`, or `boolean[]`). Passes when `attrs.get(a)` is in the set. Duplicate elements in `values` are ignored (the rule uses `Set` semantics internally).
 
 ### AttrLiteralNotIn

@@ -1,11 +1,39 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createHash } from "node:crypto";
-
 /**
  * Shared validation helpers for attribute-based rule constructors.
  */
+
+/**
+ * FNV-1a 64-bit non-cryptographic hash, computed with BigInt. Sync,
+ * runtime-agnostic (no `node:*` imports), deterministic. Returns 16
+ * lowercase hex characters, zero-padded.
+ *
+ * Used by `computeValuesKey` to build a stable grouping suffix for `ruleType`.
+ * The 64-bit output gives ~2^32 birthday-collision bound, which is
+ * effectively non-colliding for any realistic policy size and resists
+ * deliberate collision construction by a hostile policy author or supply
+ * chain. (A 32-bit variant was rejected during review because random short
+ * strings can be made to collide within seconds, weakening evaluator
+ * grouping when two distinct rules on the same attribute share a `ruleType`.)
+ *
+ * Iterates UTF-16 code units via `charCodeAt`. BigInt is used because
+ * 64-bit multiplication overflows IEEE-754 doubles; `Math.imul` only
+ * supports 32-bit. BigInt is available in every modern JavaScript runtime
+ * (Node 10.4+, all evergreen browsers, Cloudflare Workers, Deno, Bun).
+ */
+const FNV_OFFSET_BASIS_64 = 0xcbf29ce484222325n;
+const FNV_PRIME_64 = 0x100000001b3n;
+const FNV_MASK_64 = 0xffffffffffffffffn;
+export function fnv1a64(s: string): string {
+	let hash = FNV_OFFSET_BASIS_64;
+	for (let i = 0; i < s.length; i++) {
+		hash ^= BigInt(s.charCodeAt(i));
+		hash = (hash * FNV_PRIME_64) & FNV_MASK_64;
+	}
+	return hash.toString(16).padStart(16, "0");
+}
 
 export type LiteralValue = string | number | boolean;
 
@@ -194,15 +222,20 @@ export function requireOptionalGroup(className: string, value: unknown): string 
 
 /**
  * Computes a stable cache/dedup key for an array of LiteralValues.
- * Format: `{type}:{count}:{hashPrefix}` — SHA-256 over a canonical serialization
- * of `values`. The canonical form first deduplicates `values` (to mirror the
- * Set-based semantics of AttrLiteralIn / AttrLiteralNotIn — duplicates do not
- * change the rule's behavior, so they must not change its `ruleType`), then
- * applies `JSON.stringify(String(v))` to each remaining element before sorting
- * and joining with `,`. The per-element quoting prevents separator collisions
+ * Format: `{type}:{count}:{hashPrefix}` — `hashPrefix` is a 16-hex-character
+ * FNV-1a 64-bit hash over a canonical serialization of `values`. The canonical
+ * form first deduplicates `values` (to mirror the Set-based semantics of
+ * AttrLiteralIn / AttrLiteralNotIn — duplicates do not change the rule's
+ * behavior, so they must not change its `ruleType`), then applies
+ * `JSON.stringify(String(v))` to each remaining element before sorting and
+ * joining with `,`. The per-element quoting prevents separator collisions
  * across different arrays (e.g. `["a,b", "c"]` vs `["a", "b,c"]`).
  * The `{count}` segment reflects the post-dedup element count.
  * Caller must guarantee values is a non-empty homogeneous LiteralValue[].
+ *
+ * The hash is non-cryptographic by design, but uses 64-bit output to keep
+ * the birthday-collision bound (~2^32) far above any realistic policy size
+ * and to resist deliberate collision construction.
  */
 export function computeValuesKey(values: LiteralValue[]): string {
 	const elementType = typeof values[0];
@@ -211,8 +244,7 @@ export function computeValuesKey(values: LiteralValue[]): string {
 		.map((v) => JSON.stringify(String(v)))
 		.sort()
 		.join(",");
-	const hash = createHash("sha256").update(joined).digest("hex").slice(0, 8);
-	return `${elementType}:${unique.length}:${hash}`;
+	return `${elementType}:${unique.length}:${fnv1a64(joined)}`;
 }
 
 /**
