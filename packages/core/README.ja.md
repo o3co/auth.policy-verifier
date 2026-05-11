@@ -2,7 +2,7 @@
 
 auth.policy-verifier の型定義・評価エンジン・モジュール基盤。コレクター、ルール、モジュールが実装すべきインターフェースを定義するパッケージです。
 
-**Runtime:** Runtime-agnostic。`Map.groupBy` をサポートする任意のモダン JavaScript ランタイムで動作します — Node.js 22+（`engines.node` で宣言しており、古い Node ではインストール時にブロックされます）、モダンブラウザ、Cloudflare Workers、Deno、Bun、Vercel Edge 等。同梱の `server` パッケージは引き続き Node 専用です。
+**Runtime:** `Map.groupBy` をサポートするサーバー／エッジ JavaScript ランタイムが対象です — Node.js 22+（`engines.node` で宣言しており、古い Node ではインストール時にブロックされます）、Cloudflare Workers、Vercel Edge、Deno、Bun。ブラウザは設計上対象外です（認可判定はサーバー側で enforcement する必要があるため）。同梱の `server` パッケージは引き続き Node 専用です。
 
 ## インストール
 

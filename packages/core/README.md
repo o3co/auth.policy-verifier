@@ -2,7 +2,7 @@
 
 Types, evaluation engine, and module infrastructure for auth.policy-verifier. This package defines the interfaces that collectors, rules, and modules implement.
 
-**Runtime:** Runtime-agnostic. Loads in any modern JavaScript runtime that supports `Map.groupBy` — Node.js 22+ (declared via `engines.node` so older Node installs are blocked at install time), modern browsers, Cloudflare Workers, Deno, Bun, Vercel Edge, etc. The `server` companion package remains Node-only.
+**Runtime:** Server- and edge-side JavaScript runtimes that support `Map.groupBy` — Node.js 22+ (declared via `engines.node` so older Node installs are blocked at install time), Cloudflare Workers, Vercel Edge, Deno, Bun. Browsers are out of scope by design: authorization decisions must be enforced server-side. The `server` companion package remains Node-only.
 
 ## Install
 
