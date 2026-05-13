@@ -73,8 +73,8 @@ importers:
         specifier: ^6.2.3
         version: 6.2.3
       zod:
-        specifier: ^4.3.6
-        version: 4.3.6
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@o3co/auth.policy-verifier.builtins':
         specifier: workspace:*
@@ -114,7 +114,7 @@ importers:
         version: 0.0.3(express@5.2.1)(pino@10.3.1)
       '@o3co/ts.hocon':
         specifier: ^1.1.0
-        version: 1.1.0(zod@4.3.6)
+        version: 1.1.0(zod@4.4.3)
       express:
         specifier: ^5.2.1
         version: 5.2.1
@@ -1461,8 +1461,8 @@ packages:
     engines: {node: '>= 14.6'}
     hasBin: true
 
-  zod@4.3.6:
-    resolution: {integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==}
+  zod@4.4.3:
+    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
 snapshots:
 
@@ -1642,9 +1642,9 @@ snapshots:
     optionalDependencies:
       pino: 10.3.1
 
-  '@o3co/ts.hocon@1.1.0(zod@4.3.6)':
+  '@o3co/ts.hocon@1.1.0(zod@4.4.3)':
     optionalDependencies:
-      zod: 4.3.6
+      zod: 4.4.3
 
   '@oxc-project/types@0.122.0': {}
 
@@ -2693,4 +2693,4 @@ snapshots:
 
   yaml@2.8.3: {}
 
-  zod@4.3.6: {}
+  zod@4.4.3: {}
