@@ -103,14 +103,12 @@ describe("isValidProjectName", () => {
 });
 
 describe("isValidDirName", () => {
-	it.each([
-		["my-verifier"],
-		["auth.policy-verifier"],
-		["a"],
-		["foo_bar~baz.1"],
-	])("accepts %s", (name) => {
-		expect(isValidDirName(name)).toBe(true);
-	});
+	it.each([["my-verifier"], ["auth.policy-verifier"], ["a"], ["foo_bar~baz.1"]])(
+		"accepts %s",
+		(name) => {
+			expect(isValidDirName(name)).toBe(true);
+		},
+	);
 
 	it.each([
 		[""],
