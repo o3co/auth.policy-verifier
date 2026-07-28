@@ -40,7 +40,7 @@
 		"@o3co/auth.policy-verifier.core": "workspace:*",
 		"@o3co/auth.utils": "^0.0.4",
 		"express": "^5.0.0",
-		"jose": "^6.2.3",
+		"jose": "^6.2.4",
 		"zod": "^4.4.3"
 	},
 	"devDependencies": {
