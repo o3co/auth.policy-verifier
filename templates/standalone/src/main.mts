@@ -6,27 +6,17 @@
  */
 import { fileURLToPath } from "node:url";
 import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
-import {
-	AppConfigSchema,
-	builtinKeyResolversModule,
-	createApp,
-} from "@o3co/auth.policy-verifier.server";
+import { builtinKeyResolversModule, createApp } from "@o3co/auth.policy-verifier.server";
 import { createLogger, gracefulShutdown } from "@o3co/auth.utils";
-import { parseFile } from "@o3co/ts.hocon";
-import { validate } from "@o3co/ts.hocon/zod";
-import { resolveConfigPaths } from "./configPath.js";
+import { loadAppConfig } from "./loadConfig.js";
 
 const logger = createLogger("policy-verifier");
 
 const env = process.env.CONFIG_ENV || process.env.NODE_ENV || "development";
 const configDir = new URL("../config/", import.meta.url);
 const configDirPath = fileURLToPath(configDir);
-const { applicationConfPath, envConfPath } = resolveConfigPaths(configDirPath, env);
 
-const config = validate(
-	parseFile(envConfPath).withFallback(parseFile(applicationConfPath)),
-	AppConfigSchema,
-);
+const config = loadAppConfig(configDirPath, env);
 
 const app = await createApp({
 	pathResolver: import.meta.resolve,
