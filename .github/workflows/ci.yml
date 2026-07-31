@@ -32,6 +32,15 @@ jobs:
       - run: pnpm run lint
       - run: pnpm run build
       - run: pnpm -r --if-present run typecheck
+
+      # Every workspace, including the ones with no `test:coverage` script:
+      # templates/standalone, tests/integration and create-app. The coverage
+      # step below skips those (`--if-present`), so without this they were
+      # never run in CI at all.
+      - run: pnpm run test
+
+      # Re-runs the three published packages under instrumentation to produce
+      # the reports uploaded below.
       - run: pnpm run test:coverage
 
       - name: Upload coverage to Codecov (core)
