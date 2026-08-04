@@ -19,13 +19,13 @@
 		"@o3co/auth.policy-verifier.builtins": "workspace:*",
 		"@o3co/auth.policy-verifier.server": "workspace:*",
 		"@o3co/auth.utils": "^0.0.4",
-		"@o3co/ts.hocon": "^1.11.0",
+		"@o3co/ts.hocon": "^1.12.0",
 		"express": "^5.2.1"
 	},
 	"devDependencies": {
 		"@types/node": "^26.1.2",
 		"@types/supertest": "^7.2.1",
-		"jose": "^6.2.4",
+		"jose": "^6.2.6",
 		"supertest": "^7.2.2",
 		"tsx": "^4.23.1",
 		"typescript": "^5.9.3",
