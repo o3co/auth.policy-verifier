@@ -70,8 +70,8 @@ importers:
         specifier: ^5.0.0
         version: 5.2.1
       jose:
-        specifier: ^6.2.4
-        version: 6.2.4
+        specifier: ^6.2.6
+        version: 6.2.6
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -113,8 +113,8 @@ importers:
         specifier: ^0.0.4
         version: 0.0.4(express@5.2.1)(pino@10.3.1)
       '@o3co/ts.hocon':
-        specifier: ^1.11.0
-        version: 1.11.0(yaml@2.9.0)(zod@4.4.3)
+        specifier: ^1.12.0
+        version: 1.12.0(yaml@2.9.0)(zod@4.4.3)
       express:
         specifier: ^5.2.1
         version: 5.2.1
@@ -126,8 +126,8 @@ importers:
         specifier: ^7.2.1
         version: 7.2.1
       jose:
-        specifier: ^6.2.4
-        version: 6.2.4
+        specifier: ^6.2.6
+        version: 6.2.6
       supertest:
         specifier: ^7.2.2
         version: 7.2.2
@@ -592,8 +592,8 @@ packages:
       pino:
         optional: true
 
-  '@o3co/ts.hocon@1.11.0':
-    resolution: {integrity: sha512-vtv8nbNnka1vnVBKkW4hlhWJ73ppKsvtL6Ym4n131HOddoBpTd3nA0UtzErSEariWLyQeEx0T1Sqm6FxPwm6Iw==}
+  '@o3co/ts.hocon@1.12.0':
+    resolution: {integrity: sha512-JgR8xrzRUT1PPih9b+qmShGBPXwwT7U+yf+xFjZEXkQPXDhgVXf+F/2FrIHdkiYPmSR3Fqv832583cNEr0K+9g==}
     engines: {node: '>=22'}
     peerDependencies:
       smol-toml: '>=1.0.0'
@@ -1110,8 +1110,8 @@ packages:
     resolution: {integrity: sha512-HGYWWS/ehqTV3xN10i23tkPkpH46MLCIMFNCaaKNavAXTF1RkqxawEPtnjnGZ6XKSInBKkiOA5BKS+aZiY3AvA==}
     engines: {node: '>=8'}
 
-  jose@6.2.4:
-    resolution: {integrity: sha512-N8acGzVsQy6M/fjFcxtysNc4Q379TcM5dM/qKkNtsHFji88yANnXTr7BLeP75iPnFwBfQzM/jg2BZ9+HZrHCZA==}
+  jose@6.2.6:
+    resolution: {integrity: sha512-HwMtbJjMw8rC8dUTwCNilHJD+fxTeKM3JV1eprSmTjS41qwXSSt6exJXgyPK1QOu0jB9eDYLESRDkB3qaT3jnw==}
 
   js-tokens@10.0.0:
     resolution: {integrity: sha512-lM/UBzQmfJRo9ABXbPWemivdCW8V2G8FHaHdypQaIy523snUjog0W71ayWXTjiR+ixeMyVHN2XcpnTd/liPg/Q==}
@@ -1870,7 +1870,7 @@ snapshots:
     optionalDependencies:
       pino: 10.3.1
 
-  '@o3co/ts.hocon@1.11.0(yaml@2.9.0)(zod@4.4.3)':
+  '@o3co/ts.hocon@1.12.0(yaml@2.9.0)(zod@4.4.3)':
     optionalDependencies:
       yaml: 2.9.0
       zod: 4.4.3
@@ -2433,7 +2433,7 @@ snapshots:
       html-escaper: 2.0.2
       istanbul-lib-report: 3.0.1
 
-  jose@6.2.4: {}
+  jose@6.2.6: {}
 
   js-tokens@10.0.0: {}
 
