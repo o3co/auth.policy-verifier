@@ -196,7 +196,7 @@ describe("createApp", () => {
 
 	it("throws when no rule collector is configured", async () => {
 		const noRuleConfig = AppConfigSchema.parse({
-			oauth: { jwt: { secret: JWT_SECRET, validate: true } },
+			oauth: { jwt: { secret: JWT_SECRET, validate: true, issuer: ISSUER, audience: AUDIENCE } },
 			attribute: { collectors: [{ collector: "TestScopeCollector" }] },
 			rule: { collectors: [] },
 			resource: { parser: "SimpleParser" },
@@ -213,7 +213,7 @@ describe("createApp", () => {
 
 	it("denies with no_applicable_rule when the pipeline collects no rules", async () => {
 		const emptyRuleConfig = AppConfigSchema.parse({
-			oauth: { jwt: { secret: JWT_SECRET, validate: true } },
+			oauth: { jwt: { secret: JWT_SECRET, validate: true, issuer: ISSUER, audience: AUDIENCE } },
 			attribute: { collectors: [{ collector: "TestScopeCollector" }] },
 			rule: { collectors: [{ collector: "EmptyRuleCollector" }] },
 			resource: { parser: "SimpleParser" },
@@ -241,7 +241,7 @@ describe("createApp", () => {
 
 	it("allows an empty rule set only when the deployment opts into onEmptyRuleSet=allow", async () => {
 		const failOpenConfig = AppConfigSchema.parse({
-			oauth: { jwt: { secret: JWT_SECRET, validate: true } },
+			oauth: { jwt: { secret: JWT_SECRET, validate: true, issuer: ISSUER, audience: AUDIENCE } },
 			attribute: { collectors: [{ collector: "TestScopeCollector" }] },
 			rule: { collectors: [{ collector: "EmptyRuleCollector" }], onEmptyRuleSet: "allow" },
 			resource: { parser: "SimpleParser" },

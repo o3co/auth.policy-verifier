@@ -415,7 +415,14 @@ describe("POST /verify — scopeless JWT (DID grant) (#27, #104)", () => {
 		const didApp = express();
 		didApp.use(
 			createVerifyRouter({
-				jwt: { key: hs256Key.key, algorithms: hs256Key.algorithms, validate: true },
+				jwt: {
+					validate: true,
+					key: hs256Key.key,
+					algorithms: hs256Key.algorithms,
+					issuer: ISSUER,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				},
 				resourceParser: new DotNotationResourceParser(),
 				attributePipeline: new AttributePipeline([
 					new PayloadScopeCollector(),
