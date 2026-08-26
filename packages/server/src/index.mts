@@ -10,4 +10,10 @@ export {
 	HS256KeyResolverFactory,
 	RS256KeyResolverFactory,
 } from "./jwt/index.mjs";
-export { createVerifyRouter, type VerifyRouterConfig } from "./routes/verify.mjs";
+export {
+	createVerifyRouter,
+	type DecodingJwtConfig,
+	type VerifyingJwtConfig,
+	type VerifyRouterConfig,
+	type VerifyRouterJwtConfig,
+} from "./routes/verify.mjs";

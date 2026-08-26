@@ -17,7 +17,21 @@ import { loadAppConfig } from "../loadConfig.js";
 
 const configDirPath = fileURLToPath(new URL("../../config/", import.meta.url));
 
-const envKeys = ["OAUTH_JWT_SECRET", "HTTP_HOSTNAME", "HTTP_PORT", "HTTP_PATH_PREFIX"] as const;
+const envKeys = [
+	"OAUTH_JWT_SECRET",
+	"OAUTH_JWT_ISSUER",
+	"OAUTH_JWT_AUDIENCE",
+	"HTTP_HOSTNAME",
+	"HTTP_PORT",
+	"HTTP_PATH_PREFIX",
+] as const;
+
+/** application.conf leaves issuer/audience unset, so every load must supply them. */
+function setRequiredEnv(): void {
+	process.env.OAUTH_JWT_SECRET = "test-secret";
+	process.env.OAUTH_JWT_ISSUER = "https://issuer.test";
+	process.env.OAUTH_JWT_AUDIENCE = "https://api.test";
+}
 
 afterEach(() => {
 	for (const key of envKeys) {
@@ -31,7 +45,7 @@ describe("loadAppConfig", () => {
 	it.each(["development", "production"])(
 		"resolves the %s overlay against application.conf",
 		(env) => {
-			process.env.OAUTH_JWT_SECRET = "test-secret";
+			setRequiredEnv();
 
 			const config = loadAppConfig(configDirPath, env);
 
@@ -39,11 +53,14 @@ describe("loadAppConfig", () => {
 			expect(config.oauth.jwt.algorithm).toBe("HS256");
 			expect(config.oauth.jwt.secret).toBe("test-secret");
 			expect(config.oauth.jwt.validate).toBe(true);
+			expect(config.oauth.jwt.issuer).toBe("https://issuer.test");
+			expect(config.oauth.jwt.audience).toBe("https://api.test");
+			expect(config.oauth.jwt.tokenType).toBe("at+jwt");
 		},
 	);
 
 	it("registers the collectors declared in application.conf", () => {
-		process.env.OAUTH_JWT_SECRET = "test-secret";
+		setRequiredEnv();
 
 		const config = loadAppConfig(configDirPath, "development");
 
@@ -59,7 +76,7 @@ describe("loadAppConfig", () => {
 	});
 
 	it("applies the optional environment substitutions from application.conf", () => {
-		process.env.OAUTH_JWT_SECRET = "test-secret";
+		setRequiredEnv();
 		process.env.HTTP_HOSTNAME = "127.0.0.1";
 		process.env.HTTP_PORT = "8080";
 		process.env.HTTP_PATH_PREFIX = "/auth";
@@ -77,5 +94,21 @@ describe("loadAppConfig", () => {
 
 	it("rejects an env name that escapes the config directory", () => {
 		expect(() => loadAppConfig(configDirPath, "../secrets")).toThrow(/resolves outside/);
+	});
+});
+
+describe("loadAppConfig — RFC 9068 requirements (#105)", () => {
+	it("fails to load when the issuer is not supplied", () => {
+		process.env.OAUTH_JWT_SECRET = "test-secret";
+		process.env.OAUTH_JWT_AUDIENCE = "https://api.test";
+
+		expect(() => loadAppConfig(configDirPath, "development")).toThrow();
+	});
+
+	it("fails to load when the audience is not supplied", () => {
+		process.env.OAUTH_JWT_SECRET = "test-secret";
+		process.env.OAUTH_JWT_ISSUER = "https://issuer.test";
+
+		expect(() => loadAppConfig(configDirPath, "development")).toThrow();
 	});
 });
