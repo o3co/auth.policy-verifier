@@ -160,3 +160,39 @@ describe("AppConfigSchema — RFC 9068 token validation (#105)", () => {
 		expect(result.success).toBe(true);
 	});
 });
+
+describe("AppConfigSchema — batch decisions (#124)", () => {
+	const validJwt = { algorithm: "HS256", secret: "s", validate: true, ...rfc9068 };
+
+	it("defaults verify.maxBatchSize to 50", () => {
+		const result = AppConfigSchema.parse({ oauth: { jwt: validJwt }, ...baseBody });
+		expect(result.verify.maxBatchSize).toBe(50);
+	});
+
+	it("accepts an operator-set cap", () => {
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			verify: { maxBatchSize: 200 },
+		});
+		expect(result.verify.maxBatchSize).toBe(200);
+	});
+
+	it("coerces the string a HOCON env substitution produces", () => {
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			verify: { maxBatchSize: "25" },
+		});
+		expect(result.verify.maxBatchSize).toBe(25);
+	});
+
+	it.each([0, -1, 1.5])("rejects %s as a cap", (value) => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			verify: { maxBatchSize: value },
+		});
+		expect(result.success).toBe(false);
+	});
+});

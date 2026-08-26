@@ -4,6 +4,12 @@
 // Collectors
 export { PayloadScopeCollector } from "./collectors/PayloadScopeCollector.mjs";
 export { PayloadSubjectIdCollector } from "./collectors/PayloadSubjectIdCollector.mjs";
+export {
+	RequestContextAttributeCollector,
+	type RequestContextAttributeCollectorConfig,
+	type RequestContextAttributeMapping,
+	type RequestContextAttributeType,
+} from "./collectors/RequestContextAttributeCollector.mjs";
 export { StaticPermissionCollector } from "./collectors/StaticPermissionCollector.mjs";
 export { StaticRoleCollector } from "./collectors/StaticRoleCollector.mjs";
 // Module

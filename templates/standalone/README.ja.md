@@ -37,15 +37,18 @@ OAUTH_JWT_SECRET=your-secret \
 | `OAUTH_JWT_AUDIENCE` | （必須） | この resource server を指す audience — RFC 9068 §4 `aud` |
 | `OAUTH_JWT_TOKEN_TYPE` | `at+jwt` | 受け入れる `typ` ヘッダ。同じ鍵で署名された id/refresh/logout token を拒否する |
 | `OAUTH_JWT_VALIDATE` | `true` | JWT 署名を検証するかどうか |
+| `RULE_ON_EMPTY_RULE_SET` | `deny` | ルールが 1 つも集まらなかったときの決定（`deny` \| `allow`） |
+| `VERIFY_MAX_BATCH_SIZE` | `50` | `POST /verify/batch` の件数上限 |
 
 ## デフォルトコレクター
 
 以下のコレクターが `builtinCollectorsModule` を通じて登録されます。
 
-**Attribute collectors**（JWT ペイロードから属性を抽出）:
+**Attribute collectors**:
 
-- `PayloadScopeCollector` — OAuth スコープを抽出する
-- `PayloadSubjectIdCollector` — サブジェクト識別子を抽出する
+- `PayloadScopeCollector` — JWT ペイロードから OAuth スコープを抽出する
+- `PayloadSubjectIdCollector` — JWT ペイロードからサブジェクト識別子を抽出する
+- `RequestContextAttributeCollector` — リクエストボディの `context` の宣言済みフィールドを属性に昇格させる（既定では未接続。`attribute.collectors` に `attributes` マッピングを付けて追加する）
 
 **Rule collectors**（認可ルールを解決）:
 

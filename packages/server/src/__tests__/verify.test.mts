@@ -659,3 +659,257 @@ describe("POST /verify — RFC 9068 §4 token validation (#105)", () => {
 		).toThrow(/audience/);
 	});
 });
+
+describe("POST /verify — decision contract (#124)", () => {
+	const app = createTestApp();
+
+	it("echoes the subject, resource and action the decision was made for", async () => {
+		const token = await signHS256Token({ sub: "user-1", scope: "read:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.status).toBe(200);
+		expect(res.body).toMatchObject({
+			subject: "user-1",
+			resource: "project:1",
+			action: "read",
+			decision: "allow",
+		});
+	});
+
+	it("carries a structured reason on an allow", async () => {
+		const token = await signHS256Token({ sub: "user-1", scope: "read:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.body.reason.groups).toEqual([
+			{
+				ruleType: "scope",
+				passed: true,
+				rules: [
+					{
+						code: "invalid_scope",
+						message: "Token does not have required scope: read:project",
+						passed: true,
+					},
+				],
+			},
+		]);
+	});
+
+	it("carries a structured reason on a deny, naming the failing group", async () => {
+		const token = await signHS256Token({ sub: "user-1", scope: "write:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.status).toBe(403);
+		expect(res.body).toMatchObject({ decision: "deny", code: "invalid_scope" });
+		expect(res.body.reason.groups).toEqual([
+			{
+				ruleType: "scope",
+				passed: false,
+				rules: [
+					{
+						code: "invalid_scope",
+						message: "Token does not have required scope: read:project",
+						passed: false,
+					},
+				],
+			},
+		]);
+	});
+
+	it("omits subject when the token carries no sub claim", async () => {
+		const token = await signHS256Token({ scope: "read:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.status).toBe(200);
+		expect(res.body.subject).toBeUndefined();
+	});
+
+	it("never takes the subject from the request body", async () => {
+		// The token is the only authority on who is asking; accepting a body-supplied
+		// subject would let any token holder ask for a decision about anyone else.
+		const token = await signHS256Token({ sub: "user-1", scope: "read:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read", subject: "admin" });
+
+		expect(res.body.subject).toBe("user-1");
+	});
+});
+
+describe("POST /verify/batch (#124)", () => {
+	const app = createTestApp();
+
+	it("decides every entry in one round trip, preserving order", async () => {
+		const token = await signHS256Token({ sub: "user-1", scope: "read:project" });
+		const res = await request(app)
+			.post("/verify/batch")
+			.set("Authorization", `Bearer ${token}`)
+			.send({
+				decisions: [
+					{ resource: "project:1", action: "read" },
+					{ resource: "project:2", action: "write" },
+					{ resource: "project:3", action: "read" },
+				],
+			});
+
+		expect(res.status).toBe(200);
+		expect(res.body.decisions).toHaveLength(3);
+		expect(res.body.decisions.map((d: { decision: string }) => d.decision)).toEqual([
+			"allow",
+			"deny",
+			"allow",
+		]);
+		expect(res.body.decisions.map((d: { resource: string }) => d.resource)).toEqual([
+			"project:1",
+			"project:2",
+			"project:3",
+		]);
+	});
+
+	it("answers 200 even when every entry is denied — the batch itself succeeded", async () => {
+		const token = await signHS256Token({ sub: "user-1", scope: "read:project" });
+		const res = await request(app)
+			.post("/verify/batch")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ decisions: [{ resource: "project:1", action: "delete" }] });
+
+		expect(res.status).toBe(200);
+		expect(res.body.decisions[0].decision).toBe("deny");
+		expect(res.body.decisions[0].reason.groups).toHaveLength(1);
+	});
+
+	it("passes each entry its own context", async () => {
+		const contexts: Array<Record<string, unknown> | undefined> = [];
+		const recordingCollector: AttributeCollector = {
+			async collect(context: CollectorContext) {
+				contexts.push(context.requestContext);
+				return new Map();
+			},
+		};
+		const recordingApp = express();
+		recordingApp.use(
+			createVerifyRouter({
+				jwt: {
+					validate: true,
+					key: hs256Key.key,
+					algorithms: hs256Key.algorithms,
+					issuer: ISSUER,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				},
+				resourceParser: new DotNotationResourceParser(),
+				attributePipeline: new AttributePipeline([new PayloadScopeCollector(), recordingCollector]),
+				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
+			}),
+		);
+
+		const token = await signHS256Token({ sub: "user-1", scope: "read:project" });
+		await request(recordingApp)
+			.post("/verify/batch")
+			.set("Authorization", `Bearer ${token}`)
+			.send({
+				decisions: [
+					{ resource: "project:1", action: "read", context: { tenant: "a" } },
+					{ resource: "project:2", action: "read", context: { tenant: "b" } },
+				],
+			});
+
+		expect(contexts).toEqual([{ tenant: "a" }, { tenant: "b" }]);
+	});
+
+	it("returns 400 when decisions is absent", async () => {
+		const token = await signHS256Token({ sub: "user-1", scope: "read:project" });
+		const res = await request(app)
+			.post("/verify/batch")
+			.set("Authorization", `Bearer ${token}`)
+			.send({});
+
+		expect(res.status).toBe(400);
+		expect(res.body.code).toBe("invalid_request");
+	});
+
+	it("returns 400 when decisions is empty", async () => {
+		const token = await signHS256Token({ sub: "user-1", scope: "read:project" });
+		const res = await request(app)
+			.post("/verify/batch")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ decisions: [] });
+
+		expect(res.status).toBe(400);
+		expect(res.body.code).toBe("invalid_request");
+	});
+
+	it("returns 400 naming the offending index when an entry is malformed", async () => {
+		const token = await signHS256Token({ sub: "user-1", scope: "read:project" });
+		const res = await request(app)
+			.post("/verify/batch")
+			.set("Authorization", `Bearer ${token}`)
+			.send({
+				decisions: [{ resource: "project:1", action: "read" }, { resource: "project:2" }],
+			});
+
+		expect(res.status).toBe(400);
+		expect(res.body.code).toBe("invalid_request");
+		expect(res.body.message).toContain("decisions[1]");
+	});
+
+	it("returns 400 when the batch exceeds the configured cap", async () => {
+		const cappedApp = express();
+		cappedApp.use(
+			createVerifyRouter({
+				jwt: {
+					validate: true,
+					key: hs256Key.key,
+					algorithms: hs256Key.algorithms,
+					issuer: ISSUER,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				},
+				resourceParser: new DotNotationResourceParser(),
+				attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
+				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
+				maxBatchSize: 2,
+			}),
+		);
+
+		const token = await signHS256Token({ sub: "user-1", scope: "read:project" });
+		const res = await request(cappedApp)
+			.post("/verify/batch")
+			.set("Authorization", `Bearer ${token}`)
+			.send({
+				decisions: [
+					{ resource: "project:1", action: "read" },
+					{ resource: "project:2", action: "read" },
+					{ resource: "project:3", action: "read" },
+				],
+			});
+
+		expect(res.status).toBe(400);
+		expect(res.body.code).toBe("invalid_request");
+		expect(res.body.message).toContain("2");
+	});
+
+	it("rejects the whole batch with 401 when the token does not verify", async () => {
+		const token = await signHS256Token({ scope: "read:project" }, { issuer: "https://evil.test" });
+		const res = await request(app)
+			.post("/verify/batch")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ decisions: [{ resource: "project:1", action: "read" }] });
+
+		expect(res.status).toBe(401);
+		expect(res.body.code).toBe("invalid_token");
+	});
+});

@@ -73,11 +73,47 @@ export interface RuleCollector {
 	collect(context: CollectorContext): Promise<Rule[]>;
 }
 
+/** How one rule inside a group came out. */
+export interface RuleOutcome {
+	code: string;
+	message: string;
+	passed: boolean;
+}
+
+/**
+ * How one rule group (`ruleType`) came out. Groups are the unit of
+ * AND-evaluation, so this is the granularity at which "why" is answerable.
+ */
+export interface RuleGroupOutcome {
+	ruleType: string;
+	passed: boolean;
+	/**
+	 * On a failing group, every rule in it — all of them ran and all of them
+	 * failed. On a passing group, the single rule that satisfied it; the group is
+	 * an OR, so evaluation stops at the first pass and the rest never ran.
+	 */
+	rules: RuleOutcome[];
+}
+
+/**
+ * Structured account of how a decision was reached, carried on both allow and
+ * deny. A bare allow/deny cannot answer "why", and an engine placed behind the
+ * same decision contract has to be able to report the same thing — OPA returns
+ * a decision document and OpenFGA/Cedar name the tuple or policy that decided,
+ * so the contract carries a reason rather than a single representative rule.
+ */
+export interface DecisionReason {
+	/** Every rule group that was evaluated, in evaluation order. */
+	groups: RuleGroupOutcome[];
+}
+
 /**
  * Outcome of `evaluate`. On `"deny"`, `code` and `message` come from the first
- * rule of the first failing group.
+ * rule of the first failing group; `reason` accounts for every group.
  */
-export type Decision = { decision: "allow" } | { decision: "deny"; code: string; message: string };
+export type Decision =
+	| { decision: "allow"; reason: DecisionReason }
+	| { decision: "deny"; code: string; message: string; reason: DecisionReason };
 
 /** Named bundle of permissions. Used by role-based attribute collectors. */
 export interface Role {

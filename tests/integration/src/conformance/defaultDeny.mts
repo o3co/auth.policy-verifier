@@ -3,18 +3,9 @@
 
 import type { Decision } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
+import type { AuthorizationRequest } from "./types.mjs";
 
-/**
- * Engine-neutral authorization request. Deliberately shaped as
- * `(subject, resource, action, context)` so an adapter for a heavy-class engine
- * (OPA, OpenFGA, Cedar) can satisfy the same suite.
- */
-export interface AuthorizationRequest {
-	subject: string;
-	resource: string;
-	action: string;
-	context?: Record<string, unknown>;
-}
+export type { AuthorizationRequest };
 
 /**
  * Hooks a decision engine must provide to be checked for default-deny.

@@ -22,6 +22,8 @@ Evaluates collected attributes against a set of rules. Rules are grouped by `rul
 
 An **empty rule set is denied** (`code: "no_applicable_rule"`): a request no rule spoke to was never authorized. Pass `{ onEmptyRuleSet: "allow" }` as the third argument to opt a deployment out of that default.
 
+Every decision carries a structured `reason`: `reason.groups` lists each rule group in evaluation order with `passed` and the rules behind that verdict — every alternative for a failing group, the satisfying rule for a passing one. All groups are evaluated, including groups after the first failing one, because stopping early cannot report which of the rest would also have failed. The `code` / `message` on a deny still come from the first failing group.
+
 ### AttributePipeline
 
 ```typescript
@@ -88,7 +90,10 @@ A module registers collector, parser, and key resolver factories into the provid
 | `AttributeCollector` | `collect(context: CollectorContext): Promise<Attributes>` |
 | `Rule` | `{ ruleType: string; code: string; message: string; verify(attrs: Attributes): boolean }` |
 | `RuleCollector` | `collect(context: CollectorContext): Promise<Rule[]>` |
-| `Decision` | `{ decision: "allow" } \| { decision: "deny"; code: string; message: string }` |
+| `Decision` | `{ decision: "allow"; reason: DecisionReason } \| { decision: "deny"; code: string; message: string; reason: DecisionReason }` |
+| `DecisionReason` | `{ groups: RuleGroupOutcome[] }` |
+| `RuleGroupOutcome` | `{ ruleType: string; passed: boolean; rules: RuleOutcome[] }` |
+| `RuleOutcome` | `{ code: string; message: string; passed: boolean }` |
 | `Role` | `{ name: string; permissions: string[] }` |
 | `VerifierPayload` | Decoded JWT claims: `sub`, `azp`, `scope`, `iss`, `aud`, `exp`, `iat`, `token`, `tokenType`, plus arbitrary extra claims |
 | `PathResolver` | `(specifier: string) => string` — resolves module-relative paths |

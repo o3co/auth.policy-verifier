@@ -232,11 +232,12 @@ describe("createApp", () => {
 			.send({ resource: "project", action: "read" });
 
 		expect(res.status).toBe(403);
-		expect(res.body).toEqual({
+		expect(res.body).toMatchObject({
 			decision: "deny",
 			code: "no_applicable_rule",
 			message: "No applicable rule was collected for this request",
 		});
+		expect(res.body.reason.groups).toEqual([]);
 	});
 
 	it("allows an empty rule set only when the deployment opts into onEmptyRuleSet=allow", async () => {

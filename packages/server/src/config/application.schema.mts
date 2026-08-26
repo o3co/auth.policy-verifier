@@ -103,6 +103,14 @@ export const AppConfigSchema = z.object({
 			parser: z.string().default("DotNotationResourceParser"),
 		})
 		.default(() => ({ parser: "DotNotationResourceParser" })),
+	verify: z
+		.object({
+			// Cap on `POST /verify/batch` entries. The batch endpoint exists so
+			// filtering a list of N resources is one round trip; the cap keeps one
+			// request from turning into an unbounded amount of pipeline work.
+			maxBatchSize: z.coerce.number().int().positive().default(50),
+		})
+		.default(() => ({ maxBatchSize: 50 })),
 });
 
 /** Type inferred from `AppConfigSchema`. Consumed by `createApp`. */

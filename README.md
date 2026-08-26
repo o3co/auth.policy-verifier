@@ -37,15 +37,21 @@ Authorization: Bearer <jwt>
   │                                                   │
   │  4. Evaluate                                      │
   │     OR within rule group, AND across groups        │
+  │     every group runs → structured reason           │
   │                                                   │
-  │  → 200 {"decision": "allow"}                      │
-  │  → 403 {"decision": "deny", "code": "..."}       │
+  │  → 200 {"decision": "allow",  "reason": {...}}    │
+  │  → 403 {"decision": "deny", "code": …, "reason"}  │
   └──────────────────────────────────────────────────┘
+
+POST /verify/batch — the same contract, N decisions per round trip
+{"decisions": [{"resource": "project:1", "action": "read"}, …]}
+  → 200 {"decisions": [{…}, …]}   (order preserved; 200 even if all deny)
 ```
 
 ## Features
 
 - **Collector pattern** — Attributes and rules are gathered by composable collectors, not a static policy file. Add custom collectors for any attribute source (database, external API, JWT claims).
+- **A decision contract, not a boolean** — every request is `(subject, resource, action, context)` and every answer carries a structured `reason` naming each rule group and how it came out, so "why was this denied" is answerable without re-running the pipeline. `POST /verify/batch` decides many resources in one round trip.
 - **Configurable JWT verification** — HS256 (shared secret), RS256/ES256/EdDSA (JWKS URI or direct public key). Symmetric design with [auth.provider](https://github.com/o3co/auth.provider)'s JWT config.
 - **RFC 9068 §4 token validation** — `iss`, `aud` and the `typ` header are checked alongside the signature, so an `id_token`, refresh token or logout token signed with the same key, or a token minted for another service, is rejected. `issuer` and `audience` are required whenever `validate = true`.
 - **JWKS support** — Point `jwksUri` at auth.provider's `/.well-known/jwks.json` for automatic key rotation.
@@ -78,7 +84,37 @@ curl -X POST http://localhost:3000/verify \
 ```
 
 ```json
-{"decision": "allow"}
+{
+  "subject": "user-1",
+  "resource": "project:1",
+  "action": "read",
+  "decision": "allow",
+  "reason": {
+    "groups": [
+      {
+        "ruleType": "scope",
+        "passed": true,
+        "rules": [{ "code": "invalid_scope", "message": "…", "passed": true }]
+      }
+    ]
+  }
+}
+```
+
+Filtering a list is one round trip, not one per resource:
+
+```bash
+curl -X POST http://localhost:3000/verify/batch \
+  -H "Authorization: Bearer <jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"decisions": [
+        {"resource": "project:1", "action": "read"},
+        {"resource": "project:2", "action": "read"}
+      ]}'
+```
+
+```json
+{"decisions": [{ "resource": "project:1", "decision": "allow", "…": "…" }]}
 ```
 
 ## Architecture
@@ -110,6 +146,15 @@ Rules are grouped by `ruleType` (e.g., "scope", "permission"):
 - **Within a group:** OR — any single passing rule satisfies the group
 - **Across groups:** AND — every group must be satisfied
 
+Every group is evaluated, including groups after the first failing one, and the
+decision carries a `reason` listing each group, whether it passed, and the rules
+behind that. Stopping at the first failure cannot say which of the remaining
+groups would also have failed, which is the question a deny explanation exists
+to answer. Rules are pure predicates over attributes by contract, so running
+them all is safe. The `code` / `message` on a deny still come from the first
+failing group, unchanged.
+
+
 Empty rule set → **deny**. A request that collects no rule was never authorized by anything, so the
 engine denies it with `no_applicable_rule` — matching the implicit-deny semantics of OPA / OpenFGA /
 Cedar. `rule.onEmptyRuleSet = "allow"` is an explicit per-deployment opt-out that makes the engine
@@ -122,6 +167,15 @@ configured at all is rejected.
 | --- | --- | --- |
 | `HasScope("read:project")` | `ResourceActionScopeRuleCollector` | JWT `scope` claim contains `read:project` |
 | `HasPermission("project:1.perm:read")` | `ResourceActionPermissionRuleCollector` | User permissions/roles include matching pattern (supports `*` wildcards) |
+
+### Built-in Attribute Collectors
+
+| Collector | Reads | Writes |
+| --- | --- | --- |
+| `PayloadScopeCollector` | JWT `scope` claim | `scopes` |
+| `PayloadSubjectIdCollector` | JWT `sub` claim | `userId` |
+| `StaticPermissionCollector` / `StaticRoleCollector` | config constants | `permissions` / `roles` |
+| `RequestContextAttributeCollector` | declared fields of the request `context` | the operator's own keys |
 
 ## Configuration
 
@@ -154,6 +208,14 @@ attribute {
   collectors = [
     { collector = "PayloadScopeCollector" }
     { collector = "PayloadSubjectIdCollector" }
+    # Promotes declared fields of the request body's `context` into attributes.
+    # Nothing undeclared is promoted, and a value that does not match its
+    # declared type is dropped.
+    { collector = "RequestContextAttributeCollector"
+      attributes = [
+        { from = "tenant.id", to = "tenantId" }
+        { from = "groups", type = "string[]" }
+      ] }
   ]
 }
 
@@ -167,6 +229,11 @@ rule {
 
 resource {
   parser = DotNotationResourceParser
+}
+
+verify {
+  maxBatchSize = 50             # cap on POST /verify/batch entries
+  maxBatchSize = ${?VERIFY_MAX_BATCH_SIZE}
 }
 ```
 
