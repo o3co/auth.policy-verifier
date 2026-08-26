@@ -28,9 +28,16 @@ import { describe, expect, it } from "vitest";
 
 const JWT_SECRET = "standalone-smoke-secret";
 const secretKey = new TextEncoder().encode(JWT_SECRET);
+const ISSUER = "https://issuer.test";
+const AUDIENCE = "https://api.test";
 
 async function signToken(payload: Record<string, unknown>): Promise<string> {
-	return new SignJWT(payload).setProtectedHeader({ alg: "HS256" }).setIssuedAt().sign(secretKey);
+	return new SignJWT(payload)
+		.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
+		.setIssuedAt()
+		.setIssuer(ISSUER)
+		.setAudience(AUDIENCE)
+		.sign(secretKey);
 }
 
 // Config mirrors the structure of application.conf, using the same builtin registry keys.
@@ -38,7 +45,7 @@ async function signToken(payload: Record<string, unknown>): Promise<string> {
 // ResourceActionScopeRuleCollector requires scope "<action>:<resourceType>" to be present.
 // DotNotationResourceParser is the default and matches the omitted resource.parser in application.conf.
 const baseConfig = AppConfigSchema.parse({
-	oauth: { jwt: { secret: JWT_SECRET, validate: true } },
+	oauth: { jwt: { secret: JWT_SECRET, validate: true, issuer: ISSUER, audience: AUDIENCE } },
 	attribute: {
 		collectors: [
 			{ collector: "PayloadScopeCollector" },
@@ -81,6 +88,30 @@ describe("standalone smoke", () => {
 
 		expect(res.status).toBe(200);
 		expect(res.body.decision).toBe("allow");
+	});
+
+	it("POST /verify with an id_token signed by the same key returns 401", async () => {
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: baseConfig,
+			modules: [builtinCollectorsModule, builtinKeyResolversModule],
+		});
+
+		// The paired provider signs id_tokens with the same key as access tokens;
+		// only the typ header separates them.
+		const token = await new SignJWT({ scope: "read:document" })
+			.setProtectedHeader({ alg: "HS256", typ: "id+jwt" })
+			.setIssuedAt()
+			.setIssuer(ISSUER)
+			.setAudience(AUDIENCE)
+			.sign(secretKey);
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "document", action: "read" });
+
+		expect(res.status).toBe(401);
+		expect(res.body.code).toBe("invalid_token");
 	});
 
 	it("POST /verify with insufficient scope returns 403 (deny)", async () => {

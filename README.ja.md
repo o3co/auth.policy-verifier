@@ -47,6 +47,7 @@ Authorization: Bearer <jwt>
 
 - **Collector パターン** — 属性とルールはコンポーザブルな Collector で収集。静的なポリシーファイルではない。任意の属性ソース（DB, 外部 API, JWT クレーム）向けにカスタム Collector を追加可能。
 - **JWT 検証アルゴリズム設定可能** — HS256（共有シークレット）、RS256/ES256/EdDSA（JWKS URI または公開鍵直接指定）。[auth.provider](https://github.com/o3co/auth.provider) の JWT 設定と対称設計。
+- **RFC 9068 §4 のトークン検証** — 署名だけでなく `iss` / `aud` / `typ` ヘッダも検証する。同じ鍵で署名された `id_token` / refresh token / logout token や、他サービス向けに発行されたトークンは拒否される。`validate = true` のとき `issuer` と `audience` は必須。
 - **JWKS サポート** — `jwksUri` を auth.provider の `/.well-known/jwks.json` に向ければ鍵ローテーションに自動対応。
 - **プラグイン可能なアーキテクチャ** — Module システムでカスタム Collector、ルール、リソースパーサーをファクトリ経由で登録。
 - **DSL ロックインなし** — 認可ロジックは TypeScript。Rego も Cedar ポリシー言語も不要。スケールアウトが必要になれば [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) 経由で OPA や Cedar に差し替え可能 — interceptor がバックエンドを抽象化する。
@@ -63,7 +64,10 @@ Authorization: Bearer <jwt>
 npx @o3co/create-auth-policy-verifier my-policy-verifier
 cd my-policy-verifier
 pnpm install
-OAUTH_JWT_SECRET=your-secret pnpm start
+OAUTH_JWT_SECRET=your-secret \
+  OAUTH_JWT_ISSUER=https://issuer.example.com \
+  OAUTH_JWT_AUDIENCE=https://api.example.com \
+  pnpm start
 ```
 
 ```bash
@@ -133,6 +137,10 @@ oauth {
     jwksUri = ${?OAUTH_JWT_JWKS_URI}        # RS256/ES256/EdDSA — 例: http://auth-provider/.well-known/jwks.json
     publicKey = ${?OAUTH_JWT_PUBLIC_KEY}     # RS256/ES256/EdDSA — PEM 文字列
     publicKeyPath = ${?OAUTH_JWT_PUBLIC_KEY_PATH}  # またはファイルパス
+    issuer = ${?OAUTH_JWT_ISSUER}           # validate = true のとき必須 — RFC 9068 §4 iss
+    audience = ${?OAUTH_JWT_AUDIENCE}       # validate = true のとき必須 — RFC 9068 §4 aud
+    tokenType = "at+jwt"                     # 受け入れる typ ヘッダ
+    tokenType = ${?OAUTH_JWT_TOKEN_TYPE}
     validate = true
     validate = ${?OAUTH_JWT_VALIDATE}
   }

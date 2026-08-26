@@ -9,9 +9,16 @@ import { AppConfigSchema, builtinKeyResolversModule, createApp } from "#/index.m
 
 const JWT_SECRET = "test-secret";
 const secretKey = new TextEncoder().encode(JWT_SECRET);
+const ISSUER = "https://issuer.test";
+const AUDIENCE = "https://api.test";
 
 async function signToken(payload: Record<string, unknown>): Promise<string> {
-	return new SignJWT(payload).setProtectedHeader({ alg: "HS256" }).setIssuedAt().sign(secretKey);
+	return new SignJWT(payload)
+		.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
+		.setIssuedAt()
+		.setIssuer(ISSUER)
+		.setAudience(AUDIENCE)
+		.sign(secretKey);
 }
 
 // Minimal test module that registers factories for a scope collector and rule collector
@@ -48,7 +55,7 @@ const testModule: Module = {
 };
 
 const testConfig = AppConfigSchema.parse({
-	oauth: { jwt: { secret: JWT_SECRET, validate: true } },
+	oauth: { jwt: { secret: JWT_SECRET, validate: true, issuer: ISSUER, audience: AUDIENCE } },
 	attribute: { collectors: [{ collector: "TestScopeCollector" }] },
 	rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
 	resource: { parser: "SimpleParser" },
@@ -91,7 +98,7 @@ describe("createApp", () => {
 
 	it("throws if config references unregistered collector", async () => {
 		const badConfig = AppConfigSchema.parse({
-			oauth: { jwt: { secret: JWT_SECRET, validate: true } },
+			oauth: { jwt: { secret: JWT_SECRET, validate: true, issuer: ISSUER, audience: AUDIENCE } },
 			attribute: { collectors: [{ collector: "NonExistent" }] },
 			rule: { collectors: [] },
 		});
@@ -103,6 +110,46 @@ describe("createApp", () => {
 				modules: [testModule, builtinKeyResolversModule],
 			}),
 		).rejects.toThrow('Registry: "NonExistent" is not registered');
+	});
+
+	it("throws when validate=true but a hand-built config omits issuer/audience", async () => {
+		// AppConfigSchema rejects this shape, so reach createApp with an object that
+		// never went through it — the same path a library consumer can take.
+		const handBuilt = {
+			...testConfig,
+			oauth: { jwt: { ...testConfig.oauth.jwt, issuer: undefined, audience: undefined } },
+		} as unknown as typeof testConfig;
+
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: handBuilt,
+				modules: [testModule, builtinKeyResolversModule],
+			}),
+		).rejects.toThrow(/issuer and oauth\.jwt\.audience are required/);
+	});
+
+	it("rejects a token minted for another audience end to end", async () => {
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: testConfig,
+			modules: [testModule, builtinKeyResolversModule],
+		});
+
+		const token = await new SignJWT({ scope: "read:project" })
+			.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
+			.setIssuedAt()
+			.setIssuer(ISSUER)
+			.setAudience("https://other-service.test")
+			.sign(secretKey);
+
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project", action: "read" });
+
+		expect(res.status).toBe(401);
+		expect(res.body.code).toBe("invalid_token");
 	});
 
 	it("includes healthcheck endpoint", async () => {

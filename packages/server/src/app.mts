@@ -15,7 +15,7 @@ import {
 import { createHealthcheckRouter } from "@o3co/auth.utils/express";
 import express from "express";
 import type { AppConfig } from "./config/application.schema.mjs";
-import { createVerifyRouter } from "./routes/verify.mjs";
+import { createVerifyRouter, type VerifyRouterJwtConfig } from "./routes/verify.mjs";
 
 /** Options accepted by `createApp`. */
 export interface CreateAppOptions {
@@ -74,13 +74,29 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	const resourceParserFactory = resourceParserRegistry.get(config.resource.parser);
 	const resourceParser = resourceParserFactory(config.resource);
 
-	// 6. Build key resolver from JWT config via the registry.
-	// When validate=false, decodeJwt is used instead of jwtVerify, so no key material is needed.
-	const keyResolver = config.oauth.jwt.validate
-		? await keyResolverRegistry.get(config.oauth.jwt.algorithm)(config.oauth.jwt)
-		: { key: new Uint8Array(0), algorithms: [] as string[] };
-
-	if (!config.oauth.jwt.validate) {
+	// 6. Build the router's JWT config. When validate=false, decodeJwt is used instead
+	// of jwtVerify, so neither key material nor RFC 9068 claim checks apply.
+	let jwt: VerifyRouterJwtConfig;
+	if (config.oauth.jwt.validate) {
+		const keyResolver = await keyResolverRegistry.get(config.oauth.jwt.algorithm)(config.oauth.jwt);
+		const { issuer, audience, tokenType } = config.oauth.jwt;
+		// AppConfigSchema already requires these; re-checked here because createApp also
+		// accepts hand-built config objects that never went through the schema.
+		if (!issuer || !audience) {
+			throw new Error(
+				"createApp: oauth.jwt.issuer and oauth.jwt.audience are required when oauth.jwt.validate is true (RFC 9068 §4)",
+			);
+		}
+		jwt = {
+			validate: true,
+			key: keyResolver.key,
+			algorithms: keyResolver.algorithms,
+			issuer,
+			audience,
+			tokenType,
+		};
+	} else {
+		jwt = { validate: false };
 		console.warn(
 			"WARNING: JWT signature validation is disabled. Tokens will be accepted without verification.",
 		);
@@ -93,11 +109,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	app.use(
 		prefix,
 		createVerifyRouter({
-			jwt: {
-				key: keyResolver.key,
-				algorithms: keyResolver.algorithms,
-				validate: config.oauth.jwt.validate,
-			},
+			jwt,
 			resourceParser,
 			attributePipeline: new AttributePipeline(attributeCollectors),
 			rulePipeline: new RulePipeline(ruleCollectors),

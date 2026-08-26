@@ -11,19 +11,51 @@ import {
 import express from "express";
 import { decodeJwt, type JWTPayload, jwtVerify } from "jose";
 
+/**
+ * JWT parameters used when signature validation is on. Every field a resource
+ * server must check per RFC 9068 §4 is required here, so a deployment cannot
+ * end up verifying the signature alone.
+ */
+export interface VerifyingJwtConfig {
+	validate: true;
+	// The `key` is produced by a KeyResolverFactory; its concrete type depends on
+	// the algorithm (e.g. KeyObject for HS256, JWTVerifyGetKey for JWKS, etc.).
+	// The route narrows it via cast when calling jwtVerify.
+	key: unknown;
+	algorithms: string[];
+	/** Issuer(s) this deployment accepts. A token minted by anyone else is rejected. */
+	issuer: string | string[];
+	/** Audience identifying this resource server. A token minted for another service is rejected. */
+	audience: string | string[];
+	/**
+	 * Accepted `typ` header — `"at+jwt"` for RFC 9068 access tokens. An `application/`
+	 * prefix on either side is ignored when comparing. Pinning it is what keeps an
+	 * `id_token`, refresh token or logout token signed with the same key from passing.
+	 */
+	tokenType: string;
+}
+
+/** Development-only shape: the token is decoded, never verified. */
+export interface DecodingJwtConfig {
+	validate: false;
+}
+
+/** JWT half of `VerifyRouterConfig`, discriminated on `validate`. */
+export type VerifyRouterJwtConfig = VerifyingJwtConfig | DecodingJwtConfig;
+
 /** Config for `createVerifyRouter`. The `jwt.key` type is library-specific and is narrowed at call-time. */
 export interface VerifyRouterConfig {
-	jwt: {
-		// The `key` is produced by a KeyResolverFactory; its concrete type depends on
-		// the algorithm (e.g. KeyObject for HS256, JWTVerifyGetKey for JWKS, etc.).
-		// The route narrows it via cast when calling jwtVerify.
-		key: unknown;
-		algorithms: string[];
-		validate: boolean;
-	};
+	jwt: VerifyRouterJwtConfig;
 	resourceParser: ResourceParser;
 	attributePipeline: AttributePipeline;
 	rulePipeline: RulePipeline;
+}
+
+/** True for a non-empty string or a non-empty array of non-empty strings. */
+function isPresent(value: string | string[] | undefined): boolean {
+	return Array.isArray(value)
+		? value.length > 0 && value.every((v) => typeof v === "string" && v !== "")
+		: typeof value === "string" && value !== "";
 }
 
 /**
@@ -34,6 +66,29 @@ export interface VerifyRouterConfig {
  * or 400 for bad request / 401 for auth errors / 500 for unexpected.
  */
 export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
+	const jwt = config.jwt;
+
+	// Fail at construction rather than accept tokens with an unchecked iss/aud/typ.
+	// A JavaScript caller can reach here with the fields missing even though the
+	// TypeScript shape requires them.
+	if (jwt.validate) {
+		if (!isPresent(jwt.issuer)) {
+			throw new Error(
+				"createVerifyRouter: jwt.issuer is required when jwt.validate is true (RFC 9068 §4)",
+			);
+		}
+		if (!isPresent(jwt.audience)) {
+			throw new Error(
+				"createVerifyRouter: jwt.audience is required when jwt.validate is true (RFC 9068 §4)",
+			);
+		}
+		if (!isPresent(jwt.tokenType)) {
+			throw new Error(
+				"createVerifyRouter: jwt.tokenType is required when jwt.validate is true (RFC 9068 §4)",
+			);
+		}
+	}
+
 	const router = express.Router();
 	router.use(express.json());
 
@@ -73,11 +128,14 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			}
 
 			let decoded: JWTPayload;
-			if (config.jwt.validate) {
+			if (jwt.validate) {
 				try {
 					// key is either a static key or a JWKS get-key function; both satisfy jwtVerify overloads
-					const result = await jwtVerify(token, config.jwt.key as Parameters<typeof jwtVerify>[1], {
-						algorithms: config.jwt.algorithms,
+					const result = await jwtVerify(token, jwt.key as Parameters<typeof jwtVerify>[1], {
+						algorithms: jwt.algorithms,
+						issuer: jwt.issuer,
+						audience: jwt.audience,
+						typ: jwt.tokenType,
 					});
 					decoded = result.payload;
 				} catch {

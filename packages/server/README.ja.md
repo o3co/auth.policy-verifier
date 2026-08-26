@@ -39,11 +39,23 @@ function createApp(options: CreateAppOptions): Promise<express.Express>
 
 ```typescript
 interface VerifyRouterConfig {
-  jwt: { secret: string; validate: boolean };
+  jwt: VerifyRouterJwtConfig;
   resourceParser: ResourceParser;
   attributePipeline: AttributePipeline;
   rulePipeline: RulePipeline;
 }
+
+// `validate` による判別可能ユニオン。検証パラメータは検証するときにだけ存在する。
+type VerifyRouterJwtConfig =
+  | {
+      validate: true;
+      key: unknown;             // KeyResolverFactory が返す鍵
+      algorithms: string[];
+      issuer: string | string[];    // RFC 9068 §4 iss
+      audience: string | string[];  // RFC 9068 §4 aud
+      tokenType: string;            // 受け入れる typ ヘッダ（例: "at+jwt"）
+    }
+  | { validate: false };
 
 function createVerifyRouter(config: VerifyRouterConfig): express.Router
 ```
@@ -53,7 +65,7 @@ function createVerifyRouter(config: VerifyRouterConfig): express.Router
 リクエスト処理フロー:
 
 1. `Authorization: <type> <token>` ヘッダーを取得する。存在しない場合は 401 を返す。
-2. `validate` が `true` の場合: HS256 で JWT を検証する。失敗時は 401 を返す。
+2. `validate` が `true` の場合: 署名に加えて RFC 9068 §4 のクレームを検証する — `iss` を `issuer` と、`aud` を `audience` と、`typ` ヘッダを `tokenType` と照合する（`application/` プレフィックスは無視）。失敗時は 401 を返す。3 つのいずれかが欠けている場合、`createVerifyRouter` は例外を投げる。
 3. `validate` が `false` の場合: JWT を検証なしでデコードする。不正なトークンの場合は 401 を返す。
 4. `req.body.resource` を `resourceParser` でパースし、`req.body.action` と `req.body.context` を読み取る。
 5. `x-request-id` ヘッダーが存在する場合、`CollectorContext.headers` に含める（コレクターが上流呼び出し時に転送可能）。
@@ -74,6 +86,9 @@ const AppConfigSchema = z.object({
     jwt: z.object({
       secret: z.string(),
       validate: z.boolean().default(true),
+      issuer: z.string().optional(),        // validate = true のとき必須
+      audience: z.union([z.string(), z.array(z.string())]).optional(), // validate = true のとき必須
+      tokenType: z.string().default("at+jwt"),
     }),
   }),
   attribute: z.object({

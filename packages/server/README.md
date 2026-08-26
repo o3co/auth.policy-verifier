@@ -39,11 +39,23 @@ Steps performed:
 
 ```typescript
 interface VerifyRouterConfig {
-  jwt: { secret: string; validate: boolean };
+  jwt: VerifyRouterJwtConfig;
   resourceParser: ResourceParser;
   attributePipeline: AttributePipeline;
   rulePipeline: RulePipeline;
 }
+
+// Discriminated on `validate`: verification parameters exist only when verifying.
+type VerifyRouterJwtConfig =
+  | {
+      validate: true;
+      key: unknown;             // from a KeyResolverFactory
+      algorithms: string[];
+      issuer: string | string[];    // RFC 9068 §4 iss
+      audience: string | string[];  // RFC 9068 §4 aud
+      tokenType: string;            // accepted typ header, e.g. "at+jwt"
+    }
+  | { validate: false };
 
 function createVerifyRouter(config: VerifyRouterConfig): express.Router
 ```
@@ -53,7 +65,7 @@ Returns an Express Router that handles `POST /verify`. `createApp` calls this in
 Request flow:
 
 1. Extract `Authorization: <type> <token>` header. Returns 401 if missing.
-2. If `validate` is `true`: verify the JWT with HS256 using `secret`. Returns 401 on failure.
+2. If `validate` is `true`: verify the signature **and** the RFC 9068 §4 claims — `iss` against `issuer`, `aud` against `audience`, and the `typ` header against `tokenType` (an `application/` prefix is ignored). Returns 401 on failure. `createVerifyRouter` throws if any of the three is missing.
 3. If `validate` is `false`: decode the JWT without verification. Returns 401 if the token is malformed.
 4. Parse `req.body.resource` with `resourceParser`; read `req.body.action` and `req.body.context`.
 5. Include `x-request-id` header in `CollectorContext.headers` if present (collectors can forward it to upstream calls they make).
@@ -74,6 +86,9 @@ const AppConfigSchema = z.object({
     jwt: z.object({
       secret: z.string(),
       validate: z.boolean().default(true),
+      issuer: z.string().optional(),        // required when validate is true
+      audience: z.union([z.string(), z.array(z.string())]).optional(), // required when validate is true
+      tokenType: z.string().default("at+jwt"),
     }),
   }),
   attribute: z.object({

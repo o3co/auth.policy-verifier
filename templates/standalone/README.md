@@ -6,7 +6,10 @@ Deployable server template for auth.policy-verifier. This is the composition roo
 
 ```sh
 pnpm install
-OAUTH_JWT_SECRET=your-secret pnpm run start
+OAUTH_JWT_SECRET=your-secret \
+  OAUTH_JWT_ISSUER=https://issuer.example.com \
+  OAUTH_JWT_AUDIENCE=https://api.example.com \
+  pnpm run start
 ```
 
 ## Configuration
@@ -30,6 +33,9 @@ Individual values can also be overridden with environment variables.
 | `HTTP_PORT` | `3000` | Bind port |
 | `HTTP_PATH_PREFIX` | `""` | URL path prefix |
 | `OAUTH_JWT_SECRET` | (required) | HMAC-HS256 JWT signing secret |
+| `OAUTH_JWT_ISSUER` | (required) | Issuer this deployment accepts — RFC 9068 §4 `iss` |
+| `OAUTH_JWT_AUDIENCE` | (required) | Audience identifying this resource server — RFC 9068 §4 `aud` |
+| `OAUTH_JWT_TOKEN_TYPE` | `at+jwt` | Accepted `typ` header; rejects id/refresh/logout tokens signed with the same key |
 | `OAUTH_JWT_VALIDATE` | `true` | Whether to verify JWT signature |
 
 ## Default Collectors
@@ -79,7 +85,11 @@ Build the image and run the container:
 
 ```sh
 make build
-docker run -e OAUTH_JWT_SECRET=secret auth-policy-verifier
+docker run \
+  -e OAUTH_JWT_SECRET=secret \
+  -e OAUTH_JWT_ISSUER=https://issuer.example.com \
+  -e OAUTH_JWT_AUDIENCE=https://api.example.com \
+  auth-policy-verifier
 ```
 
 For local development with Docker Compose:
