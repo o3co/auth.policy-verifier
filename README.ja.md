@@ -106,7 +106,10 @@ standalone → server   → core
 - **グループ内:** OR — 1つでも通ればそのグループは通過
 - **グループ間:** AND — 全グループが通過する必要あり
 
-ルールなし → allow。RuleCollector が未設定なら全リクエストが許可される。
+ルールが 1 つも集まらなかった場合 → **deny**。どのルールも適用されなかったリクエストは「認可されていない」ので、
+`no_applicable_rule` で拒否する (OPA / OpenFGA / Cedar の implicit deny と同じ挙動)。
+`rule.onEmptyRuleSet = "allow"` を明示するとこの既定を opt-out して fail-open にできるが、認可を別レイヤで
+担保している場合に限る。RuleCollector が 1 つも設定されていない場合は起動時に失敗する。
 
 ### 組み込みルール
 
@@ -146,6 +149,8 @@ attribute {
 }
 
 rule {
+  onEmptyRuleSet = "deny"       # deny | allow — ルールが集まらなかったときの決定
+  onEmptyRuleSet = ${?RULE_ON_EMPTY_RULE_SET}
   collectors = [
     { collector = "ResourceActionScopeRuleCollector" }
   ]

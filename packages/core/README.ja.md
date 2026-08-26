@@ -20,6 +20,8 @@ function evaluate(attrs: Attributes, rules: Rule[]): Decision
 
 収集した属性をルールセットに対して評価します。ルールは `ruleType` でグループ化され、グループ内はいずれかのルールが通れば満足（OR）、すべてのグループが満たされた場合に許可（グループ間 AND）となります。戻り値は `{ decision: "allow" }` または `{ decision: "deny"; code: string; message: string }` です。
 
+**ルールが 1 つも集まらなかった場合は deny** (`code: "no_applicable_rule"`) です。どのルールも適用されなかったリクエストは認可されていないためです。第 3 引数に `{ onEmptyRuleSet: "allow" }` を渡すと、この既定を deployment 単位で opt-out できます。
+
 ### AttributePipeline
 
 ```typescript

@@ -39,7 +39,7 @@ export const builtinCollectorsModule: Module = {
 		// Rule collector factories
 		context.ruleCollectorRegistry.register(
 			"ResourceActionScopeRuleCollector",
-			() => new ResourceActionScopeRuleCollector(),
+			(config) => new ResourceActionScopeRuleCollector(config),
 		);
 		context.ruleCollectorRegistry.register(
 			"ResourceActionPermissionRuleCollector",

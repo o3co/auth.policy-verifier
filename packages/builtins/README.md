@@ -171,7 +171,11 @@ All attribute comparison rules follow the same grouping semantics described for 
 | `ResourceActionPermissionRuleCollector` | `"<resource.raw>.perm:<action>"` | `[HasPermission(...)]` |
 | `ResourceActionScopeRuleCollector` | `"<action>:<resource.resourceType>"` | `[HasScope(...)]` |
 
-Both collectors take no constructor arguments.
+`ResourceActionPermissionRuleCollector` takes no constructor arguments.
+`ResourceActionScopeRuleCollector` accepts `{ scopeless?: "deny" | "skip" }` (default `"deny"`): it emits the
+`HasScope` rule for every request, so a token carrying no `scope` claim fails it. `"skip"` emits no rule for a
+scopeless token — only use it in a pipeline where another rule group authorizes the request, since a request
+that collects no rule at all is denied.
 
 ## Resource Parser
 
@@ -205,7 +209,7 @@ import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
 | `attributeCollector` | `"PayloadSubjectIdCollector"` | `() => new PayloadSubjectIdCollector()` |
 | `attributeCollector` | `"StaticPermissionCollector"` | `(config) => new StaticPermissionCollector(config)` |
 | `attributeCollector` | `"StaticRoleCollector"` | `(config) => new StaticRoleCollector(config)` |
-| `ruleCollector` | `"ResourceActionScopeRuleCollector"` | `() => new ResourceActionScopeRuleCollector()` |
+| `ruleCollector` | `"ResourceActionScopeRuleCollector"` | `(config) => new ResourceActionScopeRuleCollector(config)` |
 | `ruleCollector` | `"ResourceActionPermissionRuleCollector"` | `() => new ResourceActionPermissionRuleCollector()` |
 | `resourceParser` | `"DotNotationResourceParser"` | `() => new DotNotationResourceParser()` |
 

@@ -106,7 +106,11 @@ Rules are grouped by `ruleType` (e.g., "scope", "permission"):
 - **Within a group:** OR — any single passing rule satisfies the group
 - **Across groups:** AND — every group must be satisfied
 
-Empty rules → allow. This means if no rule collectors are configured, all requests are allowed.
+Empty rule set → **deny**. A request that collects no rule was never authorized by anything, so the
+engine denies it with `no_applicable_rule` — matching the implicit-deny semantics of OPA / OpenFGA /
+Cedar. `rule.onEmptyRuleSet = "allow"` is an explicit per-deployment opt-out that makes the engine
+fail-open; set it only when authorization is enforced elsewhere. Booting with no rule collector
+configured at all is rejected.
 
 ### Built-in Rule Types
 
@@ -146,6 +150,8 @@ attribute {
 }
 
 rule {
+  onEmptyRuleSet = "deny"       # deny | allow — decision when no rule is collected
+  onEmptyRuleSet = ${?RULE_ON_EMPTY_RULE_SET}
   collectors = [
     { collector = "ResourceActionScopeRuleCollector" }
   ]

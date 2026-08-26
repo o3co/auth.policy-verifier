@@ -64,3 +64,31 @@ describe("AppConfigSchema — JWT algorithm validation", () => {
 		expect(result.success).toBe(true);
 	});
 });
+
+describe("AppConfigSchema — empty rule set policy", () => {
+	it("defaults rule.onEmptyRuleSet to deny", () => {
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: { algorithm: "HS256", secret: "s", validate: true } },
+			...baseBody,
+		});
+		expect(result.rule.onEmptyRuleSet).toBe("deny");
+	});
+
+	it("accepts an explicit allow opt-out", () => {
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: { algorithm: "HS256", secret: "s", validate: true } },
+			attribute: { collectors: [] },
+			rule: { collectors: [], onEmptyRuleSet: "allow" },
+		});
+		expect(result.rule.onEmptyRuleSet).toBe("allow");
+	});
+
+	it("rejects an unrecognized onEmptyRuleSet value", () => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: { algorithm: "HS256", secret: "s", validate: true } },
+			attribute: { collectors: [] },
+			rule: { collectors: [], onEmptyRuleSet: "maybe" },
+		});
+		expect(result.success).toBe(false);
+	});
+});
