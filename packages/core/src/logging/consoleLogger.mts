@@ -36,11 +36,12 @@ export interface ConsoleLoggerOptions {
  *   fatal → console.error
  *
  * The merged object (child bindings + per-call obj) is passed verbatim to the
- * underlying `console.*` method. No `JSON.stringify` happens here — Node's
- * console formats objects with `util.inspect` for terminal output, while
- * structured log aggregators generally consume the unmodified object form.
- * Tests should spy on `console.*` and assert on the call arguments rather
- * than on string output.
+ * underlying `console.*` method, which renders it with `util.inspect` — i.e.
+ * human-readable text on stdout/stderr, not JSON. This logger is the
+ * never-silent fallback for deployments that wire nothing; an aggregator-ready
+ * NDJSON stream comes from injecting a structured logger instead (the
+ * standalone template injects pino). Tests should spy on `console.*` and
+ * assert on the call arguments rather than on string output.
  *
  * Per-call obj wins over child bindings on key collision (pino-compatible
  * last-write-wins).
