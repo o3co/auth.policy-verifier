@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from "zod";
+import { DEFAULT_MAX_BATCH_SIZE } from "../routes/verify.mjs";
 
 const collectorSchema = z
 	.object({
@@ -128,9 +129,9 @@ export const AppConfigSchema = z.object({
 			// Cap on `POST /verify/batch` entries. The batch endpoint exists so
 			// filtering a list of N resources is one round trip; the cap keeps one
 			// request from turning into an unbounded amount of pipeline work.
-			maxBatchSize: z.coerce.number().int().positive().default(50),
+			maxBatchSize: z.coerce.number().int().positive().default(DEFAULT_MAX_BATCH_SIZE),
 		})
-		.default(() => ({ maxBatchSize: 50 })),
+		.default(() => ({ maxBatchSize: DEFAULT_MAX_BATCH_SIZE })),
 	// Defaulted (not shape-only): deployments mount an overlay config OVER the
 	// template's application.conf, so a section the overlay does not repeat is
 	// simply absent. `silent` is a threshold, not a level anything emits at.
