@@ -299,6 +299,24 @@ and version sections follow the release labeling policy in
   - A shared credential is a floor, not a ceiling: it does not replace network
     policy or mTLS between the enforcement layer and this service.
 
+- `@o3co/create-auth-policy-verifier` now generates `pnpm-lock.yaml` for the
+  project it scaffolds, and accepts `--no-lockfile` to skip it
+  ([#119](https://github.com/o3co/auth.policy-verifier/issues/119)). The
+  template's `Dockerfile` installs with `--frozen-lockfile`, which needs a
+  lockfile the template itself cannot ship: until the scaffolder has replaced
+  every `workspace:*` with a published version, the dependency set a lockfile
+  would pin does not exist. It is therefore resolved once, at scaffold time,
+  against the rewritten `package.json` (`pnpm install --lockfile-only
+  --ignore-workspace`) — commit the result.
+
+  Best-effort by design: it needs `pnpm` (or `corepack`) and a reachable
+  registry, and neither is guaranteed on the machine running the scaffolder.
+  Failure prints what to run and leaves the scaffold successful, because the
+  generated project is usable without a lockfile — it just cannot be built into
+  an image until `pnpm install` has been run once. `generateLockfile` is
+  exported alongside `scaffold` for programmatic use, and reports failure as a
+  result rather than throwing.
+
 ### Changed
 
 - **BREAKING**: `DotNotationResourceParser`
@@ -521,3 +539,62 @@ and version sections follow the release labeling policy in
   type-checked at all. Turning it on surfaced three pre-existing type errors in
   `tests/integration`, a package that has no build step and had therefore never
   been type-checked; they are fixed.
+- The standalone template's `Dockerfile` no longer rebuilds into a different
+  image each time, and now ships a health signal
+  ([#119](https://github.com/o3co/auth.policy-verifier/issues/119)).
+
+  - **Reproducible inputs**: the base image is pinned by digest
+    (`node:24-alpine@sha256:…`) rather than by a moving tag, global `corepack`
+    is pinned to a version instead of resolving to whatever is latest at build
+    time, and dependencies install with `pnpm install --frozen-lockfile` from a
+    committed `pnpm-lock.yaml` instead of re-resolving every range. The
+    lockfile is a required build input — a build without one fails at the
+    `COPY` rather than quietly resolving something new. Dependabot's `docker`
+    ecosystem now watches `templates/standalone`, so the digest is bumped
+    deliberately rather than left to rot.
+  - **Dependencies resolved once**: the runtime stage takes `node_modules` from
+    a `pnpm prune --prod` of the same tree the build used, instead of running a
+    second `pnpm install --prod`. A second install is a second resolution, and
+    therefore a second chance for the runtime image to contain something the
+    build never saw.
+  - **Non-root**: `pnpm install` and `pnpm run build` run as `node` in every
+    stage, matching the pattern auth.provider's template already uses.
+  - The builder stage copies `tsconfig*.json` rather than `tsconfig.json`
+    alone, so the `tsconfig.typecheck.json` the template now ships reaches the
+    image and `pnpm run typecheck` works in the test and develop stages.
+  - **`EXPOSE`** declares the port, derived from the same `HTTP_PORT` the app
+    reads.
+  - **`HEALTHCHECK`** probes `GET /healthcheck` — at the container's own
+    routable address, not `127.0.0.1`. Since [#108] made the config bind
+    loopback by default, a container that keeps that default is reachable from
+    nothing, yet a loopback probe passes anyway: it would report `healthy` for
+    a container no caller can reach. Probing the address the container is
+    reachable at asks the same question a caller does, so a missing
+    `HTTP_HOSTNAME=0.0.0.0` surfaces as `unhealthy` instead of being masked.
+    The probe follows `HTTP_PORT` and `HTTP_PATH_PREFIX`, and needs no
+    credential — `GET /healthcheck` is never gated by `http.callerAuth`.
+
+    The one shape this is wrong for is a sidecar sharing a network namespace
+    with its caller, where loopback is the correct bind; that deployment
+    overrides `healthcheck:` on the service, which keeps the restart-driving
+    signal honest for everyone else.
+
+### Fixed
+
+- `@o3co/create-auth-policy-verifier` scaffolded an **empty directory** whenever
+  it was run the documented way. Its template-copy filter excluded any path
+  containing a `node_modules` or `dist` segment, matched against the absolute
+  path — and the scaffolder itself lives under `node_modules` when installed by
+  `npm create` / `npx`, so the filter rejected every file of the template. It
+  only ever worked from a source checkout. The exclusion is now judged relative
+  to the template root, so build output inside the template is still skipped
+  while the template itself is copied. The same latent bug in
+  `create-app/scripts/copy-templates.mjs` was corrected too. Found while
+  verifying [#119](https://github.com/o3co/auth.policy-verifier/issues/119)'s
+  Docker build end to end.
+- The scaffolder's printed next steps said `npm install` for a project whose
+  `packageManager` is pnpm and whose lockfile is `pnpm-lock.yaml`; installing
+  with npm would have ignored that lockfile and written a `package-lock.json`
+  the image does not use. They now say `pnpm`.
+
+[#108]: https://github.com/o3co/auth.policy-verifier/issues/108

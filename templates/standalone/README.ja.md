@@ -126,17 +126,63 @@ const app = await createApp({
 ```sh
 make build
 docker run \
+  -p 3000:3000 \
+  -e HTTP_HOSTNAME=0.0.0.0 \
+  -e HTTP_CALLER_AUTH_TOKEN=<secret> \
   -e OAUTH_JWT_SECRET=secret \
   -e OAUTH_JWT_ISSUER=https://issuer.example.com \
   -e OAUTH_JWT_AUDIENCE=https://api.example.com \
   auth-policy-verifier
 ```
 
+最初の 2 つは [信頼境界](#信頼境界) で述べた opt-in の組で、ポートを公開する
+こと自体が両方を必要にします:
+
+- `HTTP_HOSTNAME=0.0.0.0` — 設定は既定で loopback に bind しますが、コンテナ内
+  での loopback は「どこからも到達できない」を意味し、公開したポートは決して
+  繋がらないため。
+- `HTTP_CALLER_AUTH_TOKEN` — 同じ設定によって `/verify` がポートに到達できる
+  すべてのものから届く状態になり、`/verify` は認可判断を返すため。省略して
+  よいのは、ホストの外から公開ポートに到達できない場合だけです。
+
 Docker Compose でローカル開発する場合:
 
 ```sh
 make dev
 ```
+
+`docker-compose.yml` は `HTTP_HOSTNAME=0.0.0.0` を自身で設定し、任意の `.env`
+を読み込みます。資格情報は供給**しません** — `HTTP_CALLER_AUTH_TOKEN` はその
+`.env` に置いてください。
+
+### `pnpm-lock.yaml` はビルド入力
+
+同じソースからの 2 回のビルドが 2 つの異なるイメージを生まないようにするのが
+`pnpm install --frozen-lockfile` です。そのため `Dockerfile` は
+`pnpm-lock.yaml` を COPY し、無ければビルドは失敗します。
+`create-auth-policy-verifier` が scaffold 時に生成するので、コミットして
+ください。無い場合（オフラインでの scaffold、または `--no-lockfile`）は
+`pnpm install` を一度実行してその結果をコミットします。
+
+したがって依存更新は lockfile の変更です: `pnpm update` → commit → 再ビルド。
+ベースイメージを digest で固定しているのも同じ理由で、更新方法も同じ —
+tag と digest を意図的に一緒に上げます。
+
+### HEALTHCHECK が報告するもの
+
+コンテナの healthcheck は `127.0.0.1` ではなく、**コンテナ自身の到達可能
+アドレス**を probe します。これは意図的です。loopback に対する probe は、
+サーバーが loopback に bind していて誰も到達できない状態でも成功してしまい —
+外から見れば死んでいるコンテナを「healthy」と報告します。実際に到達可能な
+アドレスを叩けば呼び出し元と同じ問いになるため、`HTTP_HOSTNAME=0.0.0.0` の
+付け忘れは隠れずに `unhealthy` として現れます。
+
+`GET /healthcheck` は `http.callerAuth` で決してゲートされないので、probe に
+資格情報は不要です。`HTTP_PATH_PREFIX` と `HTTP_PORT` には追従します。
+
+例外は 1 つ、呼び出し元と network namespace を共有する sidecar 構成です。
+そこでは loopback bind が正しく、到達可能アドレスでは何も listen していま
+せん。そのサービスでは `healthcheck:` を override してください。
 
 ## 関連
 

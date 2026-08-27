@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, resolve, sep } from "node:path";
+import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -14,9 +14,14 @@ const EXCLUDED_DIRS = new Set(["node_modules", "dist"]);
 rmSync(dest, { recursive: true, force: true });
 cpSync(src, dest, {
 	recursive: true,
+	// Relative to `src`, not the absolute path: a checkout that happens to sit
+	// under a directory named node_modules or dist would otherwise match every
+	// entry and copy nothing. Same reasoning as isTemplateEntryIncluded in
+	// src/index.mts.
 	filter: (source) => {
-		const segments = source.split(sep);
-		return !segments.some((segment) => EXCLUDED_DIRS.has(segment));
+		const rel = relative(src, source);
+		if (rel === "") return true;
+		return !rel.split(sep).some((segment) => EXCLUDED_DIRS.has(segment));
 	},
 });
 
