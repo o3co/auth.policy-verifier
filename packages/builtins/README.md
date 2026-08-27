@@ -59,13 +59,15 @@ new HasPermission(permission: string)
 ### HasScope
 
 ```ts
-new HasScope(scope: string)
+new HasScope(scope: string, options?: { allowBareScopeRewrite?: boolean })
 ```
 
 - `ruleType`: `"scope"`, `code`: `"invalid_scope"`
 - Checks `ATTR_SCOPES`.
-- A bare scope string `"resource"` in `ATTR_SCOPES` is normalized to `"read:resource"` before comparison.
-- Matching is case-insensitive exact match after normalization.
+- Matching is **exact and case-sensitive**. OAuth 2.0 scope values are case-sensitive opaque strings ([RFC 6749 §3.3](https://datatracker.ietf.org/doc/html/rfc6749#section-3.3)), so `read:PROJECT` does not satisfy `read:project`.
+- A scope containing more than one `:` is a value in its own right — nothing is split off at the second `:`. `read:project:restricted` does not satisfy `read:project` (a deliberately narrowed grant must not collapse into the broader one), and `read:project` does not satisfy `read:project:restricted`.
+- `allowBareScopeRewrite` (default `false`) opts in to treating a bare granted scope `"resource"` as `"read:resource"` as well as literally. Only a scope with **no** `:` is ever rewritten; `"project:restricted"` is left alone, because which segment is the action is unknowable and guessing over-grants. Leave it off unless your issuer emits bare resource names.
+- Non-string entries in `ATTR_SCOPES` never match and never throw.
 
 ### AttrMatchRule
 
@@ -185,10 +187,13 @@ All attribute comparison rules follow the same grouping semantics described for 
 | `ResourceActionScopeRuleCollector` | `"<action>:<resource.resourceType>"` | `[HasScope(...)]` |
 
 `ResourceActionPermissionRuleCollector` takes no constructor arguments.
-`ResourceActionScopeRuleCollector` accepts `{ scopeless?: "deny" | "skip" }` (default `"deny"`): it emits the
-`HasScope` rule for every request, so a token carrying no `scope` claim fails it. `"skip"` emits no rule for a
-scopeless token — only use it in a pipeline where another rule group authorizes the request, since a request
-that collects no rule at all is denied.
+`ResourceActionScopeRuleCollector` accepts `{ scopeless?: "deny" | "skip", allowBareScopeRewrite?: boolean }`.
+
+- `scopeless` (default `"deny"`): it emits the `HasScope` rule for every request, so a token carrying no `scope`
+  claim fails it. `"skip"` emits no rule for a scopeless token — only use it in a pipeline where another rule
+  group authorizes the request, since a request that collects no rule at all is denied.
+- `allowBareScopeRewrite` (default `false`): forwarded to [`HasScope`](#hasscope). Set it to `true` only if your
+  issuer emits bare resource names (`project`) rather than `{action}:{resourceType}` scopes (`read:project`).
 
 ## Resource Parser
 

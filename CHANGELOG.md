@@ -10,6 +10,36 @@ and version sections follow the release labeling policy in
 
 ### Changed
 
+- **BREAKING**: `HasScope` (`@o3co/auth.policy-verifier.builtins`) now matches
+  scopes exactly instead of normalizing them
+  ([#116](https://github.com/o3co/auth.policy-verifier/issues/116)). The old
+  matcher lowercased both sides, rewrote a bare granted scope to `read:<scope>`,
+  and destructured on `:` so that everything after the second segment was
+  dropped — each of which could satisfy a requirement the issuer never granted.
+  OAuth 2.0 scope values are case-sensitive opaque strings (RFC 6749 §3.3).
+  - **Case**: matching is now case-sensitive. `read:PROJECT` no longer satisfies
+    a `read:project` requirement (old: matched → new: denied).
+  - **Multi-colon**: a scope is no longer split at `:`. `read:project:restricted`
+    no longer satisfies `read:project` (old: matched, silently widening a
+    deliberately narrowed grant → new: denied), and `read:project:restricted`
+    now satisfies its own identical requirement (old: never matched, because the
+    granted value was truncated to `read:project` before comparison → new:
+    matched).
+  - **Bare-scope rewrite**: a granted scope containing no `:` is now compared
+    literally. It is no longer rewritten to `read:<scope>` unless the new
+    `allowBareScopeRewrite` option is explicitly enabled (default `false`).
+    Even when enabled, only a scope with no `:` is rewritten — a value such as
+    `project:restricted` is never re-interpreted.
+  - **Migration** — a deployment whose issuer emits bare resource names
+    (`project` rather than `read:project`) must opt back in, or every such token
+    starts being denied:
+    - HOCON: `{ collector = "ResourceActionScopeRuleCollector", allowBareScopeRewrite = true }`
+    - TypeScript: `new ResourceActionScopeRuleCollector({ allowBareScopeRewrite: true })`
+      or `new HasScope(scope, { allowBareScopeRewrite: true })`
+    - A deployment whose issuer emits `{action}:{resourceType}` scopes in the
+      exact case the policy requires needs no change.
+  - A non-string entry in `ATTR_SCOPES` now denies instead of throwing a
+    `TypeError` (which surfaced as a 500 rather than a decision).
 - **BREAKING**: the `reason` payload of `POST /verify` and `POST /verify/batch`
   responses (and the `RuleGroupOutcome` type in
   `@o3co/auth.policy-verifier.core`) now reports each rule group honestly

@@ -59,13 +59,15 @@ new HasPermission(permission: string)
 ### HasScope
 
 ```ts
-new HasScope(scope: string)
+new HasScope(scope: string, options?: { allowBareScopeRewrite?: boolean })
 ```
 
 - `ruleType`: `"scope"`、`code`: `"invalid_scope"`
 - `ATTR_SCOPES` を確認します。
-- `ATTR_SCOPES` 内のプレフィックスなし scope 文字列（例: `"resource"`）は、比較前に `"read:resource"` へ正規化されます。
-- 正規化後に大文字・小文字を区別しない完全一致で比較します。
+- 比較は**大文字・小文字を区別する完全一致**です。OAuth 2.0 の scope 値は大文字・小文字を区別する不透明な文字列であるため（[RFC 6749 §3.3](https://datatracker.ietf.org/doc/html/rfc6749#section-3.3)）、`read:PROJECT` は `read:project` を満たしません。
+- `:` を 2 つ以上含む scope はそれ自体が 1 つの値であり、2 つ目の `:` 以降が切り捨てられることはありません。`read:project:restricted` は `read:project` を満たさず（意図的に絞り込まれた grant が広い方へ吸収されてはならない）、`read:project` も `read:project:restricted` を満たしません。
+- `allowBareScopeRewrite`（既定 `false`）を有効にすると、プレフィックスなしの scope `"resource"` を、そのままの値に加えて `"read:resource"` としても扱います。書き換え対象は `:` を **1 つも含まない** scope のみで、`"project:restricted"` は書き換えません（どのセグメントが action かは判別不能であり、推測は過剰付与になるため）。issuer がプレフィックスなしのリソース名を発行する場合以外は無効のままにしてください。
+- `ATTR_SCOPES` 内の文字列以外の要素は、一致もせず例外も投げません。
 
 ### AttrMatchRule
 
@@ -185,10 +187,13 @@ new AttrPairCompare({ a: string, op: "lt" | "le" | "gt" | "ge", b: string, group
 | `ResourceActionScopeRuleCollector` | `"<action>:<resource.resourceType>"` | `[HasScope(...)]` |
 
 `ResourceActionPermissionRuleCollector` にコンストラクタ引数はありません。
-`ResourceActionScopeRuleCollector` は `{ scopeless?: "deny" | "skip" }` を受け取ります (既定は `"deny"`)。既定では
-リクエストごとに必ず `HasScope` ルールを生成するため、`scope` claim を持たないトークンはこのルールに落ちます。
-`"skip"` は scopeless トークンに対してルールを生成しませんが、ルールが 1 つも集まらないリクエストは deny されるため、
-別のルールグループが認可を担うパイプラインでのみ使ってください。
+`ResourceActionScopeRuleCollector` は `{ scopeless?: "deny" | "skip", allowBareScopeRewrite?: boolean }` を受け取ります。
+
+- `scopeless`（既定 `"deny"`）: 既定ではリクエストごとに必ず `HasScope` ルールを生成するため、`scope` claim を持たない
+  トークンはこのルールに落ちます。`"skip"` は scopeless トークンに対してルールを生成しませんが、ルールが 1 つも集まらない
+  リクエストは deny されるため、別のルールグループが認可を担うパイプラインでのみ使ってください。
+- `allowBareScopeRewrite`（既定 `false`）: [`HasScope`](#hasscope) へそのまま渡されます。issuer が `{action}:{resourceType}`
+  形式（`read:project`）ではなくプレフィックスなしのリソース名（`project`）を発行する場合にのみ `true` にしてください。
 
 ## Resource Parser
 
