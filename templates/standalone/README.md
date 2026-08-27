@@ -37,15 +37,18 @@ Individual values can also be overridden with environment variables.
 | `OAUTH_JWT_AUDIENCE` | (required) | Audience identifying this resource server — RFC 9068 §4 `aud` |
 | `OAUTH_JWT_TOKEN_TYPE` | `at+jwt` | Accepted `typ` header; rejects id/refresh/logout tokens signed with the same key |
 | `OAUTH_JWT_VALIDATE` | `true` | Whether to verify JWT signature |
+| `RULE_ON_EMPTY_RULE_SET` | `deny` | Decision when no rule is collected (`deny` \| `allow`) |
+| `VERIFY_MAX_BATCH_SIZE` | `50` | Cap on `POST /verify/batch` entries |
 
 ## Default Collectors
 
 The following collectors are registered via `builtinCollectorsModule`:
 
-**Attribute collectors** (extract attributes from the JWT payload):
+**Attribute collectors**:
 
-- `PayloadScopeCollector` — extracts OAuth scopes
-- `PayloadSubjectIdCollector` — extracts the subject identifier
+- `PayloadScopeCollector` — extracts OAuth scopes from the JWT payload
+- `PayloadSubjectIdCollector` — extracts the subject identifier from the JWT payload
+- `RequestContextAttributeCollector` — promotes declared fields of the request body's `context` into attributes (not wired by default; add it to `attribute.collectors` with an `attributes` mapping list)
 
 **Rule collectors** (resolve authorization rules):
 

@@ -120,6 +120,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 			attributePipeline: new AttributePipeline(attributeCollectors),
 			rulePipeline: new RulePipeline(ruleCollectors),
 			evaluateOptions: { onEmptyRuleSet: config.rule.onEmptyRuleSet },
+			maxBatchSize: config.verify.maxBatchSize,
 		}),
 	);
 

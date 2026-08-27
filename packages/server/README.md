@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.server
 
-Express HTTP server for auth.policy-verifier. Provides `createApp` to assemble the application from modules and config, and `POST /verify` for authorization decisions.
+Express HTTP server for auth.policy-verifier. Provides `createApp` to assemble the application from modules and config, and `POST /verify` / `POST /verify/batch` for authorization decisions.
 
 ## Install
 
@@ -30,7 +30,7 @@ Steps performed:
 2. Calls `mod.init(context)` for each module in order, allowing each to register factory functions.
 3. Instantiates attribute collectors and rule collectors from `config.attribute.collectors` and `config.rule.collectors` by looking up the registered factory for each `collector` name.
 4. Instantiates the resource parser from `config.resource.parser`.
-5. Mounts `GET /healthcheck` and `POST /verify` under `config.http.pathPrefix`.
+5. Mounts `GET /healthcheck`, `POST /verify` and `POST /verify/batch` under `config.http.pathPrefix`.
 6. Returns the configured `express.Express` instance.
 
 `pathResolver` must be `import.meta.resolve` (or a compatible resolver) from the composition root. It is passed to modules that need to resolve module-relative paths.
@@ -43,6 +43,10 @@ interface VerifyRouterConfig {
   resourceParser: ResourceParser;
   attributePipeline: AttributePipeline;
   rulePipeline: RulePipeline;
+  /** Evaluator semantics overrides; omitted means deny on an empty rule set. */
+  evaluateOptions?: EvaluateOptions;
+  /** Most entries POST /verify/batch will decide in one request. Defaults to 50. */
+  maxBatchSize?: number;
 }
 
 // Discriminated on `validate`: verification parameters exist only when verifying.
@@ -60,7 +64,7 @@ type VerifyRouterJwtConfig =
 function createVerifyRouter(config: VerifyRouterConfig): express.Router
 ```
 
-Returns an Express Router that handles `POST /verify`. `createApp` calls this internally; use it directly only if you need to mount the router independently.
+Returns an Express Router that handles `POST /verify` and `POST /verify/batch`. `createApp` calls this internally; use it directly only if you need to mount the router independently.
 
 Request flow:
 
@@ -100,6 +104,9 @@ const AppConfigSchema = z.object({
   resource: z.object({
     parser: z.string().default("DotNotationResourceParser"),
   }),
+  verify: z.object({
+    maxBatchSize: z.coerce.number().int().positive().default(50),
+  }),
 });
 
 type AppConfig = z.infer<typeof AppConfigSchema>;
@@ -124,12 +131,28 @@ x-request-id: <optional>
 }
 ```
 
+`subject` is **not** accepted in the body. It comes from the verified token's `sub` claim — accepting one here would let any token holder ask for a decision about somebody else.
+
 **Response — allow**
 
 ```http
 HTTP/1.1 200 OK
 
-{ "decision": "allow" }
+{
+  "subject": "user-1",
+  "resource": "project:1",
+  "action": "read",
+  "decision": "allow",
+  "reason": {
+    "groups": [
+      {
+        "ruleType": "scope",
+        "passed": true,
+        "rules": [{ "code": "invalid_scope", "message": "...", "passed": true }]
+      }
+    ]
+  }
+}
 ```
 
 **Response — deny**
@@ -137,8 +160,18 @@ HTTP/1.1 200 OK
 ```http
 HTTP/1.1 403 Forbidden
 
-{ "decision": "deny", "code": "<code>", "message": "<message>" }
+{
+  "subject": "user-1",
+  "resource": "project:1",
+  "action": "read",
+  "decision": "deny",
+  "code": "<code>",
+  "message": "<message>",
+  "reason": { "groups": [ ... ] }
+}
 ```
+
+`reason.groups` lists every rule group in evaluation order — `passed`, plus every alternative for a failing group and the satisfying rule for a passing one. `code` / `message` come from the first failing group, as before.
 
 **Response — unexpected error**
 
@@ -147,6 +180,37 @@ HTTP/1.1 500 Internal Server Error
 
 { "decision": "deny", "code": "internal_error" }
 ```
+
+### POST /verify/batch
+
+The same decision contract, N decisions per round trip — filtering a list of N resources costs one request rather than N.
+
+**Request**
+
+```http
+POST /verify/batch HTTP/1.1
+Authorization: Bearer <jwt>
+Content-Type: application/json
+
+{
+  "decisions": [
+    { "resource": "project:1", "action": "read" },
+    { "resource": "project:2", "action": "read", "context": { "tenant": "acme" } }
+  ]
+}
+```
+
+One token authorizes the whole batch; each entry carries its own `resource`, `action` and `context`.
+
+**Response**
+
+```http
+HTTP/1.1 200 OK
+
+{ "decisions": [ { ... }, { ... } ] }
+```
+
+Entries come back in request order, each the same object `POST /verify` would have answered for it. The status reports whether the batch was **decided**, not what it decided — a batch of denials is still `200`, and the caller reads each entry. `400 invalid_request` when `decisions` is absent, empty, over `verify.maxBatchSize`, or carries a malformed entry (the message names the index); `401` rejects the whole batch when the token does not verify.
 
 ## Usage Example
 

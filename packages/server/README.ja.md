@@ -43,6 +43,10 @@ interface VerifyRouterConfig {
   resourceParser: ResourceParser;
   attributePipeline: AttributePipeline;
   rulePipeline: RulePipeline;
+  /** 評価セマンティクスの上書き。省略時は空 rule set を deny。 */
+  evaluateOptions?: EvaluateOptions;
+  /** POST /verify/batch の 1 リクエストあたり件数上限。既定は 50。 */
+  maxBatchSize?: number;
 }
 
 // `validate` による判別可能ユニオン。検証パラメータは検証するときにだけ存在する。
@@ -100,6 +104,9 @@ const AppConfigSchema = z.object({
   resource: z.object({
     parser: z.string().default("DotNotationResourceParser"),
   }),
+  verify: z.object({
+    maxBatchSize: z.coerce.number().int().positive().default(50),
+  }),
 });
 
 type AppConfig = z.infer<typeof AppConfigSchema>;
@@ -124,12 +131,29 @@ x-request-id: <省略可>
 }
 ```
 
+`subject` はボディでは受け付けません。検証済みトークンの `sub` クレームから取ります — ここで受け付けると、
+トークンを持つ誰もが他人についての決定を要求できてしまうためです。
+
 **レスポンス — 許可**
 
 ```http
 HTTP/1.1 200 OK
 
-{ "decision": "allow" }
+{
+  "subject": "user-1",
+  "resource": "project:1",
+  "action": "read",
+  "decision": "allow",
+  "reason": {
+    "groups": [
+      {
+        "ruleType": "scope",
+        "passed": true,
+        "rules": [{ "code": "invalid_scope", "message": "...", "passed": true }]
+      }
+    ]
+  }
+}
 ```
 
 **レスポンス — 拒否**
@@ -137,8 +161,19 @@ HTTP/1.1 200 OK
 ```http
 HTTP/1.1 403 Forbidden
 
-{ "decision": "deny", "code": "<code>", "message": "<message>" }
+{
+  "subject": "user-1",
+  "resource": "project:1",
+  "action": "read",
+  "decision": "deny",
+  "code": "<code>",
+  "message": "<message>",
+  "reason": { "groups": [ ... ] }
+}
 ```
+
+`reason.groups` は評価順に全ルールグループを列挙します — `passed` と、失敗グループなら全代替ルール、
+通過グループなら満たしたルールが入ります。`code` / `message` は従来どおり最初に失敗したグループから取ります。
 
 **レスポンス — 予期しないエラー**
 
@@ -147,6 +182,41 @@ HTTP/1.1 500 Internal Server Error
 
 { "decision": "deny", "code": "internal_error" }
 ```
+
+### POST /verify/batch
+
+同じ decision 契約で、1 往復に N 件 — N 個のリソースの絞り込みが N 回ではなく 1 回のリクエストで済みます。
+
+**リクエスト**
+
+```http
+POST /verify/batch HTTP/1.1
+Authorization: Bearer <jwt>
+Content-Type: application/json
+
+{
+  "decisions": [
+    { "resource": "project:1", "action": "read" },
+    { "resource": "project:2", "action": "read", "context": { "tenant": "acme" } }
+  ]
+}
+```
+
+1 つのトークンがバッチ全体を認可し、各エントリが自分の `resource` / `action` / `context` を持ちます。
+
+**レスポンス**
+
+```http
+HTTP/1.1 200 OK
+
+{ "decisions": [ { ... }, { ... } ] }
+```
+
+エントリはリクエスト順で返り、それぞれ `POST /verify` が同じ入力に返すのと同じオブジェクトです。
+ステータスはバッチが**判定できたか**を表し、判定結果そのものではありません — 全件 deny でも `200` で、
+呼び出し側が各エントリを読みます。`decisions` が無い / 空 / `verify.maxBatchSize` 超過 / 不正なエントリを
+含む場合は `400 invalid_request`（メッセージが該当 index を示します）、トークンが検証できない場合は
+`401` でバッチ全体を拒否します。
 
 ## 使い方
 

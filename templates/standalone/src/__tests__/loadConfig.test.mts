@@ -56,6 +56,7 @@ describe("loadAppConfig", () => {
 			expect(config.oauth.jwt.issuer).toBe("https://issuer.test");
 			expect(config.oauth.jwt.audience).toBe("https://api.test");
 			expect(config.oauth.jwt.tokenType).toBe("at+jwt");
+			expect(config.verify.maxBatchSize).toBe(50);
 		},
 	);
 

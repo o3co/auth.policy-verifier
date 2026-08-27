@@ -20,12 +20,25 @@ All collectors implement `AttributeCollector`.
 | `PayloadSubjectIdCollector` | `payload.sub`, `payload.azp` | `ATTR_USER_ID`, `ATTR_CLIENT_ID` | none |
 | `StaticPermissionCollector` | — | `ATTR_PERMISSIONS: string[]` | `{ permissions: string[] }` |
 | `StaticRoleCollector` | — | `ATTR_ROLES: Role[]` | `{ roles: Role[] }` |
+| `RequestContextAttributeCollector` | declared fields of `requestContext` | the operator's own keys | `{ attributes: Mapping[] }` |
 
 `StaticPermissionCollector` and `StaticRoleCollector` always emit the values supplied at construction time, regardless of request context.
 
-### No built-in collector for `requestContext`
+### RequestContextAttributeCollector
 
-The engine does not ship a collector that expands `CollectorContext.requestContext` into attributes. The shape of `requestContext` is defined by each consuming project's transport/interceptor, so interpreting it is a project concern. Write a focused `AttributeCollector` for each field you need to promote — validate its shape there, and store it under a project-specific constant key. See [AGENTS.md — Core Vocabulary Scope](../../AGENTS.md#core-vocabulary-scope) for the rationale and a worked example.
+Promotes declared fields of `CollectorContext.requestContext` into attributes:
+
+```hocon
+{ collector = "RequestContextAttributeCollector"
+  attributes = [
+    { from = "tenant.id", to = "tenantId" }     # dot path; `to` defaults to `from`
+    { from = "groups", type = "string[]" }
+  ] }
+```
+
+Each mapping is `{ from: string; to?: string; type?: "string" | "number" | "boolean" | "string[]" }`, `type` defaulting to `"string"`. A malformed mapping throws at construction; an unusable *value* does not — `requestContext` is caller-supplied request data, so a field that is missing, empty, or not of its declared type is simply not promoted.
+
+The declaration is the trust boundary. `requestContext` is free-form and unvalidated, so **nothing undeclared becomes an attribute** and a configured dot path traverses own properties only (`constructor.name` reads nothing). This collector invents no vocabulary of its own: the operator names both the fields and the keys, which is what keeps [AGENTS.md — Core Vocabulary Scope](../../AGENTS.md#core-vocabulary-scope) intact while still shipping something usable. For anything beyond read-check-write — deriving a value, calling out to a store — write a focused project-side `AttributeCollector` as that section describes.
 
 ## Rules
 
@@ -209,6 +222,7 @@ import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
 | `attributeCollector` | `"PayloadSubjectIdCollector"` | `() => new PayloadSubjectIdCollector()` |
 | `attributeCollector` | `"StaticPermissionCollector"` | `(config) => new StaticPermissionCollector(config)` |
 | `attributeCollector` | `"StaticRoleCollector"` | `(config) => new StaticRoleCollector(config)` |
+| `attributeCollector` | `"RequestContextAttributeCollector"` | `(config) => new RequestContextAttributeCollector(config)` |
 | `ruleCollector` | `"ResourceActionScopeRuleCollector"` | `(config) => new ResourceActionScopeRuleCollector(config)` |
 | `ruleCollector` | `"ResourceActionPermissionRuleCollector"` | `() => new ResourceActionPermissionRuleCollector()` |
 | `resourceParser` | `"DotNotationResourceParser"` | `() => new DotNotationResourceParser()` |

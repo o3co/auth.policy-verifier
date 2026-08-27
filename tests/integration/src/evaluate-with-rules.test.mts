@@ -45,7 +45,7 @@ describe("evaluate with AttrLiteralEqual + AttrPairNotEqual + AttrLiteralCompare
 
 		const result = evaluate(attrs, rules);
 
-		expect(result).toEqual({ decision: "allow" });
+		expect(result.decision).toBe("allow");
 	});
 
 	it("Scenario B: AttrPairNotEqual fails (userId === ownerId) → deny with attr_match", () => {
@@ -59,7 +59,7 @@ describe("evaluate with AttrLiteralEqual + AttrPairNotEqual + AttrLiteralCompare
 
 		const result = evaluate(attrs, rules);
 
-		expect(result).toEqual({
+		expect(result).toMatchObject({
 			decision: "deny",
 			code: rulePairNotEqual.code,
 			message: rulePairNotEqual.message,
@@ -81,7 +81,7 @@ describe("evaluate with AttrLiteralEqual + AttrPairNotEqual + AttrLiteralCompare
 
 		const result = evaluate(attrs, rules);
 
-		expect(result).toEqual({
+		expect(result).toMatchObject({
 			decision: "deny",
 			code: ruleEqual.code,
 			message: ruleEqual.message,

@@ -133,6 +133,32 @@ describe("standalone smoke", () => {
 		expect(res.body.code).toBe("invalid_token");
 	});
 
+	it("POST /verify/batch decides every entry in one round trip", async () => {
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: baseConfig,
+			modules: [builtinCollectorsModule, builtinKeyResolversModule],
+		});
+
+		const token = await signToken({ sub: "user-1", scope: "read:document" });
+		const res = await request(app)
+			.post("/verify/batch")
+			.set("Authorization", `Bearer ${token}`)
+			.send({
+				decisions: [
+					{ resource: "document", action: "read" },
+					{ resource: "document", action: "write" },
+				],
+			});
+
+		expect(res.status).toBe(200);
+		expect(res.body.decisions.map((d: { decision: string }) => d.decision)).toEqual([
+			"allow",
+			"deny",
+		]);
+		expect(res.body.decisions[0].subject).toBe("user-1");
+	});
+
 	it("POST /verify with insufficient scope returns 403 (deny)", async () => {
 		const app = await createApp({
 			pathResolver: (s: string) => s,

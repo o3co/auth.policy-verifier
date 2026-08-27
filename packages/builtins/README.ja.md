@@ -20,12 +20,25 @@ npm install @o3co/auth.policy-verifier.builtins
 | `PayloadSubjectIdCollector` | `payload.sub`、`payload.azp` | `ATTR_USER_ID`、`ATTR_CLIENT_ID` | なし |
 | `StaticPermissionCollector` | — | `ATTR_PERMISSIONS: string[]` | `{ permissions: string[] }` |
 | `StaticRoleCollector` | — | `ATTR_ROLES: Role[]` | `{ roles: Role[] }` |
+| `RequestContextAttributeCollector` | `requestContext` の宣言済みフィールド | 運用者が決めたキー | `{ attributes: Mapping[] }` |
 
 `StaticPermissionCollector` と `StaticRoleCollector` は、リクエストのコンテキストに関わらず、コンストラクタに渡した値を常に出力します。
 
-### `requestContext` 向けの組み込みコレクターは提供しない
+### RequestContextAttributeCollector
 
-本エンジンは `CollectorContext.requestContext` をそのまま attribute に展開するコレクターを提供しません。`requestContext` の形は利用側プロジェクトの transport/interceptor が定めるため、その解釈はプロジェクト側の責務です。必要なフィールドごとに焦点を絞った `AttributeCollector` を実装し、その中で値の型・形状を検証し、プロジェクト固有の定数キーで格納してください。詳細と具体例は [AGENTS.md — Core Vocabulary Scope](../../AGENTS.md#core-vocabulary-scope) を参照してください。
+`CollectorContext.requestContext` の宣言済みフィールドを attribute に昇格させます:
+
+```hocon
+{ collector = "RequestContextAttributeCollector"
+  attributes = [
+    { from = "tenant.id", to = "tenantId" }     # dot path。`to` の既定値は `from`
+    { from = "groups", type = "string[]" }
+  ] }
+```
+
+各マッピングは `{ from: string; to?: string; type?: "string" | "number" | "boolean" | "string[]" }` で、`type` の既定は `"string"` です。マッピング定義が不正ならコンストラクタで throw しますが、*値* が使えない場合は throw しません — `requestContext` は呼び出し側が渡すリクエストデータなので、欠落・空文字・宣言した型に合わない値は単に昇格されません。
+
+この宣言が信頼境界です。`requestContext` は自由形式かつ未検証なので、**宣言していないフィールドは attribute になりません**。dot path は own property のみを辿るため `constructor.name` のような指定は何も読みません。このコレクター自身は語彙を持ち込みません — フィールド名もキー名も運用者が決めるため、[AGENTS.md — Core Vocabulary Scope](../../AGENTS.md#core-vocabulary-scope) の方針を崩さずに実用的なものを提供できます。read-check-write を超える処理（値の導出、外部ストア参照など）が必要な場合は、同節が説明するプロジェクト側の `AttributeCollector` を書いてください。
 
 ## Rules
 
@@ -209,6 +222,7 @@ import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
 | `attributeCollector` | `"PayloadSubjectIdCollector"` | `() => new PayloadSubjectIdCollector()` |
 | `attributeCollector` | `"StaticPermissionCollector"` | `(config) => new StaticPermissionCollector(config)` |
 | `attributeCollector` | `"StaticRoleCollector"` | `(config) => new StaticRoleCollector(config)` |
+| `attributeCollector` | `"RequestContextAttributeCollector"` | `(config) => new RequestContextAttributeCollector(config)` |
 | `ruleCollector` | `"ResourceActionScopeRuleCollector"` | `(config) => new ResourceActionScopeRuleCollector(config)` |
 | `ruleCollector` | `"ResourceActionPermissionRuleCollector"` | `() => new ResourceActionPermissionRuleCollector()` |
 | `resourceParser` | `"DotNotationResourceParser"` | `() => new DotNotationResourceParser()` |

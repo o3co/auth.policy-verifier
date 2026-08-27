@@ -37,15 +37,21 @@ Authorization: Bearer <jwt>
   │                                                   │
   │  4. 評価                                          │
   │     ルールグループ内は OR、グループ間は AND          │
+  │     全グループを評価 → 構造化 reason                │
   │                                                   │
-  │  → 200 {"decision": "allow"}                      │
-  │  → 403 {"decision": "deny", "code": "..."}       │
+  │  → 200 {"decision": "allow",  "reason": {...}}    │
+  │  → 403 {"decision":"deny","code":…,"reason":{…}} │
   └──────────────────────────────────────────────────┘
+
+POST /verify/batch — 同じ契約で、1 往復に N 件の decision
+{"decisions": [{"resource": "project:1", "action": "read"}, …]}
+  → 200 {"decisions": [{…}, …]}   (順序は保持。全部 deny でも 200)
 ```
 
 ## 特徴
 
 - **Collector パターン** — 属性とルールはコンポーザブルな Collector で収集。静的なポリシーファイルではない。任意の属性ソース（DB, 外部 API, JWT クレーム）向けにカスタム Collector を追加可能。
+- **boolean ではなく decision 契約** — リクエストは `(subject, resource, action, context)`、応答は各ルールグループとその結果を並べた構造化 `reason` を必ず伴う。「なぜ deny されたか」をパイプラインの再実行なしに答えられる。`POST /verify/batch` は複数リソースを 1 往復で判定する。
 - **JWT 検証アルゴリズム設定可能** — HS256（共有シークレット）、RS256/ES256/EdDSA（JWKS URI または公開鍵直接指定）。[auth.provider](https://github.com/o3co/auth.provider) の JWT 設定と対称設計。
 - **RFC 9068 §4 のトークン検証** — 署名だけでなく `iss` / `aud` / `typ` ヘッダも検証する。同じ鍵で署名された `id_token` / refresh token / logout token や、他サービス向けに発行されたトークンは拒否される。`validate = true` のとき `issuer` と `audience` は必須。
 - **JWKS サポート** — `jwksUri` を auth.provider の `/.well-known/jwks.json` に向ければ鍵ローテーションに自動対応。
@@ -78,7 +84,37 @@ curl -X POST http://localhost:3000/verify \
 ```
 
 ```json
-{"decision": "allow"}
+{
+  "subject": "user-1",
+  "resource": "project:1",
+  "action": "read",
+  "decision": "allow",
+  "reason": {
+    "groups": [
+      {
+        "ruleType": "scope",
+        "passed": true,
+        "rules": [{ "code": "invalid_scope", "message": "…", "passed": true }]
+      }
+    ]
+  }
+}
+```
+
+リスト絞り込みはリソースごとではなく 1 往復で済む:
+
+```bash
+curl -X POST http://localhost:3000/verify/batch \
+  -H "Authorization: Bearer <jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"decisions": [
+        {"resource": "project:1", "action": "read"},
+        {"resource": "project:2", "action": "read"}
+      ]}'
+```
+
+```json
+{"decisions": [{ "resource": "project:1", "decision": "allow", "…": "…" }]}
 ```
 
 ## アーキテクチャ
@@ -110,6 +146,12 @@ standalone → server   → core
 - **グループ内:** OR — 1つでも通ればそのグループは通過
 - **グループ間:** AND — 全グループが通過する必要あり
 
+最初に失敗したグループ以降も含め、**全グループを評価する**。決定には各グループの通過可否と
+その根拠となったルールを並べた `reason` が付く。途中で打ち切ると「残りのグループも失敗したのか」に
+答えられず、それこそが deny の説明が存在する理由だからである。ルールは契約上 attributes の純関数なので
+全部走らせても安全。deny の `code` / `message` は従来どおり最初に失敗したグループから取る。
+
+
 ルールが 1 つも集まらなかった場合 → **deny**。どのルールも適用されなかったリクエストは「認可されていない」ので、
 `no_applicable_rule` で拒否する (OPA / OpenFGA / Cedar の implicit deny と同じ挙動)。
 `rule.onEmptyRuleSet = "allow"` を明示するとこの既定を opt-out して fail-open にできるが、認可を別レイヤで
@@ -121,6 +163,15 @@ standalone → server   → core
 | --- | --- | --- |
 | `HasScope("read:project")` | `ResourceActionScopeRuleCollector` | JWT の `scope` クレームに `read:project` が含まれる |
 | `HasPermission("project:1.perm:read")` | `ResourceActionPermissionRuleCollector` | ユーザーの permissions/roles にマッチするパターンが含まれる（`*` ワイルドカード対応） |
+
+### 組み込み AttributeCollector
+
+| Collector | 読む | 書く |
+| --- | --- | --- |
+| `PayloadScopeCollector` | JWT `scope` クレーム | `scopes` |
+| `PayloadSubjectIdCollector` | JWT `sub` クレーム | `userId` |
+| `StaticPermissionCollector` / `StaticRoleCollector` | config の定数 | `permissions` / `roles` |
+| `RequestContextAttributeCollector` | リクエスト `context` の宣言済みフィールド | 運用者が決めたキー |
 
 ## 設定
 
@@ -153,6 +204,13 @@ attribute {
   collectors = [
     { collector = "PayloadScopeCollector" }
     { collector = "PayloadSubjectIdCollector" }
+    # リクエストボディの `context` から宣言済みフィールドだけを属性に昇格させる。
+    # 宣言していないフィールドは昇格されず、宣言した型に合わない値は捨てられる。
+    { collector = "RequestContextAttributeCollector"
+      attributes = [
+        { from = "tenant.id", to = "tenantId" }
+        { from = "groups", type = "string[]" }
+      ] }
   ]
 }
 
@@ -166,6 +224,11 @@ rule {
 
 resource {
   parser = DotNotationResourceParser
+}
+
+verify {
+  maxBatchSize = 50             # POST /verify/batch の件数上限
+  maxBatchSize = ${?VERIFY_MAX_BATCH_SIZE}
 }
 ```
 

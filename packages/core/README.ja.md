@@ -23,7 +23,14 @@ interface EvaluateOptions {
 function evaluate(attrs: Attributes, rules: Rule[], options?: EvaluateOptions): Decision
 ```
 
-収集した属性をルールセットに対して評価します。ルールは `ruleType` でグループ化され、グループ内はいずれかのルールが通れば満足（OR）、すべてのグループが満たされた場合に許可（グループ間 AND）となります。戻り値は `{ decision: "allow" }` または `{ decision: "deny"; code: string; message: string }` です。
+収集した属性をルールセットに対して評価します。ルールは `ruleType` でグループ化され、グループ内はいずれかのルールが通れば満足（OR）、すべてのグループが満たされた場合に許可（グループ間 AND）となります。戻り値は `{ decision: "allow"; reason }` または `{ decision: "deny"; code: string; message: string; reason }` です。
+
+**ルールが 1 つも集まらなかった場合は deny** (`code: "no_applicable_rule"`) です。どのルールも適用されなかったリクエストは認可されていないためです。第 3 引数に `{ onEmptyRuleSet: "allow" }` を渡すと、この既定を deployment 単位で opt-out できます。
+
+すべての決定は構造化された `reason` を伴います。`reason.groups` は評価順に各ルールグループを並べ、`passed` と
+その根拠となったルール（失敗グループは全代替ルール、通過グループは満たしたルール）を持ちます。最初に失敗した
+グループ以降も評価します — 途中で打ち切ると「残りも失敗したのか」に答えられないためです。deny の
+`code` / `message` は従来どおり最初に失敗したグループから取ります。
 
 **ルールが 1 つも集まらなかった場合は deny** (`code: "no_applicable_rule"`) です。どのルールも適用されなかったリクエストは認可されていないためです。第 3 引数に `{ onEmptyRuleSet: "allow" }` を渡すと、この既定を deployment 単位で opt-out できます。
 
@@ -93,7 +100,10 @@ interface ModuleContext {
 | `AttributeCollector` | `collect(context: CollectorContext): Promise<Attributes>` |
 | `Rule` | `{ ruleType: string; code: string; message: string; verify(attrs: Attributes): boolean }` |
 | `RuleCollector` | `collect(context: CollectorContext): Promise<Rule[]>` |
-| `Decision` | `{ decision: "allow" } \| { decision: "deny"; code: string; message: string }` |
+| `Decision` | `{ decision: "allow"; reason: DecisionReason } \| { decision: "deny"; code: string; message: string; reason: DecisionReason }` |
+| `DecisionReason` | `{ groups: RuleGroupOutcome[] }` |
+| `RuleGroupOutcome` | `{ ruleType: string; passed: boolean; rules: RuleOutcome[] }` |
+| `RuleOutcome` | `{ code: string; message: string; passed: boolean }` |
 | `Role` | `{ name: string; permissions: string[] }` |
 | `VerifierPayload` | デコード済み JWT クレーム: `sub`、`azp`、`scope`、`iss`、`aud`、`exp`、`iat`、`token`、`tokenType`、および任意の追加クレーム |
 | `PathResolver` | `(specifier: string) => string` — モジュール相対パスを解決する |

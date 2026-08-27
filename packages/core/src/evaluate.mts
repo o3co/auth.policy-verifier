@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Attributes, Decision, Rule } from "./types.mjs";
+import type { Attributes, Decision, Rule, RuleGroupOutcome } from "./types.mjs";
 
 /** Deny returned when no rule group applied to the request. */
-const NO_APPLICABLE_RULE: Decision = {
+const NO_APPLICABLE_RULE: Omit<Decision & { decision: "deny" }, "reason"> = {
 	decision: "deny",
 	code: "no_applicable_rule",
 	message: "No applicable rule was collected for this request",
@@ -31,6 +31,9 @@ export interface EvaluateOptions {
  * for an allow decision. On deny, the first rule of the failing group supplies
  * the `code` and `message`.
  *
+ * Every decision carries a structured `reason` naming each rule group and how it
+ * came out, so a caller can answer "why" without re-running the pipeline.
+ *
  * An empty rule set is **denied by default**: "no rule applied" means the request
  * was never authorized, not that it needs no authorization. This matches the
  * implicit-deny semantics of OPA / OpenFGA / Cedar, so an engine swapped in behind
@@ -48,23 +51,49 @@ export function evaluate(attrs: Attributes, rules: Rule[], options?: EvaluateOpt
 
 	// Phase 2: nothing to evaluate → default-deny unless the deployment opted out.
 	if (groups.size === 0) {
-		return options?.onEmptyRuleSet === "allow" ? { decision: "allow" } : NO_APPLICABLE_RULE;
+		const reason = { groups: [] };
+		return options?.onEmptyRuleSet === "allow"
+			? { decision: "allow", reason }
+			: { ...NO_APPLICABLE_RULE, reason };
 	}
 
 	// Phase 3: each group must have at least one passing rule (AND across groups).
-	for (const groupRules of groups.values()) {
-		const passed = groupRules.some((rule) => rule.verify(attrs));
-		if (passed) continue;
+	// Every group is evaluated, including groups after the first failing one:
+	// stopping early cannot report which of the remaining groups would also have
+	// failed, which is the question a deny explanation exists to answer. Rules are
+	// pure predicates over attributes by contract, so running them all is safe.
+	const outcomes: RuleGroupOutcome[] = [];
+	for (const [ruleType, groupRules] of groups) {
+		outcomes.push(evaluateGroup(ruleType, groupRules, attrs));
+	}
 
-		// Deny on the first failing group; representative carries the user-facing reason.
-		const representative = groupRules[0];
+	// Phase 4: deny names the FIRST failing group, as before; reason carries all.
+	const reason = { groups: outcomes };
+	const firstFailure = outcomes.find((group) => !group.passed);
+	if (firstFailure) {
+		const representative = firstFailure.rules[0];
 		return {
 			decision: "deny",
 			code: representative.code,
 			message: representative.message,
+			reason,
 		};
 	}
 
-	// Phase 4: all groups passed → allow.
-	return { decision: "allow" };
+	return { decision: "allow", reason };
+}
+
+/**
+ * Evaluates one `ruleType` group. The group is an OR, so evaluation stops at the
+ * first passing rule and the outcome names just that rule; a failing group ran
+ * every alternative, so all of them are reported.
+ */
+function evaluateGroup(ruleType: string, rules: Rule[], attrs: Attributes): RuleGroupOutcome {
+	const evaluated: RuleGroupOutcome["rules"] = [];
+	for (const rule of rules) {
+		const passed = rule.verify(attrs);
+		evaluated.push({ code: rule.code, message: rule.message, passed });
+		if (passed) return { ruleType, passed: true, rules: evaluated.slice(-1) };
+	}
+	return { ruleType, passed: false, rules: evaluated };
 }

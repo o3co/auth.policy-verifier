@@ -68,6 +68,34 @@ describe("AppConfigSchema — JWT algorithm validation", () => {
 	});
 });
 
+describe("AppConfigSchema — empty rule set policy", () => {
+	it("defaults rule.onEmptyRuleSet to deny", () => {
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: { algorithm: "HS256", secret: "s", validate: true, ...rfc9068 } },
+			...baseBody,
+		});
+		expect(result.rule.onEmptyRuleSet).toBe("deny");
+	});
+
+	it("accepts an explicit allow opt-out", () => {
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: { algorithm: "HS256", secret: "s", validate: true, ...rfc9068 } },
+			attribute: { collectors: [] },
+			rule: { collectors: [], onEmptyRuleSet: "allow" },
+		});
+		expect(result.rule.onEmptyRuleSet).toBe("allow");
+	});
+
+	it("rejects an unrecognized onEmptyRuleSet value", () => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: { algorithm: "HS256", secret: "s", validate: true, ...rfc9068 } },
+			attribute: { collectors: [] },
+			rule: { collectors: [], onEmptyRuleSet: "maybe" },
+		});
+		expect(result.success).toBe(false);
+	});
+});
+
 describe("AppConfigSchema — RFC 9068 token validation (#105)", () => {
 	const hs256 = { algorithm: "HS256", secret: "s" };
 
@@ -133,6 +161,42 @@ describe("AppConfigSchema — RFC 9068 token validation (#105)", () => {
 	});
 });
 
+describe("AppConfigSchema — batch decisions (#124)", () => {
+	const validJwt = { algorithm: "HS256", secret: "s", validate: true, ...rfc9068 };
+
+	it("defaults verify.maxBatchSize to 50", () => {
+		const result = AppConfigSchema.parse({ oauth: { jwt: validJwt }, ...baseBody });
+		expect(result.verify.maxBatchSize).toBe(50);
+	});
+
+	it("accepts an operator-set cap", () => {
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			verify: { maxBatchSize: 200 },
+		});
+		expect(result.verify.maxBatchSize).toBe(200);
+	});
+
+	it("coerces the string a HOCON env substitution produces", () => {
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			verify: { maxBatchSize: "25" },
+		});
+		expect(result.verify.maxBatchSize).toBe(25);
+	});
+
+	it.each([0, -1, 1.5])("rejects %s as a cap", (value) => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			verify: { maxBatchSize: value },
+		});
+		expect(result.success).toBe(false);
+	});
+});
+
 describe("AppConfigSchema — multiple acceptable issuers (#105)", () => {
 	const hs256 = { algorithm: "HS256", secret: "s" };
 
@@ -170,34 +234,6 @@ describe("AppConfigSchema — multiple acceptable issuers (#105)", () => {
 				},
 			},
 			...baseBody,
-		});
-		expect(result.success).toBe(false);
-	});
-});
-
-describe("AppConfigSchema — empty rule set policy", () => {
-	it("defaults rule.onEmptyRuleSet to deny", () => {
-		const result = AppConfigSchema.parse({
-			oauth: { jwt: { algorithm: "HS256", secret: "s", validate: true, ...rfc9068 } },
-			...baseBody,
-		});
-		expect(result.rule.onEmptyRuleSet).toBe("deny");
-	});
-
-	it("accepts an explicit allow opt-out", () => {
-		const result = AppConfigSchema.parse({
-			oauth: { jwt: { algorithm: "HS256", secret: "s", validate: true, ...rfc9068 } },
-			attribute: { collectors: [] },
-			rule: { collectors: [], onEmptyRuleSet: "allow" },
-		});
-		expect(result.rule.onEmptyRuleSet).toBe("allow");
-	});
-
-	it("rejects an unrecognized onEmptyRuleSet value", () => {
-		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { algorithm: "HS256", secret: "s", validate: true, ...rfc9068 } },
-			attribute: { collectors: [] },
-			rule: { collectors: [], onEmptyRuleSet: "maybe" },
 		});
 		expect(result.success).toBe(false);
 	});

@@ -3,6 +3,8 @@
 
 import {
 	type AttributePipeline,
+	type Decision,
+	type DecisionReason,
 	type EvaluateOptions,
 	evaluate,
 	type ResourceParser,
@@ -52,6 +54,45 @@ export interface VerifyRouterConfig {
 	rulePipeline: RulePipeline;
 	/** Evaluator semantics overrides; omitted means engine defaults (deny on an empty rule set). */
 	evaluateOptions?: EvaluateOptions;
+	/** Most entries `POST /verify/batch` will decide in one request. Defaults to 50. */
+	maxBatchSize?: number;
+}
+
+/** Default cap on `POST /verify/batch` entries when the config does not set one. */
+export const DEFAULT_MAX_BATCH_SIZE = 50;
+
+/**
+ * One decision the caller is asking for. The subject is deliberately absent:
+ * it comes from the verified token, never from the body — accepting one here
+ * would let any token holder ask for a decision about somebody else.
+ */
+export interface DecisionRequest {
+	resource: string;
+	action: string;
+	context?: Record<string, unknown>;
+}
+
+/**
+ * What the endpoint decided, and for whom.
+ *
+ * The four inputs an engine needs — subject, resource, action, context — are
+ * named explicitly, and the outcome carries a structured `reason` rather than a
+ * bare allow/deny. That is what lets a heavy-class engine (OPA's
+ * `input document → decision`, OpenFGA's `check(user, relation, object)`, Cedar)
+ * sit behind this same contract: the request carries enough for each of them to
+ * form its own query, and the response has somewhere to put what decided.
+ */
+export interface DecisionResponse {
+	/** JWT `sub` of the token presented. Absent when the token carries none. */
+	subject?: string;
+	resource: string;
+	action: string;
+	decision: "allow" | "deny";
+	/** Present on deny — the first failing group's representative rule. */
+	code?: string;
+	/** Present on deny — the first failing group's representative rule. */
+	message?: string;
+	reason: DecisionReason;
 }
 
 /** True for a non-empty string or a non-empty array of non-empty strings. */
@@ -61,15 +102,69 @@ function isPresent(value: string | string[] | undefined): boolean {
 		: typeof value === "string" && value !== "";
 }
 
+/** Error envelope shared by every non-decision response. */
+interface ErrorBody {
+	decision: "deny";
+	code: string;
+	message: string;
+}
+
+const errorBody = (code: string, message: string): ErrorBody => ({
+	decision: "deny",
+	code,
+	message,
+});
+
+/** Outcome of authenticating the caller: either the verified payload or the response to send. */
+type Authentication =
+	| { ok: true; payload: VerifierPayload }
+	| { ok: false; status: number; body: ErrorBody };
+
 /**
- * Builds the Express router that serves `POST /verify`.
+ * Validates one entry of a decision request. Returns the entry or the reason it
+ * is unusable, phrased with `label` so a batch can name the offending index.
+ */
+function parseDecisionRequest(raw: unknown, label: string): DecisionRequest | string {
+	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+		return `${label} must be an object`;
+	}
+	const { resource, action, context } = raw as Record<string, unknown>;
+	if (typeof resource !== "string" || resource === "") {
+		return `${label}.resource must be a non-empty string`;
+	}
+	if (typeof action !== "string" || action === "") {
+		return `${label}.action must be a non-empty string`;
+	}
+	// `typeof [] === "object"`, so arrays need excluding explicitly — an array
+	// reaching `CollectorContext.requestContext` is a shape no collector expects.
+	if (
+		context !== undefined &&
+		(typeof context !== "object" || context === null || Array.isArray(context))
+	) {
+		return `${label}.context must be an object`;
+	}
+	return { resource, action, context: context as Record<string, unknown> | undefined };
+}
+
+/**
+ * Builds the Express router serving the decision endpoints.
  *
- * Request: `Authorization: Bearer <jwt>`, body `{ resource: string, action: string, context?: object }`.
- * Response: `{ decision: "allow" }` (200), `{ decision: "deny", code, message }` (403),
- * or 400 for bad request / 401 for auth errors / 500 for unexpected.
+ * `POST /verify` — `Authorization: Bearer <jwt>`, body
+ * `{ resource, action, context? }`; answers a {@link DecisionResponse} with 200
+ * on allow and 403 on deny.
+ *
+ * `POST /verify/batch` — body `{ decisions: [{ resource, action, context? }, …] }`;
+ * answers `200 { decisions: DecisionResponse[] }` in request order. The status
+ * reports whether the batch was decided, not what it decided, so a batch of
+ * denials is still 200 — the caller reads each entry. Filtering a list of N
+ * resources is one round trip rather than N.
+ *
+ * Both answer 400 for a malformed body, 401 for authentication failures, and
+ * 500 for anything unexpected.
  */
 export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	const jwt = config.jwt;
+	const maxBatchSize = config.maxBatchSize ?? DEFAULT_MAX_BATCH_SIZE;
 
 	// Fail at construction rather than accept tokens with an unchecked iss/aud/typ.
 	// A JavaScript caller can reach here with the fields missing even though the
@@ -92,126 +187,171 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 		}
 	}
 
+	/** Extracts and verifies the bearer token. Shared by both endpoints. */
+	async function authenticate(req: express.Request): Promise<Authentication> {
+		const rawAuthHeader = req.get("authorization");
+		if (!rawAuthHeader) {
+			return {
+				ok: false,
+				status: 401,
+				body: errorBody("missing_token", "Authorization header is missing"),
+			};
+		}
+
+		const authHeader = rawAuthHeader.trim();
+		const spaceIndex = authHeader.indexOf(" ");
+		const scheme = spaceIndex > 0 ? authHeader.slice(0, spaceIndex) : authHeader;
+		const token = spaceIndex > 0 ? authHeader.slice(spaceIndex + 1).trim() : undefined;
+
+		if (scheme.toLowerCase() !== "bearer") {
+			return {
+				ok: false,
+				status: 401,
+				body: errorBody("unsupported_scheme", `Unsupported authorization scheme: ${scheme}`),
+			};
+		}
+		if (!token) {
+			return {
+				ok: false,
+				status: 401,
+				body: errorBody("missing_token", "Authorization header is missing"),
+			};
+		}
+
+		let decoded: JWTPayload;
+		try {
+			if (jwt.validate) {
+				// key is either a static key or a JWKS get-key function; both satisfy jwtVerify overloads
+				const result = await jwtVerify(token, jwt.key as Parameters<typeof jwtVerify>[1], {
+					algorithms: jwt.algorithms,
+					issuer: jwt.issuer,
+					audience: jwt.audience,
+					typ: jwt.tokenType,
+				});
+				decoded = result.payload;
+			} else {
+				decoded = decodeJwt(token);
+			}
+		} catch {
+			return {
+				ok: false,
+				status: 401,
+				body: errorBody("invalid_token", "Invalid token"),
+			};
+		}
+
+		return { ok: true, payload: { ...decoded, token, tokenType: scheme } };
+	}
+
+	/** Runs the pipelines and the evaluator for one entry. */
+	async function decide(
+		req: express.Request,
+		payload: VerifierPayload,
+		entry: DecisionRequest,
+	): Promise<DecisionResponse> {
+		const resource = config.resourceParser.parse(entry.resource);
+		const requestId = req.get("x-request-id");
+		const headers = requestId ? { "x-request-id": requestId } : undefined;
+		const context = {
+			payload,
+			resource,
+			action: entry.action,
+			headers,
+			requestContext: entry.context,
+		};
+
+		const [attrs, rules] = await Promise.all([
+			config.attributePipeline.collect(context),
+			config.rulePipeline.collect(context),
+		]);
+
+		return toResponse(payload, entry, evaluate(attrs, rules, config.evaluateOptions));
+	}
+
 	const router = express.Router();
 	router.use(express.json());
 
 	router.post("/verify", async (req: express.Request, res: express.Response) => {
 		try {
-			const rawAuthHeader = req.get("authorization");
-			if (!rawAuthHeader) {
-				res.status(401).json({
-					decision: "deny",
-					code: "missing_token",
-					message: "Authorization header is missing",
-				});
+			const auth = await authenticate(req);
+			if (!auth.ok) {
+				res.status(auth.status).json(auth.body);
 				return;
 			}
 
-			const authHeader = rawAuthHeader.trim();
-			const spaceIndex = authHeader.indexOf(" ");
-			const scheme = spaceIndex > 0 ? authHeader.slice(0, spaceIndex) : authHeader;
-			const token = spaceIndex > 0 ? authHeader.slice(spaceIndex + 1).trim() : undefined;
-
-			if (scheme.toLowerCase() !== "bearer") {
-				res.status(401).json({
-					decision: "deny",
-					code: "unsupported_scheme",
-					message: `Unsupported authorization scheme: ${scheme}`,
-				});
+			const entry = parseDecisionRequest(req.body, "body");
+			if (typeof entry === "string") {
+				res.status(400).json(errorBody("invalid_request", entry));
 				return;
 			}
 
-			if (!token) {
-				res.status(401).json({
-					decision: "deny",
-					code: "missing_token",
-					message: "Authorization header is missing",
-				});
-				return;
-			}
-
-			let decoded: JWTPayload;
-			if (jwt.validate) {
-				try {
-					// key is either a static key or a JWKS get-key function; both satisfy jwtVerify overloads
-					const result = await jwtVerify(token, jwt.key as Parameters<typeof jwtVerify>[1], {
-						algorithms: jwt.algorithms,
-						issuer: jwt.issuer,
-						audience: jwt.audience,
-						typ: jwt.tokenType,
-					});
-					decoded = result.payload;
-				} catch {
-					res.status(401).json({
-						decision: "deny",
-						code: "invalid_token",
-						message: "Invalid token",
-					});
-					return;
-				}
-			} else {
-				try {
-					decoded = decodeJwt(token);
-				} catch {
-					res.status(401).json({
-						decision: "deny",
-						code: "invalid_token",
-						message: "Invalid token",
-					});
-					return;
-				}
-			}
-
-			const payload: VerifierPayload = {
-				...decoded,
-				token,
-				tokenType: scheme,
-			};
-
-			const { resource: rawResource, action, context: requestContext } = req.body;
-
-			if (typeof rawResource !== "string" || rawResource === "") {
-				res.status(400).json({
-					decision: "deny",
-					code: "invalid_request",
-					message: "resource must be a non-empty string",
-				});
-				return;
-			}
-			if (typeof action !== "string" || action === "") {
-				res.status(400).json({
-					decision: "deny",
-					code: "invalid_request",
-					message: "action must be a non-empty string",
-				});
-				return;
-			}
-
-			const resource = config.resourceParser.parse(rawResource);
-			const requestId = req.get("x-request-id");
-			const headers = requestId ? { "x-request-id": requestId } : undefined;
-			const context = { payload, resource, action, headers, requestContext };
-
-			const [attrs, rules] = await Promise.all([
-				config.attributePipeline.collect(context),
-				config.rulePipeline.collect(context),
-			]);
-
-			const decision = evaluate(attrs, rules, config.evaluateOptions);
-
-			if (decision.decision === "deny") {
-				res.status(403).json(decision);
-				return;
-			}
-			res.status(200).json(decision);
+			const decision = await decide(req, auth.payload, entry);
+			res.status(decision.decision === "deny" ? 403 : 200).json(decision);
 		} catch (_cause) {
-			res.status(500).json({
-				decision: "deny",
-				code: "internal_error",
-				message: "Internal server error",
-			});
+			res.status(500).json(errorBody("internal_error", "Internal server error"));
+		}
+	});
+
+	router.post("/verify/batch", async (req: express.Request, res: express.Response) => {
+		try {
+			const auth = await authenticate(req);
+			if (!auth.ok) {
+				res.status(auth.status).json(auth.body);
+				return;
+			}
+
+			const raw = (req.body as { decisions?: unknown } | undefined)?.decisions;
+			if (!Array.isArray(raw) || raw.length === 0) {
+				res.status(400).json(errorBody("invalid_request", "decisions must be a non-empty array"));
+				return;
+			}
+			if (raw.length > maxBatchSize) {
+				res
+					.status(400)
+					.json(
+						errorBody(
+							"invalid_request",
+							`decisions must contain at most ${maxBatchSize} entries, got ${raw.length}`,
+						),
+					);
+				return;
+			}
+
+			// Validate the whole batch before deciding any of it: a caller that sent
+			// one malformed entry gets told which, rather than a partial answer.
+			const entries: DecisionRequest[] = [];
+			for (const [index, item] of raw.entries()) {
+				const entry = parseDecisionRequest(item, `decisions[${index}]`);
+				if (typeof entry === "string") {
+					res.status(400).json(errorBody("invalid_request", entry));
+					return;
+				}
+				entries.push(entry);
+			}
+
+			const decisions = await Promise.all(entries.map((entry) => decide(req, auth.payload, entry)));
+			res.status(200).json({ decisions });
+		} catch (_cause) {
+			res.status(500).json(errorBody("internal_error", "Internal server error"));
 		}
 	});
 
 	return router;
+}
+
+/** Projects an engine `Decision` onto the wire contract, naming what it was about. */
+function toResponse(
+	payload: VerifierPayload,
+	entry: DecisionRequest,
+	decision: Decision,
+): DecisionResponse {
+	const base = {
+		...(typeof payload.sub === "string" ? { subject: payload.sub } : {}),
+		resource: entry.resource,
+		action: entry.action,
+		reason: decision.reason,
+	};
+	return decision.decision === "deny"
+		? { ...base, decision: "deny", code: decision.code, message: decision.message }
+		: { ...base, decision: "allow" };
 }
