@@ -35,11 +35,35 @@ describe("ResourceActionScopeRuleCollector", () => {
 		expect(rules[0].verify(attrs)).toBe(true);
 	});
 
-	it("returns no rules when payload has no scope claim", async () => {
+	it("emits a failing scope rule when payload has no scope claim (default-deny)", async () => {
 		const ctx = makeContext("document", "read");
-		// payload has no scope — simulates DID JWT
+		// payload has no scope — a scopeless token must not silently drop the
+		// scope group from AND-evaluation, which would authorize by omission.
 		const rules = await collector.collect(ctx);
+		expect(rules).toHaveLength(1);
+		expect(rules[0].ruleType).toBe("scope");
+		expect(rules[0].verify(new Map())).toBe(false);
+	});
+
+	it("returns no rules for a scopeless token only when scopeless: skip is opted into", async () => {
+		const skipping = new ResourceActionScopeRuleCollector({ scopeless: "skip" });
+		const rules = await skipping.collect(makeContext("document", "read"));
 		expect(rules).toHaveLength(0);
+	});
+
+	it("still emits the scope rule under scopeless: skip when the token carries a scope claim", async () => {
+		const skipping = new ResourceActionScopeRuleCollector({ scopeless: "skip" });
+		const rules = await skipping.collect(makeContext("document", "read", "read:document"));
+		expect(rules).toHaveLength(1);
+	});
+
+	it("rejects an unrecognized scopeless option at construction time", () => {
+		expect(
+			() =>
+				new ResourceActionScopeRuleCollector({
+					scopeless: "allow",
+				} as unknown as { scopeless: "deny" | "skip" }),
+		).toThrow(/scopeless/);
 	});
 
 	it("returns HasScope rule when payload has scope claim", async () => {

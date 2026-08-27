@@ -90,6 +90,25 @@ describe("standalone smoke", () => {
 		expect(res.body.decision).toBe("allow");
 	});
 
+	it("POST /verify with a scopeless token returns 403 (deny)", async () => {
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: baseConfig,
+			modules: [builtinCollectorsModule, builtinKeyResolversModule],
+		});
+
+		// A validly-signed token carrying no scope claim asserts no capability, so a
+		// scope-only pipeline must deny it rather than collect zero rules and allow.
+		const token = await signToken({ sub: "user-1" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "document", action: "read" });
+
+		expect(res.status).toBe(403);
+		expect(res.body.decision).toBe("deny");
+	});
+
 	it("POST /verify with an id_token signed by the same key returns 401", async () => {
 		const app = await createApp({
 			pathResolver: (s: string) => s,

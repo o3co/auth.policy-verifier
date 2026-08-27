@@ -3,6 +3,7 @@
 
 import {
 	type AttributePipeline,
+	type EvaluateOptions,
 	evaluate,
 	type ResourceParser,
 	type RulePipeline,
@@ -49,6 +50,8 @@ export interface VerifyRouterConfig {
 	resourceParser: ResourceParser;
 	attributePipeline: AttributePipeline;
 	rulePipeline: RulePipeline;
+	/** Evaluator semantics overrides; omitted means engine defaults (deny on an empty rule set). */
+	evaluateOptions?: EvaluateOptions;
 }
 
 /** True for a non-empty string or a non-empty array of non-empty strings. */
@@ -194,7 +197,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				config.rulePipeline.collect(context),
 			]);
 
-			const decision = evaluate(attrs, rules);
+			const decision = evaluate(attrs, rules, config.evaluateOptions);
 
 			if (decision.decision === "deny") {
 				res.status(403).json(decision);

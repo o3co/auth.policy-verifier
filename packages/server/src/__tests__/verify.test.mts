@@ -53,7 +53,7 @@ async function signHS256Token(
 		.sign(hs256Key.key as import("node:crypto").KeyObject);
 }
 
-function createTestApp(resourceParser?: ResourceParser) {
+function createTestApp(resourceParser?: ResourceParser, ruleCollectors?: RuleCollector[]) {
 	const app = express();
 	app.use(
 		createVerifyRouter({
@@ -67,7 +67,7 @@ function createTestApp(resourceParser?: ResourceParser) {
 			},
 			resourceParser: resourceParser ?? new DotNotationResourceParser(),
 			attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
-			rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
+			rulePipeline: new RulePipeline(ruleCollectors ?? [new ResourceActionScopeRuleCollector()]),
 		}),
 	);
 	return app;
@@ -355,12 +355,88 @@ describe("POST /verify — Bearer scheme validation (#17)", () => {
 	});
 });
 
-describe("POST /verify — scopeless JWT (DID grant) (#27)", () => {
+describe("POST /verify — scopeless JWT (DID grant) (#27, #104)", () => {
 	const app = createTestApp();
 
-	it("returns allow for valid token without scope claim", async () => {
+	/** Rule collector standing in for a DID-grant pipeline: authorizes by `sub` prefix. */
+	const didRuleCollector: RuleCollector = {
+		async collect() {
+			return [
+				{
+					ruleType: "did",
+					code: "unknown_subject",
+					message: "Subject is not a recognized DID",
+					verify(attrs: Attributes) {
+						return String(attrs.get("sub") ?? "").startsWith("did:example:");
+					},
+				},
+			];
+		},
+	};
+
+	const didAttributeCollector: AttributeCollector = {
+		async collect(context: CollectorContext) {
+			return new Map<string, unknown>([["sub", context.payload.sub]]);
+		},
+	};
+
+	it("denies a scopeless token in a scope-only pipeline", async () => {
+		// The scope rule is emitted regardless of the claim, so a token asserting no
+		// capability fails it instead of dropping the group from AND-evaluation.
 		const token = await signHS256Token({ sub: "did:example:123" });
 		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.status).toBe(403);
+		expect(res.body.decision).toBe("deny");
+		expect(res.body.code).toBe("invalid_scope");
+	});
+
+	it("still denies a scopeless token when the scope collector opts into scopeless: skip alone", async () => {
+		// Skipping leaves the request with no applicable rule; the engine default-denies
+		// rather than treating "nothing collected" as "nothing to enforce".
+		const skipApp = createTestApp(undefined, [
+			new ResourceActionScopeRuleCollector({ scopeless: "skip" }),
+		]);
+		const token = await signHS256Token({ sub: "did:example:123" });
+		const res = await request(skipApp)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.status).toBe(403);
+		expect(res.body.code).toBe("no_applicable_rule");
+	});
+
+	it("allows a scopeless token when scopeless: skip is paired with an identity rule that passes", async () => {
+		// The supported DID-grant wiring: another rule group carries the decision.
+		const didApp = express();
+		didApp.use(
+			createVerifyRouter({
+				jwt: {
+					validate: true,
+					key: hs256Key.key,
+					algorithms: hs256Key.algorithms,
+					issuer: ISSUER,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				},
+				resourceParser: new DotNotationResourceParser(),
+				attributePipeline: new AttributePipeline([
+					new PayloadScopeCollector(),
+					didAttributeCollector,
+				]),
+				rulePipeline: new RulePipeline([
+					new ResourceActionScopeRuleCollector({ scopeless: "skip" }),
+					didRuleCollector,
+				]),
+			}),
+		);
+
+		const token = await signHS256Token({ sub: "did:example:123" });
+		const res = await request(didApp)
 			.post("/verify")
 			.set("Authorization", `Bearer ${token}`)
 			.send({ resource: "project:1", action: "read" });

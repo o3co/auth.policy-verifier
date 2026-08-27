@@ -174,3 +174,31 @@ describe("AppConfigSchema — multiple acceptable issuers (#105)", () => {
 		expect(result.success).toBe(false);
 	});
 });
+
+describe("AppConfigSchema — empty rule set policy", () => {
+	it("defaults rule.onEmptyRuleSet to deny", () => {
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: { algorithm: "HS256", secret: "s", validate: true, ...rfc9068 } },
+			...baseBody,
+		});
+		expect(result.rule.onEmptyRuleSet).toBe("deny");
+	});
+
+	it("accepts an explicit allow opt-out", () => {
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: { algorithm: "HS256", secret: "s", validate: true, ...rfc9068 } },
+			attribute: { collectors: [] },
+			rule: { collectors: [], onEmptyRuleSet: "allow" },
+		});
+		expect(result.rule.onEmptyRuleSet).toBe("allow");
+	});
+
+	it("rejects an unrecognized onEmptyRuleSet value", () => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: { algorithm: "HS256", secret: "s", validate: true, ...rfc9068 } },
+			attribute: { collectors: [] },
+			rule: { collectors: [], onEmptyRuleSet: "maybe" },
+		});
+		expect(result.success).toBe(false);
+	});
+});

@@ -171,7 +171,11 @@ new AttrPairCompare({ a: string, op: "lt" | "le" | "gt" | "ge", b: string, group
 | `ResourceActionPermissionRuleCollector` | `"<resource.raw>.perm:<action>"` | `[HasPermission(...)]` |
 | `ResourceActionScopeRuleCollector` | `"<action>:<resource.resourceType>"` | `[HasScope(...)]` |
 
-どちらもコンストラクタ引数はありません。
+`ResourceActionPermissionRuleCollector` にコンストラクタ引数はありません。
+`ResourceActionScopeRuleCollector` は `{ scopeless?: "deny" | "skip" }` を受け取ります (既定は `"deny"`)。既定では
+リクエストごとに必ず `HasScope` ルールを生成するため、`scope` claim を持たないトークンはこのルールに落ちます。
+`"skip"` は scopeless トークンに対してルールを生成しませんが、ルールが 1 つも集まらないリクエストは deny されるため、
+別のルールグループが認可を担うパイプラインでのみ使ってください。
 
 ## Resource Parser
 
@@ -205,7 +209,7 @@ import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
 | `attributeCollector` | `"PayloadSubjectIdCollector"` | `() => new PayloadSubjectIdCollector()` |
 | `attributeCollector` | `"StaticPermissionCollector"` | `(config) => new StaticPermissionCollector(config)` |
 | `attributeCollector` | `"StaticRoleCollector"` | `(config) => new StaticRoleCollector(config)` |
-| `ruleCollector` | `"ResourceActionScopeRuleCollector"` | `() => new ResourceActionScopeRuleCollector()` |
+| `ruleCollector` | `"ResourceActionScopeRuleCollector"` | `(config) => new ResourceActionScopeRuleCollector(config)` |
 | `ruleCollector` | `"ResourceActionPermissionRuleCollector"` | `() => new ResourceActionPermissionRuleCollector()` |
 | `resourceParser` | `"DotNotationResourceParser"` | `() => new DotNotationResourceParser()` |
 

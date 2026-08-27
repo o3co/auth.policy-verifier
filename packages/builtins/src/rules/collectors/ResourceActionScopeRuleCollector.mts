@@ -4,6 +4,21 @@
 import type { CollectorContext, Rule, RuleCollector } from "@o3co/auth.policy-verifier.core";
 import { HasScope } from "../HasScope.mjs";
 
+/** How the collector treats a token that carries no `scope` claim. */
+export type ScopelessPolicy = "deny" | "skip";
+
+const SCOPELESS_POLICIES: readonly ScopelessPolicy[] = ["deny", "skip"];
+
+/** Config entry accepted by `ResourceActionScopeRuleCollector`. */
+export interface ResourceActionScopeRuleCollectorConfig {
+	/**
+	 * `"deny"` (default) emits the scope rule for every request, so a scopeless
+	 * token fails it. `"skip"` emits no rule for a scopeless token, leaving the
+	 * scope group out of AND-evaluation.
+	 */
+	scopeless?: ScopelessPolicy;
+}
+
 /**
  * Generates a HasScope rule derived from the request action and resource type.
  *
@@ -18,22 +33,37 @@ import { HasScope } from "../HasScope.mjs";
  *
  * ## Behavior for scopeless tokens
  *
- * Flows where the IdP does not issue a `scope` claim (e.g. DID-grant tokens)
- * produce scopeless JWTs. For those requests this collector returns no rules,
- * so the scope rule group is absent from AND-evaluation and other rule groups
- * decide independently. The collector is therefore safe to include in
- * pipelines that mix OAuth and DID flows.
+ * By default the rule is emitted regardless of whether the token carries a
+ * `scope` claim, so a scopeless token fails it. Dropping the rule instead would
+ * remove the scope group from AND-evaluation, and in a scope-only pipeline that
+ * turns "the token asserts no capability" into "every capability is allowed".
  *
- * For pipelines that exclusively serve scopeless flows, this collector
- * contributes nothing — prefer collectors that derive rules from identity
- * claims (e.g. DID, `sub`, role) instead.
+ * Flows where the IdP does not issue a `scope` claim (e.g. DID-grant tokens)
+ * must opt out explicitly with `{ scopeless: "skip" }`, and only in a pipeline
+ * where another rule group authorizes the request — otherwise the request is
+ * left with no applicable rule, which the evaluator denies.
+ *
+ * For pipelines that exclusively serve scopeless flows, prefer collectors that
+ * derive rules from identity claims (e.g. DID, `sub`, role) instead.
  *
  * See https://github.com/o3co/auth.provider/issues/56 for background on why
  * the IdP asserts identity, not permissions.
  */
 export class ResourceActionScopeRuleCollector implements RuleCollector {
+	private readonly scopeless: ScopelessPolicy;
+
+	constructor(config?: ResourceActionScopeRuleCollectorConfig) {
+		const scopeless = config?.scopeless ?? "deny";
+		if (!SCOPELESS_POLICIES.includes(scopeless)) {
+			throw new Error(
+				`ResourceActionScopeRuleCollector: scopeless must be one of ${SCOPELESS_POLICIES.join(", ")}, got "${scopeless}"`,
+			);
+		}
+		this.scopeless = scopeless;
+	}
+
 	async collect(context: CollectorContext): Promise<Rule[]> {
-		if (context.payload.scope === undefined) {
+		if (this.scopeless === "skip" && context.payload.scope === undefined) {
 			return [];
 		}
 		const scope = `${context.action}:${context.resource.resourceType}`;
