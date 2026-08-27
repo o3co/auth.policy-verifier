@@ -32,6 +32,8 @@ function evaluate(attrs: Attributes, rules: Rule[], options?: EvaluateOptions): 
 グループ以降も評価します — 途中で打ち切ると「残りも失敗したのか」に答えられないためです。deny の
 `code` / `message` は従来どおり最初に失敗したグループから取ります。
 
+**ルールが 1 つも集まらなかった場合は deny** (`code: "no_applicable_rule"`) です。どのルールも適用されなかったリクエストは認可されていないためです。第 3 引数に `{ onEmptyRuleSet: "allow" }` を渡すと、この既定を deployment 単位で opt-out できます。
+
 ### AttributePipeline
 
 ```typescript

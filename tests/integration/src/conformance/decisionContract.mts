@@ -59,6 +59,12 @@ export function describeDecisionContractConformance(adapter: DecisionContractAda
 	describe(`decision contract conformance — ${adapter.name}`, () => {
 		const { allowed, denied, contextDependent } = adapter.fixtures;
 
+		// The cross-check cases below make three round trips each, and an adapter
+		// may be talking to a real engine over the network. vitest's 5s default is
+		// tight enough that a loaded CI runner trips it, so the multi-trip cases
+		// get their own budget rather than reading as a contract violation.
+		const MULTI_TRIP_TIMEOUT_MS = 30_000;
+
 		it("allows the request its policy allows", async () => {
 			expect((await adapter.decide(allowed)).decision).toBe("allow");
 		});
@@ -97,31 +103,39 @@ export function describeDecisionContractConformance(adapter: DecisionContractAda
 			);
 		});
 
-		it("decides a batch entry exactly as it decides that request alone", async () => {
-			// The property that makes the batch endpoint a round-trip optimization
-			// rather than a second policy surface.
-			const requests = [allowed, denied];
-			const batched = await adapter.decideBatch(requests);
-			const singly = await Promise.all(requests.map((request) => adapter.decide(request)));
+		it(
+			"decides a batch entry exactly as it decides that request alone",
+			async () => {
+				// The property that makes the batch endpoint a round-trip optimization
+				// rather than a second policy surface.
+				const requests = [allowed, denied];
+				const batched = await adapter.decideBatch(requests);
+				const singly = await Promise.all(requests.map((request) => adapter.decide(request)));
 
-			expect(batched.map((r) => r.decision)).toEqual(singly.map((r) => r.decision));
-			expect(batched.map((r) => r.reason)).toEqual(singly.map((r) => r.reason));
-		});
+				expect(batched.map((r) => r.decision)).toEqual(singly.map((r) => r.decision));
+				expect(batched.map((r) => r.reason)).toEqual(singly.map((r) => r.reason));
+			},
+			MULTI_TRIP_TIMEOUT_MS,
+		);
 
 		it("mixes allow and deny within one batch", async () => {
 			const results = await adapter.decideBatch([allowed, denied]);
 			expect(results.map((r) => r.decision)).toEqual(["allow", "deny"]);
 		});
 
-		it.runIf(contextDependent)("lets request context decide the outcome", async () => {
-			if (!contextDependent) return;
-			const { request, allowingContext, denyingContext } = contextDependent;
+		it.runIf(contextDependent)(
+			"lets request context decide the outcome",
+			async () => {
+				if (!contextDependent) return;
+				const { request, allowingContext, denyingContext } = contextDependent;
 
-			const allow = await adapter.decide({ ...request, context: allowingContext });
-			const deny = await adapter.decide({ ...request, context: denyingContext });
+				const allow = await adapter.decide({ ...request, context: allowingContext });
+				const deny = await adapter.decide({ ...request, context: denyingContext });
 
-			expect(allow.decision).toBe("allow");
-			expect(deny.decision).toBe("deny");
-		});
+				expect(allow.decision).toBe("allow");
+				expect(deny.decision).toBe("deny");
+			},
+			MULTI_TRIP_TIMEOUT_MS,
+		);
 	});
 }
