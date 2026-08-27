@@ -86,7 +86,7 @@ const AppConfigSchema = z.object({
     jwt: z.object({
       secret: z.string(),
       validate: z.boolean().default(true),
-      issuer: z.string().optional(),        // validate = true のとき必須
+      issuer: z.union([z.string(), z.array(z.string())]).optional(),   // validate = true のとき必須
       audience: z.union([z.string(), z.array(z.string())]).optional(), // validate = true のとき必須
       tokenType: z.string().default("at+jwt"),
     }),

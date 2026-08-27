@@ -132,3 +132,45 @@ describe("AppConfigSchema — RFC 9068 token validation (#105)", () => {
 		expect(result.success).toBe(true);
 	});
 });
+
+describe("AppConfigSchema — multiple acceptable issuers (#105)", () => {
+	const hs256 = { algorithm: "HS256", secret: "s" };
+
+	it("accepts an issuer list, matching the router's issuer type", () => {
+		const result = AppConfigSchema.safeParse({
+			oauth: {
+				jwt: {
+					...hs256,
+					validate: true,
+					issuer: ["https://issuer.test", "https://issuer-2.test"],
+					audience: "https://api.test",
+				},
+			},
+			...baseBody,
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it("rejects an empty issuer list", () => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: { ...hs256, validate: true, issuer: [], audience: "https://api.test" } },
+			...baseBody,
+		});
+		expect(result.success).toBe(false);
+	});
+
+	it("rejects an issuer list carrying an empty entry", () => {
+		const result = AppConfigSchema.safeParse({
+			oauth: {
+				jwt: {
+					...hs256,
+					validate: true,
+					issuer: ["https://issuer.test", ""],
+					audience: "https://api.test",
+				},
+			},
+			...baseBody,
+		});
+		expect(result.success).toBe(false);
+	});
+});
