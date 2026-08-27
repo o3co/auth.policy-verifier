@@ -9,6 +9,8 @@ import {
 	type EvaluateOptions,
 	type EventLogger,
 	evaluate,
+	type Resource,
+	ResourceParseError,
 	type ResourceParser,
 	type RulePipeline,
 	type VerifierPayload,
@@ -86,14 +88,31 @@ const errorBody = (code: string, message: string): ErrorBody => ({
 	message,
 });
 
+/** One validated entry: the request as sent, plus its resource already parsed. */
+interface ValidatedDecisionRequest {
+	request: DecisionRequest;
+	resource: Resource;
+}
+
 /** Outcome of validating one decision request: either the parsed entry or the reason it is unusable. */
-type ParsedDecisionRequest = { ok: true; request: DecisionRequest } | { ok: false; error: string };
+type ParsedDecisionRequest =
+	| { ok: true; entry: ValidatedDecisionRequest }
+	| { ok: false; error: string };
 
 /**
  * Validates one entry of a decision request. Returns the entry or the reason it
  * is unusable, phrased with `label` so a batch can name the offending index.
+ *
+ * The resource string is parsed here rather than at decision time: a string the
+ * parser refuses is a malformed request, not a server fault, and it belongs
+ * with the other body validation so a batch names the offending index and no
+ * entry is decided before the whole batch is known to be usable.
  */
-function parseDecisionRequest(raw: unknown, label: string): ParsedDecisionRequest {
+function parseDecisionRequest(
+	raw: unknown,
+	label: string,
+	resourceParser: ResourceParser,
+): ParsedDecisionRequest {
 	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
 		return { ok: false, error: `${label} must be an object` };
 	}
@@ -112,9 +131,26 @@ function parseDecisionRequest(raw: unknown, label: string): ParsedDecisionReques
 	) {
 		return { ok: false, error: `${label}.context must be an object` };
 	}
+
+	let parsedResource: Resource;
+	try {
+		parsedResource = resourceParser.parse(resource);
+	} catch (cause) {
+		// Only a ResourceParseError means "the caller's string is malformed".
+		// Anything else is a fault in the parser and must keep surfacing as a 500.
+		if (!(cause instanceof ResourceParseError)) throw cause;
+		return {
+			ok: false,
+			error: `${label}.resource is not a valid resource string "${cause.raw}": ${cause.detail}`,
+		};
+	}
+
 	return {
 		ok: true,
-		request: { resource, action, context: context as Record<string, unknown> | undefined },
+		entry: {
+			request: { resource, action, context: context as Record<string, unknown> | undefined },
+			resource: parsedResource,
+		},
 	};
 }
 
@@ -131,8 +167,10 @@ function parseDecisionRequest(raw: unknown, label: string): ParsedDecisionReques
  * denials is still 200 — the caller reads each entry. Filtering a list of N
  * resources is one round trip rather than N.
  *
- * Both answer 400 for a malformed body, 401 for authentication failures, and
- * 500 for anything unexpected.
+ * Both answer 400 for a malformed body — including a `resource` the configured
+ * `ResourceParser` refuses, which is the caller's syntax error rather than a
+ * server fault — 401 for authentication failures, and 500 for anything
+ * unexpected.
  */
 export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	const maxBatchSize = config.maxBatchSize ?? DEFAULT_MAX_BATCH_SIZE;
@@ -141,13 +179,12 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	// invalid hand-built jwt config still fails here, at router construction.
 	const authenticator = createTokenAuthenticator(config.jwt, logger);
 
-	/** Runs the pipelines and the evaluator for one entry. */
+	/** Runs the pipelines and the evaluator for one already-validated entry. */
 	async function decide(
 		req: express.Request,
 		payload: VerifierPayload,
-		entry: DecisionRequest,
+		{ request: entry, resource }: ValidatedDecisionRequest,
 	): Promise<DecisionResponse> {
-		const resource = config.resourceParser.parse(entry.resource);
 		const requestId = req.get("x-request-id");
 		const headers = requestId ? { "x-request-id": requestId } : undefined;
 		const context = {
@@ -177,13 +214,13 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				return;
 			}
 
-			const parsed = parseDecisionRequest(req.body, "body");
+			const parsed = parseDecisionRequest(req.body, "body", config.resourceParser);
 			if (!parsed.ok) {
 				res.status(400).json(errorBody("invalid_request", parsed.error));
 				return;
 			}
 
-			const decision = await decide(req, auth.payload, parsed.request);
+			const decision = await decide(req, auth.payload, parsed.entry);
 			res.status(decision.decision === "deny" ? 403 : 200).json(decision);
 		} catch (cause) {
 			logger.error({ err: cause, endpoint: "/verify" }, "verify_internal_error");
@@ -218,14 +255,14 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 
 			// Validate the whole batch before deciding any of it: a caller that sent
 			// one malformed entry gets told which, rather than a partial answer.
-			const entries: DecisionRequest[] = [];
+			const entries: ValidatedDecisionRequest[] = [];
 			for (const [index, item] of raw.entries()) {
-				const parsed = parseDecisionRequest(item, `decisions[${index}]`);
+				const parsed = parseDecisionRequest(item, `decisions[${index}]`, config.resourceParser);
 				if (!parsed.ok) {
 					res.status(400).json(errorBody("invalid_request", parsed.error));
 					return;
 				}
-				entries.push(parsed.request);
+				entries.push(parsed.entry);
 			}
 
 			const decisions = await Promise.all(entries.map((entry) => decide(req, auth.payload, entry)));

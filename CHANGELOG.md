@@ -10,6 +10,73 @@ and version sections follow the release labeling policy in
 
 ### Changed
 
+- **BREAKING**: `DotNotationResourceParser`
+  (`@o3co/auth.policy-verifier.builtins`) now validates a canonical grammar and
+  refuses what it used to repair
+  ([#117](https://github.com/o3co/auth.policy-verifier/issues/117)). The derived
+  `resourceType` is the authorization namespace —
+  `ResourceActionScopeRuleCollector` turns it into the `{action}:{resourceType}`
+  scope that must be granted — so two distinct resources that parsed to the same
+  type were authorized identically, and a caller could reach resource A through a
+  grant written for resource B. This is [#116](https://github.com/o3co/auth.policy-verifier/issues/116)'s
+  principle applied one layer earlier: stop silently rewriting authorization
+  identifiers, on the resource side as well as the scope side.
+
+  The accepted grammar:
+
+  ```text
+  resource = segment *( "." segment )
+  segment  = type [ ":" id ]
+  type     = 1*tchar
+  id       = 1*tchar
+  tchar    = %x21 / %x23-2D / %x2F-39 / %x3B-5B / %x5D-7E
+             ; RFC 6749 NQCHAR less "." and ":"
+             ; i.e. printable ASCII except space, `"`, `\`, "." and ":"
+  ```
+
+  - **Separator preserved**: `resourceType` is now the segment types joined with
+    `.` instead of `_`. `"project:1.member:2"` derives `project.member`, not
+    `project_member`. The old join collapsed the nested type `a.b` and the flat
+    type literally named `a_b` onto one string; `.` is now reserved as the
+    separator and cannot occur inside a type, so distinct type sequences produce
+    distinct types. `_` is an ordinary type character.
+  - **Empty segments refused**: `""`, `a..b`, `.a`, `a.`, `a:` and `:1` now
+    throw. `a..b` used to parse, landing in whatever namespace the empty types
+    produced.
+  - **Extra `:` components refused, not truncated**: `a:1:2` used to be read as
+    `a:1` with the tail silently dropped, widening a deliberately narrowed
+    identifier. It now throws.
+  - **Whitespace refused, not trimmed**: `"  project:1  "` and `"project : 1"`
+    now throw. Trimming made them one resource for scope rules while
+    `ResourceActionPermissionRuleCollector`, which reads `raw`, still saw two.
+  - Characters outside the grammar (non-ASCII, `"`, `\`, control characters) are
+    refused: a type that cannot appear in an OAuth scope value is a type no
+    issuer could grant.
+  - **Migration** — a deployment whose config or callers name resources whose
+    derived types collide under the old join must rename one side before
+    upgrading, because the two now authorize separately:
+    - Scope grants and policy referring to a nested type must be rewritten from
+      `<action>:a_b` to `<action>:a.b`. A grant of `read:project_member` no
+      longer authorizes the resource `project:1.member:2`; that resource now
+      requires `read:project.member`. A resource whose type is genuinely the
+      single flat segment `project_member` is unaffected.
+    - Resource strings sent by callers must be canonical: no surrounding or
+      inner whitespace, no empty segments, at most one `:` per segment. A caller
+      that was sending `"project : 1"` and relying on the trim must send
+      `"project:1"`.
+    - An id that needs `.` or `:` must be encoded (percent-encoding round-trips
+      through the grammar) or handled by a `ResourceParser` written for that
+      syntax.
+  - New `ResourceParseError` exported from `@o3co/auth.policy-verifier.core`,
+    carrying the refused string (`raw`) and the reason (`detail`). Any
+    `ResourceParser` should raise it for input outside its syntax.
+  - `POST /verify` and `POST /verify/batch` answer **400 `invalid_request`** for
+    a `resource` the parser refuses — the caller's syntax error, not a server
+    fault — instead of 500, and no longer log it as `verify_internal_error`, so
+    a client looping on a typo cannot manufacture an incident. The batch
+    endpoint validates every entry's resource before deciding any of them, and
+    names the offending index. Any other throw from a parser still surfaces as
+    500.
 - **BREAKING**: `HasScope` (`@o3co/auth.policy-verifier.builtins`) now matches
   scopes exactly instead of normalizing them
   ([#116](https://github.com/o3co/auth.policy-verifier/issues/116)). The old

@@ -497,6 +497,66 @@ describe("POST /verify — request body validation (#18)", () => {
 	});
 });
 
+describe("POST /verify — resource the parser refuses (#117)", () => {
+	const app = createTestApp();
+
+	async function makeRequest(body: Record<string, unknown>) {
+		const token = await signHS256Token({ scope: "read:project" });
+		return request(app).post("/verify").set("Authorization", `Bearer ${token}`).send(body);
+	}
+
+	// A resource string outside the parser's grammar is a malformed request, the
+	// same class as a missing `action` — not a server fault. Answering 500 would
+	// both mislead the caller and page the operator over somebody's typo.
+	const refused = ["a..b", "a:1:2", ".project", "project.", "  project:1  ", "project : 1"];
+
+	for (const resource of refused) {
+		it(`returns 400 invalid_request for ${JSON.stringify(resource)}`, async () => {
+			const res = await makeRequest({ resource, action: "read" });
+
+			expect(res.status).toBe(400);
+			expect(res.body.code).toBe("invalid_request");
+			expect(res.body.decision).toBe("deny");
+		});
+	}
+
+	it("names the offending resource string in the message", async () => {
+		const res = await makeRequest({ resource: "a..b", action: "read" });
+
+		expect(res.status).toBe(400);
+		expect(res.body.message).toContain("a..b");
+	});
+
+	it("still answers 500 when the parser fails for an unrelated reason", async () => {
+		// Only a ResourceParseError means "the caller's string is malformed".
+		// Any other throw is a bug in the parser and must stay a 500, not be
+		// re-labelled as the caller's fault.
+		const brokenParser: ResourceParser = {
+			parse() {
+				throw new Error("parser store exploded");
+			},
+		};
+		const brokenApp = createTestApp(brokenParser);
+		const token = await signHS256Token({ scope: "read:project" });
+
+		const res = await request(brokenApp)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.status).toBe(500);
+		expect(res.body.code).toBe("internal_error");
+	});
+
+	it("rejects an unauthenticated request before parsing the resource", async () => {
+		// 401 outranks 400: an anonymous caller learns nothing about the grammar.
+		const res = await request(app).post("/verify").send({ resource: "a..b", action: "read" });
+
+		expect(res.status).toBe(401);
+		expect(res.body.code).toBe("missing_token");
+	});
+});
+
 describe("POST /verify — RFC 9068 §4 token validation (#105)", () => {
 	const app = createTestApp();
 
@@ -954,5 +1014,26 @@ describe("POST /verify/batch (#124)", () => {
 
 		expect(res.status).toBe(401);
 		expect(res.body.code).toBe("invalid_token");
+	});
+
+	it("returns 400 naming the index whose resource the parser refuses (#117)", async () => {
+		const token = await signHS256Token({ sub: "user-1", scope: "read:project" });
+		const res = await request(app)
+			.post("/verify/batch")
+			.set("Authorization", `Bearer ${token}`)
+			.send({
+				decisions: [
+					{ resource: "project:1", action: "read" },
+					{ resource: "a..b", action: "read" },
+					{ resource: "project:3", action: "read" },
+				],
+			});
+
+		expect(res.status).toBe(400);
+		expect(res.body.code).toBe("invalid_request");
+		expect(res.body.message).toContain("decisions[1]");
+		// The whole batch is refused before any of it is decided, exactly as for
+		// a structurally malformed entry — not a partial answer.
+		expect(res.body.decisions).toBeUndefined();
 	});
 });

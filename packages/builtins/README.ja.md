@@ -205,13 +205,46 @@ new AttrPairCompare({ a: string, op: "lt" | "le" | "gt" | "ge", b: string, group
 new DotNotationResourceParser()
 ```
 
-入力形式: `"<type>[:<id>].<type>[:<id>]..."`
+文法:
 
-例: `"foo.bar:123"` → `{ raw: "foo.bar:123", resourceType: "foo_bar", resourceId: "123" }`
+```text
+resource = segment *( "." segment )
+segment  = type [ ":" id ]
+type     = 1*tchar
+id       = 1*tchar
+tchar    = %x21 / %x23-2D / %x2F-39 / %x3B-5B / %x5D-7E
+           ; RFC 6749 NQCHAR から "." と ":" を除いたもの
+           ; すなわち、空白・`"`・`\`・`.`・`:` を除く印字可能 ASCII
+```
+
+例: `"foo.bar:123"` → `{ raw: "foo.bar:123", resourceType: "foo.bar", resourceId: "123" }`
 
 - セグメントは `.` で分割されます。各セグメントには `:id` を含めることができます。
-- `resourceType` はセグメントの type を `_` で結合した文字列です。
+- `resourceType` はセグメントの type を `.` で結合した文字列です。区切り文字は書き換えず、そのまま保持されます。
 - `resourceId` は最後のセグメントの id です（存在する場合）。
+- `raw` は入力そのままです。
+
+文法に合わない入力は `ResourceParseError`（`@o3co/auth.policy-verifier.core`）を送出します。パーサーが入力を
+修復することはありません。サーバーはそのリクエストを decision ではなく `400 invalid_request` として返します。
+拒否される例:
+
+| 入力 | 理由 |
+| --- | --- |
+| `""`, `a..b`, `.a`, `a.` | 空セグメント — すべてのセグメントに type が必要 |
+| `a:`, `:1` | type または id が空 |
+| `a:1:2` | セグメント内に `:` が 2 個以上 — 末尾を切り捨てず拒否する |
+| `  a:1  `, `a : 1` | 空白 — trim せず拒否する |
+| `プロジェクト`, `a"b`, `a\b` | OAuth scope 値が持てない文字 |
+
+`resourceType` は認可の名前空間です。`ResourceActionScopeRuleCollector` はこれを
+`{action}:{resourceType}` scope に変換し、その scope が付与されていることを要求します。つまり同じ type に
+パースされる 2 つの異なるリソースは同一に認可されてしまうため、そうならないように文法を設計しています。
+`.` を区切り文字として予約することで、ネストした type `a.b` と `a_b` という名前のフラットな type が
+区別されます（以前はどちらも `a_b` でした）。これは [`HasScope`](#hasscope) が scope 値に対して適用しているのと
+同じ原則です — 書かれたものをそのまま比較し、意図を正規化して推測しない。
+
+`.` や `:`、あるいは許可集合外の文字を必要とする id は、呼び出し側でエンコードする（percent-encoding は
+この文法をそのまま通ります）か、その構文向けに書かれた `ResourceParser` で扱ってください。
 
 ## builtinCollectorsModule
 
