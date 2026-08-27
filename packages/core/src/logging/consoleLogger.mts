@@ -57,7 +57,11 @@ function emit(
 	// implementation); biome's recommended preset in this repo does not
 	// enable `noConsole`, so no suppression is needed.
 	if (typeof obj === "string") {
-		console[method]({ ...bindings }, obj, ...(msg !== undefined ? [msg] : []), ...args);
+		// String-first has no per-call obj, so only the bindings could fill the
+		// leading object — when they are empty too, prepending would render the
+		// line as `{} message` (#133).
+		const prefix = Object.keys(bindings).length > 0 ? [{ ...bindings }] : [];
+		console[method](...prefix, obj, ...(msg !== undefined ? [msg] : []), ...args);
 	} else {
 		console[method]({ ...bindings, ...obj }, ...(msg !== undefined ? [msg] : []), ...args);
 	}

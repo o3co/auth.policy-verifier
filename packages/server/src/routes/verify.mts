@@ -73,7 +73,10 @@ export interface VerifyRouterConfig {
 	logger?: EventLogger;
 }
 
-/** Default cap on `POST /verify/batch` entries when the config does not set one. */
+/**
+ * Default cap on `POST /verify/batch` entries when the config does not set one.
+ * Single definition — `AppConfigSchema`'s `verify.maxBatchSize` default imports it.
+ */
 export const DEFAULT_MAX_BATCH_SIZE = 50;
 
 /**
@@ -221,20 +224,23 @@ function assertTimeClaims(payload: JWTPayload): void {
 	}
 }
 
+/** Outcome of validating one decision request: either the parsed entry or the reason it is unusable. */
+type ParsedDecisionRequest = { ok: true; request: DecisionRequest } | { ok: false; error: string };
+
 /**
  * Validates one entry of a decision request. Returns the entry or the reason it
  * is unusable, phrased with `label` so a batch can name the offending index.
  */
-function parseDecisionRequest(raw: unknown, label: string): DecisionRequest | string {
+function parseDecisionRequest(raw: unknown, label: string): ParsedDecisionRequest {
 	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-		return `${label} must be an object`;
+		return { ok: false, error: `${label} must be an object` };
 	}
 	const { resource, action, context } = raw as Record<string, unknown>;
 	if (typeof resource !== "string" || resource === "") {
-		return `${label}.resource must be a non-empty string`;
+		return { ok: false, error: `${label}.resource must be a non-empty string` };
 	}
 	if (typeof action !== "string" || action === "") {
-		return `${label}.action must be a non-empty string`;
+		return { ok: false, error: `${label}.action must be a non-empty string` };
 	}
 	// `typeof [] === "object"`, so arrays need excluding explicitly — an array
 	// reaching `CollectorContext.requestContext` is a shape no collector expects.
@@ -242,9 +248,12 @@ function parseDecisionRequest(raw: unknown, label: string): DecisionRequest | st
 		context !== undefined &&
 		(typeof context !== "object" || context === null || Array.isArray(context))
 	) {
-		return `${label}.context must be an object`;
+		return { ok: false, error: `${label}.context must be an object` };
 	}
-	return { resource, action, context: context as Record<string, unknown> | undefined };
+	return {
+		ok: true,
+		request: { resource, action, context: context as Record<string, unknown> | undefined },
+	};
 }
 
 /**
@@ -397,13 +406,13 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				return;
 			}
 
-			const entry = parseDecisionRequest(req.body, "body");
-			if (typeof entry === "string") {
-				res.status(400).json(errorBody("invalid_request", entry));
+			const parsed = parseDecisionRequest(req.body, "body");
+			if (!parsed.ok) {
+				res.status(400).json(errorBody("invalid_request", parsed.error));
 				return;
 			}
 
-			const decision = await decide(req, auth.payload, entry);
+			const decision = await decide(req, auth.payload, parsed.request);
 			res.status(decision.decision === "deny" ? 403 : 200).json(decision);
 		} catch (cause) {
 			logger.error({ err: cause, endpoint: "/verify" }, "verify_internal_error");
@@ -440,12 +449,12 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			// one malformed entry gets told which, rather than a partial answer.
 			const entries: DecisionRequest[] = [];
 			for (const [index, item] of raw.entries()) {
-				const entry = parseDecisionRequest(item, `decisions[${index}]`);
-				if (typeof entry === "string") {
-					res.status(400).json(errorBody("invalid_request", entry));
+				const parsed = parseDecisionRequest(item, `decisions[${index}]`);
+				if (!parsed.ok) {
+					res.status(400).json(errorBody("invalid_request", parsed.error));
 					return;
 				}
-				entries.push(entry);
+				entries.push(parsed.request);
 			}
 
 			const decisions = await Promise.all(entries.map((entry) => decide(req, auth.payload, entry)));

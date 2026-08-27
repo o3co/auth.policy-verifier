@@ -50,10 +50,11 @@ describe("consoleLogger level routing", () => {
 	});
 
 	it("accepts plain string as first arg (no obj)", () => {
+		// No bindings and no merge object: prepending `{}` would render the line
+		// as `{} plain string message` (#133), so the string goes through alone.
 		const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
 		consoleLogger.warn("plain string message");
-		// When string is passed, emit { ...bindings } as obj + the string as msg.
-		expect(spy).toHaveBeenCalledWith({}, "plain string message");
+		expect(spy).toHaveBeenCalledWith("plain string message");
 	});
 
 	it("object-first call with no msg does NOT forward undefined", () => {
@@ -65,10 +66,18 @@ describe("consoleLogger level routing", () => {
 		expect(spy).not.toHaveBeenCalledWith({ a: 1 }, undefined);
 	});
 
+	it("object-first call keeps the leading object even when it is empty", () => {
+		// Only the string-first shape drops the empty prefix (#133); an explicit
+		// object-first `{}` is passed through unchanged.
+		const spy = vi.spyOn(console, "info").mockImplementation(() => {});
+		consoleLogger.info({}, "object-first message");
+		expect(spy).toHaveBeenCalledWith({}, "object-first message");
+	});
+
 	it("string-first call with msg + extra args forwards all positional args (pino interpolation)", () => {
 		const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
 		consoleLogger.warn("base %s", "interp1", "interp2");
-		expect(spy).toHaveBeenCalledWith({}, "base %s", "interp1", "interp2");
+		expect(spy).toHaveBeenCalledWith("base %s", "interp1", "interp2");
 	});
 });
 
