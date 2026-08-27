@@ -135,19 +135,26 @@ type Authentication =
  * tell apart from a bad token (#107: a JWKS outage flips the whole fleet to
  * 401-deny while the verifier's own logs stay empty).
  *
- * Infrastructure side: a JWKS fetch timeout, a malformed JWKS document, or any
- * non-jose error escaping `jwtVerify` (fetch/DNS failures from the remote key
- * getter, a broken key resolver). Everything else jose throws is judged
- * token-side — deliberately including `JWKSNoMatchingKey`, because the `kid`
- * that failed to match is attacker-controllable and must not open an
- * error-level log-flooding channel; its `err.code` in the warn line still
- * identifies a stale-JWKS rotation problem.
+ * Infrastructure side: a JWKS fetch timeout, a malformed JWKS document, a bare
+ * `JOSEError` (`ERR_JOSE_GENERIC` — jose reserves the base class for the JWKS
+ * fetch path: its only two throw sites are a non-200 JWKS response and a body
+ * that fails to parse as JSON), or any non-jose error escaping `jwtVerify`
+ * (fetch/DNS failures from the remote key getter, a broken key resolver).
+ * Every subclass jose throws about the token itself is judged token-side —
+ * deliberately including `JWKSNoMatchingKey`, because the `kid` that failed to
+ * match is attacker-controllable and must not open an error-level log-flooding
+ * channel; its `err.code` in the warn line still identifies a stale-JWKS
+ * rotation problem.
  */
 function isVerificationUnavailable(cause: unknown): boolean {
-	if (cause instanceof errors.JWKSTimeout || cause instanceof errors.JWKSInvalid) {
+	if (!(cause instanceof errors.JOSEError)) {
 		return true;
 	}
-	return !(cause instanceof errors.JOSEError);
+	return (
+		cause instanceof errors.JWKSTimeout ||
+		cause instanceof errors.JWKSInvalid ||
+		cause.code === "ERR_JOSE_GENERIC"
+	);
 }
 
 /**

@@ -202,6 +202,35 @@ describe("verify router failure logging: verification unavailable (error)", () =
 		expect(events[0].obj.err).toBeInstanceOf(errors.JWKSTimeout);
 	});
 
+	it.each([
+		// jose's only two bare-JOSEError throw sites (ERR_JOSE_GENERIC) are both
+		// on the JWKS fetch path: a non-200 response and a body that fails to
+		// parse as JSON. Both are provider-side outages, not token problems.
+		"Expected 200 OK from the JSON Web Key Set HTTP response",
+		"Failed to parse the JSON Web Key Set HTTP response as JSON",
+	])("logs jwt_verification_unavailable for a generic JOSEError (%s)", async (message) => {
+		const { events, logger } = captureEvents();
+		const app = createTestApp({
+			jwt: {
+				...verifyingJwt,
+				key: async () => {
+					throw new errors.JOSEError(message);
+				},
+			},
+			logger,
+		});
+		const token = await signToken({ scope: "read:project" });
+
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project", action: "read" });
+
+		expect(res.status).toBe(401);
+		expect(events).toHaveLength(1);
+		expect(events[0]).toMatchObject({ level: "error", msg: "jwt_verification_unavailable" });
+	});
+
 	it("logs jwt_verification_unavailable for a non-jose infrastructure error", async () => {
 		const { events, logger } = captureEvents();
 		const app = createTestApp({
