@@ -703,13 +703,18 @@ describe("POST /verify — decision contract (#124)", () => {
 			{
 				ruleType: "scope",
 				passed: true,
-				rules: [
+				evaluated: [
 					{
 						code: "invalid_scope",
 						message: "Token does not have required scope: read:project",
 						passed: true,
 					},
 				],
+				satisfiedBy: {
+					code: "invalid_scope",
+					message: "Token does not have required scope: read:project",
+					passed: true,
+				},
 			},
 		]);
 	});
@@ -727,7 +732,7 @@ describe("POST /verify — decision contract (#124)", () => {
 			{
 				ruleType: "scope",
 				passed: false,
-				rules: [
+				evaluated: [
 					{
 						code: "invalid_scope",
 						message: "Token does not have required scope: read:project",

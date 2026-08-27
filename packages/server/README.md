@@ -148,7 +148,8 @@ HTTP/1.1 200 OK
       {
         "ruleType": "scope",
         "passed": true,
-        "rules": [{ "code": "invalid_scope", "message": "...", "passed": true }]
+        "evaluated": [{ "code": "invalid_scope", "message": "...", "passed": true }],
+        "satisfiedBy": { "code": "invalid_scope", "message": "...", "passed": true }
       }
     ]
   }
@@ -171,7 +172,7 @@ HTTP/1.1 403 Forbidden
 }
 ```
 
-`reason.groups` lists every rule group in evaluation order — `passed`, plus every alternative for a failing group and the satisfying rule for a passing one. `code` / `message` come from the first failing group, as before.
+`reason.groups` lists every rule group in evaluation order — `passed`, plus `evaluated`: every rule that actually ran in that group, in order. A failing group ran (and lists) every alternative; a passing group stops at its first passing rule, so `evaluated` ends with it after any alternatives that were tried and failed, and `satisfiedBy` names that deciding rule explicitly. `code` / `message` come from the first failing group, as before.
 
 **Response — unexpected error**
 

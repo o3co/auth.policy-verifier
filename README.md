@@ -94,7 +94,8 @@ curl -X POST http://localhost:3000/verify \
       {
         "ruleType": "scope",
         "passed": true,
-        "rules": [{ "code": "invalid_scope", "message": "…", "passed": true }]
+        "evaluated": [{ "code": "invalid_scope", "message": "…", "passed": true }],
+        "satisfiedBy": { "code": "invalid_scope", "message": "…", "passed": true }
       }
     ]
   }
@@ -147,12 +148,14 @@ Rules are grouped by `ruleType` (e.g., "scope", "permission"):
 - **Across groups:** AND — every group must be satisfied
 
 Every group is evaluated, including groups after the first failing one, and the
-decision carries a `reason` listing each group, whether it passed, and the rules
-behind that. Stopping at the first failure cannot say which of the remaining
-groups would also have failed, which is the question a deny explanation exists
-to answer. Rules are pure predicates over attributes by contract, so running
-them all is safe. The `code` / `message` on a deny still come from the first
-failing group, unchanged.
+decision carries a `reason` listing each group, whether it passed, and — as
+`evaluated` — every rule that actually ran in that group, in order. A passing
+group stops at its first passing rule and names it again as `satisfiedBy`; a
+failing group ran every alternative. Stopping at the first failure cannot say
+which of the remaining groups would also have failed, which is the question a
+deny explanation exists to answer. Rules are pure predicates over attributes by
+contract, so running them all is safe. The `code` / `message` on a deny still
+come from the first failing group, unchanged.
 
 
 Empty rule set → **deny**. A request that collects no rule was never authorized by anything, so the

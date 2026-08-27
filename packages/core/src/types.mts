@@ -83,17 +83,22 @@ export interface RuleOutcome {
 /**
  * How one rule group (`ruleType`) came out. Groups are the unit of
  * AND-evaluation, so this is the granularity at which "why" is answerable.
+ *
+ * `evaluated` always means the same thing: every rule that actually ran, in
+ * evaluation order. The group is an OR, so a passing group stops at its first
+ * passing rule — `evaluated` then ends with that rule, preceded by any
+ * alternatives that were tried and failed before it; alternatives after it
+ * never ran and are not reported. A failing group ran every alternative, so
+ * `evaluated` lists them all.
+ *
+ * `satisfiedBy` marks the pass case explicitly: the rule that satisfied the
+ * group, always the last element of `evaluated`. "What ran" is `evaluated`;
+ * "what decided" is `satisfiedBy` on a pass, and on a fail the whole of
+ * `evaluated` (every alternative refused).
  */
-export interface RuleGroupOutcome {
-	ruleType: string;
-	passed: boolean;
-	/**
-	 * On a failing group, every rule in it — all of them ran and all of them
-	 * failed. On a passing group, the single rule that satisfied it; the group is
-	 * an OR, so evaluation stops at the first pass and the rest never ran.
-	 */
-	rules: RuleOutcome[];
-}
+export type RuleGroupOutcome =
+	| { ruleType: string; passed: true; evaluated: RuleOutcome[]; satisfiedBy: RuleOutcome }
+	| { ruleType: string; passed: false; evaluated: RuleOutcome[] };
 
 /**
  * Structured account of how a decision was reached, carried on both allow and

@@ -123,12 +123,14 @@ describe("evaluate — structured decision reason (#124)", () => {
 			{
 				ruleType: "scope",
 				passed: true,
-				rules: [{ code: "invalid_scope", message: "Failed: invalid_scope", passed: true }],
+				evaluated: [{ code: "invalid_scope", message: "Failed: invalid_scope", passed: true }],
+				satisfiedBy: { code: "invalid_scope", message: "Failed: invalid_scope", passed: true },
 			},
 			{
 				ruleType: "permission",
 				passed: true,
-				rules: [{ code: "no_permission", message: "Failed: no_permission", passed: true }],
+				evaluated: [{ code: "no_permission", message: "Failed: no_permission", passed: true }],
+				satisfiedBy: { code: "no_permission", message: "Failed: no_permission", passed: true },
 			},
 		]);
 	});
@@ -155,8 +157,8 @@ describe("evaluate — structured decision reason (#124)", () => {
 
 		const scopeGroup = result.reason.groups.find((g) => g.ruleType === "scope");
 		expect(scopeGroup?.passed).toBe(false);
-		expect(scopeGroup?.rules.map((r) => r.code)).toEqual(["invalid_scope", "also_invalid"]);
-		expect(scopeGroup?.rules.every((r) => !r.passed)).toBe(true);
+		expect(scopeGroup?.evaluated.map((r) => r.code)).toEqual(["invalid_scope", "also_invalid"]);
+		expect(scopeGroup?.evaluated.every((r) => !r.passed)).toBe(true);
 	});
 
 	it("evaluates later groups even after an earlier one fails", () => {
@@ -177,5 +179,94 @@ describe("evaluate — structured decision reason (#124)", () => {
 	it("reports no groups when nothing was collected", () => {
 		const result = evaluate(new Map(), []);
 		expect(result.reason.groups).toEqual([]);
+	});
+});
+
+describe("evaluate — RuleGroupOutcome.evaluated means what ran (#135)", () => {
+	it("on a pass, evaluated lists the tried-and-failed alternatives before the passing rule", () => {
+		// The old `rules` field held only the passing rule here, so a consumer
+		// aggregating "rules evaluated" undercounted the two failed attempts.
+		const attrs: Attributes = new Map();
+		const result = evaluate(attrs, [
+			makeRule("scope", "first_failed", false),
+			makeRule("scope", "second_failed", false),
+			makeRule("scope", "finally_passed", true),
+		]);
+
+		expect(result.decision).toBe("allow");
+		const group = result.reason.groups[0];
+		expect(group.passed).toBe(true);
+		expect(group.evaluated.map((r) => [r.code, r.passed])).toEqual([
+			["first_failed", false],
+			["second_failed", false],
+			["finally_passed", true],
+		]);
+	});
+
+	it("on a pass, satisfiedBy names the deciding rule and matches the last evaluated entry", () => {
+		const attrs: Attributes = new Map();
+		const result = evaluate(attrs, [
+			makeRule("scope", "first_failed", false),
+			makeRule("scope", "finally_passed", true),
+		]);
+
+		const group = result.reason.groups[0];
+		expect(group.passed).toBe(true);
+		if (!group.passed) throw new Error("unreachable — narrows the union");
+		expect(group.satisfiedBy).toEqual({
+			code: "finally_passed",
+			message: "Failed: finally_passed",
+			passed: true,
+		});
+		expect(group.satisfiedBy).toEqual(group.evaluated.at(-1));
+	});
+
+	it("on a pass, alternatives after the passing rule never run and are not reported", () => {
+		const attrs: Attributes = new Map();
+		let laterAlternativeRan = false;
+		const neverReached: Rule = {
+			ruleType: "scope",
+			code: "never_reached",
+			message: "Failed: never_reached",
+			verify: () => {
+				laterAlternativeRan = true;
+				return true;
+			},
+		};
+		const result = evaluate(attrs, [makeRule("scope", "finally_passed", true), neverReached]);
+
+		const group = result.reason.groups[0];
+		expect(laterAlternativeRan).toBe(false);
+		expect(group.evaluated.map((r) => r.code)).toEqual(["finally_passed"]);
+	});
+
+	it("on a fail, evaluated lists every alternative and satisfiedBy is absent", () => {
+		const attrs: Attributes = new Map();
+		const result = evaluate(attrs, [
+			makeRule("scope", "first_failed", false),
+			makeRule("scope", "second_failed", false),
+		]);
+
+		expect(result.decision).toBe("deny");
+		const group = result.reason.groups[0];
+		expect(group.passed).toBe(false);
+		expect(group.evaluated.map((r) => [r.code, r.passed])).toEqual([
+			["first_failed", false],
+			["second_failed", false],
+		]);
+		expect("satisfiedBy" in group).toBe(false);
+	});
+
+	it("still takes the deny code from the first alternative of the first failing group", () => {
+		// The representative rule on a deny was `rules[0]` and is now
+		// `evaluated[0]` — same rule, since a failing group ran all alternatives
+		// in order.
+		const attrs: Attributes = new Map();
+		const result = evaluate(attrs, [
+			makeRule("scope", "first_failed", false),
+			makeRule("scope", "second_failed", false),
+		]);
+
+		expect(result).toMatchObject({ decision: "deny", code: "first_failed" });
 	});
 });

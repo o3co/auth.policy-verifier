@@ -99,7 +99,7 @@ A module registers collector, parser, and key resolver factories into the provid
 | `RuleCollector` | `collect(context: CollectorContext): Promise<Rule[]>` |
 | `Decision` | `{ decision: "allow"; reason: DecisionReason } \| { decision: "deny"; code: string; message: string; reason: DecisionReason }` |
 | `DecisionReason` | `{ groups: RuleGroupOutcome[] }` |
-| `RuleGroupOutcome` | `{ ruleType: string; passed: boolean; rules: RuleOutcome[] }` |
+| `RuleGroupOutcome` | `{ ruleType: string; passed: true; evaluated: RuleOutcome[]; satisfiedBy: RuleOutcome } \| { ruleType: string; passed: false; evaluated: RuleOutcome[] }` — `evaluated` is every rule that ran, in order; `satisfiedBy` names the rule that satisfied a passing group |
 | `RuleOutcome` | `{ code: string; message: string; passed: boolean }` |
 | `Role` | `{ name: string; permissions: string[] }` |
 | `VerifierPayload` | Decoded JWT claims: `sub`, `azp`, `scope`, `iss`, `aud`, `exp`, `iat`, `token`, `tokenType`, plus arbitrary extra claims |

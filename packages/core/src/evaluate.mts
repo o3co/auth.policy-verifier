@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Attributes, Decision, Rule, RuleGroupOutcome } from "./types.mjs";
+import type { Attributes, Decision, Rule, RuleGroupOutcome, RuleOutcome } from "./types.mjs";
 
 /** Deny returned when no rule group applied to the request. */
 const NO_APPLICABLE_RULE: Omit<Decision & { decision: "deny" }, "reason"> = {
@@ -71,7 +71,7 @@ export function evaluate(attrs: Attributes, rules: Rule[], options?: EvaluateOpt
 	const reason = { groups: outcomes };
 	const firstFailure = outcomes.find((group) => !group.passed);
 	if (firstFailure) {
-		const representative = firstFailure.rules[0];
+		const representative = firstFailure.evaluated[0];
 		return {
 			decision: "deny",
 			code: representative.code,
@@ -84,16 +84,18 @@ export function evaluate(attrs: Attributes, rules: Rule[], options?: EvaluateOpt
 }
 
 /**
- * Evaluates one `ruleType` group. The group is an OR, so evaluation stops at the
- * first passing rule and the outcome names just that rule; a failing group ran
- * every alternative, so all of them are reported.
+ * Evaluates one `ruleType` group. The group is an OR, so evaluation stops at
+ * the first passing rule. `evaluated` reports exactly the rules that ran, in
+ * order — on a pass that is every tried-and-failed alternative followed by the
+ * passing rule (named again as `satisfiedBy`); on a fail, every alternative.
  */
 function evaluateGroup(ruleType: string, rules: Rule[], attrs: Attributes): RuleGroupOutcome {
-	const evaluated: RuleGroupOutcome["rules"] = [];
+	const evaluated: RuleOutcome[] = [];
 	for (const rule of rules) {
 		const passed = rule.verify(attrs);
-		evaluated.push({ code: rule.code, message: rule.message, passed });
-		if (passed) return { ruleType, passed: true, rules: evaluated.slice(-1) };
+		const outcome = { code: rule.code, message: rule.message, passed };
+		evaluated.push(outcome);
+		if (passed) return { ruleType, passed: true, evaluated, satisfiedBy: outcome };
 	}
-	return { ruleType, passed: false, rules: evaluated };
+	return { ruleType, passed: false, evaluated };
 }
