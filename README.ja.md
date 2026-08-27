@@ -54,6 +54,7 @@ POST /verify/batch — 同じ契約で、1 往復に N 件の decision
 - **boolean ではなく decision 契約** — リクエストは `(subject, resource, action, context)`、応答は各ルールグループとその結果を並べた構造化 `reason` を必ず伴う。「なぜ deny されたか」をパイプラインの再実行なしに答えられる。`POST /verify/batch` は複数リソースを 1 往復で判定する。
 - **JWT 検証アルゴリズム設定可能** — HS256（共有シークレット）、RS256/ES256/EdDSA（JWKS URI または公開鍵直接指定）。[auth.provider](https://github.com/o3co/auth.provider) の JWT 設定と対称設計。
 - **RFC 9068 §4 のトークン検証** — 署名だけでなく `iss` / `aud` / `typ` ヘッダも検証する。同じ鍵で署名された `id_token` / refresh token / logout token や、他サービス向けに発行されたトークンは拒否される。`mode = "verify"`（デフォルト）のとき `issuer` と `audience` は必須。
+- **トークン寿命の上限** — `exp` と `iat` は「あれば検証する」ではなく**必須**。さらに `maxTokenAgeSeconds` が、発行者がどれだけ先の `exp` を付けたかに関わらず「発行からどれだけ経ったトークンまで受け入れるか」の上限を課す。`exp` を持たずに発行（あるいは偽造）されたトークンは、永久に有効ではなく拒否される。`clockToleranceSeconds`（デフォルト 0、上限 300）はクロックずれの許容幅。これらはすべて `insecure-decode` モードでも同じく適用されるので、2 つのモードが同一トークンについて食い違うことはない。
 - **JWKS サポート** — `jwksUri` を auth.provider の `https://.../.well-known/jwks.json` に向ければ鍵ローテーションに自動対応。エンドポイントは TLS 必須（ローカル開発向けにループバックのみ例外）。取得はタイムアウト / クールダウン / キャッシュ期間で必ず上限が付き、プロバイダー障害が判定パスを止めない。
 - **プラグイン可能なアーキテクチャ** — Module システムでカスタム Collector、ルール、リソースパーサーをファクトリ経由で登録。
 - **DSL ロックインなし** — 認可ロジックは TypeScript。Rego も Cedar ポリシー言語も不要。スケールアウトが必要になれば [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) 経由で OPA や Cedar に差し替え可能 — interceptor がバックエンドを抽象化する。
@@ -201,6 +202,8 @@ oauth {
     audience = ${?OAUTH_JWT_AUDIENCE}       # mode = "verify" のとき必須 — RFC 9068 §4 aud
     tokenType = "at+jwt"                     # 受け入れる typ ヘッダ
     tokenType = ${?OAUTH_JWT_TOKEN_TYPE}
+    maxTokenAgeSeconds = 86400               # now - iat の上限。設定により iat が必須になる
+    clockToleranceSeconds = 0                # クロックずれ許容幅 0–300。provider に合わせるなら 60
     mode = "verify"                          # "verify"（デフォルト）| "insecure-decode"（テスト専用）
     mode = ${?OAUTH_JWT_MODE}
   }

@@ -54,6 +54,7 @@ POST /verify/batch — the same contract, N decisions per round trip
 - **A decision contract, not a boolean** — every request is `(subject, resource, action, context)` and every answer carries a structured `reason` naming each rule group and how it came out, so "why was this denied" is answerable without re-running the pipeline. `POST /verify/batch` decides many resources in one round trip.
 - **Configurable JWT verification** — HS256 (shared secret), RS256/ES256/EdDSA (JWKS URI or direct public key). Symmetric design with [auth.provider](https://github.com/o3co/auth.provider)'s JWT config.
 - **RFC 9068 §4 token validation** — `iss`, `aud` and the `typ` header are checked alongside the signature, so an `id_token`, refresh token or logout token signed with the same key, or a token minted for another service, is rejected. `issuer` and `audience` are required whenever `mode = "verify"` (the default).
+- **Bounded token lifetime** — `exp` and `iat` are **required**, not merely honoured when present, and `maxTokenAgeSeconds` caps how long after issuance a token is accepted whatever `exp` its issuer chose. A token minted or forged without an expiry is refused rather than accepted forever. `clockToleranceSeconds` (0 by default, capped at 300) is the skew allowance. Every one of these applies in `insecure-decode` mode too, so the two modes never disagree about the same token.
 - **JWKS support** — Point `jwksUri` at auth.provider's `https://.../.well-known/jwks.json` for automatic key rotation. The endpoint must be TLS-protected (loopback hosts excepted for local development), and the fetch is bounded by an operator-set timeout, cooldown and cache age so a provider outage cannot stall the decision path.
 - **Pluggable architecture** — Module system for registering custom collectors, rules, and resource parsers via factories.
 - **No DSL lock-in** — Authorization logic is TypeScript. No Rego, no Cedar policy language. If you outgrow this, swap to OPA or Cedar via [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) — the interceptor abstracts over the backend.
@@ -205,6 +206,8 @@ oauth {
     audience = ${?OAUTH_JWT_AUDIENCE}       # required when mode = "verify" — RFC 9068 §4 aud
     tokenType = "at+jwt"                     # accepted typ header
     tokenType = ${?OAUTH_JWT_TOKEN_TYPE}
+    maxTokenAgeSeconds = 86400               # ceiling on now - iat; makes iat required
+    clockToleranceSeconds = 0                # skew allowance, 0–300; 60 matches the provider
     mode = "verify"                          # "verify" (default) | "insecure-decode" (test-only)
     mode = ${?OAUTH_JWT_MODE}
   }

@@ -50,16 +50,22 @@ interface VerifyRouterConfig {
 }
 
 // `validate` による判別可能ユニオン。検証パラメータは検証するときにだけ存在する。
+// 時刻クレームの上限は両方の枝に載る — どちらの枝も同じように強制するため。
+type JwtTimeClaimConfig = {
+  maxTokenAgeSeconds?: number | string;    // now - iat の上限。既定 86400
+  clockToleranceSeconds?: number | string; // クロックずれ許容幅 0–300。既定 0
+};
+
 type VerifyRouterJwtConfig =
-  | {
+  | (JwtTimeClaimConfig & {
       validate: true;
       key: unknown;             // KeyResolverFactory が返す鍵
       algorithms: string[];
       issuer: string | string[];    // RFC 9068 §4 iss
       audience: string | string[];  // RFC 9068 §4 aud
       tokenType: string;            // 受け入れる typ ヘッダ（例: "at+jwt"）
-    }
-  | { validate: false };
+    })
+  | (JwtTimeClaimConfig & { validate: false; allowInsecureDecode: true });
 
 function createVerifyRouter(config: VerifyRouterConfig): express.Router
 ```
@@ -71,11 +77,12 @@ function createVerifyRouter(config: VerifyRouterConfig): express.Router
 1. `Authorization: <type> <token>` ヘッダーを取得する。存在しない場合は 401 を返す。
 2. `validate` が `true` の場合: 署名に加えて RFC 9068 §4 のクレームを検証する — `iss` を `issuer` と、`aud` を `audience` と、`typ` ヘッダを `tokenType` と照合する（`application/` プレフィックスは無視）。失敗時は 401 を返す。3 つのいずれかが欠けている場合、`createVerifyRouter` は例外を投げる。
 3. `validate` が `false` の場合: JWT を検証なしでデコードする。不正なトークンの場合は 401 を返す。
-4. `req.body.resource` を `resourceParser` でパースし、`req.body.action` と `req.body.context` を読み取る。
-5. `x-request-id` ヘッダーが存在する場合、`CollectorContext.headers` に含める（コレクターが上流呼び出し時に転送可能）。
-6. `attributePipeline.collect` と `rulePipeline.collect` を並列実行し、`evaluate` を呼び出す。
-7. `200 { decision: "allow" }` または `403 { decision: "deny", code, message }` を返す。
-8. 予期しないエラーが発生した場合は `500 { decision: "deny", code: "internal_error" }` を返す。
+4. どちらの経路でもトークン自身の寿命を検証する: `exp` と `iat` は**必須**（有効期限を宣言しないトークンは失効しない）、`nbf` は存在すれば検証、`exp` は未来でなければならず、`now - iat` は `maxTokenAgeSeconds` を超えてはならない — 発行者が何年も先の `exp` を付けたトークンを拒否するのはこれ。`clockToleranceSeconds` はこれら全ての比較に効く。失敗時は 401 を返す。デコード専用経路はこれらの検査を省略せず手書きで再現するので、同一トークンに対して両モードの答えは一致する。
+5. `req.body.resource` を `resourceParser` でパースし、`req.body.action` と `req.body.context` を読み取る。
+6. `x-request-id` ヘッダーが存在する場合、`CollectorContext.headers` に含める（コレクターが上流呼び出し時に転送可能）。
+7. `attributePipeline.collect` と `rulePipeline.collect` を並列実行し、`evaluate` を呼び出す。
+8. `200 { decision: "allow" }` または `403 { decision: "deny", code, message }` を返す。
+9. 予期しないエラーが発生した場合は `500 { decision: "deny", code: "internal_error" }` を返す。
 
 ### AppConfigSchema / AppConfig
 
@@ -93,10 +100,12 @@ const AppConfigSchema = z.object({
   oauth: z.object({
     jwt: z.object({
       secret: z.string(),
-      validate: z.boolean().default(true),
-      issuer: z.union([z.string(), z.array(z.string())]).optional(),   // validate = true のとき必須
-      audience: z.union([z.string(), z.array(z.string())]).optional(), // validate = true のとき必須
+      mode: z.enum(["verify", "insecure-decode"]).default("verify"),
+      issuer: z.union([z.string(), z.array(z.string())]).optional(),   // mode = "verify" のとき必須
+      audience: z.union([z.string(), z.array(z.string())]).optional(), // mode = "verify" のとき必須
       tokenType: z.string().default("at+jwt"),
+      maxTokenAgeSeconds: z.coerce.number().int().positive().default(86400),
+      clockToleranceSeconds: z.coerce.number().int().min(0).max(300).default(0),
     }),
   }),
   attribute: z.object({

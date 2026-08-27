@@ -21,6 +21,7 @@ import { CALLER_AUTH_REQUIRED } from "./config/defaults.mjs";
 import { createCallerAuthMiddleware, resolveCallerAuth } from "./http/callerAuth.mjs";
 import {
 	assertVerifyRouterJwtConfig,
+	resolveJwtTimeClaimBounds,
 	type VerifyRouterJwtConfig,
 } from "./jwt/tokenAuthenticator.mjs";
 import { isLoopbackBindAddress } from "./net/loopback.mjs";
@@ -72,7 +73,8 @@ function assertConfigObject(value: unknown, path: string): asserts value is obje
  * change that makes it mandatory.
  *
  * `config.oauth.jwt.mode = "insecure-decode"` disables signature verification
- * and only decodes the token (`exp` / `nbf` are still enforced). It is
+ * and only decodes the token (the time claims are still enforced in full —
+ * `exp` and `iat` required, `nbf` honoured, `maxTokenAgeSeconds` applied). It is
  * test-only; the mode string itself is the explicit consent (#134) — an
  * accidental env-var flip can produce a stray boolean but never that literal
  * string, which preserves the intent of #106's double opt-in in one knob.
@@ -149,6 +151,15 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	}
 	// Hand-built configs may omit `mode`; they get the schema's default (verify).
 	const mode: unknown = (jwtWire as { mode?: unknown }).mode ?? "verify";
+	// Ahead of the mode split, because the token lifetime bounds (#110) apply in
+	// both modes — the decode path restates them by hand rather than skipping
+	// them — and resolving here is what lets a bad value be reported against the
+	// `oauth.jwt.*` key the operator actually wrote.
+	const timeClaims = resolveJwtTimeClaimBounds(jwtWire, "oauth.jwt");
+	const bounds = {
+		maxTokenAgeSeconds: timeClaims.maxTokenAge,
+		clockToleranceSeconds: timeClaims.clockTolerance,
+	};
 	let jwt: VerifyRouterJwtConfig;
 	if (mode === "verify") {
 		const verifying = { ...jwtWire, validate: true as const };
@@ -165,10 +176,11 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 			issuer: verifying.issuer,
 			audience: verifying.audience,
 			tokenType: verifying.tokenType,
+			...bounds,
 		};
 	} else if (mode === "insecure-decode") {
 		// The mode string is the consent — see the schema's `mode` doc comment.
-		jwt = { validate: false, allowInsecureDecode: true };
+		jwt = { validate: false, allowInsecureDecode: true, ...bounds };
 		// error, not warn: a deployment that reaches this line accepts unsigned
 		// tokens, and a fleet filtering at level=error must still see it (#106).
 		logger.error({ mode: "insecure-decode" }, "jwt_validation_disabled");

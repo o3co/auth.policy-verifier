@@ -12,17 +12,114 @@
  * validation option threaded to the verifying path must be weighed — and
  * usually threaded — into the decode path as well. Keeping both paths in this
  * one module is what keeps that coupling visible.
+ *
+ * #110 is what that warning was about. `jwtVerify` enforces `exp` and `nbf`
+ * only when they are present, so a token minted — or forged — without `exp`
+ * was accepted forever, in both modes. The fix is one pair of bounds resolved
+ * once ({@link resolveJwtTimeClaimBounds}) and spent twice: as jose's
+ * `requiredClaims` / `maxTokenAge` / `clockTolerance` on the verifying path,
+ * and as the same three checks written out in {@link assertTimeClaims} on the
+ * decode path. A change to either must land in both, or the two modes start
+ * disagreeing about the same token.
  */
 
 import type { EventLogger, VerifierPayload } from "@o3co/auth.policy-verifier.core";
 import { decodeJwt, errors, type JWTPayload, jwtVerify } from "jose";
+import { resolveBound } from "../config/bounds.mjs";
+import {
+	DEFAULT_CLOCK_TOLERANCE_SECONDS,
+	DEFAULT_MAX_TOKEN_AGE_SECONDS,
+	MAX_CLOCK_TOLERANCE_SECONDS,
+} from "../config/defaults.mjs";
+
+/**
+ * Bounds on a presented token's own lifetime (#110), settable in either mode
+ * because both modes enforce them.
+ *
+ * Each admits the string a HOCON env substitution delivers as well as a number,
+ * for the same reason the JWKS fetch bounds in `jwt/jwks.mts` do: `createApp`
+ * accepts hand-built config objects, and a consumer assembling one from
+ * `process.env` supplies strings.
+ */
+export interface JwtTimeClaimConfig {
+	/**
+	 * Ceiling on `now - iat`, in seconds. Positive integer; defaults to
+	 * `DEFAULT_MAX_TOKEN_AGE_SECONDS`. Setting it makes `iat` required.
+	 */
+	maxTokenAgeSeconds?: number | string;
+	/**
+	 * Skew allowance applied to every time-claim comparison, in seconds. Integer
+	 * from 0 to `MAX_CLOCK_TOLERANCE_SECONDS`; defaults to 0.
+	 */
+	clockToleranceSeconds?: number | string;
+}
+
+/**
+ * The resolved bounds, spelled the way jose's claim-verification options name
+ * them so the verifying path can hand them straight over and the decode path
+ * has one obvious thing to mirror.
+ */
+export interface JwtTimeClaimBounds {
+	/** jose `maxTokenAge`, in seconds. */
+	maxTokenAge: number;
+	/** jose `clockTolerance`, in seconds. */
+	clockTolerance: number;
+}
+
+/**
+ * Claims every token must carry, whatever else the config says (#110).
+ *
+ * `exp` is here rather than in a knob because a token with no stated expiry is
+ * a permanent credential, and a fail-closed authorization service must not
+ * depend on the issuer's discipline for that. `iat` is required as a
+ * consequence of {@link JwtTimeClaimBounds.maxTokenAge} always being set —
+ * jose adds it to its own presence check for the same reason. RFC 9068 §2.2
+ * requires both of an access token, so this asks nothing of a conforming issuer.
+ */
+const REQUIRED_CLAIMS = ["exp"] as const;
+
+/**
+ * Resolves the time-claim bounds, falling back to the defaults for anything the
+ * config omits, and refusing a stated bound that is not a whole number of
+ * seconds in range. Hand-built configs never went through `AppConfigSchema`, so
+ * the defaults and the validation both have to hold here too: an unparsed
+ * string handed to jose is silently ignored in favour of *its* default, which
+ * for `maxTokenAge` means no ceiling at all.
+ *
+ * @param path Config path of the JWT block at the calling boundary. The router
+ * sees it as `jwt`; `createApp` passes `oauth.jwt`, the key the operator wrote.
+ */
+export function resolveJwtTimeClaimBounds(
+	config: JwtTimeClaimConfig,
+	path = "jwt",
+): JwtTimeClaimBounds {
+	const seconds = { path, unit: "seconds" } as const;
+	return {
+		maxTokenAge: resolveBound(config.maxTokenAgeSeconds, {
+			...seconds,
+			field: "maxTokenAgeSeconds",
+			fallback: DEFAULT_MAX_TOKEN_AGE_SECONDS,
+			minimum: 1,
+		}),
+		// Zero is the default and a deliberate choice ("trust the clocks"), so the
+		// floor is 0 and the absent case is told apart by `undefined`, never by
+		// falsiness. Bounded above because tolerance lengthens every token's life.
+		clockTolerance: resolveBound(config.clockToleranceSeconds, {
+			...seconds,
+			field: "clockToleranceSeconds",
+			fallback: DEFAULT_CLOCK_TOLERANCE_SECONDS,
+			minimum: 0,
+			maximum: MAX_CLOCK_TOLERANCE_SECONDS,
+		}),
+	};
+}
 
 /**
  * JWT parameters used when signature validation is on. Every field a resource
  * server must check per RFC 9068 §4 is required here, so a deployment cannot
  * end up verifying the signature alone.
  */
-export interface VerifyingJwtConfig {
+export interface VerifyingJwtConfig extends JwtTimeClaimConfig {
 	validate: true;
 	// The `key` is produced by a KeyResolverFactory; its concrete type depends on
 	// the algorithm (e.g. KeyObject for HS256, JWTVerifyGetKey for JWKS, etc.).
@@ -42,15 +139,17 @@ export interface VerifyingJwtConfig {
 }
 
 /**
- * Test-only shape: the token is decoded, never signature-verified. Its `exp` /
- * `nbf` claims are still enforced (#106). On the wire this shape is selected by
- * the single self-documenting key `oauth.jwt.mode = "insecure-decode"` (#134);
+ * Test-only shape: the token is decoded, never signature-verified. Its time
+ * claims are still enforced in full (#106, #110) — `exp` and `iat` required,
+ * `nbf` honoured, and the same age ceiling the verifying mode applies. On the
+ * wire this shape is selected by the single self-documenting key
+ * `oauth.jwt.mode = "insecure-decode"` (#134);
  * internally the interlock stays a two-key literal, and the acknowledgment is
  * re-checked at construction time — so wiring the router directly with a
  * hand-built config is not a way around the explicit consent `createApp`
  * demands.
  */
-export interface DecodingJwtConfig {
+export interface DecodingJwtConfig extends JwtTimeClaimConfig {
 	validate: false;
 	allowInsecureDecode: true;
 }
@@ -179,61 +278,102 @@ export function isVerificationUnavailable(cause: unknown): boolean {
 	);
 }
 
+/** Time claims the decode path reads, in the order `jwtVerify` type-checks them. */
+type TimeClaim = "iat" | "nbf" | "exp";
+
 /**
- * `exp` / `nbf` checks for the decode-only path (#106). `decodeJwt` performs
- * no validation at all, so the authenticator enforces the token's own lifetime
- * with `jwtVerify`'s semantics and error classes: reject a numeric `exp` in
- * the past or a numeric `nbf` in the future, reject a present non-numeric
- * value for any time claim (`iat` included — `jwtVerify` type-checks it
- * unconditionally), tolerate absence, zero clock tolerance. Skipping the
- * signature is an (acknowledged, test-only) trust decision about the issuer;
- * honouring an expired token is simply wrong in every mode.
+ * Reads one time claim the way `jwtVerify` does: absent (allowed only where
+ * jose allows it, and the caller has already ruled that out for the required
+ * ones) or numeric. A present non-numeric value is always a rejection, `iat`
+ * included — jose type-checks it whether or not anything consumes it.
  */
-export function assertTimeClaims(payload: JWTPayload): void {
-	const now = Math.floor(Date.now() / 1000);
-	if (payload.iat !== undefined && typeof payload.iat !== "number") {
+function readTimeClaim(payload: JWTPayload, claim: TimeClaim): number | undefined {
+	const value = payload[claim];
+	if (value === undefined) {
+		return undefined;
+	}
+	if (typeof value !== "number") {
 		throw new errors.JWTClaimValidationFailed(
-			'"iat" claim must be a number',
+			`"${claim}" claim must be a number`,
 			payload,
-			"iat",
+			claim,
 			"invalid",
 		);
 	}
-	if (payload.nbf !== undefined) {
-		if (typeof payload.nbf !== "number") {
+	return value;
+}
+
+/**
+ * Time-claim checks for the decode-only path (#106, #110). `decodeJwt`
+ * performs no validation at all, so the authenticator enforces the token's own
+ * lifetime here, restating `jwtVerify`'s semantics, error classes and rejection
+ * order by hand: presence first (`iat` before `exp`, jose's own order), then
+ * `nbf` against `now + tolerance`, `exp` against `now - tolerance`, and finally
+ * the age of the token against {@link JwtTimeClaimBounds.maxTokenAge}, which
+ * also refuses an `iat` in the future. Skipping the signature is an
+ * (acknowledged, test-only) trust decision about the issuer; honouring an
+ * expired — or unexpiring — token is simply wrong in every mode.
+ *
+ * `bounds` is a required argument rather than a defaulted one on purpose: the
+ * whole failure #110 records is a validation option that reached `jwtVerify`
+ * and never reached here, and a parameter that quietly defaults is how that
+ * happens again.
+ */
+export function assertTimeClaims(payload: JWTPayload, bounds: JwtTimeClaimBounds): void {
+	const now = Math.floor(Date.now() / 1000);
+	const { clockTolerance, maxTokenAge } = bounds;
+
+	// Presence for every required claim first, before any of them is read —
+	// jose's own order, and `iat` leads it because `maxTokenAge` is always set,
+	// which is what makes `iat` mandatory alongside the `exp` #110 requires.
+	for (const claim of ["iat", ...REQUIRED_CLAIMS] as const) {
+		if (!Object.hasOwn(payload, claim)) {
 			throw new errors.JWTClaimValidationFailed(
-				'"nbf" claim must be a number',
+				`missing required "${claim}" claim`,
 				payload,
-				"nbf",
-				"invalid",
-			);
-		}
-		if (payload.nbf > now) {
-			throw new errors.JWTClaimValidationFailed(
-				'"nbf" claim timestamp check failed',
-				payload,
-				"nbf",
-				"check_failed",
+				claim,
+				"missing",
 			);
 		}
 	}
-	if (payload.exp !== undefined) {
-		if (typeof payload.exp !== "number") {
-			throw new errors.JWTClaimValidationFailed(
-				'"exp" claim must be a number',
-				payload,
-				"exp",
-				"invalid",
-			);
-		}
-		if (payload.exp <= now) {
-			throw new errors.JWTExpired(
-				'"exp" claim timestamp check failed',
-				payload,
-				"exp",
-				"check_failed",
-			);
-		}
+
+	const iat = readTimeClaim(payload, "iat") as number;
+	const nbf = readTimeClaim(payload, "nbf");
+	if (nbf !== undefined && nbf > now + clockTolerance) {
+		throw new errors.JWTClaimValidationFailed(
+			'"nbf" claim timestamp check failed',
+			payload,
+			"nbf",
+			"check_failed",
+		);
+	}
+
+	const exp = readTimeClaim(payload, "exp") as number;
+	if (exp <= now - clockTolerance) {
+		throw new errors.JWTExpired(
+			'"exp" claim timestamp check failed',
+			payload,
+			"exp",
+			"check_failed",
+		);
+	}
+
+	const age = now - iat;
+	if (age - clockTolerance > maxTokenAge) {
+		throw new errors.JWTExpired(
+			'"iat" claim timestamp check failed (too far in the past)',
+			payload,
+			"iat",
+			"check_failed",
+		);
+	}
+	if (age < 0 - clockTolerance) {
+		throw new errors.JWTClaimValidationFailed(
+			'"iat" claim timestamp check failed (it should be in the past)',
+			payload,
+			"iat",
+			"check_failed",
+		);
 	}
 }
 
@@ -263,6 +403,10 @@ export function createTokenAuthenticator(
 	logger: EventLogger,
 ): TokenAuthenticator {
 	assertVerifyRouterJwtConfig(jwt);
+	// Resolved once, at construction: an unusable bound must fail here rather
+	// than per request, and both branches below read the same resolved values —
+	// which is the only reason the two paths cannot drift on them.
+	const { maxTokenAge, clockTolerance } = resolveJwtTimeClaimBounds(jwt);
 
 	return {
 		async authenticate(authorizationHeader: string | undefined): Promise<AuthenticationResult> {
@@ -307,11 +451,18 @@ export function createTokenAuthenticator(
 						issuer: jwt.issuer,
 						audience: jwt.audience,
 						typ: jwt.tokenType,
+						// #110. `requiredClaims` is what turns exp from "checked when
+						// present" into "checked"; `maxTokenAge` bounds a token whose
+						// issuer chose a distant exp, and requires `iat` as a side
+						// effect. The decode branch below restates all three by hand.
+						requiredClaims: [...REQUIRED_CLAIMS],
+						maxTokenAge,
+						clockTolerance,
 					});
 					decoded = result.payload;
 				} else {
 					decoded = decodeJwt(token);
-					assertTimeClaims(decoded);
+					assertTimeClaims(decoded, { maxTokenAge, clockTolerance });
 				}
 			} catch (cause) {
 				// Same invalid_token rejection either way — the caller is

@@ -10,8 +10,11 @@ export {
 export {
 	CALLER_AUTH_REQUIRED,
 	DEFAULT_CALLER_AUTH_HEADER,
+	DEFAULT_CLOCK_TOLERANCE_SECONDS,
 	DEFAULT_HOSTNAME,
 	DEFAULT_MAX_BATCH_SIZE,
+	DEFAULT_MAX_TOKEN_AGE_SECONDS,
+	MAX_CLOCK_TOLERANCE_SECONDS,
 } from "./config/defaults.mjs";
 export {
 	type CallerAuthConfig,
@@ -32,9 +35,12 @@ export {
 	type JwksFetchConfig,
 	type JwksUriCheck,
 	type JwtConfigErrorContext,
+	type JwtTimeClaimBounds,
+	type JwtTimeClaimConfig,
 	parseJwksUri,
 	RS256KeyResolverFactory,
 	resolveJwksFetchBounds,
+	resolveJwtTimeClaimBounds,
 	type UncheckedJwtConfig,
 	type VerifyingJwtConfig,
 	type VerifyRouterJwtConfig,

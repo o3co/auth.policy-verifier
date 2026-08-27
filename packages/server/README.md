@@ -50,16 +50,22 @@ interface VerifyRouterConfig {
 }
 
 // Discriminated on `validate`: verification parameters exist only when verifying.
+// The time-claim bounds sit on both arms, because both arms enforce them.
+type JwtTimeClaimConfig = {
+  maxTokenAgeSeconds?: number | string;    // ceiling on now - iat; default 86400
+  clockToleranceSeconds?: number | string; // skew allowance, 0–300; default 0
+};
+
 type VerifyRouterJwtConfig =
-  | {
+  | (JwtTimeClaimConfig & {
       validate: true;
       key: unknown;             // from a KeyResolverFactory
       algorithms: string[];
       issuer: string | string[];    // RFC 9068 §4 iss
       audience: string | string[];  // RFC 9068 §4 aud
       tokenType: string;            // accepted typ header, e.g. "at+jwt"
-    }
-  | { validate: false };
+    })
+  | (JwtTimeClaimConfig & { validate: false; allowInsecureDecode: true });
 
 function createVerifyRouter(config: VerifyRouterConfig): express.Router
 ```
@@ -71,11 +77,12 @@ Request flow:
 1. Extract `Authorization: <type> <token>` header. Returns 401 if missing.
 2. If `validate` is `true`: verify the signature **and** the RFC 9068 §4 claims — `iss` against `issuer`, `aud` against `audience`, and the `typ` header against `tokenType` (an `application/` prefix is ignored). Returns 401 on failure. `createVerifyRouter` throws if any of the three is missing.
 3. If `validate` is `false`: decode the JWT without verification. Returns 401 if the token is malformed.
-4. Parse `req.body.resource` with `resourceParser`; read `req.body.action` and `req.body.context`.
-5. Include `x-request-id` header in `CollectorContext.headers` if present (collectors can forward it to upstream calls they make).
-6. Run `attributePipeline.collect` and `rulePipeline.collect` in parallel; call `evaluate`.
-7. Return `200 { decision: "allow" }` or `403 { decision: "deny", code, message }`.
-8. Return `500 { decision: "deny", code: "internal_error" }` on unexpected errors.
+4. Either way, enforce the token's own lifetime: `exp` and `iat` are **required** (a token that never states an expiry never expires), `nbf` is honoured when present, `exp` must be in the future, and `now - iat` must not exceed `maxTokenAgeSeconds` — which is what refuses a token whose issuer set `exp` years out. `clockToleranceSeconds` widens every one of those comparisons. Returns 401 on failure. The decode-only path restates these checks by hand rather than skipping them, so both modes answer the same for the same token.
+5. Parse `req.body.resource` with `resourceParser`; read `req.body.action` and `req.body.context`.
+6. Include `x-request-id` header in `CollectorContext.headers` if present (collectors can forward it to upstream calls they make).
+7. Run `attributePipeline.collect` and `rulePipeline.collect` in parallel; call `evaluate`.
+8. Return `200 { decision: "allow" }` or `403 { decision: "deny", code, message }`.
+9. Return `500 { decision: "deny", code: "internal_error" }` on unexpected errors.
 
 ### AppConfigSchema / AppConfig
 
@@ -93,10 +100,12 @@ const AppConfigSchema = z.object({
   oauth: z.object({
     jwt: z.object({
       secret: z.string(),
-      validate: z.boolean().default(true),
-      issuer: z.union([z.string(), z.array(z.string())]).optional(),   // required when validate is true
-      audience: z.union([z.string(), z.array(z.string())]).optional(), // required when validate is true
+      mode: z.enum(["verify", "insecure-decode"]).default("verify"),
+      issuer: z.union([z.string(), z.array(z.string())]).optional(),   // required when mode is "verify"
+      audience: z.union([z.string(), z.array(z.string())]).optional(), // required when mode is "verify"
       tokenType: z.string().default("at+jwt"),
+      maxTokenAgeSeconds: z.coerce.number().int().positive().default(86400),
+      clockToleranceSeconds: z.coerce.number().int().min(0).max(300).default(0),
     }),
   }),
   attribute: z.object({

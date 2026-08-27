@@ -10,6 +10,64 @@ and version sections follow the release labeling policy in
 
 ### Security
 
+- **BREAKING**: a bearer token must now carry `exp` **and** `iat`, and is
+  refused if it does not
+  ([#110](https://github.com/o3co/auth.policy-verifier/issues/110)). jose
+  enforces `exp` and `nbf` only when they are present, and nothing bounded a
+  token's age, so a token minted — or forged — without `exp` was accepted
+  forever. A fail-closed authorization service must not depend on the issuer's
+  discipline for expiry.
+
+  Both enforcement paths changed, which is the substance of the fix. The
+  verifying path passes jose `requiredClaims: ["exp"]`, `maxTokenAge` and
+  `clockTolerance`; the decode-only path (`oauth.jwt.mode = "insecure-decode"`)
+  restates all three by hand in `assertTimeClaims`, because it has no key
+  material and therefore no jose claim verification to inherit. A change
+  threaded only into `jwtVerify` would have left decode-only deployments
+  accepting the very token this issue is about — the two paths are held to the
+  identical outcome by the `token-expiry` conformance suite, which runs against
+  both.
+
+  Two new keys, both of which apply in **every** mode:
+
+  - `oauth.jwt.maxTokenAgeSeconds` (default `86400`, env
+    `OAUTH_JWT_MAX_TOKEN_AGE_SECONDS`) — ceiling on `now - iat`. This is what
+    refuses an ancient-but-unexpired token: an `exp` the issuer set years out
+    no longer outlives the ceiling. Setting it is what makes `iat` required.
+    Positive whole seconds; there is deliberately no "off" value, since a
+    switch that removes the ceiling is the failure this closes.
+  - `oauth.jwt.clockToleranceSeconds` (default `0`, env
+    `OAUTH_JWT_CLOCK_TOLERANCE_SECONDS`) — skew allowance applied to `exp`,
+    `nbf` and the age ceiling alike. Bounded to `0`–`300`: tolerance lengthens
+    the accepted life of every token the deployment sees, so an unbounded knob
+    is a way to spell "expiry optional" without writing it down. `60` matches
+    the skew auth.provider allows and is the value to reach for when the issuer
+    and the verifier keep separate clocks.
+
+  `exp` itself has no knob. RFC 9068 §2.2 requires both claims of an access
+  token, so a conforming issuer needs no change.
+
+  **Operator migration** — a deployment breaks only if something presents a
+  token with no `exp` or no `iat`, or one older than a day:
+
+  - **Check the issuer first.** auth.provider stamps `iat` unconditionally and
+    `exp` whenever `oauth.accessToken.expiresIn` is set (default `3600`), so a
+    verifier paired with it needs nothing. A hand-rolled minting path that
+    omitted `expiresIn` must start setting it — that path was producing
+    permanent credentials.
+  - **Long-lived tokens**: raise `maxTokenAgeSeconds` to cover the longest
+    lifetime the issuer actually mints (`OAUTH_JWT_MAX_TOKEN_AGE_SECONDS`). It
+    is a ceiling, not a session policy — set it to a real number rather than
+    something enormous, or the ceiling stops meaning anything.
+  - **Separate clocks**: if tokens start failing right at the boundary, set
+    `clockToleranceSeconds = 60` rather than widening `maxTokenAgeSeconds`.
+  - **Test fixtures and scripts** that minted tokens without an expiry now get
+    `401 invalid_token`. Add an expiry; do not reach for the tolerance knob.
+
+  Rejections log `jwt_token_rejected` at warn as before, with
+  `err.code` naming which check failed — `ERR_JWT_CLAIM_VALIDATION_FAILED`
+  (with `claim` `exp` or `iat`, reason `missing`) for an absent claim, and
+  `ERR_JWT_EXPIRED` for one that expired or was issued too long ago.
 - **BREAKING**: `oauth.jwt.jwksUri` must now be an `https://` URL
   ([#109](https://github.com/o3co/auth.policy-verifier/issues/109)). Plaintext
   `http://` is accepted **only** for loopback hosts — `localhost`,
@@ -71,6 +129,14 @@ and version sections follow the release labeling policy in
 
 ### Added
 
+- `@o3co/auth.policy-verifier.server` exports `resolveJwtTimeClaimBounds`
+  (with `JwtTimeClaimConfig` / `JwtTimeClaimBounds`) and the constants
+  `DEFAULT_MAX_TOKEN_AGE_SECONDS`, `DEFAULT_CLOCK_TOLERANCE_SECONDS` and
+  `MAX_CLOCK_TOLERANCE_SECONDS`
+  ([#110](https://github.com/o3co/auth.policy-verifier/issues/110)), for
+  consumers mounting `createVerifyRouter` directly or building a JWT config by
+  hand. It applies the same defaults, coercion and range checks the schema
+  does, so a hand-built config gets the same answer as a parsed one.
 - Bounds on the remote JWKS fetch, which happens inside a verify request
   whenever key resolution misses the cache
   ([#109](https://github.com/o3co/auth.policy-verifier/issues/109)):

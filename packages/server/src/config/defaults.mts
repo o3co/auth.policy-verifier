@@ -40,6 +40,55 @@ export const DEFAULT_JWKS_COOLDOWN_MS = 30_000;
 /** How long a fetched JWKS is served from cache before it is refetched. */
 export const DEFAULT_JWKS_CACHE_MAX_AGE_MS = 600_000;
 
+/*
+ * Bounds on a presented token's own lifetime (#110). `exp` is required
+ * outright — that is not a knob — but two knobs decide what a *present* set of
+ * time claims is allowed to mean.
+ */
+
+/**
+ * Ceiling on `now - iat`: how long after issuance a token may still be
+ * presented, regardless of the `exp` its issuer chose.
+ *
+ * A day, and deliberately far looser than any access token should need: this is
+ * a backstop against an issuer minting a decade-long `exp`, not a session
+ * policy. The provider this project is paired with issues one-hour access
+ * tokens, so a default under an hour would make the verifier stricter than the
+ * issuer it fronts and start refusing tokens the provider still considers
+ * valid — a day leaves that alone while still putting a ceiling on "forever".
+ *
+ * Because the bound is measured from `iat`, setting it at all makes `iat`
+ * required (RFC 9068 §2.2 requires it of an access token anyway). There is no
+ * "off" value: a deployment that genuinely mints long-lived tokens raises the
+ * number to cover them, which is a statement of how long they live rather than
+ * a switch that turns the ceiling off.
+ */
+export const DEFAULT_MAX_TOKEN_AGE_SECONDS = 86_400;
+
+/**
+ * Skew allowance applied to every time-claim comparison — `exp`, `nbf` and the
+ * token-age ceiling alike.
+ *
+ * Zero by default: the verifier should not widen a token's life on its own
+ * initiative, and a deployment whose clocks are disciplined (NTP, or a
+ * single-host sidecar sharing the issuer's clock) needs nothing. Where the
+ * issuer and the verifier keep separate clocks, `60` matches the skew the
+ * paired provider allows and is the value to reach for first.
+ */
+export const DEFAULT_CLOCK_TOLERANCE_SECONDS = 0;
+
+/**
+ * Ceiling on the configurable clock tolerance.
+ *
+ * Tolerance extends the accepted life of every token the deployment sees, in
+ * both directions, so an unbounded knob is a way to spell "expiry optional"
+ * without ever writing it down — the failure #110 is about, re-entered through
+ * the mitigation. Five minutes is more skew than a machine with working time
+ * sync ever exhibits; past that the answer is to fix the clock, not to widen
+ * the window.
+ */
+export const MAX_CLOCK_TOLERANCE_SECONDS = 300;
+
 /**
  * Default bind address when the config does not set one (#108).
  *
