@@ -239,9 +239,20 @@ verify {
 
 ```text
 "project:1"               → resourceType: "project",         resourceId: "1"
-"project:1.member:2"      → resourceType: "project_member",  resourceId: "2"
-"project:1.member"        → resourceType: "project_member",  resourceId: undefined
+"project:1.member:2"      → resourceType: "project.member",  resourceId: "2"
+"project:1.member"        → resourceType: "project.member",  resourceId: undefined
+"project_member:2"        → resourceType: "project_member",  resourceId: "2"
 ```
+
+文法は `segment *( "." segment )`、`segment = type [ ":" id ]` で、type / id は RFC 6749 `NQCHAR` から
+`.` と `:` を除いた文字（空白・`"`・`\`・`.`・`:` を除く印字可能 ASCII）の 1 文字以上です。
+`resourceType` はセグメントの type を `.` で結合したもの — 区切り文字を保持するため、ネストした type `a.b` と
+`a_b` という名前のフラットな type は区別されたままになります。
+
+それ以外は修復せず `400 invalid_request` で拒否します: 空セグメント (`a..b`)、セグメント内の 2 つ目の `:`
+(`a:1:2` を `a:1` に切り詰めない)、前後および内部の空白 (`  a:1  ` を trim しない)。`resourceType` は
+scope ルールが使う認可の名前空間なので、不正な入力を推測して補完するパーサーは、別のリソース向けに
+発行された grant を呼び出し側に与えてしまいます。
 
 ## auth.provider との接続
 

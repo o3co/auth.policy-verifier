@@ -55,7 +55,12 @@ The following collectors are registered via `builtinCollectorsModule`:
 - `ResourceActionScopeRuleCollector` — matches resource/action against scope rules
 - `ResourceActionPermissionRuleCollector` — matches resource/action against permission rules
 
-The resource parser in use is `DotNotationResourceParser`.
+The resource parser in use is `DotNotationResourceParser`. It accepts
+`segment *( "." segment )` where `segment = type [ ":" id ]`, and derives `resourceType` by joining
+the segment types with `.` — so `"project:1.member:2"` is type `project.member`, id `2`. A resource
+string outside that grammar (an empty segment such as `a..b`, a second `:` such as `a:1:2`, or
+surrounding whitespace) is answered `400 invalid_request`; it is refused rather than repaired,
+because `resourceType` is what the scope rules authorize.
 
 ## Adding Custom Modules
 

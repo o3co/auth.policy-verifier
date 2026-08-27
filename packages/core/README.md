@@ -91,7 +91,8 @@ A module registers collector, parser, and key resolver factories into the provid
 | Type | Description |
 | --- | --- |
 | `Resource` | `{ raw: string; resourceType: string; resourceId?: string }` — parsed resource |
-| `ResourceParser` | `parse(raw: string): Resource` — converts a raw resource string into a `Resource` |
+| `ResourceParser` | `parse(raw: string): Resource` — converts a raw resource string into a `Resource`; throws `ResourceParseError` when the string is not in the syntax it parses |
+| `ResourceParseError` | `Error` subclass carrying `raw` (the refused string) and `detail` (why). A **request** error, not a server error — the transport layer answers it 400-class. Exported as a class, so `instanceof` narrows it |
 | `CollectorContext` | Input passed to every collector: `payload`, `resource`, `action`, optional `headers` and `requestContext` |
 | `Attributes` | `Map<string, unknown>` — subject attribute bag |
 | `AttributeCollector` | `collect(context: CollectorContext): Promise<Attributes>` |

@@ -205,13 +205,48 @@ Parses a dot-notation string into a `Resource`.
 new DotNotationResourceParser()
 ```
 
-Input format: `"<type>[:<id>].<type>[:<id>]..."`
+Grammar:
 
-Example: `"foo.bar:123"` → `{ raw: "foo.bar:123", resourceType: "foo_bar", resourceId: "123" }`
+```text
+resource = segment *( "." segment )
+segment  = type [ ":" id ]
+type     = 1*tchar
+id       = 1*tchar
+tchar    = %x21 / %x23-2D / %x2F-39 / %x3B-5B / %x5D-7E
+           ; RFC 6749 NQCHAR less "." and ":"
+           ; i.e. printable ASCII except space, `"`, `\`, `.` and `:`
+```
+
+Example: `"foo.bar:123"` → `{ raw: "foo.bar:123", resourceType: "foo.bar", resourceId: "123" }`
 
 - Segments are split by `.`. Each segment may include `:id`.
-- `resourceType` is the segment types joined with `_`.
+- `resourceType` is the segment types joined with `.` — the separator is preserved, not rewritten.
 - `resourceId` is the id of the last segment, if present.
+- `raw` is the input verbatim.
+
+Anything the grammar does not accept raises `ResourceParseError`
+(from `@o3co/auth.policy-verifier.core`); the parser never repairs its input. The server answers
+such a request `400 invalid_request`, not a decision. Refused, among others:
+
+| Input | Why |
+| --- | --- |
+| `""`, `a..b`, `.a`, `a.` | an empty segment — every segment needs a type |
+| `a:`, `:1` | an empty type or id |
+| `a:1:2` | more than one `:` in a segment — the tail is refused, not truncated away |
+| `  a:1  `, `a : 1` | whitespace — it is refused, not trimmed |
+| `プロジェクト`, `a"b`, `a\b` | a character no OAuth scope value may carry |
+
+`resourceType` is the authorization namespace: `ResourceActionScopeRuleCollector` turns it into the
+`{action}:{resourceType}` scope that must be granted. Two distinct resources that parse to the same
+type are therefore authorized identically, so the grammar is built to make that impossible —
+`.` is reserved as the separator, which keeps the nested type `a.b` distinct from the flat type
+literally named `a_b` (both were `a_b` before). This is the same principle
+[`HasScope`](#hasscope) applies to scope values: compare what was written, never a normalized guess
+at what was meant.
+
+An id that needs `.`, `:` or a character outside the set must be encoded by the caller
+(percent-encoding round-trips through this grammar) or handled by a `ResourceParser` written for
+that syntax.
 
 ## builtinCollectorsModule
 

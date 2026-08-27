@@ -55,7 +55,11 @@ OAUTH_JWT_SECRET=your-secret \
 - `ResourceActionScopeRuleCollector` — リソース/アクションをスコープルールと照合する
 - `ResourceActionPermissionRuleCollector` — リソース/アクションをパーミッションルールと照合する
 
-使用されるリソースパーサーは `DotNotationResourceParser` です。
+使用されるリソースパーサーは `DotNotationResourceParser` です。`segment *( "." segment )`
+（`segment = type [ ":" id ]`）を受け付け、セグメントの type を `.` で結合して `resourceType` を導出します
+— つまり `"project:1.member:2"` は type `project.member`、id `2` です。この文法から外れたリソース文字列
+（`a..b` のような空セグメント、`a:1:2` のような 2 つ目の `:`、前後の空白）は `400 invalid_request` になります。
+`resourceType` は scope ルールが認可する対象そのものなので、修復せず拒否します。
 
 ## カスタムモジュールの追加
 

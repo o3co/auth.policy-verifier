@@ -244,9 +244,20 @@ verify {
 
 ```text
 "project:1"               → resourceType: "project",         resourceId: "1"
-"project:1.member:2"      → resourceType: "project_member",  resourceId: "2"
-"project:1.member"        → resourceType: "project_member",  resourceId: undefined
+"project:1.member:2"      → resourceType: "project.member",  resourceId: "2"
+"project:1.member"        → resourceType: "project.member",  resourceId: undefined
+"project_member:2"        → resourceType: "project_member",  resourceId: "2"
 ```
+
+The grammar is `segment *( "." segment )` where `segment = type [ ":" id ]`, and a type or id is one
+or more characters of RFC 6749 `NQCHAR` less `.` and `:` (printable ASCII except space, `"`, `\`,
+`.` and `:`). `resourceType` is the segment types joined with `.` — the separator is preserved, so
+the nested type `a.b` and the flat type named `a_b` stay distinct.
+
+Anything else is refused with `400 invalid_request` rather than repaired: empty segments (`a..b`),
+a second `:` in a segment (`a:1:2` is not truncated to `a:1`), and surrounding or inner whitespace
+(`  a:1  ` is not trimmed). `resourceType` is the authorization namespace the scope rules use, so a
+parser that guessed at malformed input could hand a caller a grant written for a different resource.
 
 ## Connecting to auth.provider
 

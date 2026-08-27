@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export { AttributePipeline } from "./AttributePipeline.mjs";
+export { ResourceParseError } from "./errors.mjs";
 export type { EvaluateOptions } from "./evaluate.mjs";
 export { evaluate } from "./evaluate.mjs";
 export {

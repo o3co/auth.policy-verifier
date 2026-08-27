@@ -180,6 +180,21 @@ HTTP/1.1 403 Forbidden
 付きません）として明示されます。
 `code` / `message` は従来どおり最初に失敗したグループから取ります。
 
+**レスポンス — 不正なリクエスト**
+
+```http
+HTTP/1.1 400 Bad Request
+
+{ "decision": "deny", "code": "invalid_request", "message": "<message>" }
+```
+
+`resource` / `action` が欠落・空・文字列でない場合、`context` がオブジェクトでない場合、および `resource` が
+設定された `ResourceParser` に拒否される文字列だった場合に返します。後者はサーバー側の障害ではなく呼び出し側の
+構文エラーなので、500 ではなく 400 で応答し、`verify_internal_error` としてもログしません。
+`DotNotationResourceParser` では空セグメント (`a..b`)、セグメント内の 2 つ目の `:` (`a:1:2`)、空白 (`  a:1  `)
+が該当します。文法は [builtins README](../builtins/README.ja.md#dotnotationresourceparser) を参照してください。
+ボディの検証は decision の前に行われるため、ここで拒否されたリクエストは 1 件も評価されません。
+
 **レスポンス — 予期しないエラー**
 
 ```http
@@ -219,9 +234,10 @@ HTTP/1.1 200 OK
 
 エントリはリクエスト順で返り、それぞれ `POST /verify` が同じ入力に返すのと同じオブジェクトです。
 ステータスはバッチが**判定できたか**を表し、判定結果そのものではありません — 全件 deny でも `200` で、
-呼び出し側が各エントリを読みます。`decisions` が無い / 空 / `verify.maxBatchSize` 超過 / 不正なエントリを
-含む場合は `400 invalid_request`（メッセージが該当 index を示します）、トークンが検証できない場合は
-`401` でバッチ全体を拒否します。
+呼び出し側が各エントリを読みます。`decisions` が無い / 空 / `verify.maxBatchSize` 超過 / 不正なエントリ
+（`resource` がパーサーに拒否されたものを含む）を含む場合は `400 invalid_request`（メッセージが該当 index を
+示します）、トークンが検証できない場合は `401` でバッチ全体を拒否します。バッチは 1 件も判定する前に全件を
+検証するため、1 件の不正なエントリは部分的な回答ではなくリクエスト全体の拒否になります。
 
 ## 使い方
 

@@ -343,6 +343,24 @@ describe("verify router failure logging: default sink and quiet paths", () => {
 		expect(events).toHaveLength(0);
 	});
 
+	it("logs nothing when the parser refuses the caller's resource string (#117)", async () => {
+		// `verify_internal_error` is a page-the-operator event. A resource string
+		// outside the parser's grammar is the caller's mistake, answered 400, and
+		// must not enter that channel — otherwise a client looping on a typo
+		// manufactures an incident.
+		const { events, logger } = captureEvents();
+		const app = createTestApp({ logger });
+		const token = await signToken({ scope: "read:project" });
+
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "a..b", action: "read" });
+
+		expect(res.status).toBe(400);
+		expect(events).toHaveLength(0);
+	});
+
 	it("logs nothing for a request that never presented a token", async () => {
 		// Absent/garbled Authorization headers are plain client errors: no
 		// verification was attempted, so there is nothing to distinguish.

@@ -97,7 +97,8 @@ interface ModuleContext {
 | 型 | 説明 |
 | --- | --- |
 | `Resource` | `{ raw: string; resourceType: string; resourceId?: string }` — パース済みリソース |
-| `ResourceParser` | `parse(raw: string): Resource` — 生のリソース文字列を `Resource` に変換する |
+| `ResourceParser` | `parse(raw: string): Resource` — 生のリソース文字列を `Resource` に変換する。パース対象の構文に合わない文字列には `ResourceParseError` を送出する |
+| `ResourceParseError` | `raw`（拒否した文字列）と `detail`（理由）を持つ `Error` サブクラス。サーバーエラーではなく**リクエスト**エラーであり、トランスポート層は 400 系で応答する。クラスとして export されるため `instanceof` で絞り込める |
 | `CollectorContext` | 各コレクターに渡される入力: `payload`、`resource`、`action`、省略可能な `headers` と `requestContext` |
 | `Attributes` | `Map<string, unknown>` — サブジェクト属性のバッグ |
 | `AttributeCollector` | `collect(context: CollectorContext): Promise<Attributes>` |

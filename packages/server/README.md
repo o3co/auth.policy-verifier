@@ -174,6 +174,22 @@ HTTP/1.1 403 Forbidden
 
 `reason.groups` lists every rule group in evaluation order — `passed`, plus `evaluated`: every rule that actually ran in that group, in order. A failing group ran (and lists) every alternative; a passing group stops at its first passing rule, so `evaluated` ends with it after any alternatives that were tried and failed, and `satisfiedBy` — present only on a passing group, absent on a failing one — names that deciding rule explicitly. `code` / `message` come from the first failing group, as before.
 
+**Response — malformed request**
+
+```http
+HTTP/1.1 400 Bad Request
+
+{ "decision": "deny", "code": "invalid_request", "message": "<message>" }
+```
+
+Returned when `resource` or `action` is missing, empty or not a string, when `context` is not an
+object, and when `resource` is a string the configured `ResourceParser` refuses — a syntax error in
+the caller's request, not a server fault, so it is answered 400 rather than 500 and is not logged as
+`verify_internal_error`. For `DotNotationResourceParser` that covers empty segments (`a..b`), a
+second `:` in a segment (`a:1:2`), and whitespace (`  a:1  `); see the
+[builtins README](../builtins/README.md#dotnotationresourceparser) for the grammar. The body is
+validated before any decision is made, so nothing is evaluated for a request that is refused here.
+
 **Response — unexpected error**
 
 ```http
@@ -211,7 +227,7 @@ HTTP/1.1 200 OK
 { "decisions": [ { ... }, { ... } ] }
 ```
 
-Entries come back in request order, each the same object `POST /verify` would have answered for it. The status reports whether the batch was **decided**, not what it decided — a batch of denials is still `200`, and the caller reads each entry. `400 invalid_request` when `decisions` is absent, empty, over `verify.maxBatchSize`, or carries a malformed entry (the message names the index); `401` rejects the whole batch when the token does not verify.
+Entries come back in request order, each the same object `POST /verify` would have answered for it. The status reports whether the batch was **decided**, not what it decided — a batch of denials is still `200`, and the caller reads each entry. `400 invalid_request` when `decisions` is absent, empty, over `verify.maxBatchSize`, or carries a malformed entry — including one whose `resource` the parser refuses — with the message naming the index; `401` rejects the whole batch when the token does not verify. The whole batch is validated before any of it is decided, so one bad entry refuses the request rather than yielding a partial answer.
 
 ## Usage Example
 
