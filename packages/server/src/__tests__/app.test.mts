@@ -131,7 +131,41 @@ describe("createApp", () => {
 				config: handBuilt,
 				modules: [testModule, builtinKeyResolversModule],
 			}),
-		).rejects.toThrow(/issuer and oauth\.jwt\.audience are required/);
+		).rejects.toThrow(/createApp: oauth\.jwt\.issuer is required/);
+	});
+
+	// The next two shapes slipped past the pre-#132 createApp check (a bare falsy
+	// test that accepted empty arrays and never looked at tokenType) and only
+	// failed one call later, inside the router. The shared guard now rejects
+	// them at this boundary, naming the oauth.jwt.* key the operator wrote.
+	it("throws when a hand-built config pins issuer to an empty array", async () => {
+		const handBuilt = {
+			...testConfig,
+			oauth: { jwt: { ...testConfig.oauth.jwt, issuer: [] } },
+		} as unknown as typeof testConfig;
+
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: handBuilt,
+				modules: [testModule, builtinKeyResolversModule],
+			}),
+		).rejects.toThrow(/createApp: oauth\.jwt\.issuer is required/);
+	});
+
+	it("throws when a hand-built config omits tokenType", async () => {
+		const handBuilt = {
+			...testConfig,
+			oauth: { jwt: { ...testConfig.oauth.jwt, tokenType: undefined } },
+		} as unknown as typeof testConfig;
+
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: handBuilt,
+				modules: [testModule, builtinKeyResolversModule],
+			}),
+		).rejects.toThrow(/createApp: oauth\.jwt\.tokenType is required/);
 	});
 
 	it("rejects a token minted for another audience end to end", async () => {

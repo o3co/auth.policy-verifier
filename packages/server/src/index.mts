@@ -4,16 +4,17 @@
 export { type CreateAppOptions, createApp } from "./app.mjs";
 export { type AppConfig, AppConfigSchema } from "./config/application.schema.mjs";
 export {
+	type AssertedJwtConfig,
+	assertVerifyRouterJwtConfig,
 	builtinKeyResolversModule,
+	type DecodingJwtConfig,
 	EdDSAKeyResolverFactory,
 	ES256KeyResolverFactory,
 	HS256KeyResolverFactory,
+	type JwtConfigErrorContext,
 	RS256KeyResolverFactory,
-} from "./jwt/index.mjs";
-export {
-	createVerifyRouter,
-	type DecodingJwtConfig,
+	type UncheckedJwtConfig,
 	type VerifyingJwtConfig,
-	type VerifyRouterConfig,
 	type VerifyRouterJwtConfig,
-} from "./routes/verify.mjs";
+} from "./jwt/index.mjs";
+export { createVerifyRouter, type VerifyRouterConfig } from "./routes/verify.mjs";

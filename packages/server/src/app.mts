@@ -17,7 +17,11 @@ import {
 import { createHealthcheckRouter } from "@o3co/auth.utils/express";
 import express from "express";
 import type { AppConfig } from "./config/application.schema.mjs";
-import { createVerifyRouter, type VerifyRouterJwtConfig } from "./routes/verify.mjs";
+import {
+	assertVerifyRouterJwtConfig,
+	type VerifyRouterJwtConfig,
+} from "./jwt/tokenAuthenticator.mjs";
+import { createVerifyRouter } from "./routes/verify.mjs";
 
 /** Options accepted by `createApp`. */
 export interface CreateAppOptions {
@@ -94,17 +98,16 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 
 	// 6. Build the router's JWT config. When validate=false, decodeJwt is used instead
 	// of jwtVerify, so neither key material nor RFC 9068 claim checks apply.
+	// AppConfigSchema already enforces both invariants (iss/aud/typ presence,
+	// the decode-only double opt-in) for schema-validated configs; re-asserted
+	// here because createApp also accepts hand-built config objects that never
+	// went through the schema (#106) — with this boundary's field paths, so the
+	// operator is pointed at the oauth.jwt.* key they actually wrote.
+	assertVerifyRouterJwtConfig(config.oauth.jwt, { caller: "createApp", path: "oauth.jwt" });
 	let jwt: VerifyRouterJwtConfig;
 	if (config.oauth.jwt.validate) {
-		const keyResolver = await keyResolverRegistry.get(config.oauth.jwt.algorithm)(config.oauth.jwt);
 		const { issuer, audience, tokenType } = config.oauth.jwt;
-		// AppConfigSchema already requires these; re-checked here because createApp also
-		// accepts hand-built config objects that never went through the schema.
-		if (!issuer || !audience) {
-			throw new Error(
-				"createApp: oauth.jwt.issuer and oauth.jwt.audience are required when oauth.jwt.validate is true (RFC 9068 §4)",
-			);
-		}
+		const keyResolver = await keyResolverRegistry.get(config.oauth.jwt.algorithm)(config.oauth.jwt);
 		jwt = {
 			validate: true,
 			key: keyResolver.key,
@@ -114,14 +117,6 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 			tokenType,
 		};
 	} else {
-		// AppConfigSchema already requires the acknowledgment; re-checked here
-		// because createApp also accepts hand-built config objects that never
-		// went through the schema (#106).
-		if (!config.oauth.jwt.allowInsecureDecode) {
-			throw new Error(
-				"createApp: oauth.jwt.validate=false disables ALL token verification (test-only); set oauth.jwt.allowInsecureDecode=true to acknowledge, or restore validate=true",
-			);
-		}
 		jwt = { validate: false, allowInsecureDecode: true };
 		// error, not warn: a deployment that reaches this line accepts unsigned
 		// tokens, and a fleet filtering at level=error must still see it (#106).

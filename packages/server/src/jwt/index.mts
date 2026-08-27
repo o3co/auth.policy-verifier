@@ -8,3 +8,15 @@ export {
 	HS256KeyResolverFactory,
 	RS256KeyResolverFactory,
 } from "./builtinKeyResolversModule.mjs";
+export {
+	type AssertedJwtConfig,
+	type AuthenticationResult,
+	assertVerifyRouterJwtConfig,
+	createTokenAuthenticator,
+	type DecodingJwtConfig,
+	type JwtConfigErrorContext,
+	type TokenAuthenticator,
+	type UncheckedJwtConfig,
+	type VerifyingJwtConfig,
+	type VerifyRouterJwtConfig,
+} from "./tokenAuthenticator.mjs";
