@@ -13,10 +13,35 @@ const makeRule = (ruleType: string, code: string, result: boolean): Rule => ({
 });
 
 describe("evaluate", () => {
-	it("returns allow when no rules are provided", () => {
+	it("returns deny when no rules are provided (default-deny)", () => {
 		const attrs: Attributes = new Map();
 		const result = evaluate(attrs, []);
+		expect(result).toEqual({
+			decision: "deny",
+			code: "no_applicable_rule",
+			message: "No applicable rule was collected for this request",
+		});
+	});
+
+	it("returns deny when every collector yields no rules for this request", () => {
+		// A rule collector may legitimately return [] for a given request shape
+		// (e.g. a scope collector facing a scopeless token). The engine must not
+		// read "nothing to check" as "nothing to enforce".
+		const attrs: Attributes = new Map([["scopes", []]]);
+		const result = evaluate(attrs, []);
+		expect(result.decision).toBe("deny");
+	});
+
+	it("returns allow on an empty rule set only when allow-on-empty is opted into", () => {
+		const attrs: Attributes = new Map();
+		const result = evaluate(attrs, [], { onEmptyRuleSet: "allow" });
 		expect(result).toEqual({ decision: "allow" });
+	});
+
+	it("returns deny on an empty rule set when deny-on-empty is stated explicitly", () => {
+		const attrs: Attributes = new Map();
+		const result = evaluate(attrs, [], { onEmptyRuleSet: "deny" });
+		expect(result.decision).toBe("deny");
 	});
 
 	it("returns allow when single rule passes", () => {

@@ -65,6 +65,9 @@ export const AppConfigSchema = z.object({
 	}),
 	rule: z.object({
 		collectors: z.array(collectorSchema),
+		// Decision for a request that collects no rules. "deny" (default) keeps the
+		// engine fail-closed; "allow" is an explicit per-deployment opt-out.
+		onEmptyRuleSet: z.enum(["deny", "allow"]).default("deny"),
 	}),
 	resource: z
 		.object({

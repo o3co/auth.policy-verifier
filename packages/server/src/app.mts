@@ -64,7 +64,13 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 		return factory(entry);
 	});
 
-	// 4. Resolve rule collectors from config — call factory with config entry
+	// 4. Resolve rule collectors from config — call factory with config entry.
+	// A pipeline with no rule collector can never authorize anything: every request
+	// would collect an empty rule set and be denied. Fail at boot rather than serve
+	// a verifier that only ever says no.
+	if (config.rule.collectors.length === 0) {
+		throw new Error("createApp: at least one rule collector must be configured (rule.collectors)");
+	}
 	const ruleCollectors = config.rule.collectors.map((entry) => {
 		const factory = ruleCollectorRegistry.get(entry.collector);
 		return factory(entry);
@@ -101,6 +107,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 			resourceParser,
 			attributePipeline: new AttributePipeline(attributeCollectors),
 			rulePipeline: new RulePipeline(ruleCollectors),
+			evaluateOptions: { onEmptyRuleSet: config.rule.onEmptyRuleSet },
 		}),
 	);
 
