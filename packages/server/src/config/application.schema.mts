@@ -112,6 +112,14 @@ export const AppConfigSchema = z.object({
 			maxBatchSize: z.coerce.number().int().positive().default(50),
 		})
 		.default(() => ({ maxBatchSize: 50 })),
+	// Defaulted (not shape-only): deployments mount an overlay config OVER the
+	// template's application.conf, so a section the overlay does not repeat is
+	// simply absent. `silent` is a threshold, not a level anything emits at.
+	logging: z
+		.object({
+			level: z.enum(["trace", "debug", "info", "warn", "error", "fatal", "silent"]).default("info"),
+		})
+		.default(() => ({ level: "info" as const })),
 });
 
 /** Type inferred from `AppConfigSchema`. Consumed by `createApp`. */

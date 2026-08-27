@@ -238,3 +238,30 @@ describe("AppConfigSchema — multiple acceptable issuers (#105)", () => {
 		expect(result.success).toBe(false);
 	});
 });
+
+describe("AppConfigSchema — logging (#107)", () => {
+	const validBody = {
+		oauth: { jwt: { validate: false } },
+		...baseBody,
+	};
+
+	it("defaults logging.level to info when the section is absent", () => {
+		// The E2E overlay config is mounted OVER the template's application.conf,
+		// so a key it does not repeat is simply absent — the section must default.
+		const result = AppConfigSchema.parse(validBody);
+		expect(result.logging).toEqual({ level: "info" });
+	});
+
+	it.each(["trace", "debug", "info", "warn", "error", "fatal", "silent"] as const)(
+		"accepts logging.level=%s",
+		(level) => {
+			const result = AppConfigSchema.parse({ ...validBody, logging: { level } });
+			expect(result.logging.level).toBe(level);
+		},
+	);
+
+	it("rejects an unknown logging.level", () => {
+		const result = AppConfigSchema.safeParse({ ...validBody, logging: { level: "verbose" } });
+		expect(result.success).toBe(false);
+	});
+});

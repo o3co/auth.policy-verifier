@@ -11,6 +11,9 @@ export {
 	ATTR_SCOPES,
 	ATTR_USER_ID,
 } from "./keys.mjs";
+export type { ConsoleLoggerOptions } from "./logging/consoleLogger.mjs";
+export { consoleLogger, createConsoleLogger } from "./logging/consoleLogger.mjs";
+export type { EventLogger, Logger, LogLevel } from "./logging/Logger.mjs";
 export type {
 	AttributeCollectorFactory,
 	KeyResolverFactory,

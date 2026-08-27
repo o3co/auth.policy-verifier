@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Module } from "@o3co/auth.policy-verifier.core";
+import type { Logger, Module } from "@o3co/auth.policy-verifier.core";
 import { SignJWT } from "jose";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AppConfigSchema, builtinKeyResolversModule, createApp } from "#/index.mjs";
 
 const JWT_SECRET = "test-secret";
@@ -262,5 +262,132 @@ describe("createApp", () => {
 
 		expect(res.status).toBe(200);
 		expect(res.body.decision).toBe("allow");
+	});
+});
+
+describe("createApp logging (#107)", () => {
+	interface CapturedCall {
+		level: "trace" | "debug" | "info" | "warn" | "error" | "fatal";
+		obj: Record<string, unknown> | string;
+		msg?: string;
+	}
+
+	/** Full `Logger` implementation that records every call for assertion. */
+	function captureLogger(): { calls: CapturedCall[]; logger: Logger } {
+		const calls: CapturedCall[] = [];
+		const record =
+			(level: CapturedCall["level"]) =>
+			(obj: Record<string, unknown> | string, msg?: string): void => {
+				calls.push({ level, obj, msg });
+			};
+		const logger: Logger = {
+			trace: record("trace"),
+			debug: record("debug"),
+			info: record("info"),
+			warn: record("warn"),
+			error: record("error"),
+			fatal: record("fatal"),
+			child: () => logger,
+		};
+		return { calls, logger };
+	}
+
+	const noKeyConfig = AppConfigSchema.parse({
+		oauth: { jwt: { validate: false } },
+		attribute: { collectors: [{ collector: "TestScopeCollector" }] },
+		rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
+		resource: { parser: "SimpleParser" },
+	});
+
+	it("routes the validate=false warning through the injected logger, not console.warn", async () => {
+		const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const { calls, logger } = captureLogger();
+			await createApp({
+				pathResolver: (s: string) => s,
+				config: noKeyConfig,
+				modules: [testModule, builtinKeyResolversModule],
+				logger,
+			});
+
+			const warns = calls.filter((c) => c.level === "warn");
+			expect(warns).toHaveLength(1);
+			expect(warns[0].msg).toBe("jwt_validation_disabled");
+			expect(consoleSpy).not.toHaveBeenCalled();
+		} finally {
+			consoleSpy.mockRestore();
+		}
+	});
+
+	it("emits the validate=false warning on the console-backed default when no logger is injected", async () => {
+		const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			await createApp({
+				pathResolver: (s: string) => s,
+				config: noKeyConfig,
+				modules: [testModule, builtinKeyResolversModule],
+			});
+			expect(consoleSpy).toHaveBeenCalledWith(expect.any(Object), "jwt_validation_disabled");
+		} finally {
+			consoleSpy.mockRestore();
+		}
+	});
+
+	it("honours logging.level for the console-backed default logger", async () => {
+		const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const silentConfig = AppConfigSchema.parse({
+				oauth: { jwt: { validate: false } },
+				logging: { level: "silent" },
+				attribute: { collectors: [{ collector: "TestScopeCollector" }] },
+				rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
+				resource: { parser: "SimpleParser" },
+			});
+			await createApp({
+				pathResolver: (s: string) => s,
+				config: silentConfig,
+				modules: [testModule, builtinKeyResolversModule],
+			});
+			expect(consoleSpy).not.toHaveBeenCalled();
+		} finally {
+			consoleSpy.mockRestore();
+		}
+	});
+
+	it("hands the logger to the verify router so request failures reach the same sink", async () => {
+		const { calls, logger } = captureLogger();
+		const failingModule: Module = {
+			name: "failing-module",
+			async init(context) {
+				context.ruleCollectorRegistry.register("FailingRuleCollector", () => ({
+					collect() {
+						return Promise.reject(new Error("rule store exploded"));
+					},
+				}));
+			},
+		};
+		const failingConfig = AppConfigSchema.parse({
+			oauth: { jwt: { secret: JWT_SECRET, validate: true, issuer: ISSUER, audience: AUDIENCE } },
+			attribute: { collectors: [{ collector: "TestScopeCollector" }] },
+			rule: { collectors: [{ collector: "FailingRuleCollector" }] },
+			resource: { parser: "SimpleParser" },
+		});
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: failingConfig,
+			modules: [testModule, failingModule, builtinKeyResolversModule],
+			logger,
+		});
+
+		const token = await signToken({ scope: "read:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project", action: "read" });
+
+		expect(res.status).toBe(500);
+		const errors = calls.filter((c) => c.level === "error");
+		expect(errors).toHaveLength(1);
+		expect(errors[0].msg).toBe("verify_internal_error");
 	});
 });

@@ -3,16 +3,18 @@
 
 import {
 	type AttributePipeline,
+	consoleLogger,
 	type Decision,
 	type DecisionReason,
 	type EvaluateOptions,
+	type EventLogger,
 	evaluate,
 	type ResourceParser,
 	type RulePipeline,
 	type VerifierPayload,
 } from "@o3co/auth.policy-verifier.core";
 import express from "express";
-import { decodeJwt, type JWTPayload, jwtVerify } from "jose";
+import { decodeJwt, errors, type JWTPayload, jwtVerify } from "jose";
 
 /**
  * JWT parameters used when signature validation is on. Every field a resource
@@ -56,6 +58,13 @@ export interface VerifyRouterConfig {
 	evaluateOptions?: EvaluateOptions;
 	/** Most entries `POST /verify/batch` will decide in one request. Defaults to 50. */
 	maxBatchSize?: number;
+	/**
+	 * Sink for the router's failure events (`jwt_token_rejected`,
+	 * `jwt_verification_unavailable`, `verify_internal_error`). Defaults to the
+	 * console-backed logger so failures are never silent, even in a deployment
+	 * that wires nothing.
+	 */
+	logger?: EventLogger;
 }
 
 /** Default cap on `POST /verify/batch` entries when the config does not set one. */
@@ -121,6 +130,27 @@ type Authentication =
 	| { ok: false; status: number; body: ErrorBody };
 
 /**
+ * True when token verification could not be attempted or completed for reasons
+ * unrelated to the presented token — the situation an operator must be able to
+ * tell apart from a bad token (#107: a JWKS outage flips the whole fleet to
+ * 401-deny while the verifier's own logs stay empty).
+ *
+ * Infrastructure side: a JWKS fetch timeout, a malformed JWKS document, or any
+ * non-jose error escaping `jwtVerify` (fetch/DNS failures from the remote key
+ * getter, a broken key resolver). Everything else jose throws is judged
+ * token-side — deliberately including `JWKSNoMatchingKey`, because the `kid`
+ * that failed to match is attacker-controllable and must not open an
+ * error-level log-flooding channel; its `err.code` in the warn line still
+ * identifies a stale-JWKS rotation problem.
+ */
+function isVerificationUnavailable(cause: unknown): boolean {
+	if (cause instanceof errors.JWKSTimeout || cause instanceof errors.JWKSInvalid) {
+		return true;
+	}
+	return !(cause instanceof errors.JOSEError);
+}
+
+/**
  * Validates one entry of a decision request. Returns the entry or the reason it
  * is unusable, phrased with `label` so a batch can name the offending index.
  */
@@ -165,6 +195,7 @@ function parseDecisionRequest(raw: unknown, label: string): DecisionRequest | st
 export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	const jwt = config.jwt;
 	const maxBatchSize = config.maxBatchSize ?? DEFAULT_MAX_BATCH_SIZE;
+	const logger = config.logger ?? consoleLogger;
 
 	// Fail at construction rather than accept tokens with an unchecked iss/aud/typ.
 	// A JavaScript caller can reach here with the fields missing even though the
@@ -232,7 +263,15 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			} else {
 				decoded = decodeJwt(token);
 			}
-		} catch {
+		} catch (cause) {
+			// Same 401 either way — the caller is unauthenticated regardless — but
+			// the log line is what lets the operator tell a provider outage from a
+			// bad token.
+			if (isVerificationUnavailable(cause)) {
+				logger.error({ err: cause }, "jwt_verification_unavailable");
+			} else {
+				logger.warn({ err: cause }, "jwt_token_rejected");
+			}
 			return {
 				ok: false,
 				status: 401,
@@ -287,7 +326,8 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 
 			const decision = await decide(req, auth.payload, entry);
 			res.status(decision.decision === "deny" ? 403 : 200).json(decision);
-		} catch (_cause) {
+		} catch (cause) {
+			logger.error({ err: cause, endpoint: "/verify" }, "verify_internal_error");
 			res.status(500).json(errorBody("internal_error", "Internal server error"));
 		}
 	});
@@ -331,7 +371,8 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 
 			const decisions = await Promise.all(entries.map((entry) => decide(req, auth.payload, entry)));
 			res.status(200).json({ decisions });
-		} catch (_cause) {
+		} catch (cause) {
+			logger.error({ err: cause, endpoint: "/verify/batch" }, "verify_internal_error");
 			res.status(500).json(errorBody("internal_error", "Internal server error"));
 		}
 	});
