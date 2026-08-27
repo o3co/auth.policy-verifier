@@ -60,7 +60,7 @@ const testModule: Module = {
 };
 
 const testConfig = AppConfigSchema.parse({
-	oauth: { jwt: { secret: JWT_SECRET, validate: true, issuer: ISSUER, audience: AUDIENCE } },
+	oauth: { jwt: { secret: JWT_SECRET, mode: "verify", issuer: ISSUER, audience: AUDIENCE } },
 	attribute: { collectors: [{ collector: "TestScopeCollector" }] },
 	rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
 	resource: { parser: "SimpleParser" },
@@ -103,7 +103,7 @@ describe("createApp", () => {
 
 	it("throws if config references unregistered collector", async () => {
 		const badConfig = AppConfigSchema.parse({
-			oauth: { jwt: { secret: JWT_SECRET, validate: true, issuer: ISSUER, audience: AUDIENCE } },
+			oauth: { jwt: { secret: JWT_SECRET, mode: "verify", issuer: ISSUER, audience: AUDIENCE } },
 			attribute: { collectors: [{ collector: "NonExistent" }] },
 			rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
 		});
@@ -117,7 +117,7 @@ describe("createApp", () => {
 		).rejects.toThrow('Registry: "NonExistent" is not registered');
 	});
 
-	it("throws when validate=true but a hand-built config omits issuer/audience", async () => {
+	it("throws when a hand-built verify-mode config omits issuer/audience", async () => {
 		// AppConfigSchema rejects this shape, so reach createApp with an object that
 		// never went through it — the same path a library consumer can take.
 		const handBuilt = {
@@ -168,6 +168,27 @@ describe("createApp", () => {
 		).rejects.toThrow(/createApp: oauth\.jwt\.tokenType is required/);
 	});
 
+	it('defaults a hand-built config with no mode to verify, and its errors name oauth.jwt.mode = "verify"', async () => {
+		// A consumer that omits `mode` gets the schema's default (verify) at this
+		// boundary too, and the guard's message names the wire key the operator
+		// would have to write — not the internal `validate` discriminant (#134).
+		const { mode: _mode, ...noMode } = testConfig.oauth.jwt;
+		const handBuilt = {
+			...testConfig,
+			oauth: { jwt: { ...noMode, issuer: undefined } },
+		} as unknown as typeof testConfig;
+
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: handBuilt,
+				modules: [testModule, builtinKeyResolversModule],
+			}),
+		).rejects.toThrow(
+			/createApp: oauth\.jwt\.issuer is required when oauth\.jwt\.mode is "verify"/,
+		);
+	});
+
 	it("rejects a token minted for another audience end to end", async () => {
 		const app = await createApp({
 			pathResolver: (s: string) => s,
@@ -202,10 +223,10 @@ describe("createApp", () => {
 		expect(res.status).toBe(200);
 	});
 
-	it("starts successfully and decodes tokens when acknowledged validate=false with no key material", async () => {
-		// validate=false + allowInsecureDecode + no key material must not throw at startup
+	it("starts successfully and decodes tokens in insecure-decode mode with no key material", async () => {
+		// mode="insecure-decode" + no key material must not throw at startup
 		const noKeyConfig = AppConfigSchema.parse({
-			oauth: { jwt: { validate: false, allowInsecureDecode: true } },
+			oauth: { jwt: { mode: "insecure-decode" } },
 			attribute: { collectors: [{ collector: "TestScopeCollector" }] },
 			rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
 			resource: { parser: "SimpleParser" },
@@ -230,7 +251,7 @@ describe("createApp", () => {
 
 	it("throws when no rule collector is configured", async () => {
 		const noRuleConfig = AppConfigSchema.parse({
-			oauth: { jwt: { secret: JWT_SECRET, validate: true, issuer: ISSUER, audience: AUDIENCE } },
+			oauth: { jwt: { secret: JWT_SECRET, mode: "verify", issuer: ISSUER, audience: AUDIENCE } },
 			attribute: { collectors: [{ collector: "TestScopeCollector" }] },
 			rule: { collectors: [] },
 			resource: { parser: "SimpleParser" },
@@ -247,7 +268,7 @@ describe("createApp", () => {
 
 	it("denies with no_applicable_rule when the pipeline collects no rules", async () => {
 		const emptyRuleConfig = AppConfigSchema.parse({
-			oauth: { jwt: { secret: JWT_SECRET, validate: true, issuer: ISSUER, audience: AUDIENCE } },
+			oauth: { jwt: { secret: JWT_SECRET, mode: "verify", issuer: ISSUER, audience: AUDIENCE } },
 			attribute: { collectors: [{ collector: "TestScopeCollector" }] },
 			rule: { collectors: [{ collector: "EmptyRuleCollector" }] },
 			resource: { parser: "SimpleParser" },
@@ -276,7 +297,7 @@ describe("createApp", () => {
 
 	it("allows an empty rule set only when the deployment opts into onEmptyRuleSet=allow", async () => {
 		const failOpenConfig = AppConfigSchema.parse({
-			oauth: { jwt: { secret: JWT_SECRET, validate: true, issuer: ISSUER, audience: AUDIENCE } },
+			oauth: { jwt: { secret: JWT_SECRET, mode: "verify", issuer: ISSUER, audience: AUDIENCE } },
 			attribute: { collectors: [{ collector: "TestScopeCollector" }] },
 			rule: { collectors: [{ collector: "EmptyRuleCollector" }], onEmptyRuleSet: "allow" },
 			resource: { parser: "SimpleParser" },
@@ -327,13 +348,13 @@ describe("createApp logging (#107)", () => {
 	}
 
 	const noKeyConfig = AppConfigSchema.parse({
-		oauth: { jwt: { validate: false, allowInsecureDecode: true } },
+		oauth: { jwt: { mode: "insecure-decode" } },
 		attribute: { collectors: [{ collector: "TestScopeCollector" }] },
 		rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
 		resource: { parser: "SimpleParser" },
 	});
 
-	it("routes the validate=false event through the injected logger, not the console", async () => {
+	it("routes the insecure-decode event through the injected logger, not the console", async () => {
 		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 		try {
 			const { calls, logger } = captureLogger();
@@ -352,7 +373,7 @@ describe("createApp logging (#107)", () => {
 		}
 	});
 
-	it("emits the validate=false event on the console-backed default when no logger is injected", async () => {
+	it("emits the insecure-decode event on the console-backed default when no logger is injected", async () => {
 		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 		try {
 			await createApp({
@@ -370,7 +391,7 @@ describe("createApp logging (#107)", () => {
 		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 		try {
 			const silentConfig = AppConfigSchema.parse({
-				oauth: { jwt: { validate: false, allowInsecureDecode: true } },
+				oauth: { jwt: { mode: "insecure-decode" } },
 				logging: { level: "silent" },
 				attribute: { collectors: [{ collector: "TestScopeCollector" }] },
 				rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
@@ -400,7 +421,7 @@ describe("createApp logging (#107)", () => {
 			},
 		};
 		const failingConfig = AppConfigSchema.parse({
-			oauth: { jwt: { secret: JWT_SECRET, validate: true, issuer: ISSUER, audience: AUDIENCE } },
+			oauth: { jwt: { secret: JWT_SECRET, mode: "verify", issuer: ISSUER, audience: AUDIENCE } },
 			attribute: { collectors: [{ collector: "TestScopeCollector" }] },
 			rule: { collectors: [{ collector: "FailingRuleCollector" }] },
 			resource: { parser: "SimpleParser" },
@@ -425,20 +446,22 @@ describe("createApp logging (#107)", () => {
 	});
 });
 
-describe("createApp insecure decode guard (#106)", () => {
+describe("createApp insecure decode mode (#106, #134)", () => {
 	const ackConfig = AppConfigSchema.parse({
-		oauth: { jwt: { validate: false, allowInsecureDecode: true } },
+		oauth: { jwt: { mode: "insecure-decode" } },
 		attribute: { collectors: [{ collector: "TestScopeCollector" }] },
 		rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
 		resource: { parser: "SimpleParser" },
 	});
 
-	it("refuses to boot a hand-built config with validate=false and no acknowledgment", async () => {
+	it("refuses to boot a hand-built config still carrying the removed wire keys", async () => {
 		// AppConfigSchema rejects this shape, so reach createApp with an object
 		// that never went through it — the same path a library consumer can take.
+		// The old pair must not be silently reinterpreted (defaulted mode would
+		// mean verify, and the operator asked for decode): fail with migration help.
 		const handBuilt = {
 			...ackConfig,
-			oauth: { jwt: { ...ackConfig.oauth.jwt, allowInsecureDecode: false } },
+			oauth: { jwt: { validate: false, allowInsecureDecode: true } },
 		} as unknown as typeof ackConfig;
 
 		await expect(
@@ -447,10 +470,27 @@ describe("createApp insecure decode guard (#106)", () => {
 				config: handBuilt,
 				modules: [testModule, builtinKeyResolversModule],
 			}),
-		).rejects.toThrow(/allowInsecureDecode/);
+		).rejects.toThrow(/replaced by oauth\.jwt\.mode/);
 	});
 
-	it("boots acknowledged decode mode and emits jwt_validation_disabled at error level", async () => {
+	it("refuses to boot a hand-built config with an unknown mode value", async () => {
+		// "insecure-decode" is the consent string; anything else must not fall
+		// through to either path.
+		const handBuilt = {
+			...ackConfig,
+			oauth: { jwt: { mode: "decode" } },
+		} as unknown as typeof ackConfig;
+
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: handBuilt,
+				modules: [testModule, builtinKeyResolversModule],
+			}),
+		).rejects.toThrow(/oauth\.jwt\.mode must be "verify" or "insecure-decode"/);
+	});
+
+	it("boots insecure-decode mode and emits jwt_validation_disabled at error level", async () => {
 		const calls: Array<{ level: string; msg?: string }> = [];
 		const record =
 			(level: string) =>

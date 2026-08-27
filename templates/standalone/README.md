@@ -36,7 +36,7 @@ Individual values can also be overridden with environment variables.
 | `OAUTH_JWT_ISSUER` | (required) | Issuer this deployment accepts — RFC 9068 §4 `iss` |
 | `OAUTH_JWT_AUDIENCE` | (required) | Audience identifying this resource server — RFC 9068 §4 `aud` |
 | `OAUTH_JWT_TOKEN_TYPE` | `at+jwt` | Accepted `typ` header; rejects id/refresh/logout tokens signed with the same key |
-| `OAUTH_JWT_VALIDATE` | `true` | Whether to verify JWT signature |
+| `OAUTH_JWT_MODE` | `verify` | `verify` fully verifies tokens; the explicit `insecure-decode` (test-only) decodes without signature verification — `exp`/`nbf` are still enforced |
 | `RULE_ON_EMPTY_RULE_SET` | `deny` | Decision when no rule is collected (`deny` \| `allow`) |
 | `VERIFY_MAX_BATCH_SIZE` | `50` | Cap on `POST /verify/batch` entries |
 

@@ -15,7 +15,7 @@ const rfc9068 = { issuer: "https://issuer.test", audience: "https://api.test" };
 describe("AppConfigSchema — JWT algorithm validation", () => {
 	it("rejects HS256 without secret", () => {
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { algorithm: "HS256", validate: true, ...rfc9068 } },
+			oauth: { jwt: { algorithm: "HS256", mode: "verify", ...rfc9068 } },
 			...baseBody,
 		});
 		expect(result.success).toBe(false);
@@ -28,7 +28,7 @@ describe("AppConfigSchema — JWT algorithm validation", () => {
 
 	it.each(["RS256", "ES256", "EdDSA"])("rejects %s without any key source", (algorithm) => {
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { algorithm, validate: true, ...rfc9068 } },
+			oauth: { jwt: { algorithm, mode: "verify", ...rfc9068 } },
 			...baseBody,
 		});
 		expect(result.success).toBe(false);
@@ -45,7 +45,7 @@ describe("AppConfigSchema — JWT algorithm validation", () => {
 		// User-registered algorithms are responsible for their own config validation
 		// inside their KeyResolverFactory. The schema intentionally accepts any string.
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { algorithm: "ES384", validate: true, custom: "value", ...rfc9068 } },
+			oauth: { jwt: { algorithm: "ES384", mode: "verify", custom: "value", ...rfc9068 } },
 			...baseBody,
 		});
 		expect(result.success).toBe(true);
@@ -53,15 +53,15 @@ describe("AppConfigSchema — JWT algorithm validation", () => {
 
 	it("accepts HS256 with secret", () => {
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { algorithm: "HS256", secret: "s", validate: true, ...rfc9068 } },
+			oauth: { jwt: { algorithm: "HS256", secret: "s", mode: "verify", ...rfc9068 } },
 			...baseBody,
 		});
 		expect(result.success).toBe(true);
 	});
 
-	it("skips validation when validate=false (no key material required)", () => {
+	it("skips key-material validation in insecure-decode mode", () => {
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { algorithm: "RS256", validate: false, allowInsecureDecode: true } },
+			oauth: { jwt: { algorithm: "RS256", mode: "insecure-decode" } },
 			...baseBody,
 		});
 		expect(result.success).toBe(true);
@@ -71,7 +71,7 @@ describe("AppConfigSchema — JWT algorithm validation", () => {
 describe("AppConfigSchema — empty rule set policy", () => {
 	it("defaults rule.onEmptyRuleSet to deny", () => {
 		const result = AppConfigSchema.parse({
-			oauth: { jwt: { algorithm: "HS256", secret: "s", validate: true, ...rfc9068 } },
+			oauth: { jwt: { algorithm: "HS256", secret: "s", mode: "verify", ...rfc9068 } },
 			...baseBody,
 		});
 		expect(result.rule.onEmptyRuleSet).toBe("deny");
@@ -79,7 +79,7 @@ describe("AppConfigSchema — empty rule set policy", () => {
 
 	it("accepts an explicit allow opt-out", () => {
 		const result = AppConfigSchema.parse({
-			oauth: { jwt: { algorithm: "HS256", secret: "s", validate: true, ...rfc9068 } },
+			oauth: { jwt: { algorithm: "HS256", secret: "s", mode: "verify", ...rfc9068 } },
 			attribute: { collectors: [] },
 			rule: { collectors: [], onEmptyRuleSet: "allow" },
 		});
@@ -88,7 +88,7 @@ describe("AppConfigSchema — empty rule set policy", () => {
 
 	it("rejects an unrecognized onEmptyRuleSet value", () => {
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { algorithm: "HS256", secret: "s", validate: true, ...rfc9068 } },
+			oauth: { jwt: { algorithm: "HS256", secret: "s", mode: "verify", ...rfc9068 } },
 			attribute: { collectors: [] },
 			rule: { collectors: [], onEmptyRuleSet: "maybe" },
 		});
@@ -99,9 +99,9 @@ describe("AppConfigSchema — empty rule set policy", () => {
 describe("AppConfigSchema — RFC 9068 token validation (#105)", () => {
 	const hs256 = { algorithm: "HS256", secret: "s" };
 
-	it("rejects validate=true without an issuer", () => {
+	it('rejects mode="verify" without an issuer', () => {
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { ...hs256, validate: true, audience: "https://api.test" } },
+			oauth: { jwt: { ...hs256, mode: "verify", audience: "https://api.test" } },
 			...baseBody,
 		});
 		expect(result.success).toBe(false);
@@ -110,9 +110,9 @@ describe("AppConfigSchema — RFC 9068 token validation (#105)", () => {
 		}
 	});
 
-	it("rejects validate=true without an audience", () => {
+	it('rejects mode="verify" without an audience', () => {
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { ...hs256, validate: true, issuer: "https://issuer.test" } },
+			oauth: { jwt: { ...hs256, mode: "verify", issuer: "https://issuer.test" } },
 			...baseBody,
 		});
 		expect(result.success).toBe(false);
@@ -123,7 +123,7 @@ describe("AppConfigSchema — RFC 9068 token validation (#105)", () => {
 
 	it("rejects an empty issuer string", () => {
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { ...hs256, validate: true, issuer: "", audience: "https://api.test" } },
+			oauth: { jwt: { ...hs256, mode: "verify", issuer: "", audience: "https://api.test" } },
 			...baseBody,
 		});
 		expect(result.success).toBe(false);
@@ -134,7 +134,7 @@ describe("AppConfigSchema — RFC 9068 token validation (#105)", () => {
 			oauth: {
 				jwt: {
 					...hs256,
-					validate: true,
+					mode: "verify",
 					issuer: "https://issuer.test",
 					audience: ["https://api.test", "https://api2.test"],
 				},
@@ -146,15 +146,15 @@ describe("AppConfigSchema — RFC 9068 token validation (#105)", () => {
 
 	it("defaults tokenType to at+jwt", () => {
 		const result = AppConfigSchema.parse({
-			oauth: { jwt: { ...hs256, validate: true, ...rfc9068 } },
+			oauth: { jwt: { ...hs256, mode: "verify", ...rfc9068 } },
 			...baseBody,
 		});
 		expect(result.oauth.jwt.tokenType).toBe("at+jwt");
 	});
 
-	it("does not require issuer/audience when validation is disabled", () => {
+	it("does not require issuer/audience in insecure-decode mode", () => {
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { algorithm: "HS256", validate: false, allowInsecureDecode: true } },
+			oauth: { jwt: { algorithm: "HS256", mode: "insecure-decode" } },
 			...baseBody,
 		});
 		expect(result.success).toBe(true);
@@ -162,7 +162,7 @@ describe("AppConfigSchema — RFC 9068 token validation (#105)", () => {
 });
 
 describe("AppConfigSchema — batch decisions (#124)", () => {
-	const validJwt = { algorithm: "HS256", secret: "s", validate: true, ...rfc9068 };
+	const validJwt = { algorithm: "HS256", secret: "s", mode: "verify", ...rfc9068 };
 
 	it("defaults verify.maxBatchSize to 50", () => {
 		const result = AppConfigSchema.parse({ oauth: { jwt: validJwt }, ...baseBody });
@@ -205,7 +205,7 @@ describe("AppConfigSchema — multiple acceptable issuers (#105)", () => {
 			oauth: {
 				jwt: {
 					...hs256,
-					validate: true,
+					mode: "verify",
 					issuer: ["https://issuer.test", "https://issuer-2.test"],
 					audience: "https://api.test",
 				},
@@ -217,7 +217,7 @@ describe("AppConfigSchema — multiple acceptable issuers (#105)", () => {
 
 	it("rejects an empty issuer list", () => {
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { ...hs256, validate: true, issuer: [], audience: "https://api.test" } },
+			oauth: { jwt: { ...hs256, mode: "verify", issuer: [], audience: "https://api.test" } },
 			...baseBody,
 		});
 		expect(result.success).toBe(false);
@@ -228,7 +228,7 @@ describe("AppConfigSchema — multiple acceptable issuers (#105)", () => {
 			oauth: {
 				jwt: {
 					...hs256,
-					validate: true,
+					mode: "verify",
 					issuer: ["https://issuer.test", ""],
 					audience: "https://api.test",
 				},
@@ -241,7 +241,7 @@ describe("AppConfigSchema — multiple acceptable issuers (#105)", () => {
 
 describe("AppConfigSchema — logging (#107)", () => {
 	const validBody = {
-		oauth: { jwt: { validate: false, allowInsecureDecode: true } },
+		oauth: { jwt: { mode: "insecure-decode" } },
 		...baseBody,
 	};
 
@@ -266,40 +266,74 @@ describe("AppConfigSchema — logging (#107)", () => {
 	});
 });
 
-describe("AppConfigSchema — insecure decode acknowledgment (#106)", () => {
-	it("rejects validate=false without allowInsecureDecode", () => {
+describe("AppConfigSchema — oauth.jwt.mode (#134)", () => {
+	const migration =
+		'oauth.jwt.validate/allowInsecureDecode were replaced by oauth.jwt.mode; set mode = "verify" or the explicit "insecure-decode"';
+
+	it('defaults mode to "verify"', () => {
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: { secret: "s", ...rfc9068 } },
+			...baseBody,
+		});
+		expect(result.oauth.jwt.mode).toBe("verify");
+	});
+
+	it("enforces the verify-mode requirements when mode is omitted", () => {
+		// The default must not be a way to skip iss/aud: an omitted mode is
+		// verify mode, so a config with no issuer still fails to parse.
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { validate: false } },
+			oauth: { jwt: { secret: "s" } },
 			...baseBody,
 		});
 		expect(result.success).toBe(false);
-		if (!result.success) {
-			expect(result.error.issues.some((i) => i.message.includes("allowInsecureDecode"))).toBe(true);
-		}
 	});
 
-	it("accepts validate=false when allowInsecureDecode=true acknowledges it", () => {
+	it('accepts mode="insecure-decode" with no key material — the string itself is the consent', () => {
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { validate: false, allowInsecureDecode: true } },
+			oauth: { jwt: { mode: "insecure-decode" } },
 			...baseBody,
 		});
 		expect(result.success).toBe(true);
 	});
 
-	it("defaults allowInsecureDecode to false", () => {
-		const result = AppConfigSchema.parse({
-			oauth: { jwt: { validate: true, secret: "s", ...rfc9068 } },
-			...baseBody,
-		});
-		expect(result.oauth.jwt.allowInsecureDecode).toBe(false);
-	});
-
-	it("does not let allowInsecureDecode relax the validate=true requirements", () => {
-		// The flag acknowledges decode-only mode; it must not weaken anything else.
+	it("rejects an unknown mode value", () => {
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { validate: true, allowInsecureDecode: true } },
+			oauth: { jwt: { mode: "decode", secret: "s", ...rfc9068 } },
 			...baseBody,
 		});
 		expect(result.success).toBe(false);
+	});
+
+	it("rejects a boolean mode — an accidental env-var flip cannot select insecure-decode", () => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: { mode: false, secret: "s", ...rfc9068 } },
+			...baseBody,
+		});
+		expect(result.success).toBe(false);
+	});
+
+	it.each(["validate", "allowInsecureDecode"])(
+		"hard-errors on the removed key %s with the migration message",
+		(staleKey) => {
+			const result = AppConfigSchema.safeParse({
+				oauth: { jwt: { secret: "s", ...rfc9068, [staleKey]: true } },
+				...baseBody,
+			});
+			expect(result.success).toBe(false);
+			if (!result.success) {
+				expect(result.error.issues.some((i) => i.message === migration)).toBe(true);
+			}
+		},
+	);
+
+	it("rejects the old decode-only pair as stale keys, not as a valid decode config", () => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: { validate: false, allowInsecureDecode: true } },
+			...baseBody,
+		});
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.error.issues.some((i) => i.message === migration)).toBe(true);
+		}
 	});
 });

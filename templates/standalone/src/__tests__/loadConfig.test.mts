@@ -21,6 +21,7 @@ const envKeys = [
 	"OAUTH_JWT_SECRET",
 	"OAUTH_JWT_ISSUER",
 	"OAUTH_JWT_AUDIENCE",
+	"OAUTH_JWT_MODE",
 	"HTTP_HOSTNAME",
 	"HTTP_PORT",
 	"HTTP_PATH_PREFIX",
@@ -52,7 +53,7 @@ describe("loadAppConfig", () => {
 			expect(config.http).toEqual({ hostname: "0.0.0.0", port: 3000, pathPrefix: "" });
 			expect(config.oauth.jwt.algorithm).toBe("HS256");
 			expect(config.oauth.jwt.secret).toBe("test-secret");
-			expect(config.oauth.jwt.validate).toBe(true);
+			expect(config.oauth.jwt.mode).toBe("verify");
 			expect(config.oauth.jwt.issuer).toBe("https://issuer.test");
 			expect(config.oauth.jwt.audience).toBe("https://api.test");
 			expect(config.oauth.jwt.tokenType).toBe("at+jwt");
@@ -85,6 +86,23 @@ describe("loadAppConfig", () => {
 		const config = loadAppConfig(configDirPath, "development");
 
 		expect(config.http).toEqual({ hostname: "127.0.0.1", port: 8080, pathPrefix: "/auth" });
+	});
+
+	it("selects insecure-decode mode via OAUTH_JWT_MODE, requiring no key material (#134)", () => {
+		// The value is the consent: only the literal string "insecure-decode"
+		// selects the decode-only path, so a stray boolean-ish env value cannot.
+		process.env.OAUTH_JWT_MODE = "insecure-decode";
+
+		const config = loadAppConfig(configDirPath, "development");
+
+		expect(config.oauth.jwt.mode).toBe("insecure-decode");
+	});
+
+	it("rejects a boolean-ish OAUTH_JWT_MODE left over from the removed OAUTH_JWT_VALIDATE", () => {
+		setRequiredEnv();
+		process.env.OAUTH_JWT_MODE = "false";
+
+		expect(() => loadAppConfig(configDirPath, "development")).toThrow();
 	});
 
 	it("rejects an HS256 config with no secret in the environment", () => {

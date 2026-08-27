@@ -4,6 +4,15 @@
 import { z } from "zod";
 import { DEFAULT_MAX_BATCH_SIZE } from "./defaults.mjs";
 
+/**
+ * Migration message for the wire keys removed in #134. Emitted by the schema
+ * for parsed configs and by `createApp` for hand-built ones, so an operator
+ * upgrading across the break always gets the same actionable pointer instead
+ * of a puzzling "issuer is required" from a silently-defaulted mode.
+ */
+export const JWT_MODE_MIGRATION_MESSAGE =
+	'oauth.jwt.validate/allowInsecureDecode were replaced by oauth.jwt.mode; set mode = "verify" or the explicit "insecure-decode"';
+
 const collectorSchema = z
 	.object({
 		collector: z.string(),
@@ -41,14 +50,21 @@ export const AppConfigSchema = z.object({
 				jwksUri: z.string().optional(),
 				publicKey: z.string().optional(),
 				publicKeyPath: z.string().optional(),
-				validate: z.boolean().default(true),
-				// Second key of the double opt-in for decode-only mode (#106). A single
-				// mistyped env var must never be able to disable all token verification,
-				// so `validate=false` alone refuses to boot; this flag is the explicit,
-				// test-only acknowledgment.
-				allowInsecureDecode: z.boolean().default(false),
+				/**
+				 * How the verifier treats bearer tokens (#134). `"verify"` (the default)
+				 * fully verifies signature, iss, aud and typ; `"insecure-decode"` is the
+				 * test-only mode that decodes without signature verification (`exp` /
+				 * `nbf` are still enforced at request time). The value itself is the
+				 * consent: an accidental env-var flip can produce a stray boolean, but
+				 * never the literal string `"insecure-decode"` — which preserves the
+				 * intent of #106's double opt-in (one mistyped variable must never be
+				 * able to disable all token verification) in a single explicit knob.
+				 * The former pair `validate` / `allowInsecureDecode` is rejected below
+				 * with a migration message.
+				 */
+				mode: z.enum(["verify", "insecure-decode"]).default("verify"),
 				// RFC 9068 §4 — a resource server validates iss and aud, not just the
-				// signature. Both are required whenever `validate` is on (see superRefine).
+				// signature. Both are required whenever mode is "verify" (see superRefine).
 				issuer: z.union([z.string(), z.array(z.string())]).optional(),
 				audience: z.union([z.string(), z.array(z.string())]).optional(),
 				// Accepted `typ` header. `at+jwt` is the RFC 9068 access-token type; pinning
@@ -57,41 +73,51 @@ export const AppConfigSchema = z.object({
 			})
 			.passthrough()
 			.superRefine((data, ctx) => {
-				if (!data.validate) {
-					// Decode-only mode: no signature check (exp/nbf are still enforced
-					// at request time, but nothing else is). One config
-					// key (often one env var) must not be enough to get here — demand
-					// the explicit second key.
-					if (!data.allowInsecureDecode) {
+				// Hard-error on the wire keys removed in #134. `.passthrough()` would
+				// otherwise let them ride along silently — and a decode-only config
+				// written for 0.x (`validate=false` + `allowInsecureDecode=true`) would
+				// be reinterpreted as the defaulted verify mode, failing with an
+				// unrelated "issuer is required" instead of migration guidance.
+				let hasStaleKey = false;
+				for (const staleKey of ["validate", "allowInsecureDecode"] as const) {
+					if (staleKey in data) {
+						hasStaleKey = true;
 						ctx.addIssue({
 							code: z.ZodIssueCode.custom,
-							message:
-								"validate=false disables ALL token verification (test-only); set allowInsecureDecode=true to acknowledge, or restore validate=true",
-							path: ["allowInsecureDecode"],
+							message: JWT_MODE_MIGRATION_MESSAGE,
+							path: [staleKey],
 						});
 					}
-					return; // key-material checks below only apply when validating
+				}
+				if (hasStaleKey) {
+					return; // the operator's intended mode is unknowable; stop here
+				}
+				if (data.mode === "insecure-decode") {
+					// Decode-only mode: no signature check (exp/nbf are still enforced
+					// at request time, but nothing else is). The mode string itself is
+					// the explicit consent (#134) — see the `mode` doc comment.
+					return; // key-material checks below only apply when verifying
 				}
 				const issuers = Array.isArray(data.issuer) ? data.issuer : [data.issuer];
 				const audiences = Array.isArray(data.audience) ? data.audience : [data.audience];
 				if (issuers.length === 0 || issuers.some((i) => !i)) {
 					ctx.addIssue({
 						code: z.ZodIssueCode.custom,
-						message: "issuer is required when validate is true (RFC 9068 §4)",
+						message: 'issuer is required when mode is "verify" (RFC 9068 §4)',
 						path: ["issuer"],
 					});
 				}
 				if (audiences.length === 0 || audiences.some((a) => !a)) {
 					ctx.addIssue({
 						code: z.ZodIssueCode.custom,
-						message: "audience is required when validate is true (RFC 9068 §4)",
+						message: 'audience is required when mode is "verify" (RFC 9068 §4)',
 						path: ["audience"],
 					});
 				}
 				if (!data.tokenType) {
 					ctx.addIssue({
 						code: z.ZodIssueCode.custom,
-						message: "tokenType must not be empty when validate is true (RFC 9068 §4)",
+						message: 'tokenType must not be empty when mode is "verify" (RFC 9068 §4)',
 						path: ["tokenType"],
 					});
 				}

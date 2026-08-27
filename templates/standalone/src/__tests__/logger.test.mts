@@ -18,7 +18,7 @@ import { createAppLogger } from "../logger.js";
 
 function configWithLevel(level?: string) {
 	return AppConfigSchema.parse({
-		oauth: { jwt: { validate: false, allowInsecureDecode: true } },
+		oauth: { jwt: { mode: "insecure-decode" } },
 		attribute: { collectors: [] },
 		rule: { collectors: [{ collector: "ResourceActionScopeRuleCollector" }] },
 		...(level === undefined ? {} : { logging: { level } }),
