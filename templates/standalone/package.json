@@ -10,6 +10,7 @@
 	},
 	"scripts": {
 		"build": "tsc",
+		"typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
 		"start": "node dist/main.mjs",
 		"test": "vitest run",
 		"debug": "NODE_OPTIONS='--conditions=development' tsx watch src/main.mts"

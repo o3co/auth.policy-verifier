@@ -27,6 +27,7 @@
 	"scripts": {
 		"prebuild": "rimraf dist",
 		"build": "tsc",
+		"typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage"
 	},

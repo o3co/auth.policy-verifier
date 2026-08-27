@@ -6,6 +6,10 @@ build: clean install
 lint:
 	pnpm run lint
 
+.PHONY: typecheck
+typecheck:
+	pnpm run typecheck
+
 .PHONY: test
 test:
 	pnpm run test

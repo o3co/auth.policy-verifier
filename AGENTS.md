@@ -116,3 +116,14 @@ Each package uses Node.js [subpath imports](https://nodejs.org/api/packages.html
 - **Published packages:** Consumers resolve `#/*` via the `"default"` condition to `./dist/*`.
 - **Local dev server:** The standalone template uses `NODE_OPTIONS='--conditions=development'` to explicitly activate the condition.
 - **Cross-package references** (e.g., `builtins` importing from `core`) go through `exports`, which always point to `./dist/`. Run `pnpm -r run build` before running tests in downstream packages.
+
+### Build vs. typecheck
+
+Each package has two TypeScript configs, and the split exists because of the point above:
+
+- `tsconfig.json` — what `build` emits. It excludes `src/**/__tests__/**`. A compiled test in `dist/` would be published (`files: ["dist", …]`), and it would carry the `#/` specifiers that only test files use — which resolve through the package's own `imports` map to `./src/*` under the `development` condition, a path no tarball ships. CI's `publish-readiness` job asserts against both, on the tarball.
+- `tsconfig.typecheck.json` — what `typecheck` checks (`tsc --noEmit`). It re-includes `src/**/*`, tests included, and emits nothing.
+
+So `pnpm run typecheck` is the only thing that type-checks test files; `pnpm run build` no longer does. Both run in `ci.yml` and `release.yml`. `tests/integration` has no build at all, so its `typecheck` is a plain `tsc --noEmit` against its own already-`noEmit` config.
+
+A test file must therefore never be imported by shipped source — the build cannot see it.
