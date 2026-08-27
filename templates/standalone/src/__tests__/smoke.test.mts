@@ -40,12 +40,21 @@ async function signToken(payload: Record<string, unknown>): Promise<string> {
 		.sign(secretKey);
 }
 
+// Shared by every config below so a change to the jwt wire keys has one place
+// to land rather than drifting between the base config and the variants.
+const JWT_CONFIG = {
+	secret: JWT_SECRET,
+	mode: "verify",
+	issuer: ISSUER,
+	audience: AUDIENCE,
+} as const;
+
 // Config mirrors the structure of application.conf, using the same builtin registry keys.
 // PayloadScopeCollector extracts scopes from the JWT "scope" claim.
 // ResourceActionScopeRuleCollector requires scope "<action>:<resourceType>" to be present.
 // DotNotationResourceParser is the default and matches the omitted resource.parser in application.conf.
 const baseConfig = AppConfigSchema.parse({
-	oauth: { jwt: { secret: JWT_SECRET, mode: "verify", issuer: ISSUER, audience: AUDIENCE } },
+	oauth: { jwt: JWT_CONFIG },
 	attribute: {
 		collectors: [
 			{ collector: "PayloadScopeCollector" },
@@ -200,7 +209,7 @@ describe("standalone smoke", () => {
 		// Proves the opt-in survives the config schema and reaches the collector,
 		// which is the only path a deployment has to re-enable the old rewrite.
 		const rewritingConfig = AppConfigSchema.parse({
-			oauth: { jwt: { secret: JWT_SECRET, validate: true, issuer: ISSUER, audience: AUDIENCE } },
+			oauth: { jwt: JWT_CONFIG },
 			attribute: { collectors: [{ collector: "PayloadScopeCollector" }] },
 			rule: {
 				collectors: [

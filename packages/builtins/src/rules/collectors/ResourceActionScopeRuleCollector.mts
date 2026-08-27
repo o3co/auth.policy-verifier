@@ -75,13 +75,16 @@ export class ResourceActionScopeRuleCollector implements RuleCollector {
 		}
 		this.scopeless = scopeless;
 
-		const allowBareScopeRewrite = config?.allowBareScopeRewrite ?? false;
-		if (typeof allowBareScopeRewrite !== "boolean") {
+		// Validate the raw value before defaulting: `?? false` alone would treat an
+		// explicit `null` as "unset" and silently accept a misconfiguration. Only
+		// an absent key may fall back to the default.
+		const rawRewrite: unknown = config?.allowBareScopeRewrite;
+		if (rawRewrite !== undefined && typeof rawRewrite !== "boolean") {
 			throw new Error(
-				`ResourceActionScopeRuleCollector: allowBareScopeRewrite must be a boolean, got "${allowBareScopeRewrite}"`,
+				`ResourceActionScopeRuleCollector: allowBareScopeRewrite must be a boolean, got "${rawRewrite}"`,
 			);
 		}
-		this.allowBareScopeRewrite = allowBareScopeRewrite;
+		this.allowBareScopeRewrite = rawRewrite ?? false;
 	}
 
 	async collect(context: CollectorContext): Promise<Rule[]> {
