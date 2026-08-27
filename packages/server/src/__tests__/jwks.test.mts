@@ -113,4 +113,74 @@ describe("resolveJwksFetchBounds — bounded fetches on the decision path (#109)
 	it("keeps an explicit zero cooldown instead of defaulting it away", () => {
 		expect(resolveJwksFetchBounds({ jwksCooldownMs: 0 }).cooldownDuration).toBe(0);
 	});
+
+	// createApp accepts hand-built configs and hands the JWT block to the key
+	// resolver unparsed, so a consumer that builds one from process.env delivers
+	// strings. They must be coerced here — the same schema-plus-runtime-guard
+	// division of labor as assertVerifyRouterJwtConfig.
+	it("coerces the strings an env-derived config carries", () => {
+		expect(
+			resolveJwksFetchBounds({
+				jwksTimeoutMs: "1500",
+				jwksCooldownMs: "0",
+				jwksCacheMaxAgeMs: "60000",
+			}),
+		).toEqual({ timeoutDuration: 1500, cooldownDuration: 0, cacheMaxAge: 60_000 });
+	});
+
+	it.each(["soon", "", "  ", "5s", "1_000"])("rejects the unparsable string %o", (value) => {
+		expect(() => resolveJwksFetchBounds({ jwksTimeoutMs: value })).toThrow(
+			/oauth\.jwt\.jwksTimeoutMs must be a positive integer/,
+		);
+	});
+
+	it.each([Number.NaN, Number.POSITIVE_INFINITY, 1.5, 0, -1])(
+		"rejects %o as a timeout — an unbounded or nonsensical fetch is the bug",
+		(value) => {
+			expect(() => resolveJwksFetchBounds({ jwksTimeoutMs: value })).toThrow(
+				/oauth\.jwt\.jwksTimeoutMs must be a positive integer/,
+			);
+		},
+	);
+
+	it.each([0, -1, 2.5])("rejects %o as a cache age", (value) => {
+		expect(() => resolveJwksFetchBounds({ jwksCacheMaxAgeMs: value })).toThrow(
+			/oauth\.jwt\.jwksCacheMaxAgeMs must be a positive integer/,
+		);
+	});
+
+	it("rejects a negative cooldown but not a zero one", () => {
+		expect(() => resolveJwksFetchBounds({ jwksCooldownMs: -1 })).toThrow(
+			/oauth\.jwt\.jwksCooldownMs must be a non-negative integer/,
+		);
+		expect(() => resolveJwksFetchBounds({ jwksCooldownMs: "0" })).not.toThrow();
+	});
+
+	it.each([true, null, {}, [], 2000n])(
+		"rejects %o — Number() would silently turn some of these into a bound",
+		(value) => {
+			// Number(true) is 1 and Number(null) is 0: coercing anything that is not
+			// a number or a string would invent a bound the operator never wrote.
+			expect(() => resolveJwksFetchBounds({ jwksTimeoutMs: value as unknown as number })).toThrow(
+				/oauth\.jwt\.jwksTimeoutMs must be a positive integer/,
+			);
+		},
+	);
+
+	it("names the config path the operator wrote, and takes an override", () => {
+		expect(() => resolveJwksFetchBounds({ jwksTimeoutMs: "soon" })).toThrow(
+			'oauth.jwt.jwksTimeoutMs must be a positive integer number of milliseconds, got "soon"',
+		);
+		expect(() => resolveJwksFetchBounds({ jwksTimeoutMs: "soon" }, "jwt")).toThrow(
+			"jwt.jwksTimeoutMs must be a positive integer number of milliseconds",
+		);
+	});
+
+	it("leaves absent bounds to the defaults instead of failing on them", () => {
+		expect(resolveJwksFetchBounds({ jwksTimeoutMs: undefined })).toEqual({
+			timeoutDuration: DEFAULT_JWKS_TIMEOUT_MS,
+			cooldownDuration: DEFAULT_JWKS_COOLDOWN_MS,
+			cacheMaxAge: DEFAULT_JWKS_CACHE_MAX_AGE_MS,
+		});
+	});
 });

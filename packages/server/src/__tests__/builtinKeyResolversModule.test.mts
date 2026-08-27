@@ -213,6 +213,39 @@ describe("builtinKeyResolversModule — JWKS fetch bounds (#109)", () => {
 		expect(Date.now() - started).toBeLessThan(2000);
 	});
 
+	it("coerces a string bound before handing it to jose", async () => {
+		// A hand-built config assembled from process.env carries strings; jose
+		// ignores a non-number and would silently fall back to its own 5s default.
+		const origin = await listen(
+			createSocketServer((socket) => {
+				sockets.push(socket);
+			}),
+		);
+		const factory = await rs256Factory();
+		const resolver = await factory({
+			algorithm: "RS256",
+			jwksUri: `${origin}/.well-known/jwks.json`,
+			jwksTimeoutMs: "50",
+		});
+
+		const started = Date.now();
+		await expect((resolver.key as RemoteJWKSet)({ alg: "RS256", kid: "any" })).rejects.toThrow(
+			/timed out/,
+		);
+		expect(Date.now() - started).toBeLessThan(2000);
+	});
+
+	it("refuses a bound it cannot make sense of, naming the config key", async () => {
+		const factory = await rs256Factory();
+		await expect(
+			factory({
+				algorithm: "RS256",
+				jwksUri: "https://auth-provider.test/.well-known/jwks.json",
+				jwksCooldownMs: "often",
+			}),
+		).rejects.toThrow(/oauth\.jwt\.jwksCooldownMs must be a non-negative integer/);
+	});
+
 	it("hands the configured cooldown and cache age to the remote key set", async () => {
 		const { publicKey } = await generateKeyPairAsync("rsa", { modulusLength: 2048 });
 		const jwk = {

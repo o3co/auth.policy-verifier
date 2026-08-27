@@ -55,9 +55,16 @@ and version sections follow the release labeling policy in
   `_CACHE_MAX_AGE_MS` env overrides in the standalone template. The defaults
   match what jose applied implicitly, so timing is unchanged; they are now
   stated (a jose release cannot silently retune the decision hot path) and
-  tunable per deployment. `@o3co/auth.policy-verifier.server` additionally
-  exports `checkJwksUri`, `parseJwksUri` and `resolveJwksFetchBounds` for
-  custom `KeyResolverFactory` implementations that fetch their own JWKS.
+  tunable per deployment. Each must be a whole number of milliseconds —
+  positive, or non-negative for the cooldown, where `0` means "refetch on every
+  miss". `AppConfigSchema` validates them at config-parse time; the key
+  resolver validates them again when it builds the key set, coercing the string
+  form a HOCON env substitution (or a hand-built config assembled from
+  `process.env`) delivers, so an unparsed value can no longer reach jose and be
+  silently ignored in favour of its default. `@o3co/auth.policy-verifier.server`
+  additionally exports `checkJwksUri`, `parseJwksUri` and
+  `resolveJwksFetchBounds` for custom `KeyResolverFactory` implementations that
+  fetch their own JWKS.
 
 ### Changed
 
