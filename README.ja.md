@@ -54,7 +54,7 @@ POST /verify/batch — 同じ契約で、1 往復に N 件の decision
 - **boolean ではなく decision 契約** — リクエストは `(subject, resource, action, context)`、応答は各ルールグループとその結果を並べた構造化 `reason` を必ず伴う。「なぜ deny されたか」をパイプラインの再実行なしに答えられる。`POST /verify/batch` は複数リソースを 1 往復で判定する。
 - **JWT 検証アルゴリズム設定可能** — HS256（共有シークレット）、RS256/ES256/EdDSA（JWKS URI または公開鍵直接指定）。[auth.provider](https://github.com/o3co/auth.provider) の JWT 設定と対称設計。
 - **RFC 9068 §4 のトークン検証** — 署名だけでなく `iss` / `aud` / `typ` ヘッダも検証する。同じ鍵で署名された `id_token` / refresh token / logout token や、他サービス向けに発行されたトークンは拒否される。`mode = "verify"`（デフォルト）のとき `issuer` と `audience` は必須。
-- **JWKS サポート** — `jwksUri` を auth.provider の `/.well-known/jwks.json` に向ければ鍵ローテーションに自動対応。
+- **JWKS サポート** — `jwksUri` を auth.provider の `https://.../.well-known/jwks.json` に向ければ鍵ローテーションに自動対応。エンドポイントは TLS 必須（ローカル開発向けにループバックのみ例外）。取得はタイムアウト / クールダウン / キャッシュ期間で必ず上限が付き、プロバイダー障害が判定パスを止めない。
 - **プラグイン可能なアーキテクチャ** — Module システムでカスタム Collector、ルール、リソースパーサーをファクトリ経由で登録。
 - **DSL ロックインなし** — 認可ロジックは TypeScript。Rego も Cedar ポリシー言語も不要。スケールアウトが必要になれば [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) 経由で OPA や Cedar に差し替え可能 — interceptor がバックエンドを抽象化する。
 
@@ -191,7 +191,10 @@ oauth {
     algorithm = "HS256"           # HS256 | RS256 | ES256 | EdDSA
     algorithm = ${?OAUTH_JWT_ALGORITHM}
     secret = ${?OAUTH_JWT_SECRET}           # HS256
-    jwksUri = ${?OAUTH_JWT_JWKS_URI}        # RS256/ES256/EdDSA — 例: http://auth-provider/.well-known/jwks.json
+    jwksUri = ${?OAUTH_JWT_JWKS_URI}        # RS256/ES256/EdDSA — https 必須、例: https://auth-provider/.well-known/jwks.json
+    jwksTimeoutMs = 5000                     # JWKS 取得の上限 — 打ち切り時間
+    jwksCooldownMs = 30000                   # 再取得の最小間隔
+    jwksCacheMaxAgeMs = 600000               # 取得済み JWKS のキャッシュ期間
     publicKey = ${?OAUTH_JWT_PUBLIC_KEY}     # RS256/ES256/EdDSA — PEM 文字列
     publicKeyPath = ${?OAUTH_JWT_PUBLIC_KEY_PATH}  # またはファイルパス
     issuer = ${?OAUTH_JWT_ISSUER}           # mode = "verify" のとき必須 — RFC 9068 §4 iss
@@ -261,11 +264,13 @@ auth.provider が非対称 JWT 署名 (RS256/ES256/EdDSA) を使う場合、poli
 ```hocon
 oauth.jwt {
   algorithm = "RS256"
-  jwksUri = "http://auth-provider:3000/.well-known/jwks.json"
+  jwksUri = "https://auth-provider:3000/.well-known/jwks.json"
 }
 ```
 
-jose の `createRemoteJWKSet` により公開鍵を自動取得・キャッシュする。
+jose の `createRemoteJWKSet` により公開鍵を自動取得・キャッシュする。取得は `jwksTimeoutMs` / `jwksCooldownMs` / `jwksCacheMaxAgeMs` で上限が付く。
+
+**JWKS URI は `https://` 必須。** そのエンドポイントが返す鍵はすべてこの deployment が受け入れるトークンを検証できる — つまりエンドポイントの同一性がトラストアンカーそのものであり、それを確立するのが TLS である。平文であれば経路上の第三者（あるいは DNS 応答を握る者）が自分の署名鍵を差し込み、検証を通るトークンを発行できる。平文 `http://` はループバックホスト（`localhost`, `127.0.0.0/8`, `[::1]`）に限って許可する — そこには攻撃者が座れる経路が存在しないためで、ローカル開発とテストのための例外である。コンテナ名や DNS 名で到達するサービス（`http://auth-provider:3000`）はループバックでは**ない**ので config パース時に拒否される。プロバイダーの前段に TLS 終端を置くか、`publicKey` / `publicKeyPath` で公開鍵を直接渡すこと。
 
 HS256 の場合は両サービスで同じシークレットを共有:
 

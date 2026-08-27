@@ -35,6 +35,10 @@ OAUTH_JWT_SECRET=your-secret \
 | `OAUTH_JWT_SECRET` | （必須） | HMAC-HS256 JWT 署名シークレット |
 | `OAUTH_JWT_ISSUER` | （必須） | この deployment が受け入れる issuer — RFC 9068 §4 `iss` |
 | `OAUTH_JWT_AUDIENCE` | （必須） | この resource server を指す audience — RFC 9068 §4 `aud` |
+| `OAUTH_JWT_JWKS_URI` | — | RS256/ES256/EdDSA の JWKS エンドポイント。`https://` 必須。平文 `http://` はループバックホスト（`localhost`, `127.0.0.0/8`, `[::1]`）のみ許可 |
+| `OAUTH_JWT_JWKS_TIMEOUT_MS` | `5000` | JWKS 取得をこの時間で打ち切る |
+| `OAUTH_JWT_JWKS_COOLDOWN_MS` | `30000` | JWKS 再取得の最小間隔 |
+| `OAUTH_JWT_JWKS_CACHE_MAX_AGE_MS` | `600000` | 取得した JWKS をキャッシュから返す期間 |
 | `OAUTH_JWT_TOKEN_TYPE` | `at+jwt` | 受け入れる `typ` ヘッダ。同じ鍵で署名された id/refresh/logout token を拒否する |
 | `OAUTH_JWT_MODE` | `verify` | `verify` はトークンを完全検証。明示的な `insecure-decode`（テスト専用）は署名検証なしでデコードする — `exp`/`nbf` は引き続き強制される |
 | `RULE_ON_EMPTY_RULE_SET` | `deny` | ルールが 1 つも集まらなかったときの決定（`deny` \| `allow`） |

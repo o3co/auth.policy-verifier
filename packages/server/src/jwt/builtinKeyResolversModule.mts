@@ -5,8 +5,9 @@ import { createSecretKey } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type { KeyResolver, KeyResolverFactory, Module } from "@o3co/auth.policy-verifier.core";
 import { createRemoteJWKSet, importSPKI } from "jose";
+import { type JwksFetchConfig, parseJwksUri, resolveJwksFetchBounds } from "./jwks.mjs";
 
-interface JwtFactoryInput {
+interface JwtFactoryInput extends JwksFetchConfig {
 	secret?: string;
 	jwksUri?: string;
 	publicKey?: string;
@@ -16,10 +17,16 @@ interface JwtFactoryInput {
 /**
  * Shared resolver for RS256/ES256/EdDSA. Accepts JWKS URI, inline PEM, or PEM
  * file path (in that priority). Throws if no key source is configured.
+ *
+ * A JWKS URI must be https, or http on a loopback host — see the trust
+ * assumption and the carve-out in `jwt/jwks.mts` (#109). The check is repeated
+ * here, after `AppConfigSchema` has already made it at config-parse time,
+ * because `createApp` also accepts hand-built configs that never met the
+ * schema.
  */
 async function resolveAsymmetric(algorithm: string, config: JwtFactoryInput): Promise<KeyResolver> {
 	if (config.jwksUri) {
-		const key = createRemoteJWKSet(new URL(config.jwksUri));
+		const key = createRemoteJWKSet(parseJwksUri(config.jwksUri), resolveJwksFetchBounds(config));
 		return { key, algorithms: [algorithm] };
 	}
 	if (config.publicKey) {

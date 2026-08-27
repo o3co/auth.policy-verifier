@@ -68,6 +68,96 @@ describe("AppConfigSchema — JWT algorithm validation", () => {
 	});
 });
 
+describe("AppConfigSchema — JWKS transport security (#109)", () => {
+	const httpsUri = "https://auth-provider.test/.well-known/jwks.json";
+	const rs256 = { algorithm: "RS256", mode: "verify", jwksUri: httpsUri, ...rfc9068 };
+
+	/** Parses an RS256 verify config whose JWKS keys the case under test overrides. */
+	const parseWithJwks = (jwt: Record<string, unknown>) =>
+		AppConfigSchema.safeParse({ oauth: { jwt: { ...rs256, ...jwt } }, ...baseBody });
+
+	it("accepts an https jwksUri", () => {
+		expect(parseWithJwks({}).success).toBe(true);
+	});
+
+	it("rejects a plaintext jwksUri at config-parse time, not at first request", () => {
+		const result = parseWithJwks({ jwksUri: "http://auth-provider:3000/.well-known/jwks.json" });
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			const issue = result.error.issues.find((i) => i.path.at(-1) === "jwksUri");
+			expect(issue?.message).toContain("https");
+		}
+	});
+
+	it.each([
+		"http://localhost:3000/.well-known/jwks.json",
+		"http://127.0.0.1:3000/.well-known/jwks.json",
+		"http://[::1]:3000/.well-known/jwks.json",
+	])("accepts plaintext %s — the loopback carve-out", (jwksUri) => {
+		expect(parseWithJwks({ jwksUri }).success).toBe(true);
+	});
+
+	it("rejects a jwksUri that is not an absolute URL", () => {
+		expect(parseWithJwks({ jwksUri: "auth-provider/.well-known/jwks.json" }).success).toBe(false);
+	});
+
+	it("leaves the jwksUri unchecked in insecure-decode mode — no key is ever fetched", () => {
+		const result = AppConfigSchema.safeParse({
+			oauth: {
+				jwt: {
+					algorithm: "RS256",
+					mode: "insecure-decode",
+					jwksUri: "http://auth-provider:3000/.well-known/jwks.json",
+				},
+			},
+			...baseBody,
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it("defaults the JWKS fetch bounds", () => {
+		const result = AppConfigSchema.parse({ oauth: { jwt: rs256 }, ...baseBody });
+		expect(result.oauth.jwt.jwksTimeoutMs).toBe(5000);
+		expect(result.oauth.jwt.jwksCooldownMs).toBe(30_000);
+		expect(result.oauth.jwt.jwksCacheMaxAgeMs).toBe(600_000);
+	});
+
+	it("coerces the strings a HOCON env substitution produces", () => {
+		const result = AppConfigSchema.parse({
+			oauth: {
+				jwt: {
+					...rs256,
+					jwksTimeoutMs: "2000",
+					jwksCooldownMs: "10000",
+					jwksCacheMaxAgeMs: "120000",
+				},
+			},
+			...baseBody,
+		});
+		expect(result.oauth.jwt.jwksTimeoutMs).toBe(2000);
+		expect(result.oauth.jwt.jwksCooldownMs).toBe(10_000);
+		expect(result.oauth.jwt.jwksCacheMaxAgeMs).toBe(120_000);
+	});
+
+	it.each(["jwksTimeoutMs", "jwksCacheMaxAgeMs"])("rejects a non-positive %s", (key) => {
+		for (const value of [0, -1, 1.5]) {
+			const result = parseWithJwks({ [key]: value });
+			expect(result.success).toBe(false);
+			if (!result.success) {
+				expect(result.error.issues.some((i) => i.path.at(-1) === key)).toBe(true);
+			}
+		}
+	});
+
+	it("rejects a negative cooldown", () => {
+		expect(parseWithJwks({ jwksCooldownMs: -1 }).success).toBe(false);
+	});
+
+	it("accepts a zero cooldown — refetching on every miss is a deliberate choice", () => {
+		expect(parseWithJwks({ jwksCooldownMs: 0 }).success).toBe(true);
+	});
+});
+
 describe("AppConfigSchema — empty rule set policy", () => {
 	it("defaults rule.onEmptyRuleSet to deny", () => {
 		const result = AppConfigSchema.parse({

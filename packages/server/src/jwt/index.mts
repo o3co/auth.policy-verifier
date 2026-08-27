@@ -9,6 +9,14 @@ export {
 	RS256KeyResolverFactory,
 } from "./builtinKeyResolversModule.mjs";
 export {
+	checkJwksUri,
+	type JwksFetchBounds,
+	type JwksFetchConfig,
+	type JwksUriCheck,
+	parseJwksUri,
+	resolveJwksFetchBounds,
+} from "./jwks.mjs";
+export {
 	type AssertedJwtConfig,
 	type AuthenticationResult,
 	assertVerifyRouterJwtConfig,

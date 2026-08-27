@@ -173,6 +173,32 @@ describe("createApp", () => {
 		).rejects.toThrow(/createApp: oauth\.jwt\.tokenType is required/);
 	});
 
+	it("refuses to boot a hand-built config with a plaintext JWKS URI (#109)", async () => {
+		// AppConfigSchema rejects this at config-parse time, but a library consumer
+		// can hand-build the config; boot is then the last place to catch a key
+		// source anyone on the network path can substitute. It must fail here and
+		// not at the first request that misses the key cache.
+		const handBuilt = {
+			...testConfig,
+			oauth: {
+				jwt: {
+					...testConfig.oauth.jwt,
+					algorithm: "RS256",
+					secret: undefined,
+					jwksUri: "http://auth-provider:3000/.well-known/jwks.json",
+				},
+			},
+		} as unknown as typeof testConfig;
+
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: handBuilt,
+				modules: [testModule, builtinKeyResolversModule],
+			}),
+		).rejects.toThrow(/jwksUri must use https/);
+	});
+
 	it('defaults a hand-built config with no mode to verify, and its errors name oauth.jwt.mode = "verify"', async () => {
 		// A consumer that omits `mode` gets the schema's default (verify) at this
 		// boundary too, and the guard's message names the wire key the operator

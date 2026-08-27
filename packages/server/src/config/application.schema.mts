@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from "zod";
-import { DEFAULT_MAX_BATCH_SIZE } from "./defaults.mjs";
+import { checkJwksUri } from "../jwt/jwks.mjs";
+import {
+	DEFAULT_JWKS_CACHE_MAX_AGE_MS,
+	DEFAULT_JWKS_COOLDOWN_MS,
+	DEFAULT_JWKS_TIMEOUT_MS,
+	DEFAULT_MAX_BATCH_SIZE,
+} from "./defaults.mjs";
 
 /**
  * Migration message for the wire keys removed in #134. Emitted by the schema
@@ -47,7 +53,26 @@ export const AppConfigSchema = z.object({
 			.object({
 				algorithm: z.string().default("HS256"),
 				secret: z.string().optional(),
+				/**
+				 * JWKS endpoint for the asymmetric algorithms. Must be https — or
+				 * http on a loopback host, the development carve-out documented in
+				 * `jwt/jwks.mts` (#109). The scheme is checked in `superRefine`
+				 * below so a plaintext endpoint fails at config-parse time, at boot,
+				 * rather than at the first request that misses the key cache.
+				 */
 				jwksUri: z.string().optional(),
+				// Bounds on the JWKS fetch, which happens inside a verify request
+				// whenever key resolution misses the cache (#109). Coerced because a
+				// HOCON env substitution delivers strings.
+				jwksTimeoutMs: z.coerce.number().int().positive().default(DEFAULT_JWKS_TIMEOUT_MS),
+				// Zero is a valid cooldown — "refetch on every miss", at the cost of
+				// letting an attacker-chosen `kid` drive fetches at the provider.
+				jwksCooldownMs: z.coerce.number().int().nonnegative().default(DEFAULT_JWKS_COOLDOWN_MS),
+				jwksCacheMaxAgeMs: z.coerce
+					.number()
+					.int()
+					.positive()
+					.default(DEFAULT_JWKS_CACHE_MAX_AGE_MS),
 				publicKey: z.string().optional(),
 				publicKeyPath: z.string().optional(),
 				/**
@@ -133,6 +158,22 @@ export const AppConfigSchema = z.object({
 						code: z.ZodIssueCode.custom,
 						message: `jwksUri or publicKey/publicKeyPath is required for ${data.algorithm}`,
 					});
+				}
+				// Transport security for the key source (#109): a plaintext JWKS
+				// endpoint lets anyone on the path substitute signing keys, so it
+				// must not survive to the first request. Checked inside the verify
+				// branch, like the key material above — in decode-only mode no key
+				// is ever fetched, and failing to boot over an unused URI would
+				// only puzzle the operator.
+				if (data.jwksUri !== undefined) {
+					const jwks = checkJwksUri(data.jwksUri);
+					if (!jwks.ok) {
+						ctx.addIssue({
+							code: z.ZodIssueCode.custom,
+							message: jwks.message,
+							path: ["jwksUri"],
+						});
+					}
 				}
 			}),
 	}),
