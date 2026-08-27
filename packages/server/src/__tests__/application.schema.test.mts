@@ -287,6 +287,67 @@ describe("AppConfigSchema — batch decisions (#124)", () => {
 	});
 });
 
+describe("AppConfigSchema — token lifetime bounds (#110)", () => {
+	const validJwt = { algorithm: "HS256", secret: "s", mode: "verify", ...rfc9068 };
+
+	/** Parses a valid verify config whose lifetime bounds the case under test overrides. */
+	const parseWithBounds = (jwt: Record<string, unknown>) =>
+		AppConfigSchema.safeParse({ oauth: { jwt: { ...validJwt, ...jwt } }, ...baseBody });
+
+	it("defaults maxTokenAgeSeconds to a day and clockToleranceSeconds to zero", () => {
+		const result = AppConfigSchema.parse({ oauth: { jwt: validJwt }, ...baseBody });
+		expect(result.oauth.jwt.maxTokenAgeSeconds).toBe(86_400);
+		expect(result.oauth.jwt.clockToleranceSeconds).toBe(0);
+	});
+
+	// The defaults must reach insecure-decode deployments too: the decode path
+	// restates these checks by hand, and a mode that skipped them would accept
+	// the eternal token the verifying mode refuses.
+	it("defaults both bounds in insecure-decode mode as well", () => {
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: { mode: "insecure-decode" } },
+			...baseBody,
+		});
+		expect(result.oauth.jwt.maxTokenAgeSeconds).toBe(86_400);
+		expect(result.oauth.jwt.clockToleranceSeconds).toBe(0);
+	});
+
+	it("coerces the strings a HOCON env substitution produces", () => {
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: { ...validJwt, maxTokenAgeSeconds: "600", clockToleranceSeconds: "60" } },
+			...baseBody,
+		});
+		expect(result.oauth.jwt.maxTokenAgeSeconds).toBe(600);
+		expect(result.oauth.jwt.clockToleranceSeconds).toBe(60);
+	});
+
+	it.each([0, -1, 1.5])("rejects %s as a maxTokenAgeSeconds", (value) => {
+		const result = parseWithBounds({ maxTokenAgeSeconds: value });
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.error.issues.some((i) => i.path.at(-1) === "maxTokenAgeSeconds")).toBe(true);
+		}
+	});
+
+	it("accepts a zero clock tolerance — no skew allowance is the default and a valid choice", () => {
+		expect(parseWithBounds({ clockToleranceSeconds: 0 }).success).toBe(true);
+	});
+
+	// Bounded above on purpose: tolerance extends the life of every token the
+	// deployment accepts, so an unbounded knob is a way to spell "never expires".
+	it.each([-1, 301, 86_400, 1.5])("rejects %s as a clockToleranceSeconds", (value) => {
+		const result = parseWithBounds({ clockToleranceSeconds: value });
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.error.issues.some((i) => i.path.at(-1) === "clockToleranceSeconds")).toBe(true);
+		}
+	});
+
+	it("accepts the clock-tolerance ceiling itself", () => {
+		expect(parseWithBounds({ clockToleranceSeconds: 300 }).success).toBe(true);
+	});
+});
+
 describe("AppConfigSchema — multiple acceptable issuers (#105)", () => {
 	const hs256 = { algorithm: "HS256", secret: "s" };
 

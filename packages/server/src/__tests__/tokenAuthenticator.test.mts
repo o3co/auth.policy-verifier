@@ -12,10 +12,14 @@
  * `tokenType`. The drift cases are pinned here so the one guard can never
  * regress to the weak form.
  */
+import { errors, type JWTPayload } from "jose";
 import { describe, expect, it } from "vitest";
 import {
+	assertTimeClaims,
 	assertVerifyRouterJwtConfig,
 	createTokenAuthenticator,
+	type JwtTimeClaimBounds,
+	resolveJwtTimeClaimBounds,
 	type VerifyRouterJwtConfig,
 } from "#/jwt/tokenAuthenticator.mjs";
 
@@ -176,5 +180,153 @@ describe("createTokenAuthenticator — construction and bearer parsing", () => {
 		const authenticator = createTokenAuthenticator(VALID_VERIFYING, silentLogger);
 		const result = await authenticator.authenticate("Bearer ");
 		expect(result).toMatchObject({ ok: false, code: "missing_token" });
+	});
+
+	// The time-claim bounds are resolved once at construction, so a config that
+	// cannot state them never gets to serve a request with jose silently applying
+	// its own semantics instead (#110).
+	it("resolves the time-claim bounds at construction, so an unusable bound cannot serve", () => {
+		expect(() =>
+			createTokenAuthenticator(
+				{ ...VALID_VERIFYING, maxTokenAgeSeconds: "forever" } as unknown as VerifyRouterJwtConfig,
+				silentLogger,
+			),
+		).toThrow(/jwt\.maxTokenAgeSeconds must be a positive integer number of seconds/);
+		expect(() =>
+			createTokenAuthenticator(
+				{
+					validate: false,
+					allowInsecureDecode: true,
+					clockToleranceSeconds: -1,
+				} as unknown as VerifyRouterJwtConfig,
+				silentLogger,
+			),
+		).toThrow(/jwt\.clockToleranceSeconds must be an integer between 0 and 300 seconds/);
+	});
+});
+
+/*
+ * #110: the time-claim bounds and the decode-path checks that restate jose's
+ * semantics for them. Two knobs, and both must reach both paths — a bound
+ * threaded only into `jwtVerify` would leave decode-only mode accepting the
+ * eternal token this issue is about.
+ */
+
+describe("resolveJwtTimeClaimBounds", () => {
+	it("defaults both bounds when the config states neither", () => {
+		expect(resolveJwtTimeClaimBounds({})).toEqual({ maxTokenAge: 86_400, clockTolerance: 0 });
+	});
+
+	it("coerces the strings a HOCON env substitution delivers", () => {
+		expect(
+			resolveJwtTimeClaimBounds({ maxTokenAgeSeconds: "600", clockToleranceSeconds: "60" }),
+		).toEqual({ maxTokenAge: 600, clockTolerance: 60 });
+	});
+
+	it.each([0, -1, 1.5, "soon", true, null])(
+		"rejects %o as a maxTokenAgeSeconds",
+		(maxTokenAgeSeconds) => {
+			expect(() =>
+				resolveJwtTimeClaimBounds({ maxTokenAgeSeconds } as { maxTokenAgeSeconds?: number }),
+			).toThrow(/jwt\.maxTokenAgeSeconds must be a positive integer number of seconds/);
+		},
+	);
+
+	// Zero is the default and a deliberate choice: no skew allowance at all.
+	it("accepts a zero clock tolerance", () => {
+		expect(resolveJwtTimeClaimBounds({ clockToleranceSeconds: 0 }).clockTolerance).toBe(0);
+	});
+
+	// Bounded above on purpose (#110): tolerance extends the life of every token
+	// the deployment accepts, so an unbounded knob is a way to spell "never expires".
+	it.each([-1, 301, 86_400, 1.5])("rejects %o as a clockToleranceSeconds", (value) => {
+		expect(() => resolveJwtTimeClaimBounds({ clockToleranceSeconds: value })).toThrow(
+			/jwt\.clockToleranceSeconds must be an integer between 0 and 300 seconds/,
+		);
+	});
+
+	it("accepts the ceiling itself", () => {
+		expect(resolveJwtTimeClaimBounds({ clockToleranceSeconds: 300 }).clockTolerance).toBe(300);
+	});
+
+	it("names the caller's config path so operators find the key they wrote", () => {
+		expect(() => resolveJwtTimeClaimBounds({ maxTokenAgeSeconds: 0 }, "oauth.jwt")).toThrow(
+			/^oauth\.jwt\.maxTokenAgeSeconds must be/,
+		);
+	});
+});
+
+describe("assertTimeClaims — decode-path parity with jwtVerify", () => {
+	const now = () => Math.floor(Date.now() / 1000);
+	const BOUNDS: JwtTimeClaimBounds = { maxTokenAge: 86_400, clockTolerance: 0 };
+	const fresh = (): JWTPayload => ({ iat: now(), exp: now() + 3600 });
+
+	/** Runs the assertion and hands back whatever it threw, for claim/code checks. */
+	function refusal(payload: JWTPayload, bounds: JwtTimeClaimBounds = BOUNDS): unknown {
+		try {
+			assertTimeClaims(payload, bounds);
+		} catch (cause) {
+			return cause;
+		}
+		throw new Error("expected assertTimeClaims to reject");
+	}
+
+	it("accepts a fresh token carrying iat and exp", () => {
+		expect(() => assertTimeClaims(fresh(), BOUNDS)).not.toThrow();
+	});
+
+	// The whole of #110: jwtVerify checks exp only when present, which left a
+	// token minted (or forged) without one valid forever.
+	it("rejects a token carrying no exp claim", () => {
+		const cause = refusal({ iat: now() });
+		expect(cause).toBeInstanceOf(errors.JWTClaimValidationFailed);
+		expect(cause).toMatchObject({ claim: "exp", reason: "missing" });
+	});
+
+	// maxTokenAge is measured from iat, so a token without one cannot be bounded.
+	it("rejects a token carrying no iat claim", () => {
+		const cause = refusal({ exp: now() + 3600 });
+		expect(cause).toBeInstanceOf(errors.JWTClaimValidationFailed);
+		expect(cause).toMatchObject({ claim: "iat", reason: "missing" });
+	});
+
+	it.each(["exp", "iat", "nbf"])("rejects a non-numeric %s claim", (claim) => {
+		const cause = refusal({ ...fresh(), [claim]: "tomorrow" });
+		expect(cause).toBeInstanceOf(errors.JWTClaimValidationFailed);
+		expect(cause).toMatchObject({ claim, reason: "invalid" });
+	});
+
+	it("rejects an expired token with JWTExpired", () => {
+		expect(refusal({ iat: now() - 7200, exp: now() - 3600 })).toBeInstanceOf(errors.JWTExpired);
+	});
+
+	it("rejects a not-yet-valid token", () => {
+		const cause = refusal({ ...fresh(), nbf: now() + 3600 });
+		expect(cause).toMatchObject({ claim: "nbf", reason: "check_failed" });
+	});
+
+	it("rejects a token issued longer ago than maxTokenAge, however far out its exp is", () => {
+		const ancient = { iat: now() - 7200, exp: now() + 315_360_000 };
+		expect(refusal(ancient, { maxTokenAge: 3600, clockTolerance: 0 })).toBeInstanceOf(
+			errors.JWTExpired,
+		);
+		expect(() =>
+			assertTimeClaims(ancient, { maxTokenAge: 86_400, clockTolerance: 0 }),
+		).not.toThrow();
+	});
+
+	it("rejects a token issued in the future", () => {
+		const cause = refusal({ iat: now() + 3600, exp: now() + 7200 });
+		expect(cause).toBeInstanceOf(errors.JWTClaimValidationFailed);
+		expect(cause).toMatchObject({ claim: "iat", reason: "check_failed" });
+	});
+
+	it("applies the clock tolerance to exp, nbf and maxTokenAge alike", () => {
+		const tolerant: JwtTimeClaimBounds = { maxTokenAge: 60, clockTolerance: 60 };
+		expect(() => assertTimeClaims({ iat: now() - 30, exp: now() - 30 }, tolerant)).not.toThrow();
+		expect(() =>
+			assertTimeClaims({ iat: now(), exp: now() + 3600, nbf: now() + 30 }, tolerant),
+		).not.toThrow();
+		expect(() => assertTimeClaims({ iat: now() - 90, exp: now() + 3600 }, tolerant)).not.toThrow();
 	});
 });

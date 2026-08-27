@@ -62,13 +62,18 @@ app.use(
 
 /** One token carrying the subject and the scopes the fixtures rely on. */
 async function mintToken(subject: string): Promise<string> {
-	return new SignJWT({ scope: "read:project" })
-		.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
-		.setIssuedAt()
-		.setIssuer(ISSUER)
-		.setAudience(AUDIENCE)
-		.setSubject(subject)
-		.sign(secret);
+	return (
+		new SignJWT({ scope: "read:project" })
+			.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
+			.setIssuedAt()
+			// iat and exp are both mandatory now (#110); the time claims are not what
+			// this suite is about, so the token simply carries valid ones.
+			.setExpirationTime("1h")
+			.setIssuer(ISSUER)
+			.setAudience(AUDIENCE)
+			.setSubject(subject)
+			.sign(secret)
+	);
 }
 
 const toBody = (request: AuthorizationRequest) => ({

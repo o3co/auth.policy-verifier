@@ -22,6 +22,7 @@
  * of labor as `assertVerifyRouterJwtConfig`.
  */
 
+import { resolveBound } from "../config/bounds.mjs";
 import {
 	DEFAULT_JWKS_CACHE_MAX_AGE_MS,
 	DEFAULT_JWKS_COOLDOWN_MS,
@@ -116,46 +117,6 @@ export interface JwksFetchBounds {
 	cacheMaxAge: number;
 }
 
-/** Renders a rejected value for an error message: `JSON.stringify` turns NaN into `null`. */
-function describeValue(value: unknown): string {
-	if (typeof value === "string") {
-		return JSON.stringify(value);
-	}
-	if (value === null || typeof value !== "object") {
-		return String(value);
-	}
-	return Array.isArray(value) ? "an array" : "an object";
-}
-
-/**
- * Validates one bound, coercing the string form on the way. Only numbers and
- * strings are coerced: `Number(true)` is 1 and `Number(null)` is 0, so running
- * anything else through `Number` would invent a bound the operator never wrote.
- * Non-integers, NaN and Infinity are refused for the same reason the schema
- * refuses them — a bound that cannot be stated in whole milliseconds is a
- * mistake, and `Infinity` is exactly the unbounded fetch this guards against.
- */
-function resolveBound(
-	value: unknown,
-	field: keyof JwksFetchConfig,
-	path: string,
-	fallback: number,
-	minimum: 0 | 1,
-): number {
-	if (value === undefined) {
-		return fallback;
-	}
-	const numeric =
-		typeof value === "number" || typeof value === "string" ? Number(value) : Number.NaN;
-	if (!Number.isInteger(numeric) || numeric < minimum) {
-		const requirement = minimum === 0 ? "a non-negative integer" : "a positive integer";
-		throw new Error(
-			`${path}.${field} must be ${requirement} number of milliseconds, got ${describeValue(value)}`,
-		);
-	}
-	return numeric;
-}
-
 /**
  * Resolves the JWKS fetch bounds, falling back to the defaults for anything the
  * config omits — hand-built configs never went through the schema, so the
@@ -173,29 +134,27 @@ export function resolveJwksFetchBounds(
 	config: JwksFetchConfig,
 	path = "oauth.jwt",
 ): JwksFetchBounds {
+	const ms = { path, unit: "milliseconds" } as const;
 	return {
-		timeoutDuration: resolveBound(
-			config.jwksTimeoutMs,
-			"jwksTimeoutMs",
-			path,
-			DEFAULT_JWKS_TIMEOUT_MS,
-			1,
-		),
+		timeoutDuration: resolveBound(config.jwksTimeoutMs, {
+			...ms,
+			field: "jwksTimeoutMs",
+			fallback: DEFAULT_JWKS_TIMEOUT_MS,
+			minimum: 1,
+		}),
 		// Zero is a valid cooldown ("refetch on every miss"), so the floor is 0 and
 		// the absent case is told apart by `undefined`, never by falsiness.
-		cooldownDuration: resolveBound(
-			config.jwksCooldownMs,
-			"jwksCooldownMs",
-			path,
-			DEFAULT_JWKS_COOLDOWN_MS,
-			0,
-		),
-		cacheMaxAge: resolveBound(
-			config.jwksCacheMaxAgeMs,
-			"jwksCacheMaxAgeMs",
-			path,
-			DEFAULT_JWKS_CACHE_MAX_AGE_MS,
-			1,
-		),
+		cooldownDuration: resolveBound(config.jwksCooldownMs, {
+			...ms,
+			field: "jwksCooldownMs",
+			fallback: DEFAULT_JWKS_COOLDOWN_MS,
+			minimum: 0,
+		}),
+		cacheMaxAge: resolveBound(config.jwksCacheMaxAgeMs, {
+			...ms,
+			field: "jwksCacheMaxAgeMs",
+			fallback: DEFAULT_JWKS_CACHE_MAX_AGE_MS,
+			minimum: 1,
+		}),
 	};
 }

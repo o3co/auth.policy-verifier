@@ -18,12 +18,16 @@ const ISSUER = "https://issuer.test";
 const AUDIENCE = "https://api.test";
 
 async function signToken(payload: Record<string, unknown>): Promise<string> {
-	return new SignJWT(payload)
-		.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
-		.setIssuedAt()
-		.setIssuer(ISSUER)
-		.setAudience(AUDIENCE)
-		.sign(secretKey);
+	return (
+		new SignJWT(payload)
+			.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
+			.setIssuedAt()
+			// iat and exp are both mandatory now (#110).
+			.setExpirationTime("1h")
+			.setIssuer(ISSUER)
+			.setAudience(AUDIENCE)
+			.sign(secretKey)
+	);
 }
 
 // Minimal test module that registers factories for a scope collector and rule collector
@@ -230,6 +234,7 @@ describe("createApp", () => {
 		const token = await new SignJWT({ scope: "read:project" })
 			.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
 			.setIssuedAt()
+			.setExpirationTime("1h")
 			.setIssuer(ISSUER)
 			.setAudience("https://other-service.test")
 			.sign(secretKey);

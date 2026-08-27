@@ -72,8 +72,12 @@ interface SignOptions {
 	key?: unknown;
 	expiresAt?: number;
 	notBefore?: number;
+	/** `iat` to stamp; defaults to now. */
+	issuedAt?: number;
 	/** Keep the payload's own `iat` instead of stamping a numeric one. */
 	skipIssuedAt?: boolean;
+	/** Omit `exp` entirely — the eternal token #110 is about. */
+	skipExpiration?: boolean;
 }
 
 async function signToken(payload: Record<string, unknown>, options: SignOptions = {}) {
@@ -82,10 +86,12 @@ async function signToken(payload: Record<string, unknown>, options: SignOptions 
 		.setIssuer(ISSUER)
 		.setAudience(AUDIENCE);
 	if (!options.skipIssuedAt) {
-		jwt.setIssuedAt();
+		jwt.setIssuedAt(options.issuedAt);
 	}
-	if (options.expiresAt !== undefined) {
-		jwt.setExpirationTime(options.expiresAt);
+	// `exp` is mandatory (#110), so an unremarkable token has to carry one: the
+	// cases that omit it are the ones asserting it is refused.
+	if (!options.skipExpiration) {
+		jwt.setExpirationTime(options.expiresAt ?? Math.floor(Date.now() / 1000) + 3600);
 	}
 	if (options.notBefore !== undefined) {
 		jwt.setNotBefore(options.notBefore);
@@ -421,15 +427,18 @@ describe("decode-only path time-claim enforcement (#106)", () => {
 	});
 
 	it.each([
-		{ claim: "exp", payload: { exp: "tomorrow" } },
-		{ claim: "nbf", payload: { nbf: "yesterday" } },
-		{ claim: "iat", payload: { iat: "yesterday" } },
-	])("rejects a token whose $claim claim is not a number", async ({ payload }) => {
+		{ claim: "exp", payload: { exp: "tomorrow" }, options: { skipExpiration: true } },
+		{ claim: "nbf", payload: { nbf: "yesterday" }, options: {} },
+		{ claim: "iat", payload: { iat: "yesterday" }, options: {} },
+	])("rejects a token whose $claim claim is not a number", async ({ payload, options }) => {
 		const { events, logger } = captureEvents();
 		// jwtVerify rejects a present non-numeric exp/nbf/iat; the decode path
-		// must not be laxer. skipIssuedAt keeps setIssuedAt() from stamping a
-		// numeric iat over the malformed one.
-		const token = await signToken({ scope: "read:project", ...payload }, { skipIssuedAt: true });
+		// must not be laxer. skipIssuedAt / skipExpiration keep the helper from
+		// stamping a numeric claim over the malformed one under test.
+		const token = await signToken(
+			{ scope: "read:project", ...payload },
+			{ skipIssuedAt: true, ...options },
+		);
 
 		const res = await request(decodeApp(logger))
 			.post("/verify")
@@ -441,19 +450,60 @@ describe("decode-only path time-claim enforcement (#106)", () => {
 		expect(events[0]).toMatchObject({ level: "warn", msg: "jwt_token_rejected" });
 	});
 
-	it("accepts a fresh token and a token with no exp claim (jwtVerify parity)", async () => {
+	// #110: the decode path must refuse the eternal token, not merely honour an
+	// exp when the issuer bothered to set one. A rejection here that the
+	// verifying path also makes is the whole point of keeping the two coupled.
+	it.each([
+		{ what: "no exp claim", options: { skipExpiration: true } },
+		{ what: "no iat claim", options: { skipIssuedAt: true } },
+	])("rejects a token with $what", async ({ options }) => {
 		const { events, logger } = captureEvents();
-		const app = decodeApp(logger);
-		const fresh = await signToken({ scope: "read:project" }, { expiresAt: now() + 3600 });
-		const noExp = await signToken({ scope: "read:project" });
+		const token = await signToken({ scope: "read:project" }, options);
 
-		for (const token of [fresh, noExp]) {
-			const res = await request(app)
-				.post("/verify")
-				.set("Authorization", `Bearer ${token}`)
-				.send({ resource: "project", action: "read" });
-			expect(res.status).toBe(200);
-		}
+		const res = await request(decodeApp(logger))
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project", action: "read" });
+
+		expect(res.status).toBe(401);
+		expect(events).toHaveLength(1);
+		expect(events[0]).toMatchObject({ level: "warn", msg: "jwt_token_rejected" });
+		expect((events[0].obj.err as { code?: string }).code).toBe("ERR_JWT_CLAIM_VALIDATION_FAILED");
+	});
+
+	it("rejects a token issued longer ago than the configured maxTokenAge", async () => {
+		const { events, logger } = captureEvents();
+		// exp is a decade out — only the age ceiling can refuse this one.
+		const token = await signToken(
+			{ scope: "read:project" },
+			{ issuedAt: now() - 7200, expiresAt: now() + 315_360_000 },
+		);
+
+		const res = await request(
+			createTestApp({
+				jwt: { validate: false, allowInsecureDecode: true, maxTokenAgeSeconds: 3600 },
+				logger,
+			}),
+		)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project", action: "read" });
+
+		expect(res.status).toBe(401);
+		expect(events).toHaveLength(1);
+		expect((events[0].obj.err as { code?: string }).code).toBe("ERR_JWT_EXPIRED");
+	});
+
+	it("accepts a fresh token carrying both time claims", async () => {
+		const { events, logger } = captureEvents();
+		const token = await signToken({ scope: "read:project" }, { expiresAt: now() + 3600 });
+
+		const res = await request(decodeApp(logger))
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project", action: "read" });
+
+		expect(res.status).toBe(200);
 		expect(events).toHaveLength(0);
 	});
 });

@@ -32,12 +32,16 @@ const ISSUER = "https://issuer.test";
 const AUDIENCE = "https://api.test";
 
 async function signToken(payload: Record<string, unknown>): Promise<string> {
-	return new SignJWT(payload)
-		.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
-		.setIssuedAt()
-		.setIssuer(ISSUER)
-		.setAudience(AUDIENCE)
-		.sign(secretKey);
+	return (
+		new SignJWT(payload)
+			.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
+			.setIssuedAt()
+			// iat and exp are both mandatory now (#110).
+			.setExpirationTime("1h")
+			.setIssuer(ISSUER)
+			.setAudience(AUDIENCE)
+			.sign(secretKey)
+	);
 }
 
 // Shared by every config below so a change to the jwt wire keys has one place
@@ -130,6 +134,7 @@ describe("standalone smoke", () => {
 		const token = await new SignJWT({ scope: "read:document" })
 			.setProtectedHeader({ alg: "HS256", typ: "id+jwt" })
 			.setIssuedAt()
+			.setExpirationTime("1h")
 			.setIssuer(ISSUER)
 			.setAudience(AUDIENCE)
 			.sign(secretKey);

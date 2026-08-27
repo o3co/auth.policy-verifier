@@ -45,12 +45,17 @@ async function signHS256Token(
 	payload: Record<string, unknown>,
 	overrides: TokenOverrides = {},
 ): Promise<string> {
-	return new SignJWT(payload)
-		.setProtectedHeader({ alg: "HS256", typ: overrides.typ ?? "at+jwt" })
-		.setIssuedAt()
-		.setIssuer(overrides.issuer ?? ISSUER)
-		.setAudience(overrides.audience ?? AUDIENCE)
-		.sign(hs256Key.key as import("node:crypto").KeyObject);
+	return (
+		new SignJWT(payload)
+			.setProtectedHeader({ alg: "HS256", typ: overrides.typ ?? "at+jwt" })
+			.setIssuedAt()
+			// iat and exp are both mandatory now (#110): a token without them is
+			// refused before any of the deviations these cases are about is reached.
+			.setExpirationTime("1h")
+			.setIssuer(overrides.issuer ?? ISSUER)
+			.setAudience(overrides.audience ?? AUDIENCE)
+			.sign(hs256Key.key as import("node:crypto").KeyObject)
+	);
 }
 
 function createTestApp(resourceParser?: ResourceParser, ruleCollectors?: RuleCollector[]) {
@@ -264,6 +269,7 @@ describe("POST /verify with RS256", () => {
 		const token = await new SignJWT({ scope: "read:project" })
 			.setProtectedHeader({ alg: "RS256", typ: "at+jwt" })
 			.setIssuedAt()
+			.setExpirationTime("1h")
 			.setIssuer(ISSUER)
 			.setAudience(AUDIENCE)
 			.sign(privateKey as unknown as CryptoKey);
@@ -305,6 +311,7 @@ describe("POST /verify with RS256", () => {
 		const token = await new SignJWT({ scope: "read:project" })
 			.setProtectedHeader({ alg: "RS256", typ: "at+jwt" })
 			.setIssuedAt()
+			.setExpirationTime("1h")
 			.setIssuer(ISSUER)
 			.setAudience(AUDIENCE)
 			.sign(wrongPrivateKey as unknown as CryptoKey);
@@ -600,6 +607,7 @@ describe("POST /verify — RFC 9068 §4 token validation (#105)", () => {
 		const token = await new SignJWT({ scope: "read:project" })
 			.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
 			.setIssuedAt()
+			.setExpirationTime("1h")
 			.setAudience(AUDIENCE)
 			.sign(hs256Key.key as import("node:crypto").KeyObject);
 		const res = await request(app)
@@ -615,6 +623,7 @@ describe("POST /verify — RFC 9068 §4 token validation (#105)", () => {
 		const token = await new SignJWT({ scope: "read:project" })
 			.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
 			.setIssuedAt()
+			.setExpirationTime("1h")
 			.setIssuer(ISSUER)
 			.sign(hs256Key.key as import("node:crypto").KeyObject);
 		const res = await request(app)
@@ -646,6 +655,7 @@ describe("POST /verify — RFC 9068 §4 token validation (#105)", () => {
 		const token = await new SignJWT({ scope: "read:project" })
 			.setProtectedHeader({ alg: "HS256" })
 			.setIssuedAt()
+			.setExpirationTime("1h")
 			.setIssuer(ISSUER)
 			.setAudience(AUDIENCE)
 			.sign(hs256Key.key as import("node:crypto").KeyObject);
@@ -673,6 +683,7 @@ describe("POST /verify — RFC 9068 §4 token validation (#105)", () => {
 		const token = await new SignJWT({ scope: "read:project" })
 			.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
 			.setIssuedAt()
+			.setExpirationTime("1h")
 			.setIssuer(ISSUER)
 			.setAudience(["https://other-service.test", AUDIENCE])
 			.sign(hs256Key.key as import("node:crypto").KeyObject);

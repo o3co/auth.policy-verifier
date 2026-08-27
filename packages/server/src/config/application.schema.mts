@@ -5,11 +5,14 @@ import { z } from "zod";
 import { checkJwksUri } from "../jwt/jwks.mjs";
 import {
 	DEFAULT_CALLER_AUTH_HEADER,
+	DEFAULT_CLOCK_TOLERANCE_SECONDS,
 	DEFAULT_HOSTNAME,
 	DEFAULT_JWKS_CACHE_MAX_AGE_MS,
 	DEFAULT_JWKS_COOLDOWN_MS,
 	DEFAULT_JWKS_TIMEOUT_MS,
 	DEFAULT_MAX_BATCH_SIZE,
+	DEFAULT_MAX_TOKEN_AGE_SECONDS,
+	MAX_CLOCK_TOLERANCE_SECONDS,
 } from "./defaults.mjs";
 
 /**
@@ -120,6 +123,37 @@ export const AppConfigSchema = z.object({
 				// Accepted `typ` header. `at+jwt` is the RFC 9068 access-token type; pinning
 				// it rejects id_tokens, refresh tokens and logout tokens signed with the same key.
 				tokenType: z.string().default("at+jwt"),
+				/**
+				 * Bounds on a presented token's own lifetime (#110). Both apply in
+				 * every mode: `insecure-decode` restates them by hand, so a
+				 * deployment cannot end up with the two modes disagreeing about the
+				 * same token. Coerced because a HOCON env substitution delivers strings.
+				 *
+				 * `maxTokenAgeSeconds` is the ceiling on `now - iat` — what refuses a
+				 * token whose issuer set `exp` years out — and setting it makes `iat`
+				 * required (RFC 9068 §2.2 requires it anyway). `exp` itself is
+				 * required unconditionally and has no knob: a knob to accept tokens
+				 * that never expire is the bug, not the setting.
+				 */
+				maxTokenAgeSeconds: z.coerce
+					.number()
+					.int()
+					.positive()
+					.default(DEFAULT_MAX_TOKEN_AGE_SECONDS),
+				/**
+				 * Skew allowance on every time-claim comparison. Bounded above
+				 * because tolerance lengthens the accepted life of every token the
+				 * deployment sees — an unbounded knob is a way to spell "expiry
+				 * optional" without writing it down. `60` matches the skew the paired
+				 * provider allows and is the value to reach for when the issuer and
+				 * the verifier keep separate clocks.
+				 */
+				clockToleranceSeconds: z.coerce
+					.number()
+					.int()
+					.min(0)
+					.max(MAX_CLOCK_TOLERANCE_SECONDS)
+					.default(DEFAULT_CLOCK_TOLERANCE_SECONDS),
 			})
 			.passthrough()
 			.superRefine((data, ctx) => {
