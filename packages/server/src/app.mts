@@ -42,7 +42,9 @@ export interface CreateAppOptions {
  * and healthcheck under the configured path prefix.
  *
  * `config.oauth.jwt.validate = false` disables signature verification and only
- * decodes the token. This is a development-only switch; a warning is logged.
+ * decodes the token (`exp` / `nbf` are still enforced). It is test-only and
+ * refuses to boot unless `oauth.jwt.allowInsecureDecode = true` explicitly
+ * acknowledges it; booting in that mode is logged at error level (#106).
  */
 export async function createApp(options: CreateAppOptions): Promise<express.Express> {
 	const { pathResolver, config, modules } = options;
@@ -112,10 +114,18 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 			tokenType,
 		};
 	} else {
+		// AppConfigSchema already requires the acknowledgment; re-checked here
+		// because createApp also accepts hand-built config objects that never
+		// went through the schema (#106).
+		if (!config.oauth.jwt.allowInsecureDecode) {
+			throw new Error(
+				"createApp: oauth.jwt.validate=false disables ALL token verification (test-only); set oauth.jwt.allowInsecureDecode=true to acknowledge, or restore validate=true",
+			);
+		}
 		jwt = { validate: false };
-		// Structured event, not console.warn: an aggregated-log pipeline can
-		// alert on the event name instead of losing a bare string (#107).
-		logger.warn({ validate: false }, "jwt_validation_disabled");
+		// error, not warn: a deployment that reaches this line accepts unsigned
+		// tokens, and a fleet filtering at level=error must still see it (#106).
+		logger.error({ validate: false, allowInsecureDecode: true }, "jwt_validation_disabled");
 	}
 
 	// 7. Build Express app

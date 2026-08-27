@@ -61,7 +61,7 @@ describe("AppConfigSchema — JWT algorithm validation", () => {
 
 	it("skips validation when validate=false (no key material required)", () => {
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { algorithm: "RS256", validate: false } },
+			oauth: { jwt: { algorithm: "RS256", validate: false, allowInsecureDecode: true } },
 			...baseBody,
 		});
 		expect(result.success).toBe(true);
@@ -154,7 +154,7 @@ describe("AppConfigSchema — RFC 9068 token validation (#105)", () => {
 
 	it("does not require issuer/audience when validation is disabled", () => {
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { algorithm: "HS256", validate: false } },
+			oauth: { jwt: { algorithm: "HS256", validate: false, allowInsecureDecode: true } },
 			...baseBody,
 		});
 		expect(result.success).toBe(true);
@@ -241,7 +241,7 @@ describe("AppConfigSchema — multiple acceptable issuers (#105)", () => {
 
 describe("AppConfigSchema — logging (#107)", () => {
 	const validBody = {
-		oauth: { jwt: { validate: false } },
+		oauth: { jwt: { validate: false, allowInsecureDecode: true } },
 		...baseBody,
 	};
 
@@ -262,6 +262,44 @@ describe("AppConfigSchema — logging (#107)", () => {
 
 	it("rejects an unknown logging.level", () => {
 		const result = AppConfigSchema.safeParse({ ...validBody, logging: { level: "verbose" } });
+		expect(result.success).toBe(false);
+	});
+});
+
+describe("AppConfigSchema — insecure decode acknowledgment (#106)", () => {
+	it("rejects validate=false without allowInsecureDecode", () => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: { validate: false } },
+			...baseBody,
+		});
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.error.issues.some((i) => i.message.includes("allowInsecureDecode"))).toBe(true);
+		}
+	});
+
+	it("accepts validate=false when allowInsecureDecode=true acknowledges it", () => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: { validate: false, allowInsecureDecode: true } },
+			...baseBody,
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it("defaults allowInsecureDecode to false", () => {
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: { validate: true, secret: "s", ...rfc9068 } },
+			...baseBody,
+		});
+		expect(result.oauth.jwt.allowInsecureDecode).toBe(false);
+	});
+
+	it("does not let allowInsecureDecode relax the validate=true requirements", () => {
+		// The flag acknowledges decode-only mode; it must not weaken anything else.
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: { validate: true, allowInsecureDecode: true } },
+			...baseBody,
+		});
 		expect(result.success).toBe(false);
 	});
 });
