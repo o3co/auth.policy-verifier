@@ -127,17 +127,63 @@ Build the image and run the container:
 ```sh
 make build
 docker run \
+  -p 3000:3000 \
+  -e HTTP_HOSTNAME=0.0.0.0 \
+  -e HTTP_CALLER_AUTH_TOKEN=<secret> \
   -e OAUTH_JWT_SECRET=secret \
   -e OAUTH_JWT_ISSUER=https://issuer.example.com \
   -e OAUTH_JWT_AUDIENCE=https://api.example.com \
   auth-policy-verifier
 ```
 
+Those first two are the opt-in pair from [Trust boundary](#trust-boundary), and
+publishing the port is exactly what makes both necessary:
+
+- `HTTP_HOSTNAME=0.0.0.0` because the config binds loopback by default, and
+  inside a container that means reachable from nothing — the published port
+  would never connect.
+- `HTTP_CALLER_AUTH_TOKEN` because the same setting is what puts `/verify` in
+  reach of anything that can route to the port, and `/verify` answers with an
+  authorization decision. Dropping it is only safe when nothing outside the
+  host can reach the published port.
+
 For local development with Docker Compose:
 
 ```sh
 make dev
 ```
+
+`docker-compose.yml` sets `HTTP_HOSTNAME=0.0.0.0` itself and reads an optional
+`.env`. It does **not** supply the credential — put `HTTP_CALLER_AUTH_TOKEN` in
+that `.env`.
+
+### `pnpm-lock.yaml` is a build input
+
+`pnpm install --frozen-lockfile` is what keeps two builds of the same source
+from producing two different images, so `Dockerfile` copies `pnpm-lock.yaml`
+and the build fails without it. `create-auth-policy-verifier` generates the
+lockfile at scaffold time — commit it. If it is missing (scaffolded offline, or
+with `--no-lockfile`), run `pnpm install` once and commit the result.
+
+Dependency updates are therefore a lockfile change: run `pnpm update`, commit,
+rebuild. The base image is pinned by digest for the same reason and is bumped
+the same way — deliberately, tag and digest together.
+
+### What the HEALTHCHECK reports
+
+The container healthcheck probes the container's **own routable address**, not
+`127.0.0.1`. This is deliberate. A probe against loopback passes even when the
+server is bound to loopback and no caller can reach it — it would report
+"healthy" for a container that is, from outside, dead. Probing the address the
+container is actually reachable at asks the same question a caller does, so
+forgetting `HTTP_HOSTNAME=0.0.0.0` shows up as `unhealthy` instead of hiding.
+
+`GET /healthcheck` is never gated by `http.callerAuth`, so the probe needs no
+credential. It follows `HTTP_PATH_PREFIX` and `HTTP_PORT`.
+
+One deployment shape is the exception: a sidecar sharing a network namespace
+with its caller, where binding loopback is correct and the routable address has
+nothing listening on it. Override `healthcheck:` on that service.
 
 ## See Also
 

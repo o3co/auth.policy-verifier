@@ -345,8 +345,20 @@ pnpm -r test     # 全テスト実行
 npx @o3co/create-auth-policy-verifier my-verifier
 cd my-verifier
 docker build -t my-verifier .
-docker run -e OAUTH_JWT_SECRET=secret my-verifier
+docker run -p 3000:3000 \
+  -e HTTP_HOSTNAME=0.0.0.0 -e HTTP_CALLER_AUTH_TOKEN=<secret> \
+  -e OAUTH_JWT_SECRET=secret my-verifier
 ```
+
+スキャフォルダーが `pnpm-lock.yaml` を生成します。イメージは
+`--frozen-lockfile` でビルドするため、lockfile が無いとビルドできません。
+
+`HTTP_HOSTNAME=0.0.0.0` はポートに到達するために必須です — 設定は既定で
+loopback に bind し、コンテナの `HEALTHCHECK` はこれが未設定のとき
+`unhealthy` を報告します（取り繕いません）。ポートを公開することは同時に
+`HTTP_CALLER_AUTH_TOKEN` を必要にします: `/verify` は認可判断を返すため、
+資格情報なしで到達可能なポートは、そこへ経路を持つ誰にでも応答します。詳細は
+[`templates/standalone/README.ja.md`](templates/standalone/README.ja.md#docker)。
 
 ## 関連プロジェクト
 

@@ -5,7 +5,7 @@ CLI scaffolder for auth.policy-verifier. Generates a new standalone server proje
 ## Usage
 
 ```sh
-npx @o3co/create-auth-policy-verifier <project-name> [--dir <dir-name>]
+npx @o3co/create-auth-policy-verifier <project-name> [--dir <dir-name>] [--no-lockfile]
 ```
 
 `<project-name>` may be either a scoped npm name (`@scope/pkg`) or an unscoped name (`pkg`).
@@ -15,8 +15,8 @@ Unscoped example:
 ```sh
 npx @o3co/create-auth-policy-verifier my-verifier
 cd my-verifier
-npm install
-npm run debug
+pnpm install
+pnpm run debug
 ```
 
 Scoped example (directory defaults to the package portion):
@@ -24,8 +24,8 @@ Scoped example (directory defaults to the package portion):
 ```sh
 npx @o3co/create-auth-policy-verifier @my-org/auth.policy-verifier
 cd auth.policy-verifier
-npm install
-npm run debug
+pnpm install
+pnpm run debug
 ```
 
 Override the directory name with `--dir`:
@@ -42,7 +42,25 @@ cd verifier
 3. Aborts with an error if the target directory already exists.
 4. Copies `templates/standalone/` to the target directory, excluding `node_modules/` and `dist/`.
 5. Rewrites `package.json`: sets `name` to `<project-name>` verbatim (scope-preserving), removes `private`, and replaces `workspace:*` dependency versions with published semver versions from `templates/versions.json`.
-6. Prints next-step instructions.
+6. Resolves that dependency set into `pnpm-lock.yaml` (`pnpm install --lockfile-only --ignore-workspace`), unless `--no-lockfile` was passed.
+7. Prints next-step instructions.
+
+### The generated `pnpm-lock.yaml`
+
+The template's `Dockerfile` installs with `pnpm install --frozen-lockfile`, so
+the generated project needs a lockfile to build at all. It cannot ship with the
+template: until step 5 has replaced every `workspace:*` with a published
+version, the dependency set the lockfile would have to pin does not exist. So
+it is resolved once, here, against the rewritten `package.json`. **Commit it** —
+it is what makes `docker build` reproducible.
+
+Step 6 needs `pnpm` (or `corepack`) and a reachable registry, and neither is
+guaranteed on the machine running the scaffolder. It is therefore best-effort:
+on failure the scaffold still succeeds and prints what to do, because the
+generated project is perfectly usable without a lockfile — it just cannot be
+built into an image until `pnpm install` has been run once. Pass
+`--no-lockfile` to skip the step outright (offline scaffolding, or a pipeline
+that installs later anyway).
 
 ## Validation Rules
 
@@ -72,6 +90,7 @@ The bundled template's `README.md` / `README.ja.md` still carry the upstream tit
 ├── docker-compose.yml
 ├── docker-compose.test.yml
 ├── package.json
+├── pnpm-lock.yaml          # Generated at scaffold time — commit it
 └── tsconfig.json
 ```
 
@@ -86,7 +105,8 @@ import { scaffold, main } from "@o3co/create-auth-policy-verifier";
 | Export | Signature | Description |
 |---|---|---|
 | `scaffold` | `(targetDir: string, projectName: string): void` | Copies the template and rewrites `package.json` |
-| `main` | `(): void` | CLI entry point — parses `process.argv` and calls `scaffold` |
+| `generateLockfile` | `(targetDir: string): LockfileResult` | Resolves `pnpm-lock.yaml` in an already-scaffolded directory; reports failure rather than throwing |
+| `main` | `(): void` | CLI entry point — parses `process.argv`, calls `scaffold`, then `generateLockfile` |
 
 ## See Also
 

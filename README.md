@@ -350,8 +350,21 @@ pnpm -r test     # test all packages
 npx @o3co/create-auth-policy-verifier my-verifier
 cd my-verifier
 docker build -t my-verifier .
-docker run -e OAUTH_JWT_SECRET=secret my-verifier
+docker run -p 3000:3000 \
+  -e HTTP_HOSTNAME=0.0.0.0 -e HTTP_CALLER_AUTH_TOKEN=<secret> \
+  -e OAUTH_JWT_SECRET=secret my-verifier
 ```
+
+The scaffolder generates `pnpm-lock.yaml`; the image builds with
+`--frozen-lockfile` and will not build without it.
+
+`HTTP_HOSTNAME=0.0.0.0` is required for the port to be reachable at all — the
+config binds loopback by default, and the container's `HEALTHCHECK` reports
+`unhealthy` when it is not set rather than pretending otherwise. Publishing the
+port is also what makes `HTTP_CALLER_AUTH_TOKEN` necessary: `/verify` answers
+with an authorization decision, so a reachable port with no credential answers
+anyone who can route to it. See
+[`templates/standalone/README.md`](templates/standalone/README.md#docker).
 
 ## Related Projects
 
