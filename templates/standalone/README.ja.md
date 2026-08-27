@@ -29,9 +29,11 @@ OAUTH_JWT_SECRET=your-secret \
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `HTTP_HOSTNAME` | `0.0.0.0` | バインドするホスト名 |
+| `HTTP_HOSTNAME` | `127.0.0.1` | バインドするホスト名。既定はループバック — [信頼境界](#信頼境界)を参照。コンテナでは `0.0.0.0` の指定が必要 |
 | `HTTP_PORT` | `3000` | バインドするポート番号 |
 | `HTTP_PATH_PREFIX` | `""` | URL パスプレフィックス |
+| `HTTP_CALLER_AUTH_TOKEN` | （未設定） | 呼び出し元サービスが提示する共有資格情報。未設定の場合、ポートに到達できる任意の相手が判定を要求できる |
+| `HTTP_CALLER_AUTH_HEADER` | `x-caller-token` | その資格情報を載せるヘッダ |
 | `OAUTH_JWT_SECRET` | （必須） | HMAC-HS256 JWT 署名シークレット |
 | `OAUTH_JWT_ISSUER` | （必須） | この deployment が受け入れる issuer — RFC 9068 §4 `iss` |
 | `OAUTH_JWT_AUDIENCE` | （必須） | この resource server を指す audience — RFC 9068 §4 `aud` |
@@ -43,6 +45,33 @@ OAUTH_JWT_SECRET=your-secret \
 | `OAUTH_JWT_MODE` | `verify` | `verify` はトークンを完全検証。明示的な `insecure-decode`（テスト専用）は署名検証なしでデコードする — `exp`/`nbf` は引き続き強制される |
 | `RULE_ON_EMPTY_RULE_SET` | `deny` | ルールが 1 つも集まらなかったときの決定（`deny` \| `allow`） |
 | `VERIFY_MAX_BATCH_SIZE` | `50` | `POST /verify/batch` の件数上限 |
+
+## 信頼境界
+
+`/verify` は認可の判定結果を返すため、誰でも到達できるポートは decision oracle になります。subject トークンが示すのは判定の *対象* であって、`resource` / `action` / `context` を渡したのがどのサービスかではありません。
+
+そのためテンプレートの既定 bind は **ループバック** です。これはサイドカー構成 — enforcement 層が同一ホストで動き、それ以外は接続できません。
+
+別ホスト・別コンテナから到達させるのは明示的なオプトインで、次の 2 つが必要です。
+
+```sh
+HTTP_HOSTNAME=0.0.0.0             # そもそもポートに到達できるようにする
+HTTP_CALLER_AUTH_TOKEN=<secret>   # そのうえで自分の enforcement 層にだけ応答させる
+```
+
+`docker-compose.yml` は既に `HTTP_HOSTNAME=0.0.0.0` を設定しています。コンテナ内でのループバックは「どこからも到達できない」ことを意味し、publish したポートが繋がらないためです。資格情報は `.env` に置いてください。
+
+`HTTP_CALLER_AUTH_TOKEN` を設定すると、`/verify` と `/verify/batch` への全リクエストが `HTTP_CALLER_AUTH_HEADER`（既定 `x-caller-token`。subject トークンを載せる `Authorization` を避けているのは意図的）にその値をそのまま載せる必要があります。
+
+```http
+POST /verify HTTP/1.1
+x-caller-token: <secret>
+Authorization: Bearer <jwt>
+```
+
+それ以外は body のパースより前に `401 { "decision": "deny", "code": "caller_unauthenticated" }` を返します。`GET /healthcheck` は常に非ゲートなので、コンテナの healthcheck はそのまま動作します。
+
+資格情報を未設定のままにする運用もサポートされており、ループバックであれば問題ありません。ループバック以外に bind した場合は起動時に `unauthenticated_non_loopback_bind` が warn で記録されます — 修正する価値があるのはこの組み合わせです。
 
 ## デフォルトコレクター
 

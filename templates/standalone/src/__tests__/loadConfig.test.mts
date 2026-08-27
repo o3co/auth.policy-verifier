@@ -25,6 +25,8 @@ const envKeys = [
 	"HTTP_HOSTNAME",
 	"HTTP_PORT",
 	"HTTP_PATH_PREFIX",
+	"HTTP_CALLER_AUTH_TOKEN",
+	"HTTP_CALLER_AUTH_HEADER",
 ] as const;
 
 /** application.conf leaves issuer/audience unset, so every load must supply them. */
@@ -50,7 +52,15 @@ describe("loadAppConfig", () => {
 
 			const config = loadAppConfig(configDirPath, env);
 
-			expect(config.http).toEqual({ hostname: "0.0.0.0", port: 3000, pathPrefix: "" });
+			// Loopback by default (#108): the shipped config is a sidecar config,
+			// and reaching the port from another host is an explicit opt-in. The
+			// callerAuth block exists but carries no token, which means the gate is off.
+			expect(config.http).toEqual({
+				hostname: "127.0.0.1",
+				port: 3000,
+				pathPrefix: "",
+				callerAuth: { header: "x-caller-token" },
+			});
 			expect(config.oauth.jwt.algorithm).toBe("HS256");
 			expect(config.oauth.jwt.secret).toBe("test-secret");
 			expect(config.oauth.jwt.mode).toBe("verify");
@@ -79,13 +89,47 @@ describe("loadAppConfig", () => {
 
 	it("applies the optional environment substitutions from application.conf", () => {
 		setRequiredEnv();
-		process.env.HTTP_HOSTNAME = "127.0.0.1";
+		// 0.0.0.0 is the container opt-out of the loopback default — the value a
+		// containerised deployment (and the cross-repo E2E) has to set explicitly.
+		process.env.HTTP_HOSTNAME = "0.0.0.0";
 		process.env.HTTP_PORT = "8080";
 		process.env.HTTP_PATH_PREFIX = "/auth";
 
 		const config = loadAppConfig(configDirPath, "development");
 
-		expect(config.http).toEqual({ hostname: "127.0.0.1", port: 8080, pathPrefix: "/auth" });
+		expect(config.http).toMatchObject({
+			hostname: "0.0.0.0",
+			port: 8080,
+			pathPrefix: "/auth",
+		});
+	});
+
+	it("enables caller authentication from the environment (#108)", () => {
+		setRequiredEnv();
+		process.env.HTTP_CALLER_AUTH_TOKEN = "caller-secret";
+
+		const config = loadAppConfig(configDirPath, "development");
+
+		expect(config.http.callerAuth).toEqual({ header: "x-caller-token", token: "caller-secret" });
+	});
+
+	it("lets the caller-credential header be renamed for existing gateway conventions", () => {
+		setRequiredEnv();
+		process.env.HTTP_CALLER_AUTH_TOKEN = "caller-secret";
+		process.env.HTTP_CALLER_AUTH_HEADER = "x-api-key";
+
+		const config = loadAppConfig(configDirPath, "development");
+
+		expect(config.http.callerAuth).toEqual({ header: "x-api-key", token: "caller-secret" });
+	});
+
+	it("refuses to boot when the caller credential is exported empty", () => {
+		// The silent-failure case: `HTTP_CALLER_AUTH_TOKEN=` must not read as
+		// "caller auth is off".
+		setRequiredEnv();
+		process.env.HTTP_CALLER_AUTH_TOKEN = "";
+
+		expect(() => loadAppConfig(configDirPath, "development")).toThrow(/callerAuth[.,\s\S]*token/);
 	});
 
 	it("selects insecure-decode mode via OAUTH_JWT_MODE, requiring no key material (#134)", () => {

@@ -8,6 +8,13 @@ services:
     volumes:
       - ./src:/home/node/src
       - ./config:/home/node/config
+    environment:
+      # application.conf binds loopback by default, which inside a container
+      # means "reachable from nothing" — the published port would never connect.
+      # Binding all interfaces is therefore an explicit opt-in per deployment,
+      # and it is why HTTP_CALLER_AUTH_TOKEN is worth setting in .env: past the
+      # container boundary, anyone who can reach the port can ask for decisions.
+      - HTTP_HOSTNAME=0.0.0.0
     env_file:
       - path: .env
         required: false

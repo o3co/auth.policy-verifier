@@ -17,10 +17,13 @@ import {
 import { createHealthcheckRouter } from "@o3co/auth.utils/express";
 import express from "express";
 import { type AppConfig, JWT_MODE_MIGRATION_MESSAGE } from "./config/application.schema.mjs";
+import { CALLER_AUTH_REQUIRED } from "./config/defaults.mjs";
+import { createCallerAuthMiddleware, resolveCallerAuth } from "./http/callerAuth.mjs";
 import {
 	assertVerifyRouterJwtConfig,
 	type VerifyRouterJwtConfig,
 } from "./jwt/tokenAuthenticator.mjs";
+import { isLoopbackBindAddress } from "./net/loopback.mjs";
 import { createVerifyRouter } from "./routes/verify.mjs";
 
 /** Options accepted by `createApp`. */
@@ -59,8 +62,14 @@ function assertConfigObject(value: unknown, path: string): asserts value is obje
  *
  * Flow: (1) create registries, (2) run `mod.init` sequentially so later modules
  * can see earlier ones' registrations, (3) resolve concrete collectors /
- * resource parser / key resolver from config, (4) mount the `/verify` router
- * and healthcheck under the configured path prefix.
+ * resource parser / key resolver from config, (4) mount the healthcheck, the
+ * optional caller-auth gate and the `/verify` router under the configured path
+ * prefix.
+ *
+ * `config.http.callerAuth.token` authenticates the *calling service* before any
+ * decision work runs (#108). It is optional in this release; the healthcheck is
+ * never gated. See `CALLER_AUTH_REQUIRED` in `config/defaults` for the one-line
+ * change that makes it mandatory.
  *
  * `config.oauth.jwt.mode = "insecure-decode"` disables signature verification
  * and only decodes the token (`exp` / `nbf` are still enforced). It is
@@ -169,10 +178,45 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 		);
 	}
 
-	// 7. Build Express app
+	// 7. Resolve caller authentication (#108). The bearer token establishes the
+	// subject a decision is about; it never establishes which service supplied
+	// `resource` / `action` / `context`. Without this gate the endpoint is a
+	// decision oracle for anyone who can route to the port.
+	//
+	// Shape-checked first for the same reason `oauth.jwt` is: `createApp` also
+	// accepts hand-built configs, and `resolveCallerAuth` indexes into the block.
+	assertConfigObject(config.http, "http");
+	const callerAuth = resolveCallerAuth(config.http, {
+		caller: "createApp",
+		path: "http.callerAuth",
+	});
+	if (!callerAuth) {
+		if (CALLER_AUTH_REQUIRED) {
+			// Reached only once the policy constant is flipped — see its doc comment.
+			throw new Error(
+				"createApp: http.callerAuth.token is required (caller authentication is mandatory)",
+			);
+		}
+		if (!isLoopbackBindAddress(config.http.hostname)) {
+			// The genuinely dangerous combination, named rather than blocked: a
+			// port reachable from off-host that will answer any caller. Warning
+			// keeps container deployments and the cross-repo E2E working while
+			// still telling their operators what they are running.
+			logger.warn({ hostname: config.http.hostname }, "unauthenticated_non_loopback_bind");
+		}
+	}
+
+	// 8. Build Express app
 	const app = express();
 	const prefix = config.http.pathPrefix || "/";
+	// Healthcheck stays open: an orchestrator probe has no credential to present,
+	// and it reveals nothing a decision does.
 	app.use(prefix, createHealthcheckRouter());
+	if (callerAuth) {
+		// Ahead of the verify router, so a rejected caller is answered before the
+		// request body is parsed and before any pipeline runs.
+		app.use(prefix, createCallerAuthMiddleware(callerAuth, logger));
+	}
 	app.use(
 		prefix,
 		createVerifyRouter({

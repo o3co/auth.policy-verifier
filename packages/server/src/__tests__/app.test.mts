@@ -610,3 +610,195 @@ describe("createApp insecure decode mode (#106, #134)", () => {
 		expect(res.status).toBe(200);
 	});
 });
+
+describe("createApp caller authentication (#108)", () => {
+	interface Captured {
+		level: "trace" | "debug" | "info" | "warn" | "error" | "fatal";
+		obj: Record<string, unknown> | string;
+		msg?: string;
+	}
+
+	function captureLogger(): { calls: Captured[]; logger: Logger } {
+		const calls: Captured[] = [];
+		const record =
+			(level: Captured["level"]) =>
+			(obj: Record<string, unknown> | string, msg?: string): void => {
+				calls.push({ level, obj, msg });
+			};
+		const logger: Logger = {
+			trace: record("trace"),
+			debug: record("debug"),
+			info: record("info"),
+			warn: record("warn"),
+			error: record("error"),
+			fatal: record("fatal"),
+			child: () => logger,
+		};
+		return { calls, logger };
+	}
+
+	/** The shared testConfig plus an `http` block, parsed through the schema. */
+	function configWithHttp(http: Record<string, unknown>) {
+		return AppConfigSchema.parse({
+			http,
+			oauth: { jwt: { secret: JWT_SECRET, mode: "verify", issuer: ISSUER, audience: AUDIENCE } },
+			attribute: { collectors: [{ collector: "TestScopeCollector" }] },
+			rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
+			resource: { parser: "SimpleParser" },
+		});
+	}
+
+	const guardedConfig = configWithHttp({ callerAuth: { token: "caller-secret" } });
+
+	it("serves decisions to a caller presenting the configured credential", async () => {
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: guardedConfig,
+			modules: [testModule, builtinKeyResolversModule],
+		});
+
+		const token = await signToken({ scope: "read:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("x-caller-token", "caller-secret")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project", action: "read" });
+
+		expect(res.status).toBe(200);
+		expect(res.body.decision).toBe("allow");
+	});
+
+	it("rejects a caller with a valid subject token but no caller credential", async () => {
+		// The subject JWT says who the token is about — never who supplied the
+		// resource/action. Without the caller credential the request must not
+		// reach the decision path at all.
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: guardedConfig,
+			modules: [testModule, builtinKeyResolversModule],
+		});
+
+		const token = await signToken({ scope: "read:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project", action: "read" });
+
+		expect(res.status).toBe(401);
+		expect(res.body.code).toBe("caller_unauthenticated");
+	});
+
+	it("gates the batch endpoint on the same credential", async () => {
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: guardedConfig,
+			modules: [testModule, builtinKeyResolversModule],
+		});
+
+		const token = await signToken({ scope: "read:project" });
+		const res = await request(app)
+			.post("/verify/batch")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ decisions: [{ resource: "project", action: "read" }] });
+
+		expect(res.status).toBe(401);
+		expect(res.body.code).toBe("caller_unauthenticated");
+	});
+
+	it("leaves the healthcheck reachable without a credential", async () => {
+		// The container healthcheck (and every orchestrator probe) has no
+		// credential to present; gating liveness would make the service unschedulable.
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: guardedConfig,
+			modules: [testModule, builtinKeyResolversModule],
+		});
+
+		const res = await request(app).get("/healthcheck");
+		expect(res.status).toBe(200);
+	});
+
+	it("serves decisions with no caller credential configured — the gate is opt-in", async () => {
+		// Deliberately optional in this pass: container deployments and the
+		// cross-repo E2E must keep working without one.
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: testConfig,
+			modules: [testModule, builtinKeyResolversModule],
+		});
+
+		const token = await signToken({ scope: "read:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project", action: "read" });
+
+		expect(res.status).toBe(200);
+	});
+
+	it("warns at boot when a non-loopback bind has no caller authentication", async () => {
+		const { calls, logger } = captureLogger();
+		await createApp({
+			pathResolver: (s: string) => s,
+			config: configWithHttp({ hostname: "0.0.0.0" }),
+			modules: [testModule, builtinKeyResolversModule],
+			logger,
+		});
+
+		const warnings = calls.filter((c) => c.msg === "unauthenticated_non_loopback_bind");
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0].level).toBe("warn");
+		expect(warnings[0].obj).toMatchObject({ hostname: "0.0.0.0" });
+	});
+
+	it("stays quiet on a loopback bind — the sidecar case is the default", async () => {
+		const { calls, logger } = captureLogger();
+		await createApp({
+			pathResolver: (s: string) => s,
+			config: testConfig,
+			modules: [testModule, builtinKeyResolversModule],
+			logger,
+		});
+
+		expect(calls.filter((c) => c.msg === "unauthenticated_non_loopback_bind")).toHaveLength(0);
+	});
+
+	it("stays quiet on a non-loopback bind that does authenticate its callers", async () => {
+		const { calls, logger } = captureLogger();
+		await createApp({
+			pathResolver: (s: string) => s,
+			config: configWithHttp({ hostname: "0.0.0.0", callerAuth: { token: "caller-secret" } }),
+			modules: [testModule, builtinKeyResolversModule],
+			logger,
+		});
+
+		expect(calls.filter((c) => c.msg === "unauthenticated_non_loopback_bind")).toHaveLength(0);
+	});
+
+	it("refuses to boot a hand-built config whose http block is malformed", async () => {
+		const handBuilt = { ...testConfig, http: null } as unknown as typeof testConfig;
+
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: handBuilt,
+				modules: [testModule, builtinKeyResolversModule],
+			}),
+		).rejects.toThrow(/^createApp: http must be a config object/);
+	});
+
+	it("refuses to boot a hand-built config whose caller credential is empty", async () => {
+		const handBuilt = {
+			...testConfig,
+			http: { ...testConfig.http, callerAuth: { token: "" } },
+		} as unknown as typeof testConfig;
+
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: handBuilt,
+				modules: [testModule, builtinKeyResolversModule],
+			}),
+		).rejects.toThrow(/^createApp: http\.callerAuth\.token must be a non-empty string/);
+	});
+});

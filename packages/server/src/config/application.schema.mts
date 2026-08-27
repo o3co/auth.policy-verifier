@@ -4,6 +4,8 @@
 import { z } from "zod";
 import { checkJwksUri } from "../jwt/jwks.mjs";
 import {
+	DEFAULT_CALLER_AUTH_HEADER,
+	DEFAULT_HOSTNAME,
 	DEFAULT_JWKS_CACHE_MAX_AGE_MS,
 	DEFAULT_JWKS_COOLDOWN_MS,
 	DEFAULT_JWKS_TIMEOUT_MS,
@@ -39,11 +41,34 @@ const collectorSchema = z
 export const AppConfigSchema = z.object({
 	http: z
 		.object({
-			hostname: z.string().default("0.0.0.0"),
+			/**
+			 * Bind address. Defaults to loopback (#108) — the verifier answers with
+			 * authorization decisions, so a reachable port is a decision oracle.
+			 * A container deployment sets `0.0.0.0` explicitly; that is the opt-in.
+			 */
+			hostname: z.string().default(DEFAULT_HOSTNAME),
 			port: z.coerce.number().default(3000),
 			pathPrefix: z.string().default(""),
+			/**
+			 * Optional shared credential the calling service must present (#108).
+			 * Configured means required; absent (or present with no `token`) means
+			 * the decision endpoints accept any caller who can reach the port —
+			 * which `createApp` warns about when the bind is not loopback.
+			 *
+			 * `token` has no default on purpose: a credential must come from the
+			 * deployment, never from this file.
+			 */
+			callerAuth: z
+				.object({
+					header: z.string().min(1).default(DEFAULT_CALLER_AUTH_HEADER),
+					// `.min(1)` and not `.optional()`-with-empty: `HTTP_CALLER_AUTH_TOKEN=`
+					// substitutes an empty string, and booting unauthenticated because a
+					// credential was exported empty is the silent failure #108 is about.
+					token: z.string().min(1).optional(),
+				})
+				.optional(),
 		})
-		.default(() => ({ hostname: "0.0.0.0", port: 3000, pathPrefix: "" })),
+		.default(() => ({ hostname: DEFAULT_HOSTNAME, port: 3000, pathPrefix: "" })),
 	oauth: z.object({
 		// Algorithm names are free-form strings so user-registered algorithms can be selected
 		// from config without editing the schema enum. Built-in algorithms keep schema-level

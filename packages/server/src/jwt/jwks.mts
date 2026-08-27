@@ -27,6 +27,7 @@ import {
 	DEFAULT_JWKS_COOLDOWN_MS,
 	DEFAULT_JWKS_TIMEOUT_MS,
 } from "../config/defaults.mjs";
+import { isLoopbackHost } from "../net/loopback.mjs";
 
 /**
  * Hosts exempt from the https requirement, named in the rejection message.
@@ -40,21 +41,6 @@ import {
  * network — and is rejected.
  */
 const LOOPBACK_HOSTS = "localhost, 127.0.0.0/8, [::1]";
-
-/** The whole 127.0.0.0/8 block, not just 127.0.0.1, octets range-checked. */
-const LOOPBACK_IPV4 = /^127(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
-
-/**
- * True for a hostname that resolves to the local machine by definition, never
- * by lookup. Deliberately an exact test rather than a prefix or suffix one:
- * `localhost.attacker.test` and `127.0.0.1.attacker.test` are ordinary
- * routable names, and treating either as loopback would hand the carve-out to
- * anyone who can register a subdomain.
- */
-function isLoopbackHost(hostname: string): boolean {
-	// `URL.hostname` is already lowercased and keeps IPv6 literals bracketed.
-	return hostname === "localhost" || hostname === "[::1]" || LOOPBACK_IPV4.test(hostname);
-}
 
 /**
  * Outcome of {@link checkJwksUri}: the parsed URL, or the operator-facing
