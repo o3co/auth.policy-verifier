@@ -85,7 +85,7 @@ Releases are triggered by pushing a `v*` tag to GitHub. There is no manual publi
 - **The published set is four packages**: `@o3co/auth.policy-verifier.core`, `.builtins`, `.server` and `@o3co/create-auth-policy-verifier`. `templates/standalone` and `tests/integration` are `private: true` and are stamped with the version but never published.
 - **Idempotent re-runs, per package:** `pnpm -r publish` skips each package that is already on the registry at this version and publishes the rest. Rerunning a tag after a publish that failed partway through therefore publishes exactly the packages that are missing — there is no whole-job "already published" short-circuit, and re-adding one would make a partial publish unrecoverable (see the comment in `release.yml`).
 - **The CHANGELOG must be cut before the tag.** The workflow refuses to publish a tag whose version has no `## [X.Y.Z]` section in `CHANGELOG.md`.
-- **Tag format must be `vX.Y.Z`** (leading `v`, optional `-prerelease` suffix). The workflow strips the `v` prefix when computing the npm version and rejects anything else.
+- **Tag format must be `v` + a SemVer 2.0.0 version**, prerelease identifiers included (`v1.2.3`, `v1.2.3-rc.1`, `v1.2.3-rc-1`, `v1.2.3-0.3.7`). SemVer build metadata (`v1.2.3+build.5`) is rejected on purpose: npm ignores it for version precedence, so two such tags are one npm version, and the CHANGELOG heading the tag must match would not be the version consumers see. The workflow strips the `v` when computing the npm version — that one parse is the only one, and the later steps consume its output rather than re-deriving it from `GITHUB_REF`.
 
 ### For Agents / Contributors
 
@@ -95,7 +95,7 @@ When asked to "release 0.2.1" or similar:
 2. Verify the change set warrants the requested version bump (breaking change → major, feature → minor, fix → patch)
 3. Run the release-cut audit in `docs/release-policy.md` R6 and land the CHANGELOG rename (`## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD`) first — the workflow refuses a tag whose version has no CHANGELOG section
 4. Propose the tag command to the user; do not push tags without explicit user approval (tag push is irreversible from an npm-publish perspective once the workflow succeeds)
-4. After the tag is pushed, watch the Actions run: `gh run watch` or `gh run list --workflow=release.yml`
+5. After the tag is pushed, watch the Actions run: `gh run watch` or `gh run list --workflow=release.yml`
 
 Do not edit `package.json` `version` fields as part of a release PR — the workflow handles versioning.
 

@@ -25,18 +25,44 @@ jobs:
       # Checked here, before anything is built or published, so a tag pushed at
       # an unstamped CHANGELOG fails while it is still free to delete the tag.
       - name: Verify tag and CHANGELOG
+        id: release
         shell: bash
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
-          VERSION="${TAG#v}"
-          if ! printf '%s' "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
-            echo "::error::tag must be vX.Y.Z (optionally with a -prerelease suffix); got '${TAG}'"
+
+          # SemVer 2.0.0 §2 (numeric identifiers carry no leading zeros) and §9
+          # (prerelease is dot-separated identifiers of [0-9A-Za-z-], so a hyphen
+          # inside one is legal: `1.2.3-rc-1` and `1.2.3-0.3.7` are valid).
+          CORE='(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
+          IDENT='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+          PRERELEASE="(-${IDENT}(\.${IDENT})*)?"
+
+          # §10 build metadata is valid SemVer but is refused for a *tag*, on
+          # purpose: npm ignores it when comparing versions, so `v1.2.3+a` and
+          # `v1.2.3+b` are one npm version and the second tag could only ever
+          # be a no-op republish — while the CHANGELOG heading and the
+          # `pnpm version` stamp would both carry a `+build` string that no
+          # consumer of the registry ever sees. Called out separately from the
+          # shape error so the reason reaches whoever pushed the tag.
+          if printf '%s' "$TAG" | grep -qE "^v${CORE}${PRERELEASE}\+"; then
+            echo "::error::tag '${TAG}' carries SemVer build metadata. npm ignores '+…' for version precedence, so it cannot distinguish two releases; drop it, or move the distinction into a prerelease identifier (v1.2.3-build.5)."
             exit 1
           fi
+          if ! printf '%s' "$TAG" | grep -qE "^v${CORE}${PRERELEASE}$"; then
+            echo "::error::tag must be 'v' + a SemVer version, e.g. v1.2.3 or v1.2.3-rc.1; got '${TAG}'"
+            exit 1
+          fi
+
+          VERSION="${TAG#v}"
           if ! grep -qF -- "## [${VERSION}]" CHANGELOG.md; then
             echo "::error::CHANGELOG.md has no '## [${VERSION}]' section. Per docs/release-policy.md R2, rename '## [Unreleased]' to '## [${VERSION}] - YYYY-MM-DD', commit, and tag that commit."
             exit 1
           fi
+
+          # The one place the tag is parsed. Later steps read this output
+          # instead of re-deriving the version from GITHUB_REF, so the tag
+          # grammar cannot drift between two copies of the same expression.
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Get pnpm store path
         id: pnpm-store
@@ -54,8 +80,14 @@ jobs:
       # is the only source of the real one (AGENTS.md, Release Process). The
       # private packages are stamped too, harmlessly — pnpm rewrites the
       # `workspace:*` ranges between them to this exact version on publish.
+      #
+      # The version comes from the step that validated the tag, not from a
+      # second `${GITHUB_REF#refs/tags/v}` here, and travels through env rather
+      # than being interpolated into the script body.
       - name: Set version from tag
-        run: pnpm -r exec pnpm version "${GITHUB_REF#refs/tags/v}" --no-git-tag-version --no-commit-hooks
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: pnpm -r exec pnpm version "$VERSION" --no-git-tag-version --no-commit-hooks
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
