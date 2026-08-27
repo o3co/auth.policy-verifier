@@ -172,7 +172,7 @@ HTTP/1.1 403 Forbidden
 }
 ```
 
-`reason.groups` lists every rule group in evaluation order — `passed`, plus `evaluated`: every rule that actually ran in that group, in order. A failing group ran (and lists) every alternative; a passing group stops at its first passing rule, so `evaluated` ends with it after any alternatives that were tried and failed, and `satisfiedBy` names that deciding rule explicitly. `code` / `message` come from the first failing group, as before.
+`reason.groups` lists every rule group in evaluation order — `passed`, plus `evaluated`: every rule that actually ran in that group, in order. A failing group ran (and lists) every alternative; a passing group stops at its first passing rule, so `evaluated` ends with it after any alternatives that were tried and failed, and `satisfiedBy` — present only on a passing group, absent on a failing one — names that deciding rule explicitly. `code` / `message` come from the first failing group, as before.
 
 **Response — unexpected error**
 
