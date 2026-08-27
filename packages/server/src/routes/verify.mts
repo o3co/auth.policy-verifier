@@ -14,46 +14,11 @@ import {
 	type VerifierPayload,
 } from "@o3co/auth.policy-verifier.core";
 import express from "express";
-import { decodeJwt, errors, type JWTPayload, jwtVerify } from "jose";
 import { DEFAULT_MAX_BATCH_SIZE } from "../config/defaults.mjs";
-
-/**
- * JWT parameters used when signature validation is on. Every field a resource
- * server must check per RFC 9068 §4 is required here, so a deployment cannot
- * end up verifying the signature alone.
- */
-export interface VerifyingJwtConfig {
-	validate: true;
-	// The `key` is produced by a KeyResolverFactory; its concrete type depends on
-	// the algorithm (e.g. KeyObject for HS256, JWTVerifyGetKey for JWKS, etc.).
-	// The route narrows it via cast when calling jwtVerify.
-	key: unknown;
-	algorithms: string[];
-	/** Issuer(s) this deployment accepts. A token minted by anyone else is rejected. */
-	issuer: string | string[];
-	/** Audience identifying this resource server. A token minted for another service is rejected. */
-	audience: string | string[];
-	/**
-	 * Accepted `typ` header — `"at+jwt"` for RFC 9068 access tokens. An `application/`
-	 * prefix on either side is ignored when comparing. Pinning it is what keeps an
-	 * `id_token`, refresh token or logout token signed with the same key from passing.
-	 */
-	tokenType: string;
-}
-
-/**
- * Test-only shape: the token is decoded, never signature-verified. Its `exp` /
- * `nbf` claims are still enforced (#106). The acknowledgment is part of the
- * shape — and re-checked at construction time — so wiring the router directly
- * is not a way around the double opt-in `createApp` enforces.
- */
-export interface DecodingJwtConfig {
-	validate: false;
-	allowInsecureDecode: true;
-}
-
-/** JWT half of `VerifyRouterConfig`, discriminated on `validate`. */
-export type VerifyRouterJwtConfig = VerifyingJwtConfig | DecodingJwtConfig;
+import {
+	createTokenAuthenticator,
+	type VerifyRouterJwtConfig,
+} from "../jwt/tokenAuthenticator.mjs";
 
 /** Config for `createVerifyRouter`. The `jwt.key` type is library-specific and is narrowed at call-time. */
 export interface VerifyRouterConfig {
@@ -108,13 +73,6 @@ export interface DecisionResponse {
 	reason: DecisionReason;
 }
 
-/** True for a non-empty string or a non-empty array of non-empty strings. */
-function isPresent(value: string | string[] | undefined): boolean {
-	return Array.isArray(value)
-		? value.length > 0 && value.every((v) => typeof v === "string" && v !== "")
-		: typeof value === "string" && value !== "";
-}
-
 /** Error envelope shared by every non-decision response. */
 interface ErrorBody {
 	decision: "deny";
@@ -127,97 +85,6 @@ const errorBody = (code: string, message: string): ErrorBody => ({
 	code,
 	message,
 });
-
-/** Outcome of authenticating the caller: either the verified payload or the response to send. */
-type Authentication =
-	| { ok: true; payload: VerifierPayload }
-	| { ok: false; status: number; body: ErrorBody };
-
-/**
- * True when token verification could not be attempted or completed for reasons
- * unrelated to the presented token — the situation an operator must be able to
- * tell apart from a bad token (#107: a JWKS outage flips the whole fleet to
- * 401-deny while the verifier's own logs stay empty).
- *
- * Infrastructure side: a JWKS fetch timeout, a malformed JWKS document, a bare
- * `JOSEError` (`ERR_JOSE_GENERIC` — jose reserves the base class for the JWKS
- * fetch path: its only two throw sites are a non-200 JWKS response and a body
- * that fails to parse as JSON), or any non-jose error escaping `jwtVerify`
- * (fetch/DNS failures from the remote key getter, a broken key resolver).
- * Every subclass jose throws about the token itself is judged token-side —
- * deliberately including `JWKSNoMatchingKey`, because the `kid` that failed to
- * match is attacker-controllable and must not open an error-level log-flooding
- * channel; its `err.code` in the warn line still identifies a stale-JWKS
- * rotation problem.
- */
-function isVerificationUnavailable(cause: unknown): boolean {
-	if (!(cause instanceof errors.JOSEError)) {
-		return true;
-	}
-	return (
-		cause instanceof errors.JWKSTimeout ||
-		cause instanceof errors.JWKSInvalid ||
-		cause.code === "ERR_JOSE_GENERIC"
-	);
-}
-
-/**
- * `exp` / `nbf` checks for the decode-only path (#106). `decodeJwt` performs
- * no validation at all, so the route enforces the token's own lifetime with
- * `jwtVerify`'s semantics and error classes: reject a numeric `exp` in the
- * past or a numeric `nbf` in the future, reject a present non-numeric value
- * for any time claim (`iat` included — `jwtVerify` type-checks it
- * unconditionally), tolerate absence, zero clock tolerance. Skipping the
- * signature is an (acknowledged, test-only) trust decision about the issuer;
- * honouring an expired token is simply wrong in every mode.
- */
-function assertTimeClaims(payload: JWTPayload): void {
-	const now = Math.floor(Date.now() / 1000);
-	if (payload.iat !== undefined && typeof payload.iat !== "number") {
-		throw new errors.JWTClaimValidationFailed(
-			'"iat" claim must be a number',
-			payload,
-			"iat",
-			"invalid",
-		);
-	}
-	if (payload.nbf !== undefined) {
-		if (typeof payload.nbf !== "number") {
-			throw new errors.JWTClaimValidationFailed(
-				'"nbf" claim must be a number',
-				payload,
-				"nbf",
-				"invalid",
-			);
-		}
-		if (payload.nbf > now) {
-			throw new errors.JWTClaimValidationFailed(
-				'"nbf" claim timestamp check failed',
-				payload,
-				"nbf",
-				"check_failed",
-			);
-		}
-	}
-	if (payload.exp !== undefined) {
-		if (typeof payload.exp !== "number") {
-			throw new errors.JWTClaimValidationFailed(
-				'"exp" claim must be a number',
-				payload,
-				"exp",
-				"invalid",
-			);
-		}
-		if (payload.exp <= now) {
-			throw new errors.JWTExpired(
-				'"exp" claim timestamp check failed',
-				payload,
-				"exp",
-				"check_failed",
-			);
-		}
-	}
-}
 
 /** Outcome of validating one decision request: either the parsed entry or the reason it is unusable. */
 type ParsedDecisionRequest = { ok: true; request: DecisionRequest } | { ok: false; error: string };
@@ -268,102 +135,11 @@ function parseDecisionRequest(raw: unknown, label: string): ParsedDecisionReques
  * 500 for anything unexpected.
  */
 export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
-	const jwt = config.jwt;
 	const maxBatchSize = config.maxBatchSize ?? DEFAULT_MAX_BATCH_SIZE;
 	const logger = config.logger ?? consoleLogger;
-
-	// Fail at construction rather than accept tokens with an unchecked iss/aud/typ.
-	// A JavaScript caller can reach here with the fields missing even though the
-	// TypeScript shape requires them.
-	if (jwt.validate) {
-		if (!isPresent(jwt.issuer)) {
-			throw new Error(
-				"createVerifyRouter: jwt.issuer is required when jwt.validate is true (RFC 9068 §4)",
-			);
-		}
-		if (!isPresent(jwt.audience)) {
-			throw new Error(
-				"createVerifyRouter: jwt.audience is required when jwt.validate is true (RFC 9068 §4)",
-			);
-		}
-		if (!isPresent(jwt.tokenType)) {
-			throw new Error(
-				"createVerifyRouter: jwt.tokenType is required when jwt.validate is true (RFC 9068 §4)",
-			);
-		}
-	} else if (jwt.allowInsecureDecode !== true) {
-		// The double opt-in (#106) holds at this API boundary too: a JavaScript
-		// caller can reach here without the acknowledgment even though the
-		// TypeScript shape requires it.
-		throw new Error(
-			"createVerifyRouter: jwt.validate=false disables ALL signature verification (test-only); set jwt.allowInsecureDecode=true to acknowledge, or use a verifying config",
-		);
-	}
-
-	/** Extracts and verifies the bearer token. Shared by both endpoints. */
-	async function authenticate(req: express.Request): Promise<Authentication> {
-		const rawAuthHeader = req.get("authorization");
-		if (!rawAuthHeader) {
-			return {
-				ok: false,
-				status: 401,
-				body: errorBody("missing_token", "Authorization header is missing"),
-			};
-		}
-
-		const authHeader = rawAuthHeader.trim();
-		const spaceIndex = authHeader.indexOf(" ");
-		const scheme = spaceIndex > 0 ? authHeader.slice(0, spaceIndex) : authHeader;
-		const token = spaceIndex > 0 ? authHeader.slice(spaceIndex + 1).trim() : undefined;
-
-		if (scheme.toLowerCase() !== "bearer") {
-			return {
-				ok: false,
-				status: 401,
-				body: errorBody("unsupported_scheme", `Unsupported authorization scheme: ${scheme}`),
-			};
-		}
-		if (!token) {
-			return {
-				ok: false,
-				status: 401,
-				body: errorBody("missing_token", "Authorization header is missing"),
-			};
-		}
-
-		let decoded: JWTPayload;
-		try {
-			if (jwt.validate) {
-				// key is either a static key or a JWKS get-key function; both satisfy jwtVerify overloads
-				const result = await jwtVerify(token, jwt.key as Parameters<typeof jwtVerify>[1], {
-					algorithms: jwt.algorithms,
-					issuer: jwt.issuer,
-					audience: jwt.audience,
-					typ: jwt.tokenType,
-				});
-				decoded = result.payload;
-			} else {
-				decoded = decodeJwt(token);
-				assertTimeClaims(decoded);
-			}
-		} catch (cause) {
-			// Same 401 either way — the caller is unauthenticated regardless — but
-			// the log line is what lets the operator tell a provider outage from a
-			// bad token.
-			if (isVerificationUnavailable(cause)) {
-				logger.error({ err: cause }, "jwt_verification_unavailable");
-			} else {
-				logger.warn({ err: cause }, "jwt_token_rejected");
-			}
-			return {
-				ok: false,
-				status: 401,
-				body: errorBody("invalid_token", "Invalid token"),
-			};
-		}
-
-		return { ok: true, payload: { ...decoded, token, tokenType: scheme } };
-	}
+	// Constructing the authenticator runs assertVerifyRouterJwtConfig, so an
+	// invalid hand-built jwt config still fails here, at router construction.
+	const authenticator = createTokenAuthenticator(config.jwt, logger);
 
 	/** Runs the pipelines and the evaluator for one entry. */
 	async function decide(
@@ -395,9 +171,9 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 
 	router.post("/verify", async (req: express.Request, res: express.Response) => {
 		try {
-			const auth = await authenticate(req);
+			const auth = await authenticator.authenticate(req.get("authorization"));
 			if (!auth.ok) {
-				res.status(auth.status).json(auth.body);
+				res.status(401).json(errorBody(auth.code, auth.message));
 				return;
 			}
 
@@ -417,9 +193,9 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 
 	router.post("/verify/batch", async (req: express.Request, res: express.Response) => {
 		try {
-			const auth = await authenticate(req);
+			const auth = await authenticator.authenticate(req.get("authorization"));
 			if (!auth.ok) {
-				res.status(auth.status).json(auth.body);
+				res.status(401).json(errorBody(auth.code, auth.message));
 				return;
 			}
 

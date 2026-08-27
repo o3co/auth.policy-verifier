@@ -36,8 +36,8 @@ import express from "express";
 import { errors, SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { HS256KeyResolverFactory } from "#/jwt/index.mjs";
-import { createVerifyRouter, type VerifyRouterJwtConfig } from "#/routes/verify.mjs";
+import { HS256KeyResolverFactory, type VerifyRouterJwtConfig } from "#/jwt/index.mjs";
+import { createVerifyRouter } from "#/routes/verify.mjs";
 
 const JWT_SECRET = "test-secret";
 const hs256Key = await HS256KeyResolverFactory({ secret: JWT_SECRET });
