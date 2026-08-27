@@ -35,6 +35,10 @@ Individual values can also be overridden with environment variables.
 | `OAUTH_JWT_SECRET` | (required) | HMAC-HS256 JWT signing secret |
 | `OAUTH_JWT_ISSUER` | (required) | Issuer this deployment accepts — RFC 9068 §4 `iss` |
 | `OAUTH_JWT_AUDIENCE` | (required) | Audience identifying this resource server — RFC 9068 §4 `aud` |
+| `OAUTH_JWT_JWKS_URI` | — | JWKS endpoint for RS256/ES256/EdDSA. Must be `https://`; plaintext `http://` is accepted only for loopback hosts (`localhost`, `127.0.0.0/8`, `[::1]`) |
+| `OAUTH_JWT_JWKS_TIMEOUT_MS` | `5000` | Abort a JWKS fetch after this long |
+| `OAUTH_JWT_JWKS_COOLDOWN_MS` | `30000` | Minimum spacing between JWKS fetches |
+| `OAUTH_JWT_JWKS_CACHE_MAX_AGE_MS` | `600000` | How long a fetched JWKS is served from cache |
 | `OAUTH_JWT_TOKEN_TYPE` | `at+jwt` | Accepted `typ` header; rejects id/refresh/logout tokens signed with the same key |
 | `OAUTH_JWT_MODE` | `verify` | `verify` fully verifies tokens; the explicit `insecure-decode` (test-only) decodes without signature verification — `exp`/`nbf` are still enforced |
 | `RULE_ON_EMPTY_RULE_SET` | `deny` | Decision when no rule is collected (`deny` \| `allow`) |

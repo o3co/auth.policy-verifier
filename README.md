@@ -54,7 +54,7 @@ POST /verify/batch — the same contract, N decisions per round trip
 - **A decision contract, not a boolean** — every request is `(subject, resource, action, context)` and every answer carries a structured `reason` naming each rule group and how it came out, so "why was this denied" is answerable without re-running the pipeline. `POST /verify/batch` decides many resources in one round trip.
 - **Configurable JWT verification** — HS256 (shared secret), RS256/ES256/EdDSA (JWKS URI or direct public key). Symmetric design with [auth.provider](https://github.com/o3co/auth.provider)'s JWT config.
 - **RFC 9068 §4 token validation** — `iss`, `aud` and the `typ` header are checked alongside the signature, so an `id_token`, refresh token or logout token signed with the same key, or a token minted for another service, is rejected. `issuer` and `audience` are required whenever `mode = "verify"` (the default).
-- **JWKS support** — Point `jwksUri` at auth.provider's `/.well-known/jwks.json` for automatic key rotation.
+- **JWKS support** — Point `jwksUri` at auth.provider's `https://.../.well-known/jwks.json` for automatic key rotation. The endpoint must be TLS-protected (loopback hosts excepted for local development), and the fetch is bounded by an operator-set timeout, cooldown and cache age so a provider outage cannot stall the decision path.
 - **Pluggable architecture** — Module system for registering custom collectors, rules, and resource parsers via factories.
 - **No DSL lock-in** — Authorization logic is TypeScript. No Rego, no Cedar policy language. If you outgrow this, swap to OPA or Cedar via [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) — the interceptor abstracts over the backend.
 
@@ -195,7 +195,10 @@ oauth {
     algorithm = "HS256"           # HS256 | RS256 | ES256 | EdDSA
     algorithm = ${?OAUTH_JWT_ALGORITHM}
     secret = ${?OAUTH_JWT_SECRET}           # HS256
-    jwksUri = ${?OAUTH_JWT_JWKS_URI}        # RS256/ES256/EdDSA — e.g. http://auth-provider/.well-known/jwks.json
+    jwksUri = ${?OAUTH_JWT_JWKS_URI}        # RS256/ES256/EdDSA — https required, e.g. https://auth-provider/.well-known/jwks.json
+    jwksTimeoutMs = 5000                     # JWKS fetch bounds — abort after
+    jwksCooldownMs = 30000                   # minimum spacing between fetches
+    jwksCacheMaxAgeMs = 600000               # cache lifetime of a fetched JWKS
     publicKey = ${?OAUTH_JWT_PUBLIC_KEY}     # RS256/ES256/EdDSA — PEM string
     publicKeyPath = ${?OAUTH_JWT_PUBLIC_KEY_PATH}  # or file path
     issuer = ${?OAUTH_JWT_ISSUER}           # required when mode = "verify" — RFC 9068 §4 iss
@@ -255,11 +258,13 @@ When auth.provider uses asymmetric JWT signing (RS256/ES256/EdDSA), point the po
 ```hocon
 oauth.jwt {
   algorithm = "RS256"
-  jwksUri = "http://auth-provider:3000/.well-known/jwks.json"
+  jwksUri = "https://auth-provider:3000/.well-known/jwks.json"
 }
 ```
 
-The policy-verifier fetches and caches the public keys automatically via jose's `createRemoteJWKSet`.
+The policy-verifier fetches and caches the public keys automatically via jose's `createRemoteJWKSet`, bounded by `jwksTimeoutMs` / `jwksCooldownMs` / `jwksCacheMaxAgeMs`.
+
+**The JWKS URI must be `https://`.** Every key that endpoint serves can verify tokens this deployment accepts, so its identity is the entire trust anchor and TLS is what establishes it; over plaintext, anyone on the network path — or holding a DNS answer — substitutes their own signing key and mints tokens that verify. Plaintext `http://` is accepted only for loopback hosts (`localhost`, `127.0.0.0/8`, `[::1]`), where there is no network path to sit on; that carve-out is for local development and tests. A service reached by container or DNS name (`http://auth-provider:3000`) is **not** loopback and is rejected at config-parse time — put a TLS terminator in front of the provider, or share the public key directly with `publicKey` / `publicKeyPath`.
 
 For HS256, both services share the same secret:
 

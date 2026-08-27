@@ -8,6 +8,57 @@ and version sections follow the release labeling policy in
 
 ## [Unreleased]
 
+### Security
+
+- **BREAKING**: `oauth.jwt.jwksUri` must now be an `https://` URL
+  ([#109](https://github.com/o3co/auth.policy-verifier/issues/109)). Plaintext
+  `http://` is accepted **only** for loopback hosts — `localhost`,
+  `127.0.0.0/8`, `[::1]` — and every other scheme (`file:`, `ftp:`, …) is
+  refused outright. A URI that fails the check is rejected at config-parse
+  time, so the deployment fails at boot instead of at the first request that
+  misses the key cache. The built-in RS256/ES256/EdDSA key resolvers repeat the
+  check when they build the key set, so a hand-built config that never went
+  through `AppConfigSchema` still fails inside `createApp` rather than serving.
+
+  Rationale: every key the JWKS endpoint serves can verify tokens the
+  deployment accepts, so the endpoint's identity is the entire trust anchor and
+  TLS server authentication is what establishes it. Over plaintext, anyone on
+  the network path (or holding a DNS answer) substitutes their own signing key
+  and mints tokens that verify — a full authorization bypass. A loopback
+  address has no network path to sit on, which is why the development carve-out
+  is safe; a host reached by container or DNS name is not loopback.
+
+  Operator migration — a config that boots today and stops booting after this
+  release is one with a routable plaintext JWKS URI, e.g. the
+  `http://auth-provider:3000/.well-known/jwks.json` the README used to
+  recommend. Either:
+  - put a TLS terminator in front of the provider and switch the URI to
+    `https://` (the README's `Connecting to auth.provider` section now shows
+    this), or
+  - drop the JWKS entirely and hand the verifier the provider's public key
+    directly with `oauth.jwt.publicKey` / `publicKeyPath`, or
+  - if the provider genuinely runs on the same host, address it as
+    `http://127.0.0.1:<port>/...` rather than by service name.
+
+  The error names the key and the rejected value:
+  `jwksUri must use https; http is accepted only for loopback hosts
+  (localhost, 127.0.0.0/8, [::1]), got "http://auth-provider:3000/..."`.
+
+### Added
+
+- Bounds on the remote JWKS fetch, which happens inside a verify request
+  whenever key resolution misses the cache
+  ([#109](https://github.com/o3co/auth.policy-verifier/issues/109)):
+  `oauth.jwt.jwksTimeoutMs` (default `5000`), `oauth.jwt.jwksCooldownMs`
+  (default `30000`) and `oauth.jwt.jwksCacheMaxAgeMs` (default `600000`), with
+  the matching `OAUTH_JWT_JWKS_TIMEOUT_MS` / `_COOLDOWN_MS` /
+  `_CACHE_MAX_AGE_MS` env overrides in the standalone template. The defaults
+  match what jose applied implicitly, so timing is unchanged; they are now
+  stated (a jose release cannot silently retune the decision hot path) and
+  tunable per deployment. `@o3co/auth.policy-verifier.server` additionally
+  exports `checkJwksUri`, `parseJwksUri` and `resolveJwksFetchBounds` for
+  custom `KeyResolverFactory` implementations that fetch their own JWKS.
+
 ### Changed
 
 - **BREAKING**: `HasScope` (`@o3co/auth.policy-verifier.builtins`) now matches
