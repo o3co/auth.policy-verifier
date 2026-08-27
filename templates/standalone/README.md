@@ -69,7 +69,7 @@ x-caller-token: <secret>
 Authorization: Bearer <jwt>
 ```
 
-Anything else gets `401 { "decision": "deny", "code": "caller_unauthenticated" }`, decided before the body is parsed. `GET /healthcheck` is never gated, so the container healthcheck keeps working.
+Anything else gets `401 { "decision": "deny", "code": "caller_unauthenticated", "message": "Caller authentication failed" }`, decided before the body is parsed. `GET /healthcheck` is never gated, so the container healthcheck keeps working.
 
 Leaving the credential unset is supported and is fine on loopback. On a non-loopback bind the server logs `unauthenticated_non_loopback_bind` at warn on boot — that combination is the one worth fixing.
 
