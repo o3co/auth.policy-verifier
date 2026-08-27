@@ -29,9 +29,27 @@ jobs:
           restore-keys: pnpm-store-
 
       - run: pnpm install --frozen-lockfile
+
+      # `pnpm audit --prod --audit-level=low`. Runs before lint/build so a known
+      # advisory in a shipped dependency fails fast and is not buried under a
+      # test log. `--prod` scopes it to what consumers actually install; the
+      # `--audit-level=low` floor is deliberate — this is an authorization
+      # service, and a "low" DoS in the request-parsing path is not cosmetic.
+      #
+      # Same entry point as `make audit`, so a contributor reproduces this
+      # locally with one command instead of re-deriving the flags.
+      - run: pnpm run audit
+
       - run: pnpm run lint
       - run: pnpm run build
-      - run: pnpm -r --if-present run typecheck
+
+      # Real work, not a no-op: every workspace package defines `typecheck`
+      # (`tsc --noEmit -p tsconfig.typecheck.json`, or plain `tsc --noEmit` for
+      # tests/integration, which emits nothing anyway). It covers `src/**/*`
+      # *including* `__tests__` — which the build deliberately no longer does,
+      # since compiled tests must not reach a published tarball. Without this
+      # step nothing would type-check test files at all.
+      - run: pnpm run typecheck
 
       # Every workspace, including the ones with no `test:coverage` script:
       # templates/standalone, tests/integration and create-app. The coverage
@@ -69,3 +87,234 @@ jobs:
           flags: server
           disable_search: true
           fail_ci_if_error: false
+
+  # Simulates the post-publish state: tarball every package `pnpm -r publish`
+  # would offer to the registry, then build the scaffold a consumer actually
+  # receives against those tarballs instead of the `workspace:*` links a local
+  # build resolves. Catches the class of defect where the template references a
+  # symbol that is not in the published tarball — invisible in the workspace,
+  # where `src/` is right there, and only observable after the tag is pushed.
+  publish-readiness:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+
+      - name: Pack every publishable workspace package
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The publish surface is read back from pnpm rather than matched
+          # against a name pattern. `pnpm -r publish` offers exactly the
+          # workspace projects that are not `private`, so asking pnpm for that
+          # list is the only way this job cannot silently drift from it — a
+          # glob like `@o3co/auth.policy-verifier.*` would quietly miss
+          # `@o3co/create-auth-policy-verifier`, which lives outside
+          # `packages/` and does not share the prefix.
+          #
+          # Today that resolves to four: .core, .builtins, .server and
+          # @o3co/create-auth-policy-verifier. templates/standalone and
+          # tests/integration are `private: true` and are never offered.
+          #
+          # `pnpm pack`, not `npm pack`: npm pack leaves `workspace:*` ranges in
+          # the tarball's package.json, which `npm install` in the scratch dir
+          # below cannot resolve (EUNSUPPORTEDPROTOCOL). pnpm pack rewrites them
+          # to the resolved version (0.0.0 here).
+          mkdir -p /tmp/tarballs
+          pnpm list -r --depth -1 --json > /tmp/workspace.json
+          node -e '
+            const fs = require("fs");
+            const projects = JSON.parse(fs.readFileSync("/tmp/workspace.json", "utf8"));
+            for (const p of projects) {
+              if (p.private) continue;
+              if (p.path === process.cwd()) continue;
+              console.log(p.path);
+            }
+          ' > /tmp/publishable.txt
+          echo "publishable workspace packages: $(wc -l < /tmp/publishable.txt)"
+          while read -r dir; do
+            [ -n "$dir" ] || continue
+            echo "packing $(node -p "require('${dir}/package.json').name")"
+            ( cd "$dir" && pnpm pack --pack-destination /tmp/tarballs >/dev/null )
+          done < /tmp/publishable.txt
+          ls -la /tmp/tarballs
+
+      - name: Assert the packed set is the whole publish surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Guards the loop above: if a pack silently failed, or a new
+          # publishable package appeared that the loop did not reach, the
+          # later assertions would pass vacuously over a short tarball set.
+          node -e '
+            const fs = require("fs");
+            const { execSync } = require("child_process");
+            const dir = "/tmp/tarballs";
+            const projects = JSON.parse(fs.readFileSync("/tmp/workspace.json", "utf8"));
+            const expected = new Set(
+              projects.filter((p) => !p.private && p.path !== process.cwd()).map((p) => p.name),
+            );
+            const packed = new Set(
+              fs.readdirSync(dir).filter((f) => f.endsWith(".tgz")).map((f) =>
+                JSON.parse(execSync(`tar -xzOf ${dir}/${f} package/package.json`).toString()).name,
+              ),
+            );
+            const missing = [...expected].filter((n) => !packed.has(n));
+            const extra = [...packed].filter((n) => !expected.has(n));
+            if (missing.length || extra.length) {
+              if (missing.length) console.error("::error::not packed: " + missing.join(", "));
+              if (extra.length) console.error("::error::packed but not publishable: " + extra.join(", "));
+              process.exit(1);
+            }
+            console.log(`OK: packed exactly the ${packed.size} publishable packages:`);
+            for (const n of [...packed].sort()) console.log(`  - ${n}`);
+          '
+
+      - name: Assert no compiled tests in published tarballs
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Compiled test artifacts must not ship. The scope is `dist/__tests__/`
+          # only — `package/templates/standalone/src/__tests__/` in the
+          # create-app tarball is consumer-facing scaffold source and MUST stay
+          # shipped, so a bare `__tests__` match would be wrong here.
+          FAILED=0
+          for tgz in /tmp/tarballs/*.tgz; do
+            HITS=$(tar -tzf "$tgz" | grep -E '/dist/.*__tests__' || true)
+            if [ -n "$HITS" ]; then
+              echo "::error::$tgz contains __tests__ artifacts in dist/:"
+              echo "$HITS"
+              FAILED=1
+            fi
+          done
+          if [ "$FAILED" -eq 1 ]; then
+            echo "Each package's tsconfig.json excludes src/**/__tests__/** so the build does not emit them; tsconfig.typecheck.json still type-checks them."
+            exit 1
+          fi
+          echo "OK: no __tests__ artifacts in any published tarball's dist/"
+
+      - name: Assert no '#/' subpath imports in published tarballs
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Per AGENTS.md "Module Resolution": `#/*` resolves through each
+          # package's own `imports` map, and under the `development` condition
+          # that is `./src/*` — which no tarball ships. Node applies
+          # `--conditions` to every package on the graph, not just the root, so
+          # a `#/` specifier surviving into dist/ breaks any consumer running
+          # under Vitest or `tsx watch`. The workspace cannot see this (src is
+          # right there); it only breaks after publish.
+          FAILED=0
+          for tgz in /tmp/tarballs/*.tgz; do
+            for f in $(tar -tzf "$tgz" | grep -E '^package/dist/.*\.(mjs|d\.mts)$' || true); do
+              HITS=$(tar -xzOf "$tgz" "$f" | grep -nE '(from|import|require)[[:space:]]*\(?[[:space:]]*["'"'"']#/' || true)
+              if [ -n "$HITS" ]; then
+                echo "::error::$tgz: $f keeps a '#/' subpath import:"
+                echo "$HITS"
+                FAILED=1
+              fi
+            done
+          done
+          if [ "$FAILED" -eq 1 ]; then
+            echo "Shipped source must use a relative specifier (../…) — see AGENTS.md \"Module Resolution\"."
+            exit 1
+          fi
+          echo "OK: no '#/' subpath imports in any published tarball's dist/"
+
+      - name: Assert the scaffolder pins every workspace dep it ships
+        shell: bash
+        run: |
+          set -euo pipefail
+          # create-app rewrites the template's `workspace:*` ranges using the
+          # `versions.json` that copy-templates.mjs bakes in at prebuild time.
+          # A workspace package added to the template but not to that script's
+          # `versions` map makes `scaffold()` throw for every user. Checked
+          # against the tarball, so it is the shipped pair that is compared.
+          CREATE_APP_TGZ=$(ls /tmp/tarballs/o3co-create-auth-policy-verifier-*.tgz)
+          node -e '
+            const { execSync } = require("child_process");
+            const tgz = process.argv[1];
+            const read = (p) => execSync(`tar -xzOf ${tgz} ${p}`).toString();
+            const versions = JSON.parse(read("package/templates/versions.json"));
+            const tmplPkg = JSON.parse(read("package/templates/standalone/package.json"));
+            const missing = [];
+            for (const section of ["dependencies", "devDependencies", "peerDependencies"]) {
+              for (const [name, spec] of Object.entries(tmplPkg[section] ?? {})) {
+                if (spec === "workspace:*" && !(name in versions)) missing.push(`${section}: ${name}`);
+              }
+            }
+            if (missing.length) {
+              console.error("::error::templates/versions.json does not pin every workspace dep the shipped template declares:");
+              for (const m of missing) console.error(`  - ${m}`);
+              console.error("Fix: add the package to the `versions` map in create-app/scripts/copy-templates.mjs");
+              process.exit(1);
+            }
+            console.log(`OK: versions.json pins all ${Object.keys(versions).length} workspace deps the shipped template declares`);
+          ' "$CREATE_APP_TGZ"
+
+      - name: Build the shipped scaffold against packed tarballs
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Build the template *out of the create-app tarball*, not out of
+          # templates/standalone. The in-repo template's tsconfig.json still
+          # `extends ../../tsconfig.base.json`; copy-templates.mjs inlines that
+          # base when it stages the shipped copy, so only the tarball's copy is
+          # self-contained — and it is the copy consumers actually get. This
+          # also puts the create-app tarball's own contents under test.
+          SCRATCH=$(mktemp -d)
+          CREATE_APP_TGZ=$(ls /tmp/tarballs/o3co-create-auth-policy-verifier-*.tgz)
+          tar -xzf "$CREATE_APP_TGZ" -C "$SCRATCH"
+          pushd "$SCRATCH/package/templates/standalone" >/dev/null
+          # Rewrite the `workspace:*` direct deps to file: tarball URLs, and add
+          # an `overrides` block pinning every packed package. The overrides are
+          # what force *transitive* workspace deps (server -> core) to resolve
+          # from /tmp/tarballs instead of the public registry, where version
+          # 0.0.0 does not exist.
+          node -e '
+            const fs = require("fs");
+            const path = require("path");
+            const { execSync } = require("child_process");
+            const dir = process.argv[1];
+            const map = new Map();
+            for (const f of fs.readdirSync(dir).filter((f) => f.endsWith(".tgz"))) {
+              const full = path.join(dir, f);
+              const name = JSON.parse(execSync(`tar -xzOf ${full} package/package.json`).toString()).name;
+              map.set(name, "file:" + full);
+            }
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            for (const section of ["dependencies", "peerDependencies", "devDependencies"]) {
+              if (!pkg[section]) continue;
+              for (const name of Object.keys(pkg[section])) {
+                if (map.has(name)) pkg[section][name] = map.get(name);
+              }
+            }
+            pkg.overrides = pkg.overrides ?? {};
+            for (const [name, spec] of map) pkg.overrides[name] = spec;
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+          ' /tmp/tarballs
+          # npm, not pnpm: pnpm would try to re-resolve this against the
+          # workspace it is nested under. npm consumes the file: tarballs
+          # directly, with overrides forcing the transitives too.
+          npm install --no-package-lock --omit=optional
+          npm run build
+          popd >/dev/null
+          echo "OK: the shipped standalone scaffold builds against packed tarballs"

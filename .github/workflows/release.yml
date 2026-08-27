@@ -91,7 +91,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - run: pnpm -r --if-present run typecheck
+      # Kept in step with ci.yml: every workspace package defines `typecheck`,
+      # and it covers `src/**/*` including `__tests__`, which the build excludes
+      # so that compiled tests never reach a tarball.
+      - run: pnpm run typecheck
       - run: pnpm run test
 
       - name: Create GitHub Release (draft)

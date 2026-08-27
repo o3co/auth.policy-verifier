@@ -29,6 +29,7 @@
 	],
 	"scripts": {
 		"build": "tsc",
+		"typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
 		"prebuild": "node scripts/copy-templates.mjs",
 		"pretest": "node scripts/copy-templates.mjs",
 		"test": "vitest run"

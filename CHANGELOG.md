@@ -127,6 +127,23 @@ and version sections follow the release labeling policy in
     logs `unauthenticated_non_loopback_bind` at warn when it sees a non-loopback
     bind with no caller authentication configured.
 
+- `qs` and `body-parser` are pinned above two advisories that the new
+  `pnpm audit --prod --audit-level=low` gate refuses:
+  [GHSA-q8mj-m7cp-5q26](https://github.com/advisories/GHSA-q8mj-m7cp-5q26) (a
+  remotely triggerable `qs.stringify` DoS) and
+  [GHSA-v422-hmwv-36x6](https://github.com/advisories/GHSA-v422-hmwv-36x6)
+  (`body-parser` silently disabling size enforcement when given an invalid
+  limit). Both reach this workspace only through `express`, a production
+  dependency of `@o3co/auth.policy-verifier.server`.
+
+  This was a stale lockfile rather than an exposure for consumers:
+  `express@5.2.1` asks for `qs@^6.14.0` and `body-parser@^2.2.1`, both of which
+  admit the patched releases, so an install resolving today already floats to
+  them — but `pnpm-lock.yaml` had pinned `qs@6.15.0` and `body-parser@2.2.2`.
+  The `overrides` block added to `pnpm-workspace.yaml` scopes each entry to the
+  vulnerable range, so it lapses on its own once `express` requires a fixed
+  version instead of holding the floor down indefinitely.
+
 ### Added
 
 - HS256 signing-secret rotation, so the algorithm this stack ships as its
@@ -460,3 +477,47 @@ and version sections follow the release labeling policy in
   (`v1.2.3-rc.1`, `v1.2.3-rc-1`, `v1.2.3-0.3.7`); build metadata
   (`v1.2.3+build.5`) is refused, because npm ignores `+…` when comparing
   versions and two such tags would be one registry version.
+
+- CI now gates dependency advisories and publish readiness, closing the gap
+  against `auth.provider`'s pipeline for the same stack
+  ([#122](https://github.com/o3co/auth.policy-verifier/issues/122)).
+
+  `pnpm audit --prod --audit-level=low` runs before lint and build. It is
+  exposed as the root `audit` script, which is what `make audit` has always
+  called — that target was broken, because no such script existed
+  ([#145](https://github.com/o3co/auth.policy-verifier/issues/145)); CI and a
+  contributor's laptop now run the identical command.
+
+  A `publish-readiness` job tarballs every package `pnpm -r publish` would
+  offer to the registry — read back from pnpm rather than matched against a
+  name pattern, so it cannot drift from the real publish surface — and then
+  builds the scaffold out of the packed `@o3co/create-auth-policy-verifier`
+  tarball against those tarballs, rather than against the `workspace:*` links
+  a local build resolves. A template referencing a symbol that is not in the
+  published tarball is invisible in the workspace, where `src/` is right there,
+  and used to surface only after the tag was pushed. The job also asserts that
+  no tarball ships compiled tests or a `#/` subpath specifier in `dist/`, and
+  that `templates/versions.json` pins every workspace dependency the shipped
+  template declares.
+
+- Published tarballs no longer contain compiled test files. Each package's
+  `tsconfig.json` excludes `src/**/__tests__/**`, so `dist/__tests__/` is no
+  longer emitted or shipped by `.core`, `.builtins`, `.server` or
+  `@o3co/create-auth-policy-verifier`. Those files also carried the only `#/`
+  subpath specifiers that survived into `dist/`, which resolve through each
+  package's own `imports` map to `./src/*` under the `development` condition —
+  a path no tarball ships, so any consumer running under Vitest or `tsx watch`
+  could resolve them into nothing. The scaffold's own
+  `templates/standalone/src/__tests__/` is consumer-facing source and is still
+  shipped, unchanged.
+
+- `pnpm -r --if-present run typecheck` in `ci.yml` and `release.yml` was a
+  no-op — no package defined a `typecheck` script, and `--if-present` swallowed
+  it silently ([#145](https://github.com/o3co/auth.policy-verifier/issues/145)).
+  Every workspace package now defines one, and both workflows call the root
+  `typecheck` script (also `make typecheck`). It runs against a
+  `tsconfig.typecheck.json` covering `src/**/*` *including* `__tests__`, which
+  the build now excludes — so making the step real is what keeps test files
+  type-checked at all. Turning it on surfaced three pre-existing type errors in
+  `tests/integration`, a package that has no build step and had therefore never
+  been type-checked; they are fixed.

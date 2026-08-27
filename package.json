@@ -10,7 +10,9 @@
 		"build": "pnpm -r run build",
 		"test": "pnpm -r run test",
 		"test:coverage": "pnpm -r --if-present run test:coverage",
+		"typecheck": "pnpm -r --if-present run typecheck",
 		"lint": "biome check packages/ templates/ create-app/ tests/",
+		"audit": "pnpm audit --prod --audit-level=low",
 		"docs": "typedoc"
 	},
 	"devDependencies": {

@@ -36,7 +36,11 @@ describe("evaluate with AttrLiteralEqual + AttrPairNotEqual + AttrLiteralCompare
 	const rules: Rule[] = [ruleEqual, rulePairNotEqual, ruleCompare];
 
 	it("Scenario A: all three rules satisfied → allow", () => {
-		const attrs: Attributes = new Map([
+		// Explicit type arguments: these entry lists mix string and number values,
+		// so without them the Map constructor's overload resolution narrows to
+		// Map<string, string> from the first entry and rejects `level`. The
+		// annotation on `attrs` cannot rescue it — overload resolution runs first.
+		const attrs: Attributes = new Map<string, unknown>([
 			["role", "admin"],
 			["userId", "u1"],
 			["ownerId", "u2"],
@@ -50,7 +54,7 @@ describe("evaluate with AttrLiteralEqual + AttrPairNotEqual + AttrLiteralCompare
 
 	it("Scenario B: AttrPairNotEqual fails (userId === ownerId) → deny with attr_match", () => {
 		// Break AttrPairNotEqual: userId equals ownerId.
-		const attrs: Attributes = new Map([
+		const attrs: Attributes = new Map<string, unknown>([
 			["role", "admin"],
 			["userId", "u1"],
 			["ownerId", "u1"], // same → rule fails
@@ -72,7 +76,7 @@ describe("evaluate with AttrLiteralEqual + AttrPairNotEqual + AttrLiteralCompare
 		// AttrLiteralCompare still passes.
 		// Evaluator processes groups in insertion order: ruleEqual's group is first,
 		// so the deny reflects ruleEqual's code/message.
-		const attrs: Attributes = new Map([
+		const attrs: Attributes = new Map<string, unknown>([
 			["role", "user"], // not "admin" → AttrLiteralEqual fails
 			["userId", "u1"],
 			["ownerId", "u1"], // same → AttrPairNotEqual fails
