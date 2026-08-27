@@ -125,7 +125,7 @@ type AppConfig = z.infer<typeof AppConfigSchema>;
 これを抑えるのが次の 2 つの設定です。
 
 - **`http.hostname` の既定値は `127.0.0.1`。** 本プロジェクトが想定するのはサイドカー構成 — enforcement 層が verifier と同居し、ループバック経由で到達する形です。全インターフェースへの bind は明示的なオプトイン（`http.hostname = "0.0.0.0"`）であり、コンテナデプロイではこれを設定しない限り到達できません。
-- **`http.callerAuth.token` は呼び出し元サービスを認証します。** 設定すると、`/verify` と `/verify/batch` への全リクエストがその値を `http.callerAuth.header`（既定 `x-caller-token`。`Authorization` を避けているのは意図的）にそのまま載せる必要があります。比較は定数時間で、body のパースより前・パイプライン処理より前に走るため、未認証のピアはプロセスの処理時間を消費できません。資格情報の欠落と誤りは同一の `401 { decision: "deny", code: "caller_unauthenticated" }` を返します — 推測した値が正しい形だったかを探索者に教えてはならないからです。`GET /healthcheck` は常に非ゲートで、オーケストレーターの probe はそのまま動作します。
+- **`http.callerAuth.token` は呼び出し元サービスを認証します。** 設定すると、`/verify` と `/verify/batch` への全リクエストがその値を `http.callerAuth.header`（既定 `x-caller-token`。`Authorization` を避けているのは意図的）にそのまま載せる必要があります。比較は定数時間で、body のパースより前・パイプライン処理より前に走るため、未認証のピアはプロセスの処理時間を消費できません。資格情報の欠落と誤りは同一の `401 { decision: "deny", code: "caller_unauthenticated", message: "Caller authentication failed" }` を返します — 推測した値が正しい形だったかを探索者に教えてはならないからです。`GET /healthcheck` は常に非ゲートで、オーケストレーターの probe はそのまま動作します。
 
 caller 認証は**本リリースでは任意**です。未設定かつ bind がループバックでない場合、`createApp` は `unauthenticated_non_loopback_bind` を warn で記録します — 本当に危険な組み合わせを、塞ぐのではなく名指しします。必須化は `config/defaults` の `CALLER_AUTH_REQUIRED` の 1 行変更で行えます（同定数の doc コメント参照）。
 

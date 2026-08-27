@@ -102,10 +102,10 @@ and version sections follow the release labeling policy in
     questions: who a decision is about, versus which service may ask for one.
   - Compared in constant time, before the request body is parsed and before any
     collector pipeline runs, so an unauthenticated peer costs the process
-    nothing. A missing credential and a wrong one get the identical
-    `401 { "decision": "deny", "code": "caller_unauthenticated" }` — the
-    rejection must not tell a prober whether their guess had the right shape.
-    Rejections log `caller_auth_rejected` at warn.
+    nothing. A missing credential and a wrong one get the identical `401`, body
+    `{ "decision": "deny", "code": "caller_unauthenticated", "message": "Caller authentication failed" }`
+    — the rejection must not tell a prober whether their guess had the right
+    shape. Rejections log `caller_auth_rejected` at warn.
   - `GET /healthcheck` is never gated: an orchestrator probe has no credential
     to present, and it reveals nothing a decision does.
   - **Optional in this release** and off unless configured, so existing
