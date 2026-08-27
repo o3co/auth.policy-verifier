@@ -8,6 +8,18 @@ export {
 	JWT_MODE_MIGRATION_MESSAGE,
 } from "./config/application.schema.mjs";
 export {
+	CALLER_AUTH_REQUIRED,
+	DEFAULT_CALLER_AUTH_HEADER,
+	DEFAULT_HOSTNAME,
+	DEFAULT_MAX_BATCH_SIZE,
+} from "./config/defaults.mjs";
+export {
+	type CallerAuthConfig,
+	type CallerAuthErrorContext,
+	createCallerAuthMiddleware,
+	resolveCallerAuth,
+} from "./http/callerAuth.mjs";
+export {
 	type AssertedJwtConfig,
 	assertVerifyRouterJwtConfig,
 	builtinKeyResolversModule,
@@ -27,4 +39,5 @@ export {
 	type VerifyingJwtConfig,
 	type VerifyRouterJwtConfig,
 } from "./jwt/index.mjs";
+export { isLoopbackBindAddress, isLoopbackHost } from "./net/loopback.mjs";
 export { createVerifyRouter, type VerifyRouterConfig } from "./routes/verify.mjs";

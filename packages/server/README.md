@@ -30,7 +30,7 @@ Steps performed:
 2. Calls `mod.init(context)` for each module in order, allowing each to register factory functions.
 3. Instantiates attribute collectors and rule collectors from `config.attribute.collectors` and `config.rule.collectors` by looking up the registered factory for each `collector` name.
 4. Instantiates the resource parser from `config.resource.parser`.
-5. Mounts `GET /healthcheck`, `POST /verify` and `POST /verify/batch` under `config.http.pathPrefix`.
+5. Mounts `GET /healthcheck`, the optional caller-authentication gate, then `POST /verify` and `POST /verify/batch` under `config.http.pathPrefix`.
 6. Returns the configured `express.Express` instance.
 
 `pathResolver` must be `import.meta.resolve` (or a compatible resolver) from the composition root. It is passed to modules that need to resolve module-relative paths.
@@ -82,9 +82,13 @@ Request flow:
 ```typescript
 const AppConfigSchema = z.object({
   http: z.object({
-    hostname: z.string().default("0.0.0.0"),
+    hostname: z.string().default("127.0.0.1"),   // loopback — see Trust boundary
     port: z.coerce.number().default(3000),
     pathPrefix: z.string().default(""),
+    callerAuth: z.object({                        // optional — see Trust boundary
+      header: z.string().min(1).default("x-caller-token"),
+      token: z.string().min(1).optional(),
+    }).optional(),
   }),
   oauth: z.object({
     jwt: z.object({
@@ -113,6 +117,19 @@ type AppConfig = z.infer<typeof AppConfigSchema>;
 ```
 
 Each entry in `attribute.collectors` and `rule.collectors` requires a `collector` field (the registered factory name). Additional fields are passed through to the factory as configuration.
+
+### Trust boundary
+
+The bearer token on `/verify` establishes the **subject** a decision is about. It says nothing about which service supplied `resource` / `action` / `context`. An endpoint that checks only the subject token is therefore a decision oracle: anyone who can route to the port can probe which tokens, scopes and resources the deployment accepts, and make it run collector pipelines while they do.
+
+Two settings bound that exposure:
+
+- **`http.hostname` defaults to `127.0.0.1`.** The deployment this project targets is a sidecar — the enforcement layer runs alongside the verifier and reaches it over loopback. Binding all interfaces is an explicit opt-in (`http.hostname = "0.0.0.0"`), which a containerised deployment must set to be reachable at all.
+- **`http.callerAuth.token` authenticates the calling service.** When set, every request to `/verify` and `/verify/batch` must carry that credential verbatim in `http.callerAuth.header` (default `x-caller-token`, deliberately not `Authorization`). The comparison is constant-time, and it runs before the body is parsed and before any pipeline work, so an unauthenticated peer costs the process nothing. A missing credential and a wrong one get the same `401 { decision: "deny", code: "caller_unauthenticated" }` — the rejection must not tell a prober whether their guess had the right shape. `GET /healthcheck` is never gated, so orchestrator probes keep working.
+
+Caller authentication is **optional in this release**. When it is not configured and the bind is not loopback, `createApp` logs `unauthenticated_non_loopback_bind` at warn — the genuinely dangerous combination, named rather than blocked. Making it mandatory is a one-line change to `CALLER_AUTH_REQUIRED` in `config/defaults`; see that constant's doc comment.
+
+A shared credential is not a substitute for network policy or mTLS between the enforcement layer and this service. It is the floor, not the ceiling.
 
 ### POST /verify
 

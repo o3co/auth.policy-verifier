@@ -429,3 +429,93 @@ describe("AppConfigSchema — oauth.jwt.mode (#134)", () => {
 		}
 	});
 });
+
+describe("AppConfigSchema — http bind address (#108)", () => {
+	const validJwt = { algorithm: "HS256", secret: "s", mode: "verify", ...rfc9068 };
+
+	it("defaults http.hostname to loopback when the http section is absent", () => {
+		// A verifier is a sidecar by default: reachable only from the process
+		// that enforces its decisions, not from every pod on the network.
+		const result = AppConfigSchema.parse({ oauth: { jwt: validJwt }, ...baseBody });
+		expect(result.http.hostname).toBe("127.0.0.1");
+	});
+
+	it("defaults http.hostname to loopback when the http section omits it", () => {
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			http: { port: 8080 },
+		});
+		expect(result.http.hostname).toBe("127.0.0.1");
+	});
+
+	it("accepts an explicit all-interfaces bind", () => {
+		// Container deployments need it; it is now an opt-in rather than the default.
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			http: { hostname: "0.0.0.0" },
+		});
+		expect(result.http.hostname).toBe("0.0.0.0");
+	});
+});
+
+describe("AppConfigSchema — http.callerAuth (#108)", () => {
+	const validJwt = { algorithm: "HS256", secret: "s", mode: "verify", ...rfc9068 };
+
+	it("leaves http.callerAuth absent when nothing configures it", () => {
+		const result = AppConfigSchema.parse({ oauth: { jwt: validJwt }, ...baseBody });
+		expect(result.http.callerAuth).toBeUndefined();
+	});
+
+	it("defaults the header name when only a token is configured", () => {
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			http: { callerAuth: { token: "s3cret" } },
+		});
+		expect(result.http.callerAuth).toEqual({ header: "x-caller-token", token: "s3cret" });
+	});
+
+	it("accepts an operator-chosen header name", () => {
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			http: { callerAuth: { header: "x-api-key", token: "s3cret" } },
+		});
+		expect(result.http.callerAuth?.header).toBe("x-api-key");
+	});
+
+	it("keeps the block usable when the token substitution resolved to nothing", () => {
+		// HOCON `token = ${?HTTP_CALLER_AUTH_TOKEN}` leaves the key absent when the
+		// variable is unset, while the surrounding block still exists because of
+		// the header default. That must mean "not configured", not "malformed".
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			http: { callerAuth: { header: "x-caller-token" } },
+		});
+		expect(result.http.callerAuth?.token).toBeUndefined();
+	});
+
+	it("rejects an empty token rather than treating it as disabled", () => {
+		// `HTTP_CALLER_AUTH_TOKEN=` substitutes an empty string. Booting
+		// unauthenticated because a credential was exported empty is exactly the
+		// silent failure this issue is about.
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			http: { callerAuth: { token: "" } },
+		});
+		expect(result.success).toBe(false);
+	});
+
+	it("rejects an empty header name", () => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			http: { callerAuth: { header: "", token: "s3cret" } },
+		});
+		expect(result.success).toBe(false);
+	});
+});

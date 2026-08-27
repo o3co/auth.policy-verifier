@@ -29,9 +29,11 @@ Individual values can also be overridden with environment variables.
 
 | Variable | Default | Description |
 |---|---|---|
-| `HTTP_HOSTNAME` | `0.0.0.0` | Bind hostname |
+| `HTTP_HOSTNAME` | `127.0.0.1` | Bind hostname. Loopback by default — see [Trust boundary](#trust-boundary). Containers must set `0.0.0.0` |
 | `HTTP_PORT` | `3000` | Bind port |
 | `HTTP_PATH_PREFIX` | `""` | URL path prefix |
+| `HTTP_CALLER_AUTH_TOKEN` | (unset) | Shared credential the calling service must present. Unset means any caller who can reach the port may ask for decisions |
+| `HTTP_CALLER_AUTH_HEADER` | `x-caller-token` | Header carrying that credential |
 | `OAUTH_JWT_SECRET` | (required) | HMAC-HS256 JWT signing secret |
 | `OAUTH_JWT_ISSUER` | (required) | Issuer this deployment accepts — RFC 9068 §4 `iss` |
 | `OAUTH_JWT_AUDIENCE` | (required) | Audience identifying this resource server — RFC 9068 §4 `aud` |
@@ -43,6 +45,33 @@ Individual values can also be overridden with environment variables.
 | `OAUTH_JWT_MODE` | `verify` | `verify` fully verifies tokens; the explicit `insecure-decode` (test-only) decodes without signature verification — `exp`/`nbf` are still enforced |
 | `RULE_ON_EMPTY_RULE_SET` | `deny` | Decision when no rule is collected (`deny` \| `allow`) |
 | `VERIFY_MAX_BATCH_SIZE` | `50` | Cap on `POST /verify/batch` entries |
+
+## Trust boundary
+
+`/verify` answers with an authorization decision, so a port anyone can reach is a decision oracle: the subject token says who a decision is *about*, never which service supplied `resource` / `action` / `context`.
+
+The template therefore binds **loopback** by default. That is the sidecar shape — the enforcement layer runs on the same host and nothing else can connect.
+
+Reaching the verifier from another host or container is an explicit opt-in, and it needs two things:
+
+```sh
+HTTP_HOSTNAME=0.0.0.0             # make the port reachable at all
+HTTP_CALLER_AUTH_TOKEN=<secret>   # and make it answer only your enforcement layer
+```
+
+`docker-compose.yml` sets `HTTP_HOSTNAME=0.0.0.0` already, because inside a container loopback means "reachable from nothing" and the published port would never connect. Put the credential in `.env`.
+
+With `HTTP_CALLER_AUTH_TOKEN` set, every request to `/verify` and `/verify/batch` must carry it verbatim in `HTTP_CALLER_AUTH_HEADER` (default `x-caller-token`, deliberately not `Authorization`, which carries the subject token):
+
+```http
+POST /verify HTTP/1.1
+x-caller-token: <secret>
+Authorization: Bearer <jwt>
+```
+
+Anything else gets `401 { "decision": "deny", "code": "caller_unauthenticated" }`, decided before the body is parsed. `GET /healthcheck` is never gated, so the container healthcheck keeps working.
+
+Leaving the credential unset is supported and is fine on loopback. On a non-loopback bind the server logs `unauthenticated_non_loopback_bind` at warn on boot — that combination is the one worth fixing.
 
 ## Default Collectors
 

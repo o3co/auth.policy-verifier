@@ -43,6 +43,31 @@ and version sections follow the release labeling policy in
   The error names the key and the rejected value:
   `jwksUri must use https; http is accepted only for loopback hosts
   (localhost, 127.0.0.0/8, [::1]), got "http://auth-provider:3000/..."`.
+- **BREAKING**: `http.hostname` now defaults to `127.0.0.1` instead of `0.0.0.0`
+  ([#108](https://github.com/o3co/auth.policy-verifier/issues/108)). `/verify`
+  answers with an authorization decision, so a port anyone can route to is a
+  decision oracle — a probe of which tokens, scopes and resources a deployment
+  accepts, and an unauthenticated compute sink while it is at it. The subject
+  JWT establishes who a decision is *about*, never which service supplied
+  `resource` / `action` / `context`. The sidecar deployment this project targets
+  needs loopback only, so binding every interface is now an opt-in.
+
+  **Operator migration** — a deployment that must be reachable from another host
+  or container has to say so explicitly, or it will start refusing connections
+  it used to accept:
+
+  - HOCON: `http.hostname = "0.0.0.0"`
+  - Env: `HTTP_HOSTNAME=0.0.0.0`
+  - Docker/Kubernetes: **every** containerised deployment needs this — inside a
+    container, loopback means reachable from nothing, so a published port or
+    Service simply never connects. The standalone template's
+    `docker-compose.yml` now sets `HTTP_HOSTNAME=0.0.0.0` for exactly this reason.
+  - A deployment already pinning `http.hostname` (in `application.conf`, an env
+    overlay, or `HTTP_HOSTNAME`) is unaffected.
+  - Pair the opt-in with `http.callerAuth.token` below: past the loopback
+    boundary, anyone who can reach the port can ask for decisions. `createApp`
+    logs `unauthenticated_non_loopback_bind` at warn when it sees a non-loopback
+    bind with no caller authentication configured.
 
 ### Added
 
@@ -65,6 +90,32 @@ and version sections follow the release labeling policy in
   additionally exports `checkJwksUri`, `parseJwksUri` and
   `resolveJwksFetchBounds` for custom `KeyResolverFactory` implementations that
   fetch their own JWKS.
+- Optional caller authentication for the decision endpoints
+  ([#108](https://github.com/o3co/auth.policy-verifier/issues/108)). Setting
+  `http.callerAuth.token` (env `HTTP_CALLER_AUTH_TOKEN`) makes `POST /verify`
+  and `POST /verify/batch` require that shared credential from the calling
+  service, in addition to the subject bearer token they already require.
+
+  - The credential travels in `http.callerAuth.header` — default
+    `x-caller-token` (env `HTTP_CALLER_AUTH_HEADER`), deliberately not
+    `Authorization`, which carries the subject token. The two answer different
+    questions: who a decision is about, versus which service may ask for one.
+  - Compared in constant time, before the request body is parsed and before any
+    collector pipeline runs, so an unauthenticated peer costs the process
+    nothing. A missing credential and a wrong one get the identical
+    `401 { "decision": "deny", "code": "caller_unauthenticated" }` — the
+    rejection must not tell a prober whether their guess had the right shape.
+    Rejections log `caller_auth_rejected` at warn.
+  - `GET /healthcheck` is never gated: an orchestrator probe has no credential
+    to present, and it reveals nothing a decision does.
+  - **Optional in this release** and off unless configured, so existing
+    deployments (and container-to-container callers such as the cross-repo E2E)
+    keep working. An empty `HTTP_CALLER_AUTH_TOKEN=` is rejected at boot rather
+    than read as "disabled". Making it mandatory later is a one-line change to
+    `CALLER_AUTH_REQUIRED` in `@o3co/auth.policy-verifier.server`'s
+    `config/defaults` — see that constant's doc comment.
+  - A shared credential is a floor, not a ceiling: it does not replace network
+    policy or mTLS between the enforcement layer and this service.
 
 ### Changed
 
