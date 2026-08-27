@@ -40,9 +40,15 @@ export interface VerifyingJwtConfig {
 	tokenType: string;
 }
 
-/** Development-only shape: the token is decoded, never verified. */
+/**
+ * Test-only shape: the token is decoded, never signature-verified. Its `exp` /
+ * `nbf` claims are still enforced (#106). The acknowledgment is part of the
+ * shape — and re-checked at construction time — so wiring the router directly
+ * is not a way around the double opt-in `createApp` enforces.
+ */
 export interface DecodingJwtConfig {
 	validate: false;
+	allowInsecureDecode: true;
 }
 
 /** JWT half of `VerifyRouterConfig`, discriminated on `validate`. */
@@ -158,6 +164,64 @@ function isVerificationUnavailable(cause: unknown): boolean {
 }
 
 /**
+ * `exp` / `nbf` checks for the decode-only path (#106). `decodeJwt` performs
+ * no validation at all, so the route enforces the token's own lifetime with
+ * `jwtVerify`'s semantics and error classes: reject a numeric `exp` in the
+ * past or a numeric `nbf` in the future, reject a present non-numeric value
+ * for any time claim (`iat` included — `jwtVerify` type-checks it
+ * unconditionally), tolerate absence, zero clock tolerance. Skipping the
+ * signature is an (acknowledged, test-only) trust decision about the issuer;
+ * honouring an expired token is simply wrong in every mode.
+ */
+function assertTimeClaims(payload: JWTPayload): void {
+	const now = Math.floor(Date.now() / 1000);
+	if (payload.iat !== undefined && typeof payload.iat !== "number") {
+		throw new errors.JWTClaimValidationFailed(
+			'"iat" claim must be a number',
+			payload,
+			"iat",
+			"invalid",
+		);
+	}
+	if (payload.nbf !== undefined) {
+		if (typeof payload.nbf !== "number") {
+			throw new errors.JWTClaimValidationFailed(
+				'"nbf" claim must be a number',
+				payload,
+				"nbf",
+				"invalid",
+			);
+		}
+		if (payload.nbf > now) {
+			throw new errors.JWTClaimValidationFailed(
+				'"nbf" claim timestamp check failed',
+				payload,
+				"nbf",
+				"check_failed",
+			);
+		}
+	}
+	if (payload.exp !== undefined) {
+		if (typeof payload.exp !== "number") {
+			throw new errors.JWTClaimValidationFailed(
+				'"exp" claim must be a number',
+				payload,
+				"exp",
+				"invalid",
+			);
+		}
+		if (payload.exp <= now) {
+			throw new errors.JWTExpired(
+				'"exp" claim timestamp check failed',
+				payload,
+				"exp",
+				"check_failed",
+			);
+		}
+	}
+}
+
+/**
  * Validates one entry of a decision request. Returns the entry or the reason it
  * is unusable, phrased with `label` so a batch can name the offending index.
  */
@@ -223,6 +287,13 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				"createVerifyRouter: jwt.tokenType is required when jwt.validate is true (RFC 9068 §4)",
 			);
 		}
+	} else if (jwt.allowInsecureDecode !== true) {
+		// The double opt-in (#106) holds at this API boundary too: a JavaScript
+		// caller can reach here without the acknowledgment even though the
+		// TypeScript shape requires it.
+		throw new Error(
+			"createVerifyRouter: jwt.validate=false disables ALL signature verification (test-only); set jwt.allowInsecureDecode=true to acknowledge, or use a verifying config",
+		);
 	}
 
 	/** Extracts and verifies the bearer token. Shared by both endpoints. */
@@ -269,6 +340,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				decoded = result.payload;
 			} else {
 				decoded = decodeJwt(token);
+				assertTimeClaims(decoded);
 			}
 		} catch (cause) {
 			// Same 401 either way — the caller is unauthenticated regardless — but

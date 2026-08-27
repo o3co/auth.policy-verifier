@@ -71,16 +71,24 @@ function captureEvents(): { events: CapturedEvent[]; logger: EventLogger } {
 interface SignOptions {
 	key?: unknown;
 	expiresAt?: number;
+	notBefore?: number;
+	/** Keep the payload's own `iat` instead of stamping a numeric one. */
+	skipIssuedAt?: boolean;
 }
 
 async function signToken(payload: Record<string, unknown>, options: SignOptions = {}) {
 	const jwt = new SignJWT(payload)
 		.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
-		.setIssuedAt()
 		.setIssuer(ISSUER)
 		.setAudience(AUDIENCE);
+	if (!options.skipIssuedAt) {
+		jwt.setIssuedAt();
+	}
 	if (options.expiresAt !== undefined) {
 		jwt.setExpirationTime(options.expiresAt);
+	}
+	if (options.notBefore !== undefined) {
+		jwt.setNotBefore(options.notBefore);
 	}
 	return jwt.sign((options.key ?? hs256Key.key) as import("node:crypto").KeyObject);
 }
@@ -161,7 +169,7 @@ describe("verify router failure logging: token rejections (warn)", () => {
 
 	it("logs jwt_token_rejected for a malformed token on the decode-only path", async () => {
 		const { events, logger } = captureEvents();
-		const app = createTestApp({ jwt: { validate: false }, logger });
+		const app = createTestApp({ jwt: { validate: false, allowInsecureDecode: true }, logger });
 
 		const res = await request(app)
 			.post("/verify")
@@ -351,6 +359,83 @@ describe("verify router failure logging: default sink and quiet paths", () => {
 
 		expect(missing.status).toBe(401);
 		expect(badScheme.status).toBe(401);
+		expect(events).toHaveLength(0);
+	});
+});
+
+describe("decode-only path time-claim enforcement (#106)", () => {
+	// decodeJwt performs no validation at all; the route must enforce exp/nbf
+	// itself with jwtVerify's semantics so a leaked expired token is not a
+	// permanent credential in decode-only deployments.
+	const decodeApp = (logger: EventLogger) =>
+		createTestApp({ jwt: { validate: false, allowInsecureDecode: true }, logger });
+
+	const now = () => Math.floor(Date.now() / 1000);
+
+	it("rejects an expired token with 401 and logs ERR_JWT_EXPIRED", async () => {
+		const { events, logger } = captureEvents();
+		const token = await signToken({ scope: "read:project" }, { expiresAt: now() - 3600 });
+
+		const res = await request(decodeApp(logger))
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project", action: "read" });
+
+		expect(res.status).toBe(401);
+		expect(res.body.code).toBe("invalid_token");
+		expect(events).toHaveLength(1);
+		expect(events[0]).toMatchObject({ level: "warn", msg: "jwt_token_rejected" });
+		expect((events[0].obj.err as { code?: string }).code).toBe("ERR_JWT_EXPIRED");
+	});
+
+	it("rejects a not-yet-valid token with 401 and logs a claim validation failure", async () => {
+		const { events, logger } = captureEvents();
+		const token = await signToken({ scope: "read:project" }, { notBefore: now() + 3600 });
+
+		const res = await request(decodeApp(logger))
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project", action: "read" });
+
+		expect(res.status).toBe(401);
+		expect(events).toHaveLength(1);
+		expect((events[0].obj.err as { code?: string }).code).toBe("ERR_JWT_CLAIM_VALIDATION_FAILED");
+	});
+
+	it.each([
+		{ claim: "exp", payload: { exp: "tomorrow" } },
+		{ claim: "nbf", payload: { nbf: "yesterday" } },
+		{ claim: "iat", payload: { iat: "yesterday" } },
+	])("rejects a token whose $claim claim is not a number", async ({ payload }) => {
+		const { events, logger } = captureEvents();
+		// jwtVerify rejects a present non-numeric exp/nbf/iat; the decode path
+		// must not be laxer. skipIssuedAt keeps setIssuedAt() from stamping a
+		// numeric iat over the malformed one.
+		const token = await signToken({ scope: "read:project", ...payload }, { skipIssuedAt: true });
+
+		const res = await request(decodeApp(logger))
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project", action: "read" });
+
+		expect(res.status).toBe(401);
+		expect(events).toHaveLength(1);
+		expect(events[0]).toMatchObject({ level: "warn", msg: "jwt_token_rejected" });
+	});
+
+	it("accepts a fresh token and a token with no exp claim (jwtVerify parity)", async () => {
+		const { events, logger } = captureEvents();
+		const app = decodeApp(logger);
+		const fresh = await signToken({ scope: "read:project" }, { expiresAt: now() + 3600 });
+		const noExp = await signToken({ scope: "read:project" });
+
+		for (const token of [fresh, noExp]) {
+			const res = await request(app)
+				.post("/verify")
+				.set("Authorization", `Bearer ${token}`)
+				.send({ resource: "project", action: "read" });
+			expect(res.status).toBe(200);
+		}
 		expect(events).toHaveLength(0);
 	});
 });

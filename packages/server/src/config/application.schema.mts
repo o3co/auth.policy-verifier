@@ -41,6 +41,11 @@ export const AppConfigSchema = z.object({
 				publicKey: z.string().optional(),
 				publicKeyPath: z.string().optional(),
 				validate: z.boolean().default(true),
+				// Second key of the double opt-in for decode-only mode (#106). A single
+				// mistyped env var must never be able to disable all token verification,
+				// so `validate=false` alone refuses to boot; this flag is the explicit,
+				// test-only acknowledgment.
+				allowInsecureDecode: z.boolean().default(false),
 				// RFC 9068 §4 — a resource server validates iss and aud, not just the
 				// signature. Both are required whenever `validate` is on (see superRefine).
 				issuer: z.union([z.string(), z.array(z.string())]).optional(),
@@ -51,7 +56,21 @@ export const AppConfigSchema = z.object({
 			})
 			.passthrough()
 			.superRefine((data, ctx) => {
-				if (!data.validate) return; // skip validation when disabled
+				if (!data.validate) {
+					// Decode-only mode: no signature check (exp/nbf are still enforced
+					// at request time, but nothing else is). One config
+					// key (often one env var) must not be enough to get here — demand
+					// the explicit second key.
+					if (!data.allowInsecureDecode) {
+						ctx.addIssue({
+							code: z.ZodIssueCode.custom,
+							message:
+								"validate=false disables ALL token verification (test-only); set allowInsecureDecode=true to acknowledge, or restore validate=true",
+							path: ["allowInsecureDecode"],
+						});
+					}
+					return; // key-material checks below only apply when validating
+				}
 				const issuers = Array.isArray(data.issuer) ? data.issuer : [data.issuer];
 				const audiences = Array.isArray(data.audience) ? data.audience : [data.audience];
 				if (issuers.length === 0 || issuers.some((i) => !i)) {

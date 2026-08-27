@@ -168,10 +168,10 @@ describe("createApp", () => {
 		expect(res.status).toBe(200);
 	});
 
-	it("starts successfully and decodes tokens when validate=false with no key material", async () => {
-		// validate=false + no secret/publicKey/jwksUri must not throw at startup
+	it("starts successfully and decodes tokens when acknowledged validate=false with no key material", async () => {
+		// validate=false + allowInsecureDecode + no key material must not throw at startup
 		const noKeyConfig = AppConfigSchema.parse({
-			oauth: { jwt: { validate: false } },
+			oauth: { jwt: { validate: false, allowInsecureDecode: true } },
 			attribute: { collectors: [{ collector: "TestScopeCollector" }] },
 			rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
 			resource: { parser: "SimpleParser" },
@@ -293,14 +293,14 @@ describe("createApp logging (#107)", () => {
 	}
 
 	const noKeyConfig = AppConfigSchema.parse({
-		oauth: { jwt: { validate: false } },
+		oauth: { jwt: { validate: false, allowInsecureDecode: true } },
 		attribute: { collectors: [{ collector: "TestScopeCollector" }] },
 		rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
 		resource: { parser: "SimpleParser" },
 	});
 
-	it("routes the validate=false warning through the injected logger, not console.warn", async () => {
-		const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+	it("routes the validate=false event through the injected logger, not the console", async () => {
+		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 		try {
 			const { calls, logger } = captureLogger();
 			await createApp({
@@ -310,17 +310,16 @@ describe("createApp logging (#107)", () => {
 				logger,
 			});
 
-			const warns = calls.filter((c) => c.level === "warn");
-			expect(warns).toHaveLength(1);
-			expect(warns[0].msg).toBe("jwt_validation_disabled");
+			const events = calls.filter((c) => c.msg === "jwt_validation_disabled");
+			expect(events).toHaveLength(1);
 			expect(consoleSpy).not.toHaveBeenCalled();
 		} finally {
 			consoleSpy.mockRestore();
 		}
 	});
 
-	it("emits the validate=false warning on the console-backed default when no logger is injected", async () => {
-		const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+	it("emits the validate=false event on the console-backed default when no logger is injected", async () => {
+		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 		try {
 			await createApp({
 				pathResolver: (s: string) => s,
@@ -334,10 +333,10 @@ describe("createApp logging (#107)", () => {
 	});
 
 	it("honours logging.level for the console-backed default logger", async () => {
-		const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 		try {
 			const silentConfig = AppConfigSchema.parse({
-				oauth: { jwt: { validate: false } },
+				oauth: { jwt: { validate: false, allowInsecureDecode: true } },
 				logging: { level: "silent" },
 				attribute: { collectors: [{ collector: "TestScopeCollector" }] },
 				rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
@@ -389,5 +388,68 @@ describe("createApp logging (#107)", () => {
 		const errors = calls.filter((c) => c.level === "error");
 		expect(errors).toHaveLength(1);
 		expect(errors[0].msg).toBe("verify_internal_error");
+	});
+});
+
+describe("createApp insecure decode guard (#106)", () => {
+	const ackConfig = AppConfigSchema.parse({
+		oauth: { jwt: { validate: false, allowInsecureDecode: true } },
+		attribute: { collectors: [{ collector: "TestScopeCollector" }] },
+		rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
+		resource: { parser: "SimpleParser" },
+	});
+
+	it("refuses to boot a hand-built config with validate=false and no acknowledgment", async () => {
+		// AppConfigSchema rejects this shape, so reach createApp with an object
+		// that never went through it — the same path a library consumer can take.
+		const handBuilt = {
+			...ackConfig,
+			oauth: { jwt: { ...ackConfig.oauth.jwt, allowInsecureDecode: false } },
+		} as unknown as typeof ackConfig;
+
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: handBuilt,
+				modules: [testModule, builtinKeyResolversModule],
+			}),
+		).rejects.toThrow(/allowInsecureDecode/);
+	});
+
+	it("boots acknowledged decode mode and emits jwt_validation_disabled at error level", async () => {
+		const calls: Array<{ level: string; msg?: string }> = [];
+		const record =
+			(level: string) =>
+			(_obj: Record<string, unknown> | string, msg?: string): void => {
+				calls.push({ level, msg });
+			};
+		const logger: Logger = {
+			trace: record("trace"),
+			debug: record("debug"),
+			info: record("info"),
+			warn: record("warn"),
+			error: record("error"),
+			fatal: record("fatal"),
+			child: () => logger,
+		};
+
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: ackConfig,
+			modules: [testModule, builtinKeyResolversModule],
+			logger,
+		});
+
+		// A mis-set env var disabling all verification is an operator-facing
+		// incident, not a curiosity: error, so a level=error fleet still sees it.
+		expect(calls).toContainEqual({ level: "error", msg: "jwt_validation_disabled" });
+		expect(calls.filter((c) => c.msg === "jwt_validation_disabled")).toHaveLength(1);
+
+		const token = await signToken({ scope: "read:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project", action: "read" });
+		expect(res.status).toBe(200);
 	});
 });
