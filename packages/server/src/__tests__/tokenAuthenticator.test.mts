@@ -123,12 +123,16 @@ describe("assertVerifyRouterJwtConfig — decode-only configs (double opt-in, #1
 
 describe("assertVerifyRouterJwtConfig — caller-facing error context", () => {
 	it("names the caller and the caller's config path so operators find the field they wrote", () => {
+		// createApp's boundary speaks the wire config, where verifying mode is
+		// selected by `oauth.jwt.mode = "verify"` — not by the internal `validate`
+		// discriminant, which no longer exists as a wire key (#134). The caller
+		// supplies its own phrasing of the gating condition.
 		expect(() =>
 			assertVerifyRouterJwtConfig(
 				{ ...VALID_VERIFYING, issuer: [] },
-				{ caller: "createApp", path: "oauth.jwt" },
+				{ caller: "createApp", path: "oauth.jwt", verifyCondition: 'oauth.jwt.mode is "verify"' },
 			),
-		).toThrow(/^createApp: oauth\.jwt\.issuer is required when oauth\.jwt\.validate is true/);
+		).toThrow(/^createApp: oauth\.jwt\.issuer is required when oauth\.jwt\.mode is "verify"/);
 	});
 
 	it("defaults to the authenticator's own boundary", () => {

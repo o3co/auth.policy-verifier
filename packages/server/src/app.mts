@@ -16,7 +16,7 @@ import {
 } from "@o3co/auth.policy-verifier.core";
 import { createHealthcheckRouter } from "@o3co/auth.utils/express";
 import express from "express";
-import type { AppConfig } from "./config/application.schema.mjs";
+import { type AppConfig, JWT_MODE_MIGRATION_MESSAGE } from "./config/application.schema.mjs";
 import {
 	assertVerifyRouterJwtConfig,
 	type VerifyRouterJwtConfig,
@@ -45,10 +45,12 @@ export interface CreateAppOptions {
  * resource parser / key resolver from config, (4) mount the `/verify` router
  * and healthcheck under the configured path prefix.
  *
- * `config.oauth.jwt.validate = false` disables signature verification and only
- * decodes the token (`exp` / `nbf` are still enforced). It is test-only and
- * refuses to boot unless `oauth.jwt.allowInsecureDecode = true` explicitly
- * acknowledges it; booting in that mode is logged at error level (#106).
+ * `config.oauth.jwt.mode = "insecure-decode"` disables signature verification
+ * and only decodes the token (`exp` / `nbf` are still enforced). It is
+ * test-only; the mode string itself is the explicit consent (#134) — an
+ * accidental env-var flip can produce a stray boolean but never that literal
+ * string, which preserves the intent of #106's double opt-in in one knob.
+ * Booting in that mode is logged at error level (#106).
  */
 export async function createApp(options: CreateAppOptions): Promise<express.Express> {
 	const { pathResolver, config, modules } = options;
@@ -96,31 +98,51 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	const resourceParserFactory = resourceParserRegistry.get(config.resource.parser);
 	const resourceParser = resourceParserFactory(config.resource);
 
-	// 6. Build the router's JWT config. When validate=false, decodeJwt is used instead
-	// of jwtVerify, so neither key material nor RFC 9068 claim checks apply.
-	// AppConfigSchema already enforces both invariants (iss/aud/typ presence,
-	// the decode-only double opt-in) for schema-validated configs; re-asserted
-	// here because createApp also accepts hand-built config objects that never
-	// went through the schema (#106) — with this boundary's field paths, so the
-	// operator is pointed at the oauth.jwt.* key they actually wrote.
-	assertVerifyRouterJwtConfig(config.oauth.jwt, { caller: "createApp", path: "oauth.jwt" });
+	// 6. Map the wire `oauth.jwt.mode` onto the router's internal discriminated
+	// union (#134). AppConfigSchema already enforces the wire invariants (the
+	// mode enum, iss/aud/typ presence, rejection of the removed keys) for
+	// schema-validated configs; everything is re-checked here because createApp
+	// also accepts hand-built config objects that never went through the schema
+	// (#106) — with this boundary's field paths, so the operator is pointed at
+	// the oauth.jwt.* key they actually wrote.
+	const jwtWire = config.oauth.jwt;
+	for (const staleKey of ["validate", "allowInsecureDecode"] as const) {
+		if (staleKey in jwtWire) {
+			// A pre-#134 config must not be silently reinterpreted: a defaulted
+			// mode would mean verify even where the operator had opted into
+			// decode-only. Fail with the same migration message the schema emits.
+			throw new Error(`createApp: ${JWT_MODE_MIGRATION_MESSAGE}`);
+		}
+	}
+	// Hand-built configs may omit `mode`; they get the schema's default (verify).
+	const mode: unknown = (jwtWire as { mode?: unknown }).mode ?? "verify";
 	let jwt: VerifyRouterJwtConfig;
-	if (config.oauth.jwt.validate) {
-		const { issuer, audience, tokenType } = config.oauth.jwt;
-		const keyResolver = await keyResolverRegistry.get(config.oauth.jwt.algorithm)(config.oauth.jwt);
+	if (mode === "verify") {
+		const verifying = { ...jwtWire, validate: true as const };
+		assertVerifyRouterJwtConfig(verifying, {
+			caller: "createApp",
+			path: "oauth.jwt",
+			verifyCondition: 'oauth.jwt.mode is "verify"',
+		});
+		const keyResolver = await keyResolverRegistry.get(jwtWire.algorithm)(jwtWire);
 		jwt = {
 			validate: true,
 			key: keyResolver.key,
 			algorithms: keyResolver.algorithms,
-			issuer,
-			audience,
-			tokenType,
+			issuer: verifying.issuer,
+			audience: verifying.audience,
+			tokenType: verifying.tokenType,
 		};
-	} else {
+	} else if (mode === "insecure-decode") {
+		// The mode string is the consent — see the schema's `mode` doc comment.
 		jwt = { validate: false, allowInsecureDecode: true };
 		// error, not warn: a deployment that reaches this line accepts unsigned
 		// tokens, and a fleet filtering at level=error must still see it (#106).
-		logger.error({ validate: false, allowInsecureDecode: true }, "jwt_validation_disabled");
+		logger.error({ mode: "insecure-decode" }, "jwt_validation_disabled");
+	} else {
+		throw new Error(
+			`createApp: oauth.jwt.mode must be "verify" or "insecure-decode", got ${JSON.stringify(mode)}`,
+		);
 	}
 
 	// 7. Build Express app

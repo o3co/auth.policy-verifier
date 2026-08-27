@@ -38,3 +38,31 @@ and version sections follow the release labeling policy in
   - Unchanged: the group-level `passed` flag, evaluation-order listing of
     `reason.groups`, and the deny `code` / `message` (still the first
     alternative of the first failing group).
+- **BREAKING**: the wire-config pair `oauth.jwt.validate` (boolean) and
+  `oauth.jwt.allowInsecureDecode` was folded into a single enum
+  `oauth.jwt.mode = "verify" | "insecure-decode"`, defaulting to `"verify"`
+  ([#134](https://github.com/o3co/auth.policy-verifier/issues/134)).
+
+  | Before | After |
+  |---|---|
+  | `validate = true` (default) | `mode = "verify"` (default) |
+  | `validate = false` + `allowInsecureDecode = true` | `mode = "insecure-decode"` |
+  | `validate = false` alone (refused to boot) | not expressible — the mode string itself is the consent |
+
+  Configs still carrying the removed keys fail at parse time (and at
+  `createApp` for hand-built config objects) with a migration message:
+  `oauth.jwt.validate/allowInsecureDecode were replaced by oauth.jwt.mode; set
+  mode = "verify" or the explicit "insecure-decode"`.
+
+  The standalone template's env override `OAUTH_JWT_VALIDATE` (and
+  `OAUTH_JWT_ALLOW_INSECURE_DECODE`) was replaced by `OAUTH_JWT_MODE`.
+
+  Rationale: after #131, `validate = false` still enforced `exp`/`nbf`, so the
+  key no longer named what it gates. The value `"insecure-decode"` is
+  self-documenting consent — an accidental env-var flip can produce a stray
+  boolean, but never that literal string — preserving the intent of the #106
+  double opt-in in a single explicit knob. The internal router-facing
+  discriminated union (`validate: true` / `validate: false` +
+  `allowInsecureDecode: true`) is unchanged; only the wire config and the
+  wire-to-internal mapping changed. Decode-only deployments still boot with the
+  `jwt_validation_disabled` event logged at error level.

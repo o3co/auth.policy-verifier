@@ -36,7 +36,7 @@ OAUTH_JWT_SECRET=your-secret \
 | `OAUTH_JWT_ISSUER` | （必須） | この deployment が受け入れる issuer — RFC 9068 §4 `iss` |
 | `OAUTH_JWT_AUDIENCE` | （必須） | この resource server を指す audience — RFC 9068 §4 `aud` |
 | `OAUTH_JWT_TOKEN_TYPE` | `at+jwt` | 受け入れる `typ` ヘッダ。同じ鍵で署名された id/refresh/logout token を拒否する |
-| `OAUTH_JWT_VALIDATE` | `true` | JWT 署名を検証するかどうか |
+| `OAUTH_JWT_MODE` | `verify` | `verify` はトークンを完全検証。明示的な `insecure-decode`（テスト専用）は署名検証なしでデコードする — `exp`/`nbf` は引き続き強制される |
 | `RULE_ON_EMPTY_RULE_SET` | `deny` | ルールが 1 つも集まらなかったときの決定（`deny` \| `allow`） |
 | `VERIFY_MAX_BATCH_SIZE` | `50` | `POST /verify/batch` の件数上限 |
 

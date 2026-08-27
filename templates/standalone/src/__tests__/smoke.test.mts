@@ -45,7 +45,7 @@ async function signToken(payload: Record<string, unknown>): Promise<string> {
 // ResourceActionScopeRuleCollector requires scope "<action>:<resourceType>" to be present.
 // DotNotationResourceParser is the default and matches the omitted resource.parser in application.conf.
 const baseConfig = AppConfigSchema.parse({
-	oauth: { jwt: { secret: JWT_SECRET, validate: true, issuer: ISSUER, audience: AUDIENCE } },
+	oauth: { jwt: { secret: JWT_SECRET, mode: "verify", issuer: ISSUER, audience: AUDIENCE } },
 	attribute: {
 		collectors: [
 			{ collector: "PayloadScopeCollector" },

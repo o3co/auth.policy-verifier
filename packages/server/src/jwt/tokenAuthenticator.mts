@@ -43,9 +43,12 @@ export interface VerifyingJwtConfig {
 
 /**
  * Test-only shape: the token is decoded, never signature-verified. Its `exp` /
- * `nbf` claims are still enforced (#106). The acknowledgment is part of the
- * shape — and re-checked at construction time — so wiring the router directly
- * is not a way around the double opt-in `createApp` enforces.
+ * `nbf` claims are still enforced (#106). On the wire this shape is selected by
+ * the single self-documenting key `oauth.jwt.mode = "insecure-decode"` (#134);
+ * internally the interlock stays a two-key literal, and the acknowledgment is
+ * re-checked at construction time — so wiring the router directly with a
+ * hand-built config is not a way around the explicit consent `createApp`
+ * demands.
  */
 export interface DecodingJwtConfig {
 	validate: false;
@@ -87,6 +90,15 @@ export interface JwtConfigErrorContext {
 	caller: string;
 	/** Config path of the JWT block at that boundary, e.g. `"oauth.jwt"`. */
 	path: string;
+	/**
+	 * How the operator selects verifying mode at this boundary, completing the
+	 * sentence "<field> is required when <verifyCondition>". The router's
+	 * internal union is discriminated on `validate`, so the default is
+	 * `"<path>.validate is true"`; `createApp` passes the wire spelling
+	 * `oauth.jwt.mode is "verify"`, because `validate` is no longer a wire key
+	 * (#134) and the message must name what the operator actually wrote.
+	 */
+	verifyCondition?: string;
 }
 
 /** True for a non-empty string or a non-empty array of non-empty strings. */
@@ -107,8 +119,10 @@ function isPresent(value: string | string[] | undefined): boolean {
  *    acknowledgment (#106): one mistyped flag must never be enough to disable
  *    all signature verification.
  *
- * Division of labor with `AppConfigSchema`: the schema's `superRefine` enforces
- * the same invariants for schema-validated configs at config-parse time,
+ * Division of labor with `AppConfigSchema`: the schema enforces the same
+ * invariants for schema-validated configs at config-parse time — the RFC 9068
+ * presence checks via `superRefine`, the decode-only consent via the `mode`
+ * enum whose `"insecure-decode"` value is itself the acknowledgment (#134) —
  * reporting every issue at once with zod paths. This guard is the runtime
  * enforcement for hand-built configs that never went through the schema — a
  * JavaScript caller can reach `createApp` or `createVerifyRouter` with fields
@@ -121,10 +135,11 @@ export function assertVerifyRouterJwtConfig<T extends UncheckedJwtConfig>(
 ): asserts jwt is T & AssertedJwtConfig {
 	const { caller, path } = context;
 	if (jwt.validate) {
+		const verifyCondition = context.verifyCondition ?? `${path}.validate is true`;
 		for (const field of ["issuer", "audience", "tokenType"] as const) {
 			if (!isPresent(jwt[field])) {
 				throw new Error(
-					`${caller}: ${path}.${field} is required when ${path}.validate is true (RFC 9068 §4)`,
+					`${caller}: ${path}.${field} is required when ${verifyCondition} (RFC 9068 §4)`,
 				);
 			}
 		}
