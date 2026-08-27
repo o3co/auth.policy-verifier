@@ -41,10 +41,40 @@ export const AppConfigSchema = z.object({
 				publicKey: z.string().optional(),
 				publicKeyPath: z.string().optional(),
 				validate: z.boolean().default(true),
+				// RFC 9068 §4 — a resource server validates iss and aud, not just the
+				// signature. Both are required whenever `validate` is on (see superRefine).
+				issuer: z.union([z.string(), z.array(z.string())]).optional(),
+				audience: z.union([z.string(), z.array(z.string())]).optional(),
+				// Accepted `typ` header. `at+jwt` is the RFC 9068 access-token type; pinning
+				// it rejects id_tokens, refresh tokens and logout tokens signed with the same key.
+				tokenType: z.string().default("at+jwt"),
 			})
 			.passthrough()
 			.superRefine((data, ctx) => {
 				if (!data.validate) return; // skip validation when disabled
+				const issuers = Array.isArray(data.issuer) ? data.issuer : [data.issuer];
+				const audiences = Array.isArray(data.audience) ? data.audience : [data.audience];
+				if (issuers.length === 0 || issuers.some((i) => !i)) {
+					ctx.addIssue({
+						code: z.ZodIssueCode.custom,
+						message: "issuer is required when validate is true (RFC 9068 §4)",
+						path: ["issuer"],
+					});
+				}
+				if (audiences.length === 0 || audiences.some((a) => !a)) {
+					ctx.addIssue({
+						code: z.ZodIssueCode.custom,
+						message: "audience is required when validate is true (RFC 9068 §4)",
+						path: ["audience"],
+					});
+				}
+				if (!data.tokenType) {
+					ctx.addIssue({
+						code: z.ZodIssueCode.custom,
+						message: "tokenType must not be empty when validate is true (RFC 9068 §4)",
+						path: ["tokenType"],
+					});
+				}
 				if (data.algorithm === "HS256" && !data.secret) {
 					ctx.addIssue({
 						code: z.ZodIssueCode.custom,

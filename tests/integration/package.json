@@ -10,11 +10,17 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
+		"@o3co/auth.policy-verifier.builtins": "workspace:*",
 		"@o3co/auth.policy-verifier.core": "workspace:*",
-		"@o3co/auth.policy-verifier.builtins": "workspace:*"
+		"@o3co/auth.policy-verifier.server": "workspace:*"
 	},
 	"devDependencies": {
+		"@types/express": "^5.0.6",
 		"@types/node": "^26.2.0",
+		"@types/supertest": "^7.2.1",
+		"express": "^5.0.0",
+		"jose": "^6.2.8",
+		"supertest": "^7.2.2",
 		"vitest": "^4.1.10"
 	}
 }

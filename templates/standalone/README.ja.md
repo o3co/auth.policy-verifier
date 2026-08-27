@@ -6,7 +6,10 @@ auth.policy-verifier のデプロイ可能なサーバーテンプレートで�
 
 ```sh
 pnpm install
-OAUTH_JWT_SECRET=your-secret pnpm run start
+OAUTH_JWT_SECRET=your-secret \
+  OAUTH_JWT_ISSUER=https://issuer.example.com \
+  OAUTH_JWT_AUDIENCE=https://api.example.com \
+  pnpm run start
 ```
 
 ## 設定
@@ -30,6 +33,9 @@ OAUTH_JWT_SECRET=your-secret pnpm run start
 | `HTTP_PORT` | `3000` | バインドするポート番号 |
 | `HTTP_PATH_PREFIX` | `""` | URL パスプレフィックス |
 | `OAUTH_JWT_SECRET` | （必須） | HMAC-HS256 JWT 署名シークレット |
+| `OAUTH_JWT_ISSUER` | （必須） | この deployment が受け入れる issuer — RFC 9068 §4 `iss` |
+| `OAUTH_JWT_AUDIENCE` | （必須） | この resource server を指す audience — RFC 9068 §4 `aud` |
+| `OAUTH_JWT_TOKEN_TYPE` | `at+jwt` | 受け入れる `typ` ヘッダ。同じ鍵で署名された id/refresh/logout token を拒否する |
 | `OAUTH_JWT_VALIDATE` | `true` | JWT 署名を検証するかどうか |
 
 ## デフォルトコレクター
@@ -79,7 +85,11 @@ const app = await createApp({
 
 ```sh
 make build
-docker run -e OAUTH_JWT_SECRET=secret auth-policy-verifier
+docker run \
+  -e OAUTH_JWT_SECRET=secret \
+  -e OAUTH_JWT_ISSUER=https://issuer.example.com \
+  -e OAUTH_JWT_AUDIENCE=https://api.example.com \
+  auth-policy-verifier
 ```
 
 Docker Compose でローカル開発する場合:

@@ -47,6 +47,7 @@ Authorization: Bearer <jwt>
 
 - **Collector pattern** — Attributes and rules are gathered by composable collectors, not a static policy file. Add custom collectors for any attribute source (database, external API, JWT claims).
 - **Configurable JWT verification** — HS256 (shared secret), RS256/ES256/EdDSA (JWKS URI or direct public key). Symmetric design with [auth.provider](https://github.com/o3co/auth.provider)'s JWT config.
+- **RFC 9068 §4 token validation** — `iss`, `aud` and the `typ` header are checked alongside the signature, so an `id_token`, refresh token or logout token signed with the same key, or a token minted for another service, is rejected. `issuer` and `audience` are required whenever `validate = true`.
 - **JWKS support** — Point `jwksUri` at auth.provider's `/.well-known/jwks.json` for automatic key rotation.
 - **Pluggable architecture** — Module system for registering custom collectors, rules, and resource parsers via factories.
 - **No DSL lock-in** — Authorization logic is TypeScript. No Rego, no Cedar policy language. If you outgrow this, swap to OPA or Cedar via [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) — the interceptor abstracts over the backend.
@@ -63,7 +64,10 @@ Authorization: Bearer <jwt>
 npx @o3co/create-auth-policy-verifier my-policy-verifier
 cd my-policy-verifier
 pnpm install
-OAUTH_JWT_SECRET=your-secret pnpm start
+OAUTH_JWT_SECRET=your-secret \
+  OAUTH_JWT_ISSUER=https://issuer.example.com \
+  OAUTH_JWT_AUDIENCE=https://api.example.com \
+  pnpm start
 ```
 
 ```bash
@@ -137,6 +141,10 @@ oauth {
     jwksUri = ${?OAUTH_JWT_JWKS_URI}        # RS256/ES256/EdDSA — e.g. http://auth-provider/.well-known/jwks.json
     publicKey = ${?OAUTH_JWT_PUBLIC_KEY}     # RS256/ES256/EdDSA — PEM string
     publicKeyPath = ${?OAUTH_JWT_PUBLIC_KEY_PATH}  # or file path
+    issuer = ${?OAUTH_JWT_ISSUER}           # required when validate = true — RFC 9068 §4 iss
+    audience = ${?OAUTH_JWT_AUDIENCE}       # required when validate = true — RFC 9068 §4 aud
+    tokenType = "at+jwt"                     # accepted typ header
+    tokenType = ${?OAUTH_JWT_TOKEN_TYPE}
     validate = true
     validate = ${?OAUTH_JWT_VALIDATE}
   }

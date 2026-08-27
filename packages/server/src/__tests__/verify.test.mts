@@ -30,10 +30,26 @@ const generateKeyPairAsync = promisify(generateKeyPair);
 const JWT_SECRET = "test-secret";
 const hs256Key = await HS256KeyResolverFactory({ secret: JWT_SECRET });
 
-async function signHS256Token(payload: Record<string, unknown>): Promise<string> {
+/** Canonical issuer/audience this verifier deployment pins (RFC 9068 §4). */
+const ISSUER = "https://issuer.test";
+const AUDIENCE = "https://api.test";
+
+/** Overrides for minting a token that deviates from what the verifier accepts. */
+interface TokenOverrides {
+	issuer?: string;
+	audience?: string;
+	typ?: string;
+}
+
+async function signHS256Token(
+	payload: Record<string, unknown>,
+	overrides: TokenOverrides = {},
+): Promise<string> {
 	return new SignJWT(payload)
-		.setProtectedHeader({ alg: "HS256" })
+		.setProtectedHeader({ alg: "HS256", typ: overrides.typ ?? "at+jwt" })
 		.setIssuedAt()
+		.setIssuer(overrides.issuer ?? ISSUER)
+		.setAudience(overrides.audience ?? AUDIENCE)
 		.sign(hs256Key.key as import("node:crypto").KeyObject);
 }
 
@@ -41,7 +57,14 @@ function createTestApp(resourceParser?: ResourceParser, ruleCollectors?: RuleCol
 	const app = express();
 	app.use(
 		createVerifyRouter({
-			jwt: { key: hs256Key.key, algorithms: hs256Key.algorithms, validate: true },
+			jwt: {
+				validate: true,
+				key: hs256Key.key,
+				algorithms: hs256Key.algorithms,
+				issuer: ISSUER,
+				audience: AUDIENCE,
+				tokenType: "at+jwt",
+			},
 			resourceParser: resourceParser ?? new DotNotationResourceParser(),
 			attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
 			rulePipeline: new RulePipeline(ruleCollectors ?? [new ResourceActionScopeRuleCollector()]),
@@ -152,7 +175,14 @@ describe("POST /verify", () => {
 		const app = express();
 		app.use(
 			createVerifyRouter({
-				jwt: { key: hs256Key.key, algorithms: hs256Key.algorithms, validate: true },
+				jwt: {
+					validate: true,
+					key: hs256Key.key,
+					algorithms: hs256Key.algorithms,
+					issuer: ISSUER,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				},
 				resourceParser: new DotNotationResourceParser(),
 				attributePipeline: new AttributePipeline([new SubscriberDidCollector()]),
 				rulePipeline: new RulePipeline([new RequireSubscriberDidCollector()]),
@@ -192,8 +222,10 @@ describe("POST /verify", () => {
 
 	it("returns 401 for expired JWT", async () => {
 		const token = await new SignJWT({ scope: "read:project" })
-			.setProtectedHeader({ alg: "HS256" })
+			.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
 			.setIssuedAt()
+			.setIssuer(ISSUER)
+			.setAudience(AUDIENCE)
 			.setExpirationTime("-1s")
 			.sign(hs256Key.key as import("node:crypto").KeyObject);
 		const res = await request(app)
@@ -215,7 +247,14 @@ describe("POST /verify with RS256", () => {
 		const app = express();
 		app.use(
 			createVerifyRouter({
-				jwt: { key: rs256Resolver.key, algorithms: rs256Resolver.algorithms, validate: true },
+				jwt: {
+					validate: true,
+					key: rs256Resolver.key,
+					algorithms: rs256Resolver.algorithms,
+					issuer: ISSUER,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				},
 				resourceParser: new DotNotationResourceParser(),
 				attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
 				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
@@ -223,8 +262,10 @@ describe("POST /verify with RS256", () => {
 		);
 
 		const token = await new SignJWT({ scope: "read:project" })
-			.setProtectedHeader({ alg: "RS256" })
+			.setProtectedHeader({ alg: "RS256", typ: "at+jwt" })
 			.setIssuedAt()
+			.setIssuer(ISSUER)
+			.setAudience(AUDIENCE)
 			.sign(privateKey as unknown as CryptoKey);
 
 		const res = await request(app)
@@ -247,7 +288,14 @@ describe("POST /verify with RS256", () => {
 		const app = express();
 		app.use(
 			createVerifyRouter({
-				jwt: { key: rs256Resolver.key, algorithms: rs256Resolver.algorithms, validate: true },
+				jwt: {
+					validate: true,
+					key: rs256Resolver.key,
+					algorithms: rs256Resolver.algorithms,
+					issuer: ISSUER,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				},
 				resourceParser: new DotNotationResourceParser(),
 				attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
 				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
@@ -255,8 +303,10 @@ describe("POST /verify with RS256", () => {
 		);
 
 		const token = await new SignJWT({ scope: "read:project" })
-			.setProtectedHeader({ alg: "RS256" })
+			.setProtectedHeader({ alg: "RS256", typ: "at+jwt" })
 			.setIssuedAt()
+			.setIssuer(ISSUER)
+			.setAudience(AUDIENCE)
 			.sign(wrongPrivateKey as unknown as CryptoKey);
 
 		const res = await request(app)
@@ -365,7 +415,14 @@ describe("POST /verify — scopeless JWT (DID grant) (#27, #104)", () => {
 		const didApp = express();
 		didApp.use(
 			createVerifyRouter({
-				jwt: { key: hs256Key.key, algorithms: hs256Key.algorithms, validate: true },
+				jwt: {
+					validate: true,
+					key: hs256Key.key,
+					algorithms: hs256Key.algorithms,
+					issuer: ISSUER,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				},
 				resourceParser: new DotNotationResourceParser(),
 				attributePipeline: new AttributePipeline([
 					new PayloadScopeCollector(),
@@ -437,5 +494,168 @@ describe("POST /verify — request body validation (#18)", () => {
 		const res = await makeRequest({ resource: "project:1", action: "" });
 		expect(res.status).toBe(400);
 		expect(res.body.code).toBe("invalid_request");
+	});
+});
+
+describe("POST /verify — RFC 9068 §4 token validation (#105)", () => {
+	const app = createTestApp();
+
+	it("allows a token from the configured issuer and audience with typ at+jwt", async () => {
+		const token = await signHS256Token({ scope: "read:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.status).toBe(200);
+		expect(res.body.decision).toBe("allow");
+	});
+
+	it("rejects a token minted by a foreign issuer", async () => {
+		const token = await signHS256Token({ scope: "read:project" }, { issuer: "https://evil.test" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.status).toBe(401);
+		expect(res.body.code).toBe("invalid_token");
+	});
+
+	it("rejects a token minted for a different audience", async () => {
+		const token = await signHS256Token(
+			{ scope: "read:project" },
+			{ audience: "https://other-service.test" },
+		);
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.status).toBe(401);
+		expect(res.body.code).toBe("invalid_token");
+	});
+
+	it("rejects a token carrying no iss claim", async () => {
+		const token = await new SignJWT({ scope: "read:project" })
+			.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
+			.setIssuedAt()
+			.setAudience(AUDIENCE)
+			.sign(hs256Key.key as import("node:crypto").KeyObject);
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.status).toBe(401);
+		expect(res.body.code).toBe("invalid_token");
+	});
+
+	it("rejects a token carrying no aud claim", async () => {
+		const token = await new SignJWT({ scope: "read:project" })
+			.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
+			.setIssuedAt()
+			.setIssuer(ISSUER)
+			.sign(hs256Key.key as import("node:crypto").KeyObject);
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.status).toBe(401);
+		expect(res.body.code).toBe("invalid_token");
+	});
+
+	// The paired provider signs id_tokens, refresh tokens and logout tokens with the
+	// same key as access tokens; only the typ header separates them.
+	it.each(["id+jwt", "rt+jwt", "logout+jwt"])(
+		"rejects a %s token signed with the same key",
+		async (typ) => {
+			const token = await signHS256Token({ scope: "read:project" }, { typ });
+			const res = await request(app)
+				.post("/verify")
+				.set("Authorization", `Bearer ${token}`)
+				.send({ resource: "project:1", action: "read" });
+
+			expect(res.status).toBe(401);
+			expect(res.body.code).toBe("invalid_token");
+		},
+	);
+
+	it("rejects a token with no typ header", async () => {
+		const token = await new SignJWT({ scope: "read:project" })
+			.setProtectedHeader({ alg: "HS256" })
+			.setIssuedAt()
+			.setIssuer(ISSUER)
+			.setAudience(AUDIENCE)
+			.sign(hs256Key.key as import("node:crypto").KeyObject);
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.status).toBe(401);
+		expect(res.body.code).toBe("invalid_token");
+	});
+
+	it("accepts the application/at+jwt spelling of the same media type", async () => {
+		const token = await signHS256Token({ scope: "read:project" }, { typ: "application/at+jwt" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.status).toBe(200);
+		expect(res.body.decision).toBe("allow");
+	});
+
+	it("accepts a token whose aud array contains the configured audience", async () => {
+		const token = await new SignJWT({ scope: "read:project" })
+			.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
+			.setIssuedAt()
+			.setIssuer(ISSUER)
+			.setAudience(["https://other-service.test", AUDIENCE])
+			.sign(hs256Key.key as import("node:crypto").KeyObject);
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.status).toBe(200);
+		expect(res.body.decision).toBe("allow");
+	});
+
+	it("refuses to build a verifying router without an issuer", () => {
+		expect(() =>
+			createVerifyRouter({
+				jwt: {
+					validate: true,
+					key: hs256Key.key,
+					algorithms: hs256Key.algorithms,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				} as unknown as Parameters<typeof createVerifyRouter>[0]["jwt"],
+				resourceParser: new DotNotationResourceParser(),
+				attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
+				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
+			}),
+		).toThrow(/issuer/);
+	});
+
+	it("refuses to build a verifying router without an audience", () => {
+		expect(() =>
+			createVerifyRouter({
+				jwt: {
+					validate: true,
+					key: hs256Key.key,
+					algorithms: hs256Key.algorithms,
+					issuer: ISSUER,
+					tokenType: "at+jwt",
+				} as unknown as Parameters<typeof createVerifyRouter>[0]["jwt"],
+				resourceParser: new DotNotationResourceParser(),
+				attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
+				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
+			}),
+		).toThrow(/audience/);
 	});
 });
