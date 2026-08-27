@@ -23,7 +23,7 @@ interface EvaluateOptions {
 function evaluate(attrs: Attributes, rules: Rule[], options?: EvaluateOptions): Decision
 ```
 
-Evaluates collected attributes against a set of rules. Rules are grouped by `ruleType`; within a group, any passing rule satisfies the group (OR); all groups must be satisfied for an allow decision (AND across groups). Returns `{ decision: "allow" }` or `{ decision: "deny"; code: string; message: string }`.
+Evaluates collected attributes against a set of rules. Rules are grouped by `ruleType`; within a group, any passing rule satisfies the group (OR); all groups must be satisfied for an allow decision (AND across groups). Returns `{ decision: "allow"; reason }` or `{ decision: "deny"; code: string; message: string; reason }`.
 
 An **empty rule set is denied** (`code: "no_applicable_rule"`): a request no rule spoke to was never authorized. Pass `{ onEmptyRuleSet: "allow" }` as the third argument to opt a deployment out of that default.
 

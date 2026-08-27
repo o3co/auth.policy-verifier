@@ -43,6 +43,10 @@ interface VerifyRouterConfig {
   resourceParser: ResourceParser;
   attributePipeline: AttributePipeline;
   rulePipeline: RulePipeline;
+  /** 評価セマンティクスの上書き。省略時は空 rule set を deny。 */
+  evaluateOptions?: EvaluateOptions;
+  /** POST /verify/batch の 1 リクエストあたり件数上限。既定は 50。 */
+  maxBatchSize?: number;
 }
 
 // `validate` による判別可能ユニオン。検証パラメータは検証するときにだけ存在する。

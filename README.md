@@ -40,7 +40,7 @@ Authorization: Bearer <jwt>
   │     every group runs → structured reason           │
   │                                                   │
   │  → 200 {"decision": "allow",  "reason": {...}}    │
-  │  → 403 {"decision": "deny", "code": …, "reason"}  │
+  │  → 403 {"decision":"deny","code":…,"reason":{…}} │
   └──────────────────────────────────────────────────┘
 
 POST /verify/batch — the same contract, N decisions per round trip

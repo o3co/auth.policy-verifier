@@ -135,7 +135,12 @@ function parseDecisionRequest(raw: unknown, label: string): DecisionRequest | st
 	if (typeof action !== "string" || action === "") {
 		return `${label}.action must be a non-empty string`;
 	}
-	if (context !== undefined && (typeof context !== "object" || context === null)) {
+	// `typeof [] === "object"`, so arrays need excluding explicitly — an array
+	// reaching `CollectorContext.requestContext` is a shape no collector expects.
+	if (
+		context !== undefined &&
+		(typeof context !== "object" || context === null || Array.isArray(context))
+	) {
 		return `${label}.context must be an object`;
 	}
 	return { resource, action, context: context as Record<string, unknown> | undefined };

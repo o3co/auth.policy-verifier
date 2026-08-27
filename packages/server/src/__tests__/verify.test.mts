@@ -736,6 +736,17 @@ describe("POST /verify — decision contract (#124)", () => {
 		expect(res.body.subject).toBeUndefined();
 	});
 
+	it("rejects an array as context on the single endpoint too", async () => {
+		const token = await signHS256Token({ sub: "user-1", scope: "read:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read", context: ["a"] });
+
+		expect(res.status).toBe(400);
+		expect(res.body.code).toBe("invalid_request");
+	});
+
 	it("never takes the subject from the request body", async () => {
 		// The token is the only authority on who is asking; accepting a body-supplied
 		// subject would let any token holder ask for a decision about anyone else.
@@ -828,6 +839,20 @@ describe("POST /verify/batch (#124)", () => {
 			});
 
 		expect(contexts).toEqual([{ tenant: "a" }, { tenant: "b" }]);
+	});
+
+	it("returns 400 when an entry's context is an array", async () => {
+		// `typeof [] === "object"`, so an array would otherwise reach
+		// CollectorContext.requestContext as a shape no collector expects.
+		const token = await signHS256Token({ sub: "user-1", scope: "read:project" });
+		const res = await request(app)
+			.post("/verify/batch")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ decisions: [{ resource: "project:1", action: "read", context: ["a"] }] });
+
+		expect(res.status).toBe(400);
+		expect(res.body.code).toBe("invalid_request");
+		expect(res.body.message).toContain("context");
 	});
 
 	it("returns 400 when decisions is absent", async () => {

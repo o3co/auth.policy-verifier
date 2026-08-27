@@ -40,7 +40,7 @@ Authorization: Bearer <jwt>
   │     全グループを評価 → 構造化 reason                │
   │                                                   │
   │  → 200 {"decision": "allow",  "reason": {...}}    │
-  │  → 403 {"decision": "deny", "code": …, "reason"}  │
+  │  → 403 {"decision":"deny","code":…,"reason":{…}} │
   └──────────────────────────────────────────────────┘
 
 POST /verify/batch — 同じ契約で、1 往復に N 件の decision

@@ -43,6 +43,10 @@ interface VerifyRouterConfig {
   resourceParser: ResourceParser;
   attributePipeline: AttributePipeline;
   rulePipeline: RulePipeline;
+  /** Evaluator semantics overrides; omitted means deny on an empty rule set. */
+  evaluateOptions?: EvaluateOptions;
+  /** Most entries POST /verify/batch will decide in one request. Defaults to 50. */
+  maxBatchSize?: number;
 }
 
 // Discriminated on `validate`: verification parameters exist only when verifying.
