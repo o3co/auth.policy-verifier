@@ -4,7 +4,9 @@
 import {
 	type AttributeCollectorFactory,
 	AttributePipeline,
+	createConsoleLogger,
 	type KeyResolverFactory,
+	type Logger,
 	type Module,
 	type PathResolver,
 	Registry,
@@ -22,6 +24,13 @@ export interface CreateAppOptions {
 	pathResolver: PathResolver;
 	config: AppConfig;
 	modules: Module[];
+	/**
+	 * Structured logger for boot-time warnings and the verify router's failure
+	 * events. Pino-compatible (a pino instance satisfies it without an adapter).
+	 * Defaults to the console-backed logger at `config.logging.level`, so
+	 * failures are never silent even when nothing is wired.
+	 */
+	logger?: Logger;
 }
 
 /**
@@ -37,6 +46,7 @@ export interface CreateAppOptions {
  */
 export async function createApp(options: CreateAppOptions): Promise<express.Express> {
 	const { pathResolver, config, modules } = options;
+	const logger = options.logger ?? createConsoleLogger({}, { level: config.logging.level });
 
 	// 1. Create registries (factories, not instances)
 	const attributeCollectorRegistry = new Registry<AttributeCollectorFactory>();
@@ -103,9 +113,9 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 		};
 	} else {
 		jwt = { validate: false };
-		console.warn(
-			"WARNING: JWT signature validation is disabled. Tokens will be accepted without verification.",
-		);
+		// Structured event, not console.warn: an aggregated-log pipeline can
+		// alert on the event name instead of losing a bare string (#107).
+		logger.warn({ validate: false }, "jwt_validation_disabled");
 	}
 
 	// 7. Build Express app
@@ -116,6 +126,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 		prefix,
 		createVerifyRouter({
 			jwt,
+			logger,
 			resourceParser,
 			attributePipeline: new AttributePipeline(attributeCollectors),
 			rulePipeline: new RulePipeline(ruleCollectors),
