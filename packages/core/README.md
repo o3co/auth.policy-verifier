@@ -15,7 +15,12 @@ npm install @o3co/auth.policy-verifier.core
 ### evaluate
 
 ```typescript
-function evaluate(attrs: Attributes, rules: Rule[]): Decision
+interface EvaluateOptions {
+  /** Decision for an empty rule set. Defaults to "deny". */
+  onEmptyRuleSet?: "deny" | "allow"
+}
+
+function evaluate(attrs: Attributes, rules: Rule[], options?: EvaluateOptions): Decision
 ```
 
 Evaluates collected attributes against a set of rules. Rules are grouped by `ruleType`; within a group, any passing rule satisfies the group (OR); all groups must be satisfied for an allow decision (AND across groups). Returns `{ decision: "allow" }` or `{ decision: "deny"; code: string; message: string }`.
