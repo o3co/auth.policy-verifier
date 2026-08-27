@@ -12,14 +12,27 @@ const OLD_SECRET = "22".repeat(32);
 const future = "2999-01-01T00:00:00Z";
 
 describe("checkHs256Rotation — the absent case", () => {
-	it.each([undefined, null])("treats %s previousSecrets as no rotation", (previousSecrets) => {
-		const result = checkHs256Rotation({ secret: SECRET, previousSecrets });
+	it("treats an omitted previousSecrets as no rotation", () => {
+		const result = checkHs256Rotation({ secret: SECRET, previousSecrets: undefined });
 		expect(result).toEqual({ ok: true, previousSecrets: [] });
 	});
 
 	it("accepts an explicit empty list", () => {
 		const result = checkHs256Rotation({ secret: SECRET, previousSecrets: [] });
 		expect(result).toEqual({ ok: true, previousSecrets: [] });
+	});
+
+	it("refuses null — it is not a second spelling for omitted", () => {
+		// A null here was produced rather than written (an unrendered template, a
+		// missing env var), so reading it as "nothing is being rotated" would boot
+		// a verifier that denies every token signed with the retired secret.
+		const result = checkHs256Rotation({ secret: SECRET, previousSecrets: null });
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.issues).toEqual([
+				{ path: ["previousSecrets"], message: expect.stringContaining("null is not a spelling") },
+			]);
+		}
 	});
 
 	it("carries a kid through even with no previous secrets", () => {
@@ -52,8 +65,14 @@ describe("checkHs256Rotation — shape", () => {
 		}
 	});
 
-	it("refuses an entry that is not an object", () => {
-		const result = checkHs256Rotation({ secret: SECRET, kid: "v1", previousSecrets: ["v0"] });
+	// `null` is refused as the whole value, but an entry inside the list is a
+	// separate check — `typeof null === "object"`, so it needs its own case.
+	it.each([
+		["a string", "v0"],
+		["null", null],
+		["a nested array", []],
+	])("refuses an entry that is not an object — %s", (_label, entry) => {
+		const result = checkHs256Rotation({ secret: SECRET, kid: "v1", previousSecrets: [entry] });
 		expect(result.ok).toBe(false);
 		if (!result.ok) {
 			expect(result.issues[0]?.path).toEqual(["previousSecrets", 0]);

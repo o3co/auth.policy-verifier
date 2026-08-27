@@ -166,13 +166,33 @@ function checkEntry(
 /**
  * Applies the rotation contract to an `oauth.jwt` block.
  *
- * Absent or `null` `previousSecrets` means "no rotation configured" rather than
- * an error, matching auth.provider's `narrowPreviousSecretsArray`: a deployment
+ * An *absent* `previousSecrets` means "no rotation configured": a deployment
  * that has never rotated writes nothing, and an operator closing a window
- * deletes the block rather than having to remember an empty-list anchor. A
- * value that is *present but not a list* is refused rather than ignored —
- * silently dropping it would take the verifier back to holding one secret while
- * the config visibly says otherwise, which is the failure this closes.
+ * deletes the block rather than having to remember an empty-list anchor. `[]`
+ * says the same thing explicitly. Anything else that is not a list — `null`
+ * included — is refused rather than ignored: silently dropping it would take
+ * the verifier back to holding one secret while the config visibly says
+ * otherwise, which is the failure this closes.
+ *
+ * `null` is deliberately NOT a second spelling for absent, and this is the one
+ * place the port diverges from auth.provider's `narrowPreviousSecretsArray`
+ * (which reads it as an explicit opt-out). Three reasons, none of them about
+ * the wire contract — the `{ kid, secret, expiresAt }` triple and the
+ * kid-overlap semantics are ported unchanged:
+ *
+ * 1. `AppConfigSchema` types the field `z.array(...).optional()`, which rejects
+ *    `null` before this function is ever reached. Accepting it here would give
+ *    a hand-built config a different answer than a parsed one — the exact
+ *    invariant this guard exists to hold (see `resolveJwksFetchBounds`).
+ * 2. No other optional key in the `oauth.jwt` block has a `null` spelling:
+ *    `secret`, `kid`, `jwksUri`, `publicKey` and `publicKeyPath` are all
+ *    absent-or-a-value. One field with a private third spelling is a trap.
+ * 3. A `null` that reached a config was almost certainly produced, not
+ *    written — an unrendered template value, a missing env var, a JSON
+ *    serializer emitting the key anyway. Reading that as "nothing is being
+ *    rotated" boots a verifier that will deny every token signed with the
+ *    retired secret the moment the provider cuts over, which is #112 again.
+ *    Failing at boot names the key instead.
  */
 export function checkHs256Rotation(config: Hs256RotationConfig): Hs256RotationCheck {
 	const issues: Hs256RotationIssue[] = [];
@@ -184,13 +204,14 @@ export function checkHs256Rotation(config: Hs256RotationConfig): Hs256RotationCh
 
 	const raw = config.previousSecrets;
 	const previousSecrets: Hs256PreviousSecret[] = [];
-	if (raw !== undefined && raw !== null) {
+	if (raw !== undefined) {
 		if (!Array.isArray(raw)) {
 			issues.push({
 				path: ["previousSecrets"],
 				message:
-					"previousSecrets must be an array of { kid, secret, expiresAt } entries " +
-					"(or absent when nothing is being rotated)",
+					"previousSecrets must be an array of { kid, secret, expiresAt } entries, " +
+					"or omitted entirely when nothing is being rotated — null is not a spelling " +
+					"for omitted",
 			});
 		} else if (raw.length > MAX_PREVIOUS_SECRETS) {
 			// Checked before the entries, and reported alone: the cap is about how

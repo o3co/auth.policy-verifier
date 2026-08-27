@@ -191,15 +191,27 @@ oauth {
   jwt {
     algorithm = "HS256"           # HS256 | RS256 | ES256 | EdDSA
     algorithm = ${?OAUTH_JWT_ALGORITHM}
-    secret = ${?OAUTH_JWT_SECRET}           # HS256
-    kid = ${?OAUTH_JWT_KID}                 # HS256 — 上の secret に名前を付ける。未設定ならヘッダを参照しない
-    previousSecrets = []                     # HS256 — 重複期間中の旧シークレット（最大 3 件）
-    jwksUri = ${?OAUTH_JWT_JWKS_URI}        # RS256/ES256/EdDSA — https 必須、例: https://auth-provider/.well-known/jwks.json
+
+    # ---- HS256 専用。以下 2 グループのどちらか一方だけを使うこと。 --------
+    secret = ${?OAUTH_JWT_SECRET}
+    kid = ${?OAUTH_JWT_KID}                  # 上の secret に名前を付ける。未設定ならトークンヘッダを参照しない
+    # previousSecrets — 重複期間中の旧シークレット、最大 3 件。ここにあえて
+    # 書いていない: このキーは RS256/ES256/EdDSA では（空リストであっても）
+    # 起動時に拒否されるため、どのアルゴリズムでもコピーされうるスニペットに
+    # 置いてはならない。HS256 のときだけ追加すること:
+    #   previousSecrets = [
+    #     { kid = "v0", secret = ${?OAUTH_JWT_PREVIOUS_SECRET}, expiresAt = "2026-09-01T00:00:00Z" }
+    #   ]
+
+    # ---- RS256 / ES256 / EdDSA 専用 --------------------------------------
+    jwksUri = ${?OAUTH_JWT_JWKS_URI}         # https 必須、例: https://auth-provider/.well-known/jwks.json
     jwksTimeoutMs = 5000                     # JWKS 取得の上限 — 打ち切り時間
     jwksCooldownMs = 30000                   # 再取得の最小間隔
     jwksCacheMaxAgeMs = 600000               # 取得済み JWKS のキャッシュ期間
-    publicKey = ${?OAUTH_JWT_PUBLIC_KEY}     # RS256/ES256/EdDSA — PEM 文字列
+    publicKey = ${?OAUTH_JWT_PUBLIC_KEY}     # PEM 文字列
     publicKeyPath = ${?OAUTH_JWT_PUBLIC_KEY_PATH}  # またはファイルパス
+
+    # ---- 全アルゴリズム共通 ----------------------------------------------
     issuer = ${?OAUTH_JWT_ISSUER}           # mode = "verify" のとき必須 — RFC 9068 §4 iss
     audience = ${?OAUTH_JWT_AUDIENCE}       # mode = "verify" のとき必須 — RFC 9068 §4 aud
     tokenType = "at+jwt"                     # 受け入れる typ ヘッダ
@@ -316,7 +328,8 @@ oauth.jwt {
 - `expiresAt` はリクエストごとに評価されるため、重複期間は再起動なしに閉じる。重複期間中の旧シークレットは、それを持つ者にとって依然としてトークンを**発行**できる鍵なので、期間はトークンの寿命程度にすること（四半期単位にしない）。
 - `kid` は任意であり、未設定なら従来どおり — 1 つのシークレットがすべてを検証し、トークンヘッダは読まれない。設定すると（`previousSecrets` を使うなら必須）ヘッダの照合が始まり、未設定の `kid` を持つトークンは拒否される。
 - `kid` を**持たない**トークンも受理される: 設定済みのシークレット（current + previous）を順に試す。1 シークレットあたり署名検証 1 回のコストがかかるため、`previousSecrets` は **3** 件に制限されている。
-- このリストは HS256 専用。RS256/ES256/EdDSA は `jwksUri` の JWKS 経由でローテーションする（発行者が公開している鍵がすべて載っている）。非対称アルゴリズムに `previousSecrets` を書いた場合は黙って無視せず起動時に拒否する。
+- このリストは HS256 専用であり、**RS256/ES256/EdDSA では空の `previousSecrets = []` も拒否される** — 判定はキーの有無であって中身の件数ではない。これらのアルゴリズムは `jwksUri` の JWKS 経由でローテーションし（発行者が公開している鍵がすべて載っている）、このブロックは何も設定しないため、黙って無視せず起動時に拒否する。設定を非対称アルゴリズムに切り替えるときは消し忘れないこと。
+- `kid` は例外で、実質 HS256 専用だが非対称アルゴリズムでは *受理された上で無視される*（これらは取得した JWKS に対して `kid` を照合する）。非対称構成の起動を壊すことはない。
 
 ## 開発
 
