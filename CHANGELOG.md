@@ -287,7 +287,11 @@ and version sections follow the release labeling policy in
   packages that are missing. `auth.provider` removed the same gate for the same
   reason in [o3co/auth.provider#111](https://github.com/o3co/auth.provider/pull/111).
 
-  The workflow also now refuses a tag that is not `vX.Y.Z`, or whose version has
-  no `## [X.Y.Z]` section in this file, before it builds or publishes anything —
-  the CHANGELOG cut required by [`docs/release-policy.md`](docs/release-policy.md)
-  R2/R6 is now checked rather than assumed.
+  The workflow also now refuses a tag that is not `v` + a SemVer version, or
+  whose version has no `## [X.Y.Z]` section in this file, before it builds or
+  publishes anything — the CHANGELOG cut required by
+  [`docs/release-policy.md`](docs/release-policy.md) R2/R6 is now checked rather
+  than assumed. Prerelease tags are accepted in full SemVer form
+  (`v1.2.3-rc.1`, `v1.2.3-rc-1`, `v1.2.3-0.3.7`); build metadata
+  (`v1.2.3+build.5`) is refused, because npm ignores `+…` when comparing
+  versions and two such tags would be one registry version.
