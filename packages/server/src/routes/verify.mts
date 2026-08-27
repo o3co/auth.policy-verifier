@@ -165,13 +165,22 @@ function isVerificationUnavailable(cause: unknown): boolean {
  * `exp` / `nbf` checks for the decode-only path (#106). `decodeJwt` performs
  * no validation at all, so the route enforces the token's own lifetime with
  * `jwtVerify`'s semantics and error classes: reject a numeric `exp` in the
- * past or a numeric `nbf` in the future, reject a non-numeric value for
- * either, tolerate absence, zero clock tolerance. Skipping the signature is an
- * (acknowledged, test-only) trust decision about the issuer; honouring an
- * expired token is simply wrong in every mode.
+ * past or a numeric `nbf` in the future, reject a present non-numeric value
+ * for any time claim (`iat` included — `jwtVerify` type-checks it
+ * unconditionally), tolerate absence, zero clock tolerance. Skipping the
+ * signature is an (acknowledged, test-only) trust decision about the issuer;
+ * honouring an expired token is simply wrong in every mode.
  */
 function assertTimeClaims(payload: JWTPayload): void {
 	const now = Math.floor(Date.now() / 1000);
+	if (payload.iat !== undefined && typeof payload.iat !== "number") {
+		throw new errors.JWTClaimValidationFailed(
+			'"iat" claim must be a number',
+			payload,
+			"iat",
+			"invalid",
+		);
+	}
 	if (payload.nbf !== undefined) {
 		if (typeof payload.nbf !== "number") {
 			throw new errors.JWTClaimValidationFailed(

@@ -72,14 +72,18 @@ interface SignOptions {
 	key?: unknown;
 	expiresAt?: number;
 	notBefore?: number;
+	/** Keep the payload's own `iat` instead of stamping a numeric one. */
+	skipIssuedAt?: boolean;
 }
 
 async function signToken(payload: Record<string, unknown>, options: SignOptions = {}) {
 	const jwt = new SignJWT(payload)
 		.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
-		.setIssuedAt()
 		.setIssuer(ISSUER)
 		.setAudience(AUDIENCE);
+	if (!options.skipIssuedAt) {
+		jwt.setIssuedAt();
+	}
 	if (options.expiresAt !== undefined) {
 		jwt.setExpirationTime(options.expiresAt);
 	}
@@ -397,10 +401,16 @@ describe("decode-only path time-claim enforcement (#106)", () => {
 		expect((events[0].obj.err as { code?: string }).code).toBe("ERR_JWT_CLAIM_VALIDATION_FAILED");
 	});
 
-	it("rejects a token whose exp claim is not a number", async () => {
+	it.each([
+		{ claim: "exp", payload: { exp: "tomorrow" } },
+		{ claim: "nbf", payload: { nbf: "yesterday" } },
+		{ claim: "iat", payload: { iat: "yesterday" } },
+	])("rejects a token whose $claim claim is not a number", async ({ payload }) => {
 		const { events, logger } = captureEvents();
-		// jwtVerify rejects a non-numeric exp; the decode path must not be laxer.
-		const token = await signToken({ scope: "read:project", exp: "tomorrow" });
+		// jwtVerify rejects a present non-numeric exp/nbf/iat; the decode path
+		// must not be laxer. skipIssuedAt keeps setIssuedAt() from stamping a
+		// numeric iat over the malformed one.
+		const token = await signToken({ scope: "read:project", ...payload }, { skipIssuedAt: true });
 
 		const res = await request(decodeApp(logger))
 			.post("/verify")
