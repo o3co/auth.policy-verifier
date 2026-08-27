@@ -90,6 +90,25 @@ export const DEFAULT_CLOCK_TOLERANCE_SECONDS = 0;
 export const MAX_CLOCK_TOLERANCE_SECONDS = 300;
 
 /**
+ * Ceiling on `oauth.jwt.previousSecrets` — how many retired HS256 secrets a
+ * deployment may hold alongside the current one (#112).
+ *
+ * The bound is not bookkeeping tidiness, it is the per-verification work
+ * budget. An HS256 token may arrive with no `kid` header at all, and the only
+ * way to verify one is to try the secrets in turn, so the length of this list
+ * is exactly the number of HMAC computations an unauthenticated caller can
+ * force on the decision hot path per request. Unbounded, it is a CPU-exhaustion
+ * dial an operator hands out by writing a longer config file.
+ *
+ * Three, because rotation needs one overlap slot and the realistic worst case
+ * is a second rotation started before the first window closed, plus one spare.
+ * A deployment that needs more is not rotating, it is accumulating: the answer
+ * is to let the windows close (`expiresAt`) rather than to keep the old keys
+ * live, since every entry here can still MINT tokens for anyone who holds it.
+ */
+export const MAX_PREVIOUS_SECRETS = 3;
+
+/**
  * Default bind address when the config does not set one (#108).
  *
  * Loopback, not `0.0.0.0`: the verifier answers `/verify` with an authorization

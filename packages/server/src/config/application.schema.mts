@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from "zod";
+import { checkHs256Rotation } from "../jwt/hs256Rotation.mjs";
 import { checkJwksUri } from "../jwt/jwks.mjs";
 import {
 	DEFAULT_CALLER_AUTH_HEADER,
@@ -81,6 +82,46 @@ export const AppConfigSchema = z.object({
 			.object({
 				algorithm: z.string().default("HS256"),
 				secret: z.string().optional(),
+				/**
+				 * Names the HS256 secret the issuer signs with today (#112), the
+				 * same `kid` auth.provider stamps into every token it mints.
+				 *
+				 * Optional, and leaving it out is the shape every pre-#112
+				 * deployment has: no `kid` configured means the token header is
+				 * never consulted and the single `secret` verifies everything.
+				 * Setting it starts pinning the header, and `previousSecrets`
+				 * requires it — nothing else tells the current secret apart from
+				 * the retired ones.
+				 *
+				 * HS256 only. The asymmetric algorithms match `kid` against the
+				 * JWKS they fetch, which is jose's job and not a config key.
+				 */
+				kid: z.string().optional(),
+				/**
+				 * HS256 secrets a rotation retired but has not finished retiring
+				 * (#112), each with the moment its overlap window closes.
+				 *
+				 * Without this the default deployment cannot rotate at all: the
+				 * verifier holds exactly one secret, so the instant the provider
+				 * starts signing with a new one, every token still in flight is
+				 * refused until both services have restarted in lockstep. The
+				 * shape is auth.provider's `previousSecrets` verbatim, so an
+				 * operator moves the same pair of values on both sides.
+				 *
+				 * Capped at `MAX_PREVIOUS_SECRETS` and checked again in
+				 * `jwt/hs256Rotation.mts`: a token carrying no `kid` is tried
+				 * against every configured secret, so the list length is the work
+				 * one unauthenticated request can force.
+				 */
+				previousSecrets: z
+					.array(
+						z.object({
+							kid: z.string(),
+							secret: z.string(),
+							expiresAt: z.string(),
+						}),
+					)
+					.optional(),
 				/**
 				 * JWKS endpoint for the asymmetric algorithms. Must be https — or
 				 * http on a loopback host, the development carve-out documented in
@@ -211,11 +252,45 @@ export const AppConfigSchema = z.object({
 						message: "secret is required for HS256",
 					});
 				}
+				if (data.algorithm === "HS256") {
+					// #112. The rotation contract is stated once, in
+					// `jwt/hs256Rotation.mts`, and spent twice: here for config
+					// files, and in the HS256 KeyResolverFactory for hand-built
+					// configs that never met this schema. Every issue is reported
+					// at the path the operator wrote, so a rotation block with two
+					// mistakes takes one round trip to fix.
+					const rotation = checkHs256Rotation(data);
+					if (!rotation.ok) {
+						for (const issue of rotation.issues) {
+							ctx.addIssue({
+								code: z.ZodIssueCode.custom,
+								message: issue.message,
+								path: issue.path,
+							});
+						}
+					}
+				}
 				const isBuiltinAsymmetric = ["RS256", "ES256", "EdDSA"].includes(data.algorithm);
 				if (isBuiltinAsymmetric && !data.jwksUri && !data.publicKey && !data.publicKeyPath) {
 					ctx.addIssue({
 						code: z.ZodIssueCode.custom,
 						message: `jwksUri or publicKey/publicKeyPath is required for ${data.algorithm}`,
+					});
+				}
+				if (isBuiltinAsymmetric && data.previousSecrets !== undefined) {
+					// Mirrors auth.provider's guard in the other direction. The
+					// asymmetric algorithms rotate through the JWKS the provider
+					// publishes, so a `previousSecrets` block carried over from an
+					// HS256 config configures nothing — and being silently dropped
+					// is how an operator ends up believing a rotation is covered
+					// when it is not.
+					ctx.addIssue({
+						code: z.ZodIssueCode.custom,
+						message:
+							`previousSecrets is not valid for ${data.algorithm} — it is the HS256 ` +
+							"rotation field. Asymmetric keys rotate through the JWKS at jwksUri, which " +
+							"carries every key the issuer currently publishes.",
+						path: ["previousSecrets"],
 					});
 				}
 				// Transport security for the key source (#109): a plaintext JWKS

@@ -807,3 +807,166 @@ describe("createApp caller authentication (#108)", () => {
 		).rejects.toThrow(/^createApp: http\.callerAuth\.token must be a non-empty string/);
 	});
 });
+
+describe("createApp — HS256 secret rotation (#112)", () => {
+	/** 64 hex characters — 32 decoded bytes, the floor auth.provider#282 set. */
+	const CURRENT_SECRET = "11".repeat(32);
+	const RETIRED_SECRET = "22".repeat(32);
+
+	/** Mints an access token the way the paired provider does, `kid` and all. */
+	async function signWith(secret: string, kid?: string): Promise<string> {
+		const header =
+			kid === undefined ? { alg: "HS256", typ: "at+jwt" } : { alg: "HS256", typ: "at+jwt", kid };
+		return await new SignJWT({ scope: "read:project" })
+			.setProtectedHeader(header)
+			.setIssuedAt()
+			.setExpirationTime("1h")
+			.setIssuer(ISSUER)
+			.setAudience(AUDIENCE)
+			.sign(new TextEncoder().encode(secret));
+	}
+
+	/** A deployment mid-rotation: signing under `v1`, still honouring `v0`. */
+	const rotatedConfig = AppConfigSchema.parse({
+		oauth: {
+			jwt: {
+				secret: CURRENT_SECRET,
+				kid: "v1",
+				previousSecrets: [{ kid: "v0", secret: RETIRED_SECRET, expiresAt: "2999-01-01T00:00:00Z" }],
+				mode: "verify",
+				issuer: ISSUER,
+				audience: AUDIENCE,
+			},
+		},
+		attribute: { collectors: [{ collector: "TestScopeCollector" }] },
+		rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
+		resource: { parser: "SimpleParser" },
+	});
+
+	async function rotatedApp() {
+		return await createApp({
+			pathResolver: (s: string) => s,
+			config: rotatedConfig,
+			modules: [testModule, builtinKeyResolversModule],
+		});
+	}
+
+	it.each([
+		["the new secret, by kid", CURRENT_SECRET, "v1"],
+		["the retired secret, by kid — the overlap window", RETIRED_SECRET, "v0"],
+		["the new secret with no kid header", CURRENT_SECRET, undefined],
+		["the retired secret with no kid header", RETIRED_SECRET, undefined],
+	])("decides on a token signed with %s", async (_label, secret, kid) => {
+		// This is the outage #112 is about: before rotation support, a token
+		// signed with anything but the single configured secret was 401 from the
+		// instant the provider cut over, until both services restarted together.
+		const res = await request(await rotatedApp())
+			.post("/verify")
+			.set("Authorization", `Bearer ${await signWith(secret, kid)}`)
+			.send({ resource: "project", action: "read" });
+
+		expect(res.status).toBe(200);
+		expect(res.body.decision).toBe("allow");
+	});
+
+	it("still refuses a secret the deployment never held", async () => {
+		const res = await request(await rotatedApp())
+			.post("/verify")
+			.set("Authorization", `Bearer ${await signWith("33".repeat(32), "v1")}`)
+			.send({ resource: "project", action: "read" });
+
+		expect(res.status).toBe(401);
+		expect(res.body.code).toBe("invalid_token");
+	});
+
+	it("refuses a kid the deployment was never configured with", async () => {
+		const res = await request(await rotatedApp())
+			.post("/verify")
+			.set("Authorization", `Bearer ${await signWith(CURRENT_SECRET, "v9")}`)
+			.send({ resource: "project", action: "read" });
+
+		expect(res.status).toBe(401);
+	});
+
+	it("logs a rotation mismatch at warn, not error — kid is attacker-controlled", async () => {
+		// #107's distinction: an operator alerting on error must see a provider
+		// outage, not a stream of invented kids from anyone who can reach the port.
+		const logger: Logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child: () => logger,
+		};
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: rotatedConfig,
+			modules: [testModule, builtinKeyResolversModule],
+			logger,
+		});
+
+		await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${await signWith(CURRENT_SECRET, "v9")}`)
+			.send({ resource: "project", action: "read" });
+
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				err: expect.objectContaining({ code: "ERR_JWKS_NO_MATCHING_KEY" }),
+			}),
+			"jwt_token_rejected",
+		);
+		expect(logger.error).not.toHaveBeenCalled();
+	});
+
+	it("keeps a single-secret deployment working untouched", async () => {
+		// The umbrella E2E shape: one shared OAUTH_JWT_SECRET, no kid, no
+		// previousSecrets — and the provider stamps a kid the verifier has never
+		// been told about. That must keep deciding exactly as it did.
+		const config = AppConfigSchema.parse({
+			oauth: {
+				jwt: { secret: CURRENT_SECRET, mode: "verify", issuer: ISSUER, audience: AUDIENCE },
+			},
+			attribute: { collectors: [{ collector: "TestScopeCollector" }] },
+			rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
+			resource: { parser: "SimpleParser" },
+		});
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config,
+			modules: [testModule, builtinKeyResolversModule],
+		});
+
+		for (const kid of ["v0", undefined]) {
+			const res = await request(app)
+				.post("/verify")
+				.set("Authorization", `Bearer ${await signWith(CURRENT_SECRET, kid)}`)
+				.send({ resource: "project", action: "read" });
+			expect(res.status).toBe(200);
+			expect(res.body.decision).toBe("allow");
+		}
+	});
+
+	it("refuses to boot on a rotation block that never met the schema", async () => {
+		// createApp accepts hand-built configs; the factory is what catches them.
+		const handBuilt = {
+			...rotatedConfig,
+			oauth: {
+				jwt: {
+					...rotatedConfig.oauth.jwt,
+					kid: undefined,
+				},
+			},
+		} as unknown as typeof rotatedConfig;
+
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: handBuilt,
+				modules: [testModule, builtinKeyResolversModule],
+			}),
+		).rejects.toThrow(/^oauth\.jwt\.kid is required/);
+	});
+});

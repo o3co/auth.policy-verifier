@@ -17,8 +17,17 @@ import {
 	type ResourceParserFactory,
 	type RuleCollectorFactory,
 } from "@o3co/auth.policy-verifier.core";
-import { exportJWK, exportSPKI, type RemoteJWKSet } from "jose";
+import {
+	exportJWK,
+	exportSPKI,
+	type JWTVerifyGetKey,
+	jwtVerify,
+	type KeyObject,
+	type RemoteJWKSet,
+	SignJWT,
+} from "jose";
 import { afterEach, describe, expect, it } from "vitest";
+import { MAX_PREVIOUS_SECRETS } from "#/config/defaults.mjs";
 import { builtinKeyResolversModule } from "#/jwt/builtinKeyResolversModule.mjs";
 
 const generateKeyPairAsync = promisify(generateKeyPair);
@@ -276,5 +285,201 @@ describe("builtinKeyResolversModule — JWKS fetch bounds (#109)", () => {
 		await defaulted({ alg: "RS256", kid: "k1" });
 		expect(defaulted.coolingDown).toBe(true);
 		expect(defaulted.fresh).toBe(true);
+	});
+});
+
+describe("HS256KeyResolverFactory — secret rotation (#112)", () => {
+	/** 64 hex characters — 32 decoded bytes, the floor auth.provider#282 set. */
+	const CURRENT = "11".repeat(32);
+	const PREVIOUS = "22".repeat(32);
+	const STRANGER = "33".repeat(32);
+
+	const FUTURE = "2999-01-01T00:00:00Z";
+	const PAST = "2000-01-01T00:00:00Z";
+
+	/** Resolves the HS256 factory from a freshly initialized registry. */
+	async function hs256Factory(): Promise<KeyResolverFactory> {
+		const context = makeContext();
+		await builtinKeyResolversModule.init(context);
+		return context.keyResolverRegistry.get("HS256");
+	}
+
+	/** Mints a token the way auth.provider does — with a `kid`, or deliberately without. */
+	async function sign(secret: string, kid?: string): Promise<string> {
+		const header = kid === undefined ? { alg: "HS256" } : { alg: "HS256", kid };
+		return await new SignJWT({ sub: "u1" })
+			.setProtectedHeader(header)
+			.setIssuedAt()
+			.setExpirationTime("5m")
+			.sign(new TextEncoder().encode(secret));
+	}
+
+	/** Runs a token down the resolver exactly as `createTokenAuthenticator` does. */
+	async function verify(
+		resolver: { key: unknown; algorithms: string[] },
+		token: string,
+	): Promise<void> {
+		await jwtVerify(token, resolver.key as JWTVerifyGetKey, { algorithms: resolver.algorithms });
+	}
+
+	const rotated = {
+		algorithm: "HS256",
+		secret: CURRENT,
+		kid: "v1",
+		previousSecrets: [{ kid: "v0", secret: PREVIOUS, expiresAt: FUTURE }],
+	};
+
+	it("keeps a single-secret config on a static key — the shape that never rotated", async () => {
+		// The umbrella E2E and every pre-#112 deployment configure `secret` alone.
+		// They must keep verifying tokens whatever `kid` the issuer stamps, so the
+		// resolver hands back the bare key and no header lookup happens at all.
+		const resolver = await (await hs256Factory())({ algorithm: "HS256", secret: CURRENT });
+		expect(typeof resolver.key).not.toBe("function");
+		await expect(verify(resolver, await sign(CURRENT, "v0"))).resolves.toBeUndefined();
+		await expect(verify(resolver, await sign(CURRENT))).resolves.toBeUndefined();
+	});
+
+	it("accepts a token signed by the current secret, by kid", async () => {
+		const resolver = await (await hs256Factory())(rotated);
+		await expect(verify(resolver, await sign(CURRENT, "v1"))).resolves.toBeUndefined();
+	});
+
+	it("accepts a token signed by a retired secret, by kid — the overlap window", async () => {
+		const resolver = await (await hs256Factory())(rotated);
+		await expect(verify(resolver, await sign(PREVIOUS, "v0"))).resolves.toBeUndefined();
+	});
+
+	it("refuses a kid it was never configured with", async () => {
+		const resolver = await (await hs256Factory())(rotated);
+		await expect(verify(resolver, await sign(STRANGER, "v9"))).rejects.toMatchObject({
+			code: "ERR_JWKS_NO_MATCHING_KEY",
+		});
+	});
+
+	it("refuses a retired secret past its expiresAt", async () => {
+		const resolver = await (await hs256Factory())({
+			...rotated,
+			previousSecrets: [{ kid: "v0", secret: PREVIOUS, expiresAt: PAST }],
+		});
+		await expect(verify(resolver, await sign(PREVIOUS, "v0"))).rejects.toMatchObject({
+			code: "ERR_JWKS_NO_MATCHING_KEY",
+		});
+		await expect(verify(resolver, await sign(CURRENT, "v1"))).resolves.toBeUndefined();
+	});
+
+	describe("tokens that carry no kid at all", () => {
+		it("falls back to trying every configured secret", async () => {
+			const resolver = await (await hs256Factory())(rotated);
+			await expect(verify(resolver, await sign(CURRENT))).resolves.toBeUndefined();
+			await expect(verify(resolver, await sign(PREVIOUS))).resolves.toBeUndefined();
+		});
+
+		it("still refuses a secret it does not hold", async () => {
+			const resolver = await (await hs256Factory())(rotated);
+			await expect(verify(resolver, await sign(STRANGER))).rejects.toMatchObject({
+				code: "ERR_JWS_SIGNATURE_VERIFICATION_FAILED",
+			});
+		});
+
+		it("does not try a secret whose overlap window has closed", async () => {
+			const resolver = await (await hs256Factory())({
+				...rotated,
+				previousSecrets: [{ kid: "v0", secret: PREVIOUS, expiresAt: PAST }],
+			});
+			await expect(verify(resolver, await sign(PREVIOUS))).rejects.toMatchObject({
+				code: "ERR_JWS_SIGNATURE_VERIFICATION_FAILED",
+			});
+		});
+
+		it("bounds the work at one signature check per configured secret", async () => {
+			// The reason the list is capped: a token with no kid costs one HMAC per
+			// live secret, and an unbounded list makes that an attacker's dial.
+			const previousSecrets = Array.from({ length: MAX_PREVIOUS_SECRETS }, (_, i) => ({
+				kid: `v${i}`,
+				secret: `${i}${i}`.repeat(32),
+				expiresAt: FUTURE,
+			}));
+			const resolver = await (await hs256Factory())({
+				algorithm: "HS256",
+				secret: CURRENT,
+				kid: "current",
+				previousSecrets,
+			});
+			const last = previousSecrets[previousSecrets.length - 1];
+			if (last === undefined) throw new Error("expected a capped list to be non-empty");
+			await expect(verify(resolver, await sign(last.secret))).resolves.toBeUndefined();
+		});
+	});
+
+	it("pins a configured kid even without rotation — a mismatch is not waved through", async () => {
+		const resolver = await (await hs256Factory())({
+			algorithm: "HS256",
+			secret: CURRENT,
+			kid: "v1",
+		});
+		await expect(verify(resolver, await sign(CURRENT, "v1"))).resolves.toBeUndefined();
+		await expect(verify(resolver, await sign(CURRENT, "v0"))).rejects.toMatchObject({
+			code: "ERR_JWKS_NO_MATCHING_KEY",
+		});
+	});
+
+	it.each([
+		[
+			"a previous secret with no kid for the current one",
+			{ algorithm: "HS256", secret: CURRENT, previousSecrets: rotated.previousSecrets },
+			/^oauth\.jwt\.kid is required/,
+		],
+		[
+			"more previous secrets than the cap",
+			{
+				algorithm: "HS256",
+				secret: CURRENT,
+				kid: "current",
+				previousSecrets: Array.from({ length: MAX_PREVIOUS_SECRETS + 1 }, (_, i) => ({
+					kid: `v${i}`,
+					secret: PREVIOUS,
+					expiresAt: FUTURE,
+				})),
+			},
+			/^oauth\.jwt\.previousSecrets accepts at most/,
+		],
+		[
+			"a duplicated kid",
+			{
+				algorithm: "HS256",
+				secret: CURRENT,
+				kid: "v0",
+				previousSecrets: [{ kid: "v0", secret: PREVIOUS, expiresAt: FUTURE }],
+			},
+			/duplicate/i,
+		],
+		[
+			"a malformed expiresAt",
+			{
+				algorithm: "HS256",
+				secret: CURRENT,
+				kid: "v1",
+				previousSecrets: [{ kid: "v0", secret: PREVIOUS, expiresAt: "soon" }],
+			},
+			/^oauth\.jwt\.previousSecrets\[0\]\.expiresAt is not a valid timestamp/,
+		],
+	])("refuses %s at construction", async (_label, config, message) => {
+		// AppConfigSchema rejects these at config-parse time; the factory re-checks
+		// because createApp also accepts hand-built configs that never went through
+		// the schema — the same division of labor as the JWKS transport check.
+		await expect((await hs256Factory())(config)).rejects.toThrow(message);
+	});
+
+	it("builds one secret key per configured kid", async () => {
+		const resolver = await (await hs256Factory())(rotated);
+		const key = resolver.key as JWTVerifyGetKey;
+		const resolved = (await key(
+			{ alg: "HS256", kid: "v0" },
+			{
+				payload: "",
+				signature: "",
+			},
+		)) as KeyObject;
+		expect(resolved.type).toBe("secret");
 	});
 });

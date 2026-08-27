@@ -129,6 +129,90 @@ and version sections follow the release labeling policy in
 
 ### Added
 
+- HS256 signing-secret rotation, so the algorithm this stack ships as its
+  default can be rotated without a coordinated outage
+  ([#112](https://github.com/o3co/auth.policy-verifier/issues/112)). The
+  verifier held exactly one secret, so the instant auth.provider began signing
+  with a new one, every token already in flight was denied until both services
+  had restarted in lockstep — a fleet-wide 401 with a restart order as its only
+  mitigation.
+
+  Two new keys on `oauth.jwt`, in auth.provider's own rotation shape so one pair
+  of values moves on both sides:
+
+  - `oauth.jwt.kid` (env `OAUTH_JWT_KID`) — names the secret the issuer signs
+    with today, matching the `kid` auth.provider stamps into every token.
+  - `oauth.jwt.previousSecrets` — a list of `{ kid, secret, expiresAt }`, each a
+    secret this deployment also accepts and the moment it stops accepting it.
+    `expiresAt` is an ISO 8601 timestamp, evaluated per request, so an overlap
+    window closes without a restart.
+
+  Both are optional and both default to absent, which is exactly the previous
+  behaviour: with no `kid` and no `previousSecrets`, one `secret` verifies every
+  token and the header is never consulted. **Nothing changes for a single-secret
+  deployment** — including one whose provider stamps a `kid` the verifier has
+  never been told about.
+
+  Two details worth knowing before configuring it:
+
+  - **A token carrying no `kid` is still accepted.** `kid` is optional per
+    RFC 7515 §4.1.4, and a symmetric token has no JWKS to look one up in, so
+    tokens minted with a bare `{ alg: "HS256" }` header genuinely occur.
+    Rotation must not turn those into a second outage, so a token without a
+    `kid` is tried against every configured secret in turn. One with a `kid` is
+    resolved by direct lookup, and an unconfigured `kid` is refused — the same
+    model auth.provider uses, which never trial-verifies.
+  - **`previousSecrets` is capped at 3 entries.** That trial is one signature
+    check per configured secret, on the decision hot path, driven by an
+    unauthenticated request — so the length of the list is the work an
+    unbounded config would hand out. Three covers a rotation, plus a second one
+    started before the first window closed, plus a spare. A longer list is not
+    rotation but accumulation, and every entry in it can still *mint* tokens.
+
+  **Operator procedure** — rotating the shared secret with no window:
+
+  1. Generate the new secret: `openssl rand -hex 32`.
+  2. **Verifier first.** Keeping the old secret as `secret`, add the *new* one
+     to `previousSecrets` with an `expiresAt` past the cutover, set `kid` to the
+     old secret's name, and restart. The verifier now accepts both; what the
+     provider mints has not changed.
+  3. **Then the provider.** Move it to the new `kid` / `secret`, keeping the old
+     pair in *its* `previousSecrets`, and restart. Tokens now arrive signed with
+     the new secret, and the verifier already accepts them.
+  4. **Verifier again.** Swap the roles — new secret as `kid` / `secret`, old
+     one in `previousSecrets` with an `expiresAt` of the access-token TTL plus a
+     buffer (auth.provider ships one-hour tokens) — and restart.
+  5. When that timestamp passes the retired secret stops verifying on its own.
+     Delete the entry from both configs at your convenience.
+
+  The field carries auth.provider's name, but on the verifier it means every
+  secret accepted *besides* the current one, which is why step 2 stages the
+  incoming secret there: an outage-free rotation needs the verifier to span the
+  cutover from both sides.
+
+  A malformed rotation block fails at config-parse time, at boot, naming the
+  entry: a non-list `previousSecrets`, a missing or non-ISO `expiresAt`, a `kid`
+  duplicated across entries, more entries than the cap, or `previousSecrets`
+  with no `kid` naming the current secret. `previousSecrets` under RS256 /
+  ES256 / EdDSA is refused rather than ignored — those rotate through the JWKS
+  at `jwksUri` — mirroring the guard auth.provider applies in the other
+  direction. The HS256 `KeyResolverFactory` repeats every check when it builds
+  the key set, so a hand-built config that never went through `AppConfigSchema`
+  still fails inside `createApp` rather than serving.
+
+  A token whose `kid` matches nothing configured is rejected with
+  `ERR_JWKS_NO_MATCHING_KEY`, logged at **warn** as `jwt_token_rejected`, not at
+  error: `kid` is attacker-controlled, and an operator alerting on error must
+  keep seeing provider outages rather than a stream of invented key ids
+  ([#107](https://github.com/o3co/auth.policy-verifier/issues/107)).
+- `@o3co/auth.policy-verifier.server` exports `checkHs256Rotation` /
+  `parseHs256Rotation` (with `Hs256PreviousSecret`, `Hs256Rotation`,
+  `Hs256RotationCheck`, `Hs256RotationConfig`, `Hs256RotationIssue`) and the
+  constant `MAX_PREVIOUS_SECRETS`
+  ([#112](https://github.com/o3co/auth.policy-verifier/issues/112)), for
+  consumers building a JWT config by hand or registering their own HS256 key
+  resolver. They apply the identical contract the schema does, so a hand-built
+  config gets the same answer as a parsed one.
 - `@o3co/auth.policy-verifier.server` exports `resolveJwtTimeClaimBounds`
   (with `JwtTimeClaimConfig` / `JwtTimeClaimBounds`) and the constants
   `DEFAULT_MAX_TOKEN_AGE_SECONDS`, `DEFAULT_CLOCK_TOLERANCE_SECONDS` and

@@ -192,6 +192,8 @@ oauth {
     algorithm = "HS256"           # HS256 | RS256 | ES256 | EdDSA
     algorithm = ${?OAUTH_JWT_ALGORITHM}
     secret = ${?OAUTH_JWT_SECRET}           # HS256
+    kid = ${?OAUTH_JWT_KID}                 # HS256 — 上の secret に名前を付ける。未設定ならヘッダを参照しない
+    previousSecrets = []                     # HS256 — 重複期間中の旧シークレット（最大 3 件）
     jwksUri = ${?OAUTH_JWT_JWKS_URI}        # RS256/ES256/EdDSA — https 必須、例: https://auth-provider/.well-known/jwks.json
     jwksTimeoutMs = 5000                     # JWKS 取得の上限 — 打ち切り時間
     jwksCooldownMs = 30000                   # 再取得の最小間隔
@@ -283,6 +285,38 @@ oauth.jwt {
   secret = ${OAUTH_JWT_SECRET}
 }
 ```
+
+### HS256 シークレットのローテーション
+
+共有シークレットが 1 つしかない状態では、無停止でシークレットを変更する方法が存在しない。auth.provider が新しい値で署名を始めた瞬間、すでに発行済みのトークンは両サービスを同時に再起動し終えるまですべてここで弾かれる。`previousSecrets` はその同時再起動を不要にする重複期間であり、auth.provider がローテーションに使うのと同じ `kid` + `secret` + `expiresAt` の形なので、同じ 1 組の値を両側で動かすだけで済む。
+
+1. 新しいシークレットを生成する: `openssl rand -hex 32`。
+2. **まず verifier。** 旧シークレットを current に残したまま、*新しい* シークレットを previousSecrets に追加して再起動する。verifier は両方を受理する状態になるが、provider が発行するトークンは何も変わらない。
+
+   ```hocon
+   oauth.jwt {
+     algorithm = "HS256"
+     kid = "v0"                 # provider がまだ署名に使っているシークレット
+     secret = ${OAUTH_JWT_SECRET}
+     previousSecrets = [{
+       kid = "v1"               # 切り替え前に先回りして受理する新シークレット
+       secret = ${OAUTH_JWT_NEXT_SECRET}
+       expiresAt = "2026-09-01T00:00:00Z"
+     }]
+   }
+   ```
+
+3. **次に provider。** 新しい `kid`/`secret` に移し、旧ペアを provider 側の `previousSecrets` に入れて再起動する。以降トークンは新シークレットで署名されて届き、verifier はすでにそれを受理できる。
+4. **再び verifier。** 役割を入れ替える: 新シークレットを `kid`/`secret` にし、旧シークレットを `previousSecrets` に移して `expiresAt` にアクセストークンの TTL + バッファを設定する（auth.provider は 1 時間トークンを発行する）。再起動する。
+5. その時刻を過ぎれば旧シークレットは自動的に検証に使われなくなる — 再起動は不要。エントリの削除は都合の良いときで良い。
+
+補足:
+
+- フィールド名は auth.provider のものだが、verifier 側では「current 以外に受理するシークレットすべて」を意味する。手順 2 で *これから来る* シークレットを先にここへ置くのはそのためで、verifier は切り替えを両側から跨ぐ必要があり、それを可能にするのがこのリストである。
+- `expiresAt` はリクエストごとに評価されるため、重複期間は再起動なしに閉じる。重複期間中の旧シークレットは、それを持つ者にとって依然としてトークンを**発行**できる鍵なので、期間はトークンの寿命程度にすること（四半期単位にしない）。
+- `kid` は任意であり、未設定なら従来どおり — 1 つのシークレットがすべてを検証し、トークンヘッダは読まれない。設定すると（`previousSecrets` を使うなら必須）ヘッダの照合が始まり、未設定の `kid` を持つトークンは拒否される。
+- `kid` を**持たない**トークンも受理される: 設定済みのシークレット（current + previous）を順に試す。1 シークレットあたり署名検証 1 回のコストがかかるため、`previousSecrets` は **3** 件に制限されている。
+- このリストは HS256 専用。RS256/ES256/EdDSA は `jwksUri` の JWKS 経由でローテーションする（発行者が公開している鍵がすべて載っている）。非対称アルゴリズムに `previousSecrets` を書いた場合は黙って無視せず起動時に拒否する。
 
 ## 開発
 

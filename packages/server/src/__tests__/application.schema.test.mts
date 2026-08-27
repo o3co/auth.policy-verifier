@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { AppConfigSchema, JWT_MODE_MIGRATION_MESSAGE } from "#/config/application.schema.mjs";
+import { MAX_PREVIOUS_SECRETS } from "#/config/defaults.mjs";
 
 const baseBody = {
 	attribute: { collectors: [] },
@@ -578,5 +579,113 @@ describe("AppConfigSchema — http.callerAuth (#108)", () => {
 			http: { callerAuth: { header: "", token: "s3cret" } },
 		});
 		expect(result.success).toBe(false);
+	});
+});
+
+describe("AppConfigSchema — HS256 secret rotation (#112)", () => {
+	/** 64 hex characters — 32 decoded bytes, the floor auth.provider#282 set. */
+	const SECRET = "11".repeat(32);
+	const OLD_SECRET = "22".repeat(32);
+	const FUTURE = "2999-01-01T00:00:00Z";
+
+	/** Parses an `oauth.jwt` block with the RFC 9068 fields already in place. */
+	function parseJwt(jwt: Record<string, unknown>) {
+		return AppConfigSchema.safeParse({
+			oauth: { jwt: { algorithm: "HS256", mode: "verify", ...rfc9068, ...jwt } },
+			...baseBody,
+		});
+	}
+
+	it("accepts a rotation block and keeps it on the parsed config", () => {
+		const previousSecrets = [{ kid: "v0", secret: OLD_SECRET, expiresAt: FUTURE }];
+		const result = parseJwt({ secret: SECRET, kid: "v1", previousSecrets });
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.data.oauth.jwt.previousSecrets).toEqual(previousSecrets);
+			expect(result.data.oauth.jwt.kid).toBe("v1");
+		}
+	});
+
+	it("accepts a single-secret config unchanged", () => {
+		const result = parseJwt({ secret: SECRET });
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.data.oauth.jwt.previousSecrets).toBeUndefined();
+		}
+	});
+
+	it("requires a kid once a previous secret is configured", () => {
+		const result = parseJwt({
+			secret: SECRET,
+			previousSecrets: [{ kid: "v0", secret: OLD_SECRET, expiresAt: FUTURE }],
+		});
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.error.issues.some((i) => i.path.join(".") === "oauth.jwt.kid")).toBe(true);
+		}
+	});
+
+	it("caps previousSecrets, reporting at the field the operator wrote", () => {
+		const result = parseJwt({
+			secret: SECRET,
+			kid: "current",
+			previousSecrets: Array.from({ length: MAX_PREVIOUS_SECRETS + 1 }, (_, i) => ({
+				kid: `v${i}`,
+				secret: OLD_SECRET,
+				expiresAt: FUTURE,
+			})),
+		});
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(
+				result.error.issues.some((i) => i.path.join(".") === "oauth.jwt.previousSecrets"),
+			).toBe(true);
+		}
+	});
+
+	it("reports a malformed entry at its own index", () => {
+		const result = parseJwt({
+			secret: SECRET,
+			kid: "v1",
+			previousSecrets: [{ kid: "v0", secret: OLD_SECRET, expiresAt: "soon" }],
+		});
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(
+				result.error.issues.some(
+					(i) => i.path.join(".") === "oauth.jwt.previousSecrets.0.expiresAt",
+				),
+			).toBe(true);
+		}
+	});
+
+	it("refuses previousSecrets under an asymmetric algorithm", () => {
+		// Mirrors auth.provider's guard: the asymmetric algorithms rotate through
+		// the JWKS, so a leftover HS256 rotation block would be silently dropped.
+		const result = AppConfigSchema.safeParse({
+			oauth: {
+				jwt: {
+					algorithm: "EdDSA",
+					mode: "verify",
+					...rfc9068,
+					publicKey: "-----BEGIN PUBLIC KEY-----",
+					previousSecrets: [{ kid: "v0", secret: OLD_SECRET, expiresAt: FUTURE }],
+				},
+			},
+			...baseBody,
+		});
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.error.issues.some((i) => i.message.includes("previousSecrets"))).toBe(true);
+		}
+	});
+
+	it("leaves the rotation block alone in insecure-decode mode", () => {
+		// Nothing verifies a signature there, so no key material is checked at all.
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: { algorithm: "HS256", mode: "insecure-decode" } },
+			...baseBody,
+		});
+		expect(result.success).toBe(true);
 	});
 });
