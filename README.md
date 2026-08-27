@@ -196,6 +196,8 @@ oauth {
     algorithm = "HS256"           # HS256 | RS256 | ES256 | EdDSA
     algorithm = ${?OAUTH_JWT_ALGORITHM}
     secret = ${?OAUTH_JWT_SECRET}           # HS256
+    kid = ${?OAUTH_JWT_KID}                 # HS256 — names the secret above; unset means the header is not consulted
+    previousSecrets = []                     # HS256 — retired secrets still inside their overlap window (max 3)
     jwksUri = ${?OAUTH_JWT_JWKS_URI}        # RS256/ES256/EdDSA — https required, e.g. https://auth-provider/.well-known/jwks.json
     jwksTimeoutMs = 5000                     # JWKS fetch bounds — abort after
     jwksCooldownMs = 30000                   # minimum spacing between fetches
@@ -288,6 +290,38 @@ oauth.jwt {
   secret = ${OAUTH_JWT_SECRET}
 }
 ```
+
+### Rotating the HS256 secret
+
+Under a single shared secret there is no way to change it without an outage: the moment auth.provider signs with a new value, every token already in flight fails here until both services have restarted in lockstep. `previousSecrets` is the overlap window that removes the lockstep — the same `kid` + `secret` + `expiresAt` shape auth.provider rotates with, so one pair of values moves on both sides.
+
+1. Generate the new secret: `openssl rand -hex 32`.
+2. **Verifier first.** Add the *new* secret as a previous secret while the old one is still current, and restart. The verifier now accepts both; nothing has changed about what the provider mints.
+
+   ```hocon
+   oauth.jwt {
+     algorithm = "HS256"
+     kid = "v0"                 # still the secret the provider signs with
+     secret = ${OAUTH_JWT_SECRET}
+     previousSecrets = [{
+       kid = "v1"               # the incoming secret, accepted ahead of the cutover
+       secret = ${OAUTH_JWT_NEXT_SECRET}
+       expiresAt = "2026-09-01T00:00:00Z"
+     }]
+   }
+   ```
+
+3. **Then the provider.** Move it to the new `kid`/`secret`, keeping the old pair in *its* `previousSecrets`, and restart. Tokens now arrive signed with the new secret and the verifier already accepts them.
+4. **Verifier again.** Swap the roles: the new secret becomes `kid`/`secret`, the old one moves into `previousSecrets` with an `expiresAt` of your access-token TTL plus a buffer (auth.provider ships one-hour tokens). Restart.
+5. Once that timestamp passes, the retired secret stops verifying on its own — no restart needed. Delete the entry from both configs at your convenience.
+
+Notes:
+
+- The field carries auth.provider's name, but on the verifier it means **every secret accepted besides the current one**. That is why step 2 stages the *incoming* secret there before the provider has ever signed with it: the verifier has to span the cutover from both sides, and this is the list that lets it.
+- `expiresAt` is evaluated per request, so a window closes without a restart. A retired secret inside its window can still **mint** tokens for anyone holding it, which is why the window should be a token lifetime, not a quarter.
+- `kid` is optional and unset means what it always meant: one secret verifies everything and the token header is never read. Setting it — which `previousSecrets` requires — starts pinning the header, and a token carrying an unconfigured `kid` is refused.
+- A token that carries **no** `kid` is still accepted: it is tried against every secret configured, current and previous. That costs one signature check per secret, which is why `previousSecrets` is capped at **3** entries.
+- The list is HS256-only. RS256/ES256/EdDSA rotate through the JWKS at `jwksUri`, which already carries every key the issuer publishes; a `previousSecrets` block under an asymmetric algorithm is refused at boot rather than silently ignored.
 
 ## Development
 

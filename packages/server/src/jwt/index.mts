@@ -9,6 +9,15 @@ export {
 	RS256KeyResolverFactory,
 } from "./builtinKeyResolversModule.mjs";
 export {
+	checkHs256Rotation,
+	type Hs256PreviousSecret,
+	type Hs256Rotation,
+	type Hs256RotationCheck,
+	type Hs256RotationConfig,
+	type Hs256RotationIssue,
+	parseHs256Rotation,
+} from "./hs256Rotation.mjs";
+export {
 	checkJwksUri,
 	type JwksFetchBounds,
 	type JwksFetchConfig,
