@@ -45,6 +45,7 @@ Individual values can also be overridden with environment variables.
 | `OAUTH_JWT_MODE` | `verify` | `verify` fully verifies tokens; the explicit `insecure-decode` (test-only) decodes without signature verification — `exp`/`nbf` are still enforced |
 | `RULE_ON_EMPTY_RULE_SET` | `deny` | Decision when no rule is collected (`deny` \| `allow`) |
 | `VERIFY_MAX_BATCH_SIZE` | `50` | Cap on `POST /verify/batch` entries |
+| `LOG_LEVEL` | `info` | Minimum level emitted: `trace`\|`debug`\|`info`\|`warn`\|`error`\|`fatal`\|`silent`. Also the switch for the decision log — see [Observability](#observability) |
 
 ## Trust boundary
 
@@ -72,6 +73,89 @@ Authorization: Bearer <jwt>
 Anything else gets `401 { "decision": "deny", "code": "caller_unauthenticated", "message": "Caller authentication failed" }`, decided before the body is parsed. `GET /healthcheck` is never gated, so the container healthcheck keeps working.
 
 Leaving the credential unset is supported and is fine on loopback. On a non-loopback bind the server logs `unauthenticated_non_loopback_bind` at warn on boot — that combination is the one worth fixing.
+
+`GET /metrics` is not gated either — see [Reaching `/metrics`](#reaching-metrics) for why, and for what that means when the bind is not loopback.
+
+## Observability
+
+The template logs newline-delimited JSON on stdout through [pino](https://getpino.io) and serves Prometheus metrics at `GET /metrics`. Both are on by default.
+
+### The decision log
+
+Every decision emits one structured event named `decision`, at `info`:
+
+```json
+{"level":30,"msg":"decision","requestId":"6f1c…","sub":"user-42","resource":"project:7","action":"read","decision":"deny","code":"invalid_scope","deniedBy":{"ruleType":"scope","refused":["invalid_scope"]},"durationMs":0.412}
+```
+
+| Field | Meaning |
+|---|---|
+| `sub` | JWT `sub` of the presented token. Omitted when the token carries none |
+| `resource` / `action` | Exactly as the caller sent them |
+| `decision` | `allow` or `deny` |
+| `code` | Deny only — the same code the caller got on the wire |
+| `satisfiedBy` | Allow only — the `{ruleType, code}` of the rule that satisfied each group |
+| `deniedBy` | Deny only — the first failing group, and every alternative in it that refused |
+| `requestId` | `x-request-id` as sent, when the caller sent one. Omitted otherwise |
+| `durationMs` | Time in the collector pipelines and the evaluator — not the HTTP round trip |
+
+One line per decision, so a `POST /verify/batch` of N entries emits N lines sharing one `requestId`. Alert and index on the event name, never on message text.
+
+**`LOG_LEVEL` is the switch.** The line is `info`, so setting `warn` turns the stream off; there is no second flag to forget. A deny is a *normal* outcome for a decision point and not a fault, which is why it is not routed to `warn` — doing that would let any caller manufacture warn-level noise and would stop `warn` meaning "something is wrong". Alert on the metrics, and read the log for the "why".
+
+**Deliberately not on the line:**
+
+- **the raw bearer token, and the claim set beyond `sub`.** A token may carry an email address, group membership or anything else the issuer chose to mint, and none of it is needed to explain a decision. This record is written on every request — successes included — and shipped to an aggregator whose blast radius is not the token's.
+- **the caller's `context` object.** It is free-form and forwarded verbatim to collectors, so it is exactly where a calling service's own request payload ends up. Logging it would make the audit stream a copy of that payload.
+- **rule `message` text**, which is derived from the resource and action already on the line.
+
+### Metrics
+
+`GET /metrics` serves the Prometheus text exposition format.
+
+| Metric | Type | Labels | What it answers |
+|---|---|---|---|
+| `auth_decisions_total` | counter | `decision` | The allow/deny rate. Exactly two series |
+| `auth_denials_total` | counter | `code` | Which rule is doing the denying — the aggregate of the log line's `deniedBy` |
+| `auth_decision_duration_seconds` | histogram | `decision` | Time in the pipelines and the evaluator |
+| `http_request_duration_seconds` | histogram | `method`, `route`, `status` | Request rate, error rate and latency (the RED method) |
+| `auth_policy_verifier_*` | various | — | Node process defaults — event-loop lag, heap, GC, handles |
+
+`http_request_duration_seconds` carries the same name and label set as [auth.provider](https://github.com/o3co/auth.provider)'s, so one Prometheus job and one dashboard convention cover both halves of the stack.
+
+A deny is not an error, so the alert worth writing is on a *change* in `rate(auth_decisions_total{decision="deny"}[5m]) / rate(auth_decisions_total[5m])`, not on denials existing.
+
+#### Every label is bounded
+
+An unbounded label mints a fresh time series per distinct value, which is how a metrics endpoint takes down the monitoring that was supposed to watch it. None of the following needs access to `/metrics` to reach.
+
+- **`resource` and `action` are not labels at all.** They come straight out of the request body and are unbounded by construction (`project:1`, `project:2`, …). They are on the decision log line instead, which is the right medium for a high-cardinality fact. `sub` is out for the same reason: one series per user.
+- **`route`** is the Express route *pattern*, never the URL, and anything unmatched — 404 probes from whatever can route to the port — collapses to `route="unmatched"`.
+- **`method`** is an allowlist of the nine methods this service can serve; everything else is `method="other"`. Node's parser hands the server every method llhttp knows (`PURGE`, `MKCOL`, `PROPFIND`, …), so `req.method` is as caller-controlled as a path.
+- **`code`** comes from the rules a deployment configured, which makes it operator-bounded — but `code` is a field on the `Rule` interface and rules are built per request, so a custom rule collector is one edit away from deriving it from the resource. It is capped at 32 distinct values, after which the rest collapse to `code="other"`. A climbing `code="other"` is itself the signal that a rule is minting codes per request.
+
+#### Reaching `/metrics`
+
+`/metrics` is **not** gated by `HTTP_CALLER_AUTH_TOKEN`. Prometheus scrape configs carry `authorization`, `basic_auth` and `oauth2` — not an arbitrary header — so gating it on `x-caller-token` would make it unscrapable by a stock scraper, and the workaround would be to hand the credential that authorizes *decisions* to the monitoring system. What the endpoint publishes is counts and latencies over bounded labels: no subject, no resource, no action, nothing about any individual decision.
+
+**The bind address is the boundary instead**, and it is loopback by default. A scraper therefore has to be on the host:
+
+- **Kubernetes** — containers in a pod share a network namespace, so a Prometheus sidecar (or the OTel collector) in the same pod scrapes `http://127.0.0.1:3000/metrics` with the bind left alone. This is the shape that keeps the default intact.
+- **docker compose** — `docker-compose.yml` already sets `HTTP_HOSTNAME=0.0.0.0`, because loopback inside a container is reachable from nothing. The port is then reachable by anything on the compose network, `/metrics` included: keep it off the published/public interface (`expose:` rather than `ports:`), and put the scraper on that network.
+- **Anything else on a non-loopback bind** — restrict the port at the network layer (NetworkPolicy, security group, firewall) exactly as you would for `/verify` itself.
+
+A scrape config for the sidecar shape:
+
+```yaml
+scrape_configs:
+  - job_name: auth-policy-verifier
+    static_configs:
+      - targets: ["127.0.0.1:3000"]
+```
+
+`HTTP_PATH_PREFIX` moves the endpoint with everything else: with `HTTP_PATH_PREFIX=/pdp` the path is `/pdp/metrics`, and `metrics_path` in the scrape config has to match.
+
+**Not published yet:** a per-dependency `up` gauge (auth.provider has one for its backing stores). The equivalent here is the JWKS endpoint, and there is no readiness-probe registry to sample — a gauge built from a second, hand-maintained list of dependencies is exactly the drift auth.provider avoided by sampling its probes. Until such a registry exists, a JWKS outage is visible as the `jwt_verification_unavailable` log event, which is emitted at `error` precisely so it can be alerted on.
 
 ## Default Collectors
 

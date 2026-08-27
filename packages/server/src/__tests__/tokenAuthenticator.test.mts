@@ -147,7 +147,7 @@ describe("assertVerifyRouterJwtConfig — caller-facing error context", () => {
 });
 
 describe("createTokenAuthenticator — construction and bearer parsing", () => {
-	const silentLogger = { warn() {}, error() {} };
+	const silentLogger = { info() {}, warn() {}, error() {} };
 
 	it("runs the guard at construction, so a hand-built invalid config cannot produce an authenticator", () => {
 		expect(() =>

@@ -45,6 +45,7 @@ OAUTH_JWT_SECRET=your-secret \
 | `OAUTH_JWT_MODE` | `verify` | `verify` はトークンを完全検証。明示的な `insecure-decode`（テスト専用）は署名検証なしでデコードする — `exp`/`nbf` は引き続き強制される |
 | `RULE_ON_EMPTY_RULE_SET` | `deny` | ルールが 1 つも集まらなかったときの決定（`deny` \| `allow`） |
 | `VERIFY_MAX_BATCH_SIZE` | `50` | `POST /verify/batch` の件数上限 |
+| `LOG_LEVEL` | `info` | 出力する最低レベル: `trace`\|`debug`\|`info`\|`warn`\|`error`\|`fatal`\|`silent`。decision ログのスイッチも兼ねる — [可観測性](#可観測性)を参照 |
 
 ## 信頼境界
 
@@ -72,6 +73,89 @@ Authorization: Bearer <jwt>
 それ以外は body のパースより前に `401 { "decision": "deny", "code": "caller_unauthenticated", "message": "Caller authentication failed" }` を返します。`GET /healthcheck` は常に非ゲートなので、コンテナの healthcheck はそのまま動作します。
 
 資格情報を未設定のままにする運用もサポートされており、ループバックであれば問題ありません。ループバック以外に bind した場合は起動時に `unauthenticated_non_loopback_bind` が warn で記録されます — 修正する価値があるのはこの組み合わせです。
+
+`GET /metrics` も非ゲートです。理由と、ループバック以外に bind したときに何を意味するかは [`/metrics` への到達方法](#metrics-への到達方法)を参照してください。
+
+## 可観測性
+
+テンプレートは [pino](https://getpino.io) を使って stdout に NDJSON を出力し、`GET /metrics` で Prometheus メトリクスを提供します。どちらも既定で有効です。
+
+### decision ログ
+
+判定 1 件ごとに `decision` という名前の構造化イベントを `info` で 1 行出力します。
+
+```json
+{"level":30,"msg":"decision","requestId":"6f1c…","sub":"user-42","resource":"project:7","action":"read","decision":"deny","code":"invalid_scope","deniedBy":{"ruleType":"scope","refused":["invalid_scope"]},"durationMs":0.412}
+```
+
+| フィールド | 意味 |
+|---|---|
+| `sub` | 提示されたトークンの JWT `sub`。トークンが持たない場合は省略される |
+| `resource` / `action` | 呼び出し元が送ったそのままの値 |
+| `decision` | `allow` または `deny` |
+| `code` | deny のみ — 呼び出し元がワイヤ上で受け取ったコードと同じ |
+| `satisfiedBy` | allow のみ — 各グループを満たしたルールの `{ruleType, code}` |
+| `deniedBy` | deny のみ — 最初に失敗したグループと、そこで拒否した全代替ルール |
+| `requestId` | 呼び出し元が送った `x-request-id`。無い場合は省略される |
+| `durationMs` | Collector パイプラインと evaluator に費やした時間。HTTP の往復時間ではない |
+
+判定 1 件につき 1 行なので、N 件の `POST /verify/batch` は同一 `requestId` を持つ N 行を出力します。アラートとインデックスはイベント名に対して張り、メッセージ本文には張らないでください。
+
+**スイッチは `LOG_LEVEL` です。** この行は `info` なので `warn` にすればストリームごと止まります。忘れるべき 2 つ目のフラグはありません。deny は decision point にとって障害ではなく *正常な* 結果なので、`warn` には送っていません。送ってしまえば任意の呼び出し元が warn レベルのノイズを製造でき、`warn` が「何かがおかしい」を意味しなくなります。アラートはメトリクスに、「なぜ」はログに求めてください。
+
+**意図的に載せていないもの:**
+
+- **生の bearer トークンと、`sub` を超えるクレーム集合。** トークンはメールアドレスやグループ所属など発行者が入れた任意の情報を運びますが、判定の説明にはどれも不要です。この記録は成功リクエストを含む全リクエストで書かれ、トークンとは影響範囲の異なるアグリゲータへ送られます。
+- **呼び出し元の `context` オブジェクト。** 自由形式で collector にそのまま渡されるため、呼び出し側サービスのリクエストペイロードが行き着く場所そのものです。これを記録すると監査ストリームがそのペイロードの複製になります。
+- **ルールの `message` 文字列。** 既に行に載っている resource と action から導かれる内容です。
+
+### メトリクス
+
+`GET /metrics` は Prometheus text exposition format を返します。
+
+| メトリクス | 種別 | ラベル | 何に答えるか |
+|---|---|---|---|
+| `auth_decisions_total` | counter | `decision` | allow/deny 比率。系列はちょうど 2 本 |
+| `auth_denials_total` | counter | `code` | どのルールが deny しているか — ログ行の `deniedBy` の集計版 |
+| `auth_decision_duration_seconds` | histogram | `decision` | パイプラインと evaluator に費やした時間 |
+| `http_request_duration_seconds` | histogram | `method`, `route`, `status` | リクエストレート・エラーレート・レイテンシ（RED メソッド） |
+| `auth_policy_verifier_*` | 各種 | — | Node プロセス既定メトリクス — event loop lag, heap, GC, handles |
+
+`http_request_duration_seconds` は [auth.provider](https://github.com/o3co/auth.provider) と同じ名前・同じラベル集合なので、1 つの Prometheus job と 1 つのダッシュボード規約でスタックの両側を賄えます。
+
+deny はエラーではないので、書く価値のあるアラートは deny の存在ではなく `rate(auth_decisions_total{decision="deny"}[5m]) / rate(auth_decisions_total[5m])` の *変化* に対するものです。
+
+#### すべてのラベルは有界
+
+有界でないラベルは値ごとに新しい時系列を作り出します。これは、監視すべき対象を監視する仕組みそのものをメトリクスエンドポイントが落とす典型的な経路です。以下のいずれも `/metrics` へのアクセスなしに到達できます。
+
+- **`resource` と `action` はそもそもラベルにしていません。** これらはリクエストボディから直接来るもので、構造上有界ではありません（`project:1`, `project:2`, …）。代わりに decision ログ行に載せています — 高カーディナリティの事実にはそちらが適切な媒体です。`sub` も同じ理由で除外しています（ユーザーごとに 1 系列になる）。
+- **`route`** は URL ではなく Express の route *パターン*で、マッチしなかったもの（ポートに到達できる何かからの 404 プローブ）はすべて `route="unmatched"` に潰れます。
+- **`method`** はこのサービスが実際に処理できる 9 メソッドの allowlist で、それ以外は `method="other"` です。Node のパーサは llhttp が知る全メソッド（`PURGE`, `MKCOL`, `PROPFIND` など）をサーバーに渡すため、`req.method` はパスと同程度に呼び出し元の制御下にあります。
+- **`code`** は deployment が設定したルールに由来するので運用者が有界にできます — ただし `code` は `Rule` インターフェースのフィールドであり、ルールはリクエストごとに構築されるため、カスタム rule collector が resource から code を導出するようになるまでは 1 回の編集です。異なる値 32 個で打ち止め、それ以降は `code="other"` に潰れます。`code="other"` が伸びていること自体が、リクエストごとに code を作っているルールがあるというシグナルです。
+
+#### `/metrics` への到達方法
+
+`/metrics` は `HTTP_CALLER_AUTH_TOKEN` で**ゲートしていません**。Prometheus の scrape config が持つのは `authorization` / `basic_auth` / `oauth2` であって任意ヘッダではないため、`x-caller-token` でゲートすると標準の scraper からは scrape 不能になり、その回避策は *判定* を認可する資格情報を監視システムに渡すことになってしまいます。このエンドポイントが公開するのは有界ラベル上のカウントとレイテンシだけで、subject も resource も action も、個々の判定に関する情報も含みません。
+
+**代わりに境界となるのは bind アドレスで、既定はループバックです。** したがって scraper は同一ホスト側に置く必要があります。
+
+- **Kubernetes** — 同一 Pod のコンテナはネットワーク名前空間を共有するので、同じ Pod 内の Prometheus サイドカー（または OTel collector）が bind を変えずに `http://127.0.0.1:3000/metrics` を scrape できます。既定をそのまま保てるのはこの形です。
+- **docker compose** — `docker-compose.yml` は既に `HTTP_HOSTNAME=0.0.0.0` を設定しています（コンテナ内のループバックはどこからも到達できないため）。この場合ポートは compose ネットワーク上の任意のコンテナから到達可能で、`/metrics` も同様です。publish する外向きインターフェースには出さず（`ports:` ではなく `expose:`）、scraper を同じネットワークに置いてください。
+- **それ以外のループバック以外 bind** — `/verify` 自体と同様に、ネットワーク層（NetworkPolicy、セキュリティグループ、ファイアウォール）でポートを制限してください。
+
+サイドカー構成の scrape config 例:
+
+```yaml
+scrape_configs:
+  - job_name: auth-policy-verifier
+    static_configs:
+      - targets: ["127.0.0.1:3000"]
+```
+
+`HTTP_PATH_PREFIX` は他のエンドポイントと同様にこのパスも動かします。`HTTP_PATH_PREFIX=/pdp` なら `/pdp/metrics` になり、scrape config の `metrics_path` も合わせる必要があります。
+
+**まだ公開していないもの:** 依存先ごとの `up` ゲージ（auth.provider はバックエンドストア向けに持っています）。ここでの相当物は JWKS エンドポイントですが、サンプリング対象になる readiness probe のレジストリがありません。依存先の一覧を別途手で持つゲージは、auth.provider が probe をサンプリングすることで避けた drift そのものです。そのレジストリができるまで、JWKS 障害は `jwt_verification_unavailable` ログイベントとして見えます — アラートを張れるようにこれは `error` で出力されています。
 
 ## デフォルトコレクター
 

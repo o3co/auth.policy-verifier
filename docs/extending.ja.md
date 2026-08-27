@@ -38,7 +38,7 @@ interface Rule {
 
 - `verify(attrs)` は述語です。通過時に `true`、失敗時に `false` を返します。**safe-deny 規約:** 欠落・型不一致・不正な属性は `false` を返してください。例外を投げない。例外を投げるとポリシー失敗がエラー応答になり、評価状態が漏れます。
 - `ruleType` は評価器が Rule をグループ化するのに使います。同じ `ruleType` の Rule は OR 結合されます（いずれか 1 つ通ればグループ通過）。異なる `ruleType` の Rule はグループ間 AND 結合されます（全グループ通過が必要）。**既定の `ruleType` は、暗黙の衝突を避けるためにルール設定を十分にエンコードしてください。** 例えば `AttrLiteralEqual` は `attr_literal_equal:${a}:${typeof v}:${String(v)}` を使います — `typeof v` セグメントは `v=true` と `v="true"` が同じ `ruleType` に畳み込まれて意図に反して OR 結合されるのを防ぎます。
-- `code` は短く安定した識別子（例: `"no_permission"`、`"attr_not_equal"`）で、下流のプログラム的ハンドリングに適した文字列にしてください。
+- `code` は短く安定した識別子（例: `"no_permission"`、`"attr_not_equal"`）で、下流のプログラム的ハンドリングに適した文字列にしてください。**1 つの Rule が生成しうる code の集合は小さく固定に保つこと。** `code` は `auth_denials_total` メトリクスの `code` ラベルと decision ログ行の `deniedBy` になるため、リクエストごとに導出される code（例えばリソース ID を畳み込んだもの）は有界でないメトリクスラベルになります。これは、監視すべき対象を監視する仕組みそのものをメトリクスエンドポイントが落とす経路です。サーバー側は異なる値 32 個で打ち止め、それ以降を `code="other"` に潰すので、最悪でも「Prometheus が死ぬ」ではなく「メトリクスが役に立たなくなる」で済みますが、変動する部分はラベルにならない `message` に入れてください。
 - `message` は人間可読な denial メッセージです。有益な情報を載せつつ、機微な属性値は漏らさないこと。
 
 ### 実例: `UserLevelAtLeast`

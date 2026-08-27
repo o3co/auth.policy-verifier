@@ -25,6 +25,7 @@ import {
 	type VerifyRouterJwtConfig,
 } from "./jwt/tokenAuthenticator.mjs";
 import { isLoopbackBindAddress } from "./net/loopback.mjs";
+import { createMetrics } from "./observability/metrics.mjs";
 import { createVerifyRouter } from "./routes/verify.mjs";
 
 /** Options accepted by `createApp`. */
@@ -221,9 +222,24 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	// 8. Build Express app
 	const app = express();
 	const prefix = config.http.pathPrefix || "/";
+	const metrics = createMetrics();
+	// First of everything, so the request histogram covers the whole stack —
+	// including the responses produced before any route runs, such as the
+	// caller-auth gate's 401s. A surge of those is exactly what it exists to show.
+	app.use(metrics.middleware);
 	// Healthcheck stays open: an orchestrator probe has no credential to present,
 	// and it reveals nothing a decision does.
 	app.use(prefix, createHealthcheckRouter());
+	// `/metrics` is ungated for the same reason, and one more (#111). Prometheus
+	// scrape configs carry `authorization`, `basic_auth` and `oauth2` — not an
+	// arbitrary header — so gating it behind `http.callerAuth`'s `x-caller-token`
+	// would make it unscrapable by a stock scraper, and the workaround would be
+	// to hand the credential that authorizes DECISIONS to the monitoring system.
+	// What it publishes is counts and latencies over bounded labels: no subject,
+	// no resource, no action, nothing about any individual decision. The boundary
+	// that protects it is the bind address, which is loopback by default (#108) —
+	// see the README on reaching it from a scraper.
+	app.use(prefix, metrics.router);
 	if (callerAuth) {
 		// Ahead of the verify router, so a rejected caller is answered before the
 		// request body is parsed and before any pipeline runs.
@@ -234,6 +250,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 		createVerifyRouter({
 			jwt,
 			logger,
+			metrics: metrics.decisions,
 			resourceParser,
 			attributePipeline: new AttributePipeline(attributeCollectors),
 			rulePipeline: new RulePipeline(ruleCollectors),
