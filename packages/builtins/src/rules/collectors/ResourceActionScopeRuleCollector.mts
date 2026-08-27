@@ -17,6 +17,12 @@ export interface ResourceActionScopeRuleCollectorConfig {
 	 * scope group out of AND-evaluation.
 	 */
 	scopeless?: ScopelessPolicy;
+	/**
+	 * Forwarded to `HasScope`. `false` (default) compares granted scopes
+	 * literally; `true` additionally treats a bare granted scope `x` as
+	 * `read:x`. See `HasScopeOptions.allowBareScopeRewrite`.
+	 */
+	allowBareScopeRewrite?: boolean;
 }
 
 /**
@@ -30,6 +36,13 @@ export interface ResourceActionScopeRuleCollectorConfig {
  * (other collectors, resource-owner policy, etc.). This collector enforces the
  * ceiling only: it produces a `HasScope` rule for the requested
  * `{action}:{resourceType}`, which must be satisfied by the token's scopes.
+ *
+ * ## Matching
+ *
+ * The emitted `HasScope` compares scopes exactly and case-sensitively. An
+ * issuer that emits bare resource names (`project` rather than `read:project`)
+ * must opt in with `{ allowBareScopeRewrite: true }`; without it a bare scope
+ * satisfies nothing of the `{action}:{resourceType}` form.
  *
  * ## Behavior for scopeless tokens
  *
@@ -51,6 +64,7 @@ export interface ResourceActionScopeRuleCollectorConfig {
  */
 export class ResourceActionScopeRuleCollector implements RuleCollector {
 	private readonly scopeless: ScopelessPolicy;
+	private readonly allowBareScopeRewrite: boolean;
 
 	constructor(config?: ResourceActionScopeRuleCollectorConfig) {
 		const scopeless = config?.scopeless ?? "deny";
@@ -60,6 +74,14 @@ export class ResourceActionScopeRuleCollector implements RuleCollector {
 			);
 		}
 		this.scopeless = scopeless;
+
+		const allowBareScopeRewrite = config?.allowBareScopeRewrite ?? false;
+		if (typeof allowBareScopeRewrite !== "boolean") {
+			throw new Error(
+				`ResourceActionScopeRuleCollector: allowBareScopeRewrite must be a boolean, got "${allowBareScopeRewrite}"`,
+			);
+		}
+		this.allowBareScopeRewrite = allowBareScopeRewrite;
 	}
 
 	async collect(context: CollectorContext): Promise<Rule[]> {
@@ -67,6 +89,6 @@ export class ResourceActionScopeRuleCollector implements RuleCollector {
 			return [];
 		}
 		const scope = `${context.action}:${context.resource.resourceType}`;
-		return [new HasScope(scope)];
+		return [new HasScope(scope, { allowBareScopeRewrite: this.allowBareScopeRewrite })];
 	}
 }

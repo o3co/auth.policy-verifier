@@ -159,6 +159,71 @@ describe("standalone smoke", () => {
 		expect(res.body.decisions[0].subject).toBe("user-1");
 	});
 
+	it("POST /verify with a differently-cased scope returns 403 (deny)", async () => {
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: baseConfig,
+			modules: [builtinCollectorsModule, builtinKeyResolversModule],
+		});
+
+		// Scope values are case-sensitive opaque strings (RFC 6749 §3.3), so
+		// "read:DOCUMENT" must not satisfy the required "read:document".
+		const token = await signToken({ scope: "read:DOCUMENT" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "document", action: "read" });
+
+		expect(res.status).toBe(403);
+		expect(res.body.decision).toBe("deny");
+	});
+
+	it("POST /verify with a bare scope returns 403 unless the rewrite is opted into", async () => {
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: baseConfig,
+			modules: [builtinCollectorsModule, builtinKeyResolversModule],
+		});
+
+		// A bare "document" is not rewritten to "read:document" by default.
+		const token = await signToken({ scope: "document" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "document", action: "read" });
+
+		expect(res.status).toBe(403);
+		expect(res.body.decision).toBe("deny");
+	});
+
+	it("POST /verify allows a bare scope once allowBareScopeRewrite is configured", async () => {
+		// Proves the opt-in survives the config schema and reaches the collector,
+		// which is the only path a deployment has to re-enable the old rewrite.
+		const rewritingConfig = AppConfigSchema.parse({
+			oauth: { jwt: { secret: JWT_SECRET, validate: true, issuer: ISSUER, audience: AUDIENCE } },
+			attribute: { collectors: [{ collector: "PayloadScopeCollector" }] },
+			rule: {
+				collectors: [
+					{ collector: "ResourceActionScopeRuleCollector", allowBareScopeRewrite: true },
+				],
+			},
+		});
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: rewritingConfig,
+			modules: [builtinCollectorsModule, builtinKeyResolversModule],
+		});
+
+		const token = await signToken({ scope: "document" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "document", action: "read" });
+
+		expect(res.status).toBe(200);
+		expect(res.body.decision).toBe("allow");
+	});
+
 	it("POST /verify with insufficient scope returns 403 (deny)", async () => {
 		const app = await createApp({
 			pathResolver: (s: string) => s,

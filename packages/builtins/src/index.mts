@@ -36,4 +36,4 @@ export {
 	type ScopelessPolicy,
 } from "./rules/collectors/ResourceActionScopeRuleCollector.mjs";
 export { HasPermission } from "./rules/HasPermission.mjs";
-export { HasScope } from "./rules/HasScope.mjs";
+export { HasScope, type HasScopeOptions } from "./rules/HasScope.mjs";

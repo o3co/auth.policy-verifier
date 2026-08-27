@@ -81,4 +81,32 @@ describe("ResourceActionScopeRuleCollector", () => {
 		const rules = await collector.collect(makeContext("document", "read", ""));
 		expect(rules).toHaveLength(1);
 	});
+
+	describe("allowBareScopeRewrite", () => {
+		it("does not rewrite a bare granted scope by default", async () => {
+			const rules = await collector.collect(makeContext("document", "read", "document"));
+			expect(rules[0].verify(new Map([["scopes", ["document"]]]))).toBe(false);
+		});
+
+		it("passes the opt-in through to the HasScope rule", async () => {
+			const rewriting = new ResourceActionScopeRuleCollector({ allowBareScopeRewrite: true });
+			const rules = await rewriting.collect(makeContext("document", "read", "document"));
+			expect(rules[0].verify(new Map([["scopes", ["document"]]]))).toBe(true);
+		});
+
+		it("keeps matching case-sensitive when the rewrite is opted in", async () => {
+			const rewriting = new ResourceActionScopeRuleCollector({ allowBareScopeRewrite: true });
+			const rules = await rewriting.collect(makeContext("document", "read", "Document"));
+			expect(rules[0].verify(new Map([["scopes", ["Document"]]]))).toBe(false);
+		});
+
+		it("rejects a non-boolean allowBareScopeRewrite at construction time", () => {
+			expect(
+				() =>
+					new ResourceActionScopeRuleCollector({
+						allowBareScopeRewrite: "yes",
+					} as unknown as { allowBareScopeRewrite: boolean }),
+			).toThrow(/allowBareScopeRewrite/);
+		});
+	});
 });
