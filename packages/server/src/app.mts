@@ -122,7 +122,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 				"createApp: oauth.jwt.validate=false disables ALL token verification (test-only); set oauth.jwt.allowInsecureDecode=true to acknowledge, or restore validate=true",
 			);
 		}
-		jwt = { validate: false };
+		jwt = { validate: false, allowInsecureDecode: true };
 		// error, not warn: a deployment that reaches this line accepts unsigned
 		// tokens, and a fleet filtering at level=error must still see it (#106).
 		logger.error({ validate: false, allowInsecureDecode: true }, "jwt_validation_disabled");

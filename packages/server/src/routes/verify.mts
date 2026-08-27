@@ -42,11 +42,13 @@ export interface VerifyingJwtConfig {
 
 /**
  * Test-only shape: the token is decoded, never signature-verified. Its `exp` /
- * `nbf` claims are still enforced (#106). Reaching this mode through
- * `createApp` additionally requires `oauth.jwt.allowInsecureDecode = true`.
+ * `nbf` claims are still enforced (#106). The acknowledgment is part of the
+ * shape — and re-checked at construction time — so wiring the router directly
+ * is not a way around the double opt-in `createApp` enforces.
  */
 export interface DecodingJwtConfig {
 	validate: false;
+	allowInsecureDecode: true;
 }
 
 /** JWT half of `VerifyRouterConfig`, discriminated on `validate`. */
@@ -285,6 +287,13 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				"createVerifyRouter: jwt.tokenType is required when jwt.validate is true (RFC 9068 §4)",
 			);
 		}
+	} else if (jwt.allowInsecureDecode !== true) {
+		// The double opt-in (#106) holds at this API boundary too: a JavaScript
+		// caller can reach here without the acknowledgment even though the
+		// TypeScript shape requires it.
+		throw new Error(
+			"createVerifyRouter: jwt.validate=false disables ALL signature verification (test-only); set jwt.allowInsecureDecode=true to acknowledge, or use a verifying config",
+		);
 	}
 
 	/** Extracts and verifies the bearer token. Shared by both endpoints. */

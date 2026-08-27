@@ -169,7 +169,7 @@ describe("verify router failure logging: token rejections (warn)", () => {
 
 	it("logs jwt_token_rejected for a malformed token on the decode-only path", async () => {
 		const { events, logger } = captureEvents();
-		const app = createTestApp({ jwt: { validate: false }, logger });
+		const app = createTestApp({ jwt: { validate: false, allowInsecureDecode: true }, logger });
 
 		const res = await request(app)
 			.post("/verify")
@@ -367,7 +367,8 @@ describe("decode-only path time-claim enforcement (#106)", () => {
 	// decodeJwt performs no validation at all; the route must enforce exp/nbf
 	// itself with jwtVerify's semantics so a leaked expired token is not a
 	// permanent credential in decode-only deployments.
-	const decodeApp = (logger: EventLogger) => createTestApp({ jwt: { validate: false }, logger });
+	const decodeApp = (logger: EventLogger) =>
+		createTestApp({ jwt: { validate: false, allowInsecureDecode: true }, logger });
 
 	const now = () => Math.floor(Date.now() / 1000);
 

@@ -658,6 +658,19 @@ describe("POST /verify — RFC 9068 §4 token validation (#105)", () => {
 			}),
 		).toThrow(/audience/);
 	});
+
+	it("refuses to build a decode-only router without the acknowledgment (#106)", () => {
+		// The double opt-in must hold at the server package's API boundary too:
+		// wiring the router directly is not a way around it.
+		expect(() =>
+			createVerifyRouter({
+				jwt: { validate: false } as unknown as Parameters<typeof createVerifyRouter>[0]["jwt"],
+				resourceParser: new DotNotationResourceParser(),
+				attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
+				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
+			}),
+		).toThrow(/allowInsecureDecode/);
+	});
 });
 
 describe("POST /verify — decision contract (#124)", () => {

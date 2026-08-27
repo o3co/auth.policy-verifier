@@ -57,7 +57,8 @@ export const AppConfigSchema = z.object({
 			.passthrough()
 			.superRefine((data, ctx) => {
 				if (!data.validate) {
-					// Decode-only mode: no signature check, no claim checks. One config
+					// Decode-only mode: no signature check (exp/nbf are still enforced
+					// at request time, but nothing else is). One config
 					// key (often one env var) must not be enough to get here — demand
 					// the explicit second key.
 					if (!data.allowInsecureDecode) {

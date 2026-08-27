@@ -64,9 +64,13 @@ function adapterFor(name: string, jwt: VerifyRouterJwtConfig) {
 				.set("Authorization", `Bearer ${await mint(deviation)}`)
 				.send({ resource: "project:1", action: "read" });
 
-			// 401 invalid_token means the token never reached policy evaluation. Any
-			// other status means it did — the decision itself is not what this suite pins.
-			return res.status === 401 ? ("rejected" as const) : ("accepted" as const);
+			// 401 invalid_token means the token never reached policy evaluation;
+			// 200/403 means it did — the decision itself is not what this suite
+			// pins. Anything else (400/500) is a broken harness, not an answer,
+			// and must fail the test rather than masquerade as either outcome.
+			if (res.status === 401) return "rejected" as const;
+			if (res.status === 200 || res.status === 403) return "accepted" as const;
+			throw new Error(`unexpected status ${res.status}: ${JSON.stringify(res.body)}`);
 		},
 	};
 }
@@ -84,5 +88,8 @@ describeTokenExpiryConformance(
 // lifetime must still be honoured (#106) — otherwise a leaked expired token
 // stays a working credential in every deployment that runs this mode.
 describeTokenExpiryConformance(
-	adapterFor("createVerifyRouter() decode-only mode (validate: false)", { validate: false }),
+	adapterFor("createVerifyRouter() decode-only mode (validate: false)", {
+		validate: false,
+		allowInsecureDecode: true,
+	}),
 );
