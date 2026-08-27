@@ -61,7 +61,7 @@ export class HasScope implements Rule {
 	}
 
 	verify(attrs: Attributes): boolean {
-		const scopes = (attrs.get(ATTR_SCOPES) as unknown[] | undefined) ?? [];
+		const scopes: unknown = attrs.get(ATTR_SCOPES);
 		if (!Array.isArray(scopes)) return false;
 		return scopes.some((s) => typeof s === "string" && this.matchScope(s, this.scope));
 	}

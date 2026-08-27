@@ -108,5 +108,18 @@ describe("ResourceActionScopeRuleCollector", () => {
 					} as unknown as { allowBareScopeRewrite: boolean }),
 			).toThrow(/allowBareScopeRewrite/);
 		});
+
+		it("rejects an explicit null allowBareScopeRewrite rather than treating it as unset", () => {
+			expect(
+				() =>
+					new ResourceActionScopeRuleCollector({
+						allowBareScopeRewrite: null,
+					} as unknown as { allowBareScopeRewrite: boolean }),
+			).toThrow(/allowBareScopeRewrite/);
+		});
+
+		it("accepts an omitted allowBareScopeRewrite", () => {
+			expect(() => new ResourceActionScopeRuleCollector({ scopeless: "deny" })).not.toThrow();
+		});
 	});
 });
