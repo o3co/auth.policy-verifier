@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { AppConfigSchema } from "#/config/application.schema.mjs";
+import { AppConfigSchema, JWT_MODE_MIGRATION_MESSAGE } from "#/config/application.schema.mjs";
 
 const baseBody = {
 	attribute: { collectors: [] },
@@ -267,8 +267,10 @@ describe("AppConfigSchema — logging (#107)", () => {
 });
 
 describe("AppConfigSchema — oauth.jwt.mode (#134)", () => {
-	const migration =
-		'oauth.jwt.validate/allowInsecureDecode were replaced by oauth.jwt.mode; set mode = "verify" or the explicit "insecure-decode"';
+	// Assert against the exported constant, not a copy of the string: the
+	// operator-facing migration text is the contract, and a test that restates
+	// it can drift from what the schema actually emits.
+	const migration = JWT_MODE_MIGRATION_MESSAGE;
 
 	it('defaults mode to "verify"', () => {
 		const result = AppConfigSchema.parse({

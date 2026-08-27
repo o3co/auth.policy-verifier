@@ -5,7 +5,12 @@ import type { Logger, Module } from "@o3co/auth.policy-verifier.core";
 import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { AppConfigSchema, builtinKeyResolversModule, createApp } from "#/index.mjs";
+import {
+	AppConfigSchema,
+	builtinKeyResolversModule,
+	createApp,
+	JWT_MODE_MIGRATION_MESSAGE,
+} from "#/index.mjs";
 
 const JWT_SECRET = "test-secret";
 const secretKey = new TextEncoder().encode(JWT_SECRET);
@@ -470,7 +475,59 @@ describe("createApp insecure decode mode (#106, #134)", () => {
 				config: handBuilt,
 				modules: [testModule, builtinKeyResolversModule],
 			}),
-		).rejects.toThrow(/replaced by oauth\.jwt\.mode/);
+		).rejects.toThrow(JWT_MODE_MIGRATION_MESSAGE);
+	});
+
+	// A JS consumer can hand createApp anything. The stale-key and mode checks
+	// below reach into the block with `in` and object spread, both of which
+	// throw a bare TypeError on a primitive — so the shape is verified first and
+	// reported like every other boundary error, naming the config path.
+	it.each([
+		["null", null],
+		["undefined", undefined],
+		["a string", "verify"],
+		["a number", 1],
+		["a boolean", true],
+		["an array", []],
+	])("refuses to boot when oauth.jwt is %s", async (_label, jwtValue) => {
+		const handBuilt = {
+			...ackConfig,
+			oauth: { jwt: jwtValue },
+		} as unknown as typeof ackConfig;
+
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: handBuilt,
+				modules: [testModule, builtinKeyResolversModule],
+			}),
+		).rejects.toThrow(/^createApp: oauth\.jwt must be a config object/);
+	});
+
+	it("refuses to boot when the whole oauth block is malformed", async () => {
+		const handBuilt = { ...ackConfig, oauth: null } as unknown as typeof ackConfig;
+
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: handBuilt,
+				modules: [testModule, builtinKeyResolversModule],
+			}),
+		).rejects.toThrow(/^createApp: oauth must be a config object/);
+	});
+
+	it("does not report a TypeError for a malformed oauth.jwt", async () => {
+		// The regression this guards: `"validate" in jwtWire` throws
+		// "Cannot use 'in' operator..." before any of our validation runs.
+		const handBuilt = { ...ackConfig, oauth: { jwt: null } } as unknown as typeof ackConfig;
+
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: handBuilt,
+				modules: [testModule, builtinKeyResolversModule],
+			}),
+		).rejects.not.toBeInstanceOf(TypeError);
 	});
 
 	it("refuses to boot a hand-built config with an unknown mode value", async () => {

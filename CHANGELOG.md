@@ -50,7 +50,8 @@ and version sections follow the release labeling policy in
   | `validate = false` alone (refused to boot) | not expressible — the mode string itself is the consent |
 
   Configs still carrying the removed keys fail at parse time (and at
-  `createApp` for hand-built config objects) with a migration message:
+  `createApp` for hand-built config objects) with a migration message, exported
+  from `@o3co/auth.policy-verifier.server` as `JWT_MODE_MIGRATION_MESSAGE`:
   `oauth.jwt.validate/allowInsecureDecode were replaced by oauth.jwt.mode; set
   mode = "verify" or the explicit "insecure-decode"`.
 

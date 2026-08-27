@@ -38,6 +38,23 @@ export interface CreateAppOptions {
 }
 
 /**
+ * Asserts that a config block a hand-built config supplies is actually an
+ * object, so the checks that follow can index into it. `createApp` accepts
+ * config objects that never went through `AppConfigSchema`, and a JavaScript
+ * caller can put anything at a given path; without this the first `in` test or
+ * object spread throws a bare `TypeError` naming neither the boundary nor the
+ * path the operator wrote. Arrays are rejected too: indexable, but never a
+ * valid config block.
+ */
+function assertConfigObject(value: unknown, path: string): asserts value is object {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		throw new Error(
+			`createApp: ${path} must be a config object, got ${value === null ? "null" : Array.isArray(value) ? "array" : typeof value}`,
+		);
+	}
+}
+
+/**
  * Builds the Express app with registries initialized by the supplied modules.
  *
  * Flow: (1) create registries, (2) run `mod.init` sequentially so later modules
@@ -105,6 +122,13 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	// also accepts hand-built config objects that never went through the schema
 	// (#106) — with this boundary's field paths, so the operator is pointed at
 	// the oauth.jwt.* key they actually wrote.
+	//
+	// Shape first: a hand-built config can carry anything at these paths, and
+	// the key checks below reach into the block with `in` and object spread,
+	// which throw a bare TypeError on a primitive. Report a malformed block like
+	// every other boundary failure instead of leaking that TypeError.
+	assertConfigObject(config.oauth, "oauth");
+	assertConfigObject(config.oauth.jwt, "oauth.jwt");
 	const jwtWire = config.oauth.jwt;
 	for (const staleKey of ["validate", "allowInsecureDecode"] as const) {
 		if (staleKey in jwtWire) {
