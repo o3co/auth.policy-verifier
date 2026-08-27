@@ -195,15 +195,27 @@ oauth {
   jwt {
     algorithm = "HS256"           # HS256 | RS256 | ES256 | EdDSA
     algorithm = ${?OAUTH_JWT_ALGORITHM}
-    secret = ${?OAUTH_JWT_SECRET}           # HS256
-    kid = ${?OAUTH_JWT_KID}                 # HS256 — names the secret above; unset means the header is not consulted
-    previousSecrets = []                     # HS256 — retired secrets still inside their overlap window (max 3)
-    jwksUri = ${?OAUTH_JWT_JWKS_URI}        # RS256/ES256/EdDSA — https required, e.g. https://auth-provider/.well-known/jwks.json
+
+    # ---- HS256 only. Keep exactly one of these two groups. --------------
+    secret = ${?OAUTH_JWT_SECRET}
+    kid = ${?OAUTH_JWT_KID}                  # names the secret above; unset means the token header is not consulted
+    # previousSecrets — retired secrets still inside their overlap window,
+    # max 3. Omitted here on purpose: the key is REFUSED at boot under
+    # RS256/ES256/EdDSA, an empty list included, so it must not sit in a
+    # snippet meant to be copied for any algorithm. Add it only under HS256:
+    #   previousSecrets = [
+    #     { kid = "v0", secret = ${?OAUTH_JWT_PREVIOUS_SECRET}, expiresAt = "2026-09-01T00:00:00Z" }
+    #   ]
+
+    # ---- RS256 / ES256 / EdDSA only -------------------------------------
+    jwksUri = ${?OAUTH_JWT_JWKS_URI}         # https required, e.g. https://auth-provider/.well-known/jwks.json
     jwksTimeoutMs = 5000                     # JWKS fetch bounds — abort after
     jwksCooldownMs = 30000                   # minimum spacing between fetches
     jwksCacheMaxAgeMs = 600000               # cache lifetime of a fetched JWKS
-    publicKey = ${?OAUTH_JWT_PUBLIC_KEY}     # RS256/ES256/EdDSA — PEM string
+    publicKey = ${?OAUTH_JWT_PUBLIC_KEY}     # PEM string
     publicKeyPath = ${?OAUTH_JWT_PUBLIC_KEY_PATH}  # or file path
+
+    # ---- every algorithm -------------------------------------------------
     issuer = ${?OAUTH_JWT_ISSUER}           # required when mode = "verify" — RFC 9068 §4 iss
     audience = ${?OAUTH_JWT_AUDIENCE}       # required when mode = "verify" — RFC 9068 §4 aud
     tokenType = "at+jwt"                     # accepted typ header
@@ -321,7 +333,8 @@ Notes:
 - `expiresAt` is evaluated per request, so a window closes without a restart. A retired secret inside its window can still **mint** tokens for anyone holding it, which is why the window should be a token lifetime, not a quarter.
 - `kid` is optional and unset means what it always meant: one secret verifies everything and the token header is never read. Setting it — which `previousSecrets` requires — starts pinning the header, and a token carrying an unconfigured `kid` is refused.
 - A token that carries **no** `kid` is still accepted: it is tried against every secret configured, current and previous. That costs one signature check per secret, which is why `previousSecrets` is capped at **3** entries.
-- The list is HS256-only. RS256/ES256/EdDSA rotate through the JWKS at `jwksUri`, which already carries every key the issuer publishes; a `previousSecrets` block under an asymmetric algorithm is refused at boot rather than silently ignored.
+- The list is HS256-only, and **an empty `previousSecrets = []` under RS256/ES256/EdDSA is refused too** — the check is on the key being present, not on it having entries. Those algorithms rotate through the JWKS at `jwksUri`, which already carries every key the issuer publishes, so the block configures nothing and is rejected at boot rather than silently ignored. Do not leave it behind when switching a config to an asymmetric algorithm.
+- `kid` is the exception: it is HS256-only in effect but *accepted and ignored* under the asymmetric algorithms, which match `kid` against the JWKS they fetch. It will not break an asymmetric boot.
 
 ## Development
 

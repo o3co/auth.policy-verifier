@@ -194,11 +194,26 @@ and version sections follow the release labeling policy in
   entry: a non-list `previousSecrets`, a missing or non-ISO `expiresAt`, a `kid`
   duplicated across entries, more entries than the cap, or `previousSecrets`
   with no `kid` naming the current secret. `previousSecrets` under RS256 /
-  ES256 / EdDSA is refused rather than ignored — those rotate through the JWKS
-  at `jwksUri` — mirroring the guard auth.provider applies in the other
-  direction. The HS256 `KeyResolverFactory` repeats every check when it builds
-  the key set, so a hand-built config that never went through `AppConfigSchema`
-  still fails inside `createApp` rather than serving.
+  ES256 / EdDSA is refused rather than ignored — **an empty `previousSecrets = []`
+  included**, since the check is on the key being present, not on it having
+  entries — because those algorithms rotate through the JWKS at `jwksUri`,
+  mirroring the guard auth.provider applies in the other direction. `kid` is
+  the exception: it is accepted and ignored under the asymmetric algorithms,
+  which match it against the JWKS they fetch, so it never breaks their boot.
+  The HS256 `KeyResolverFactory` repeats every check when it builds the key
+  set, so a hand-built config that never went through `AppConfigSchema` still
+  fails inside `createApp` rather than serving.
+
+  The only spellings of "nothing is being rotated" are **omitting
+  `previousSecrets`** and `[]`. A `null` is refused, identically at the schema
+  and at the runtime guard — every other optional key in the `oauth.jwt` block
+  reads the same way, and a `null` reaching a config was produced rather than
+  written (an unrendered template value, a missing env var), which makes "no
+  rotation configured" the wrong thing to conclude from it. This is a
+  deliberate, narrow divergence from auth.provider's `narrowPreviousSecretsArray`,
+  which reads `null` as an explicit opt-out; the wire contract this ports — the
+  `{ kid, secret, expiresAt }` triple and the kid-overlap semantics — is
+  unchanged.
 
   A token whose `kid` matches nothing configured is rejected with
   `ERR_JWKS_NO_MATCHING_KEY`, logged at **warn** as `jwt_token_rejected`, not at

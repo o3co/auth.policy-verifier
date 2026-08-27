@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { AppConfigSchema, JWT_MODE_MIGRATION_MESSAGE } from "#/config/application.schema.mjs";
 import { MAX_PREVIOUS_SECRETS } from "#/config/defaults.mjs";
+import { checkHs256Rotation, parseHs256Rotation } from "#/jwt/hs256Rotation.mjs";
 
 const baseBody = {
 	attribute: { collectors: [] },
@@ -614,6 +615,45 @@ describe("AppConfigSchema — HS256 secret rotation (#112)", () => {
 		}
 	});
 
+	it("accepts an explicit empty list as 'nothing is being rotated'", () => {
+		const result = parseJwt({ secret: SECRET, previousSecrets: [] });
+		expect(result.success).toBe(true);
+	});
+
+	describe("null is not a spelling for omitted", () => {
+		// The two boundaries must agree: `AppConfigSchema` serves config files and
+		// `checkHs256Rotation` serves hand-built configs that never met it, and a
+		// value one accepts while the other refuses is the divergence the runtime
+		// guard exists to prevent.
+		it("is refused by the schema, at the field the operator wrote", () => {
+			const result = parseJwt({ secret: SECRET, previousSecrets: null });
+			expect(result.success).toBe(false);
+			if (!result.success) {
+				expect(
+					result.error.issues.some((i) => i.path.join(".") === "oauth.jwt.previousSecrets"),
+				).toBe(true);
+			}
+		});
+
+		it("is refused by the runtime guard the same way", () => {
+			const checked = checkHs256Rotation({ secret: SECRET, previousSecrets: null });
+			expect(checked.ok).toBe(false);
+			expect(() => parseHs256Rotation({ secret: SECRET, previousSecrets: null })).toThrow(
+				/^oauth\.jwt\.previousSecrets must be an array/,
+			);
+		});
+
+		it("leaves the two boundaries agreeing on every spelling of 'nothing'", () => {
+			// undefined and [] pass both; null passes neither.
+			for (const previousSecrets of [undefined, []]) {
+				expect(parseJwt({ secret: SECRET, previousSecrets }).success).toBe(true);
+				expect(checkHs256Rotation({ secret: SECRET, previousSecrets }).ok).toBe(true);
+			}
+			expect(parseJwt({ secret: SECRET, previousSecrets: null }).success).toBe(false);
+			expect(checkHs256Rotation({ secret: SECRET, previousSecrets: null }).ok).toBe(false);
+		});
+	});
+
 	it("requires a kid once a previous secret is configured", () => {
 		const result = parseJwt({
 			secret: SECRET,
@@ -659,9 +699,46 @@ describe("AppConfigSchema — HS256 secret rotation (#112)", () => {
 		}
 	});
 
-	it("refuses previousSecrets under an asymmetric algorithm", () => {
+	/** Parses an asymmetric block carrying whatever `previousSecrets` is given. */
+	function parseAsymmetric(previousSecrets: unknown) {
+		return AppConfigSchema.safeParse({
+			oauth: {
+				jwt: {
+					algorithm: "EdDSA",
+					mode: "verify",
+					...rfc9068,
+					publicKey: "-----BEGIN PUBLIC KEY-----",
+					previousSecrets,
+				},
+			},
+			...baseBody,
+		});
+	}
+
+	it.each([
+		["a populated list", [{ kid: "v0", secret: OLD_SECRET, expiresAt: FUTURE }]],
+		// The empty list is the case a config snippet is most likely to carry, and
+		// it is refused too: the guard is on the key being present, not on it
+		// having entries. Any doc example must therefore keep this key out of a
+		// block an operator could copy for an asymmetric algorithm.
+		["an empty list", []],
+	])("refuses previousSecrets under an asymmetric algorithm — %s", (_label, previousSecrets) => {
 		// Mirrors auth.provider's guard: the asymmetric algorithms rotate through
 		// the JWKS, so a leftover HS256 rotation block would be silently dropped.
+		const result = parseAsymmetric(previousSecrets);
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.error.issues.some((i) => i.message.includes("previousSecrets"))).toBe(true);
+		}
+	});
+
+	it("accepts an asymmetric config that simply omits previousSecrets", () => {
+		expect(parseAsymmetric(undefined).success).toBe(true);
+	});
+
+	it("accepts kid under an asymmetric algorithm — ignored, never a boot failure", () => {
+		// `kid` is HS256-only in effect, but jose matches it against the fetched
+		// JWKS, so leaving it on an asymmetric config must not refuse the boot.
 		const result = AppConfigSchema.safeParse({
 			oauth: {
 				jwt: {
@@ -669,15 +746,12 @@ describe("AppConfigSchema — HS256 secret rotation (#112)", () => {
 					mode: "verify",
 					...rfc9068,
 					publicKey: "-----BEGIN PUBLIC KEY-----",
-					previousSecrets: [{ kid: "v0", secret: OLD_SECRET, expiresAt: FUTURE }],
+					kid: "v1",
 				},
 			},
 			...baseBody,
 		});
-		expect(result.success).toBe(false);
-		if (!result.success) {
-			expect(result.error.issues.some((i) => i.message.includes("previousSecrets"))).toBe(true);
-		}
+		expect(result.success).toBe(true);
 	});
 
 	it("leaves the rotation block alone in insecure-decode mode", () => {

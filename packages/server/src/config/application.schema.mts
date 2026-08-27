@@ -112,6 +112,15 @@ export const AppConfigSchema = z.object({
 				 * `jwt/hs256Rotation.mts`: a token carrying no `kid` is tried
 				 * against every configured secret, so the list length is the work
 				 * one unauthenticated request can force.
+				 *
+				 * `.optional()` and not `.nullish()`: the only ways to say
+				 * "nothing is being rotated" are omitting the key and `[]`.
+				 * A `null` here is refused, at this boundary and identically in
+				 * `checkHs256Rotation` for hand-built configs — see the reasoning
+				 * on that function. Every other optional key in this block reads
+				 * the same way, and a `null` in a config was produced rather than
+				 * written (an unrendered template, a missing env var), which makes
+				 * "no rotation configured" the wrong thing to conclude from it.
 				 */
 				previousSecrets: z
 					.array(
