@@ -52,12 +52,21 @@ interface CapturedEvent {
 	msg: string;
 }
 
-/** EventLogger implementation that records every call for assertion. */
+/**
+ * EventLogger implementation that records every FAILURE event for assertion.
+ *
+ * `info` is discarded on purpose: the router also emits a per-decision audit
+ * line at that level (#111), and this file is about the failure channel. A
+ * failure event that regressed to `info` would still be caught — it would stop
+ * appearing in `events` at all. The decision line has its own suite in
+ * `decisionLogging.test.mts`.
+ */
 function captureEvents(): { events: CapturedEvent[]; logger: EventLogger } {
 	const events: CapturedEvent[] = [];
 	return {
 		events,
 		logger: {
+			info() {},
 			warn(obj, msg) {
 				events.push({ level: "warn", obj, msg });
 			},
@@ -335,7 +344,7 @@ describe("verify router failure logging: default sink and quiet paths", () => {
 		}
 	});
 
-	it("logs nothing on an allowed request", async () => {
+	it("logs no failure event on an allowed request", async () => {
 		const { events, logger } = captureEvents();
 		const app = createTestApp({ logger });
 		const token = await signToken({ scope: "read:project" });

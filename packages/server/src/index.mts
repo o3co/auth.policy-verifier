@@ -54,4 +54,20 @@ export {
 	type VerifyRouterJwtConfig,
 } from "./jwt/index.mjs";
 export { isLoopbackBindAddress, isLoopbackHost } from "./net/loopback.mjs";
+export {
+	DECISION_EVENT,
+	type DecisionEventInput,
+	type DenyingGroup,
+	decisionEvent,
+	type NamedRule,
+} from "./observability/decisionEvent.mjs";
+export {
+	type CreateMetricsOptions,
+	createMetrics,
+	DEFAULT_METRICS_PATH,
+	type DecisionMetrics,
+	type DecisionObservation,
+	MAX_DENY_CODE_LABELS,
+	type Metrics,
+} from "./observability/metrics.mjs";
 export { createVerifyRouter, type VerifyRouterConfig } from "./routes/verify.mjs";

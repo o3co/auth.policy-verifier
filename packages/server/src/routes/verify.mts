@@ -21,6 +21,8 @@ import {
 	createTokenAuthenticator,
 	type VerifyRouterJwtConfig,
 } from "../jwt/tokenAuthenticator.mjs";
+import { DECISION_EVENT, decisionEvent } from "../observability/decisionEvent.mjs";
+import type { DecisionMetrics } from "../observability/metrics.mjs";
 
 /** Config for `createVerifyRouter`. The `jwt.key` type is library-specific and is narrowed at call-time. */
 export interface VerifyRouterConfig {
@@ -34,11 +36,19 @@ export interface VerifyRouterConfig {
 	maxBatchSize?: number;
 	/**
 	 * Sink for the router's failure events (`jwt_token_rejected`,
-	 * `jwt_verification_unavailable`, `verify_internal_error`). Defaults to the
-	 * console-backed logger so failures are never silent, even in a deployment
-	 * that wires nothing.
+	 * `jwt_verification_unavailable`, `verify_internal_error`) and for the
+	 * per-decision `decision` audit line (#111). Defaults to the console-backed
+	 * logger so neither is ever silent in a deployment that wires nothing.
+	 *
+	 * The decision line is emitted at `info`, so `logging.level` is the switch
+	 * that turns the stream off — one knob, no separate flag to forget.
 	 */
 	logger?: EventLogger;
+	/**
+	 * Optional counter seam for decisions (#111). Omitted means decisions are
+	 * logged but not counted; `createApp` wires the Prometheus implementation.
+	 */
+	metrics?: DecisionMetrics;
 }
 
 /**
@@ -171,6 +181,13 @@ function parseDecisionRequest(
  * `ResourceParser` refuses, which is the caller's syntax error rather than a
  * server fault — 401 for authentication failures, and 500 for anything
  * unexpected.
+ *
+ * Every decision — one per `/verify` call, one per entry of a batch — emits a
+ * `decision` event at info and, when `metrics` is wired, increments the
+ * decision counters (#111). Requests that never reached the evaluator (401,
+ * 400) emit neither, so the log stream and the metric agree on what a decision
+ * is. See `observability/decisionEvent.mts` for what the line does and does not
+ * carry.
  */
 export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	const maxBatchSize = config.maxBatchSize ?? DEFAULT_MAX_BATCH_SIZE;
@@ -195,12 +212,43 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			requestContext: entry.context,
 		};
 
+		// Timed from here so the measurement is the decision itself — the two
+		// pipelines plus evaluation — and not the HTTP round trip. One batch
+		// request is many decisions, and it is the per-decision cost that a
+		// collector reaching out to a store makes worse.
+		const startedAt = performance.now();
 		const [attrs, rules] = await Promise.all([
 			config.attributePipeline.collect(context),
 			config.rulePipeline.collect(context),
 		]);
+		const decision = evaluate(attrs, rules, config.evaluateOptions);
+		const durationMs = performance.now() - startedAt;
 
-		return toResponse(payload, entry, evaluate(attrs, rules, config.evaluateOptions));
+		// #111: one structured line per decision, and the counters beside it. Both
+		// are emitted here rather than at each route so a decision is reported
+		// exactly once whether it came through `/verify` or one entry of a batch.
+		const subject = typeof payload.sub === "string" ? payload.sub : undefined;
+		logger.info(
+			decisionEvent({
+				decision,
+				subject,
+				resource: entry.resource,
+				action: entry.action,
+				requestId,
+				durationMs,
+			}),
+			DECISION_EVENT,
+		);
+		config.metrics?.observe({
+			decision: decision.decision,
+			// `resource` and `action` are deliberately not passed: they come from
+			// the request body and would be unbounded metric labels. They are on
+			// the log line above instead.
+			code: decision.decision === "deny" ? decision.code : undefined,
+			durationSeconds: durationMs / 1000,
+		});
+
+		return toResponse(payload, entry, decision);
 	}
 
 	const router = express.Router();

@@ -56,6 +56,7 @@ POST /verify/batch — 同じ契約で、1 往復に N 件の decision
 - **RFC 9068 §4 のトークン検証** — 署名だけでなく `iss` / `aud` / `typ` ヘッダも検証する。同じ鍵で署名された `id_token` / refresh token / logout token や、他サービス向けに発行されたトークンは拒否される。`mode = "verify"`（デフォルト）のとき `issuer` と `audience` は必須。
 - **トークン寿命の上限** — `exp` と `iat` は「あれば検証する」ではなく**必須**。さらに `maxTokenAgeSeconds` が、発行者がどれだけ先の `exp` を付けたかに関わらず「発行からどれだけ経ったトークンまで受け入れるか」の上限を課す。`exp` を持たずに発行（あるいは偽造）されたトークンは、永久に有効ではなく拒否される。`clockToleranceSeconds`（デフォルト 0、上限 300）はクロックずれの許容幅。これらはすべて `insecure-decode` モードでも同じく適用されるので、2 つのモードが同一トークンについて食い違うことはない。
 - **JWKS サポート** — `jwksUri` を auth.provider の `https://.../.well-known/jwks.json` に向ければ鍵ローテーションに自動対応。エンドポイントは TLS 必須（ローカル開発向けにループバックのみ例外）。取得はタイムアウト / クールダウン / キャッシュ期間で必ず上限が付き、プロバイダー障害が判定パスを止めない。
+- **本番で答えられる** — 判定 1 件ごとに構造化された `decision` イベント（subject / resource / action / 決め手になったルール / request id / レイテンシ）を出力し、allow/deny カウンタを持つ Prometheus `/metrics` を提供する。メトリクスのラベルはすべて有界であり、bearer トークン・`sub` を超えるクレーム集合・呼び出し元の `context` はログに載らない。[可観測性](#可観測性)を参照。
 - **プラグイン可能なアーキテクチャ** — Module システムでカスタム Collector、ルール、リソースパーサーをファクトリ経由で登録。
 - **DSL ロックインなし** — 認可ロジックは TypeScript。Rego も Cedar ポリシー言語も不要。スケールアウトが必要になれば [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) 経由で OPA や Cedar に差し替え可能 — interceptor がバックエンドを抽象化する。
 
@@ -330,6 +331,42 @@ oauth.jwt {
 - `kid` を**持たない**トークンも受理される: 設定済みのシークレット（current + previous）を順に試す。1 シークレットあたり署名検証 1 回のコストがかかるため、`previousSecrets` は **3** 件に制限されている。
 - このリストは HS256 専用であり、**RS256/ES256/EdDSA では空の `previousSecrets = []` も拒否される** — 判定はキーの有無であって中身の件数ではない。これらのアルゴリズムは `jwksUri` の JWKS 経由でローテーションし（発行者が公開している鍵がすべて載っている）、このブロックは何も設定しないため、黙って無視せず起動時に拒否する。設定を非対称アルゴリズムに切り替えるときは消し忘れないこと。
 - `kid` は例外で、実質 HS256 専用だが非対称アルゴリズムでは *受理された上で無視される*（これらは取得した JWKS に対して `kid` を照合する）。非対称構成の起動を壊すことはない。
+
+## 可観測性
+
+「なぜこのリクエストは deny されたのか」に自分の出力から答えられない認可サービスは、自分が中心にいる障害の最中に診断不能になります。以下の 2 つは `createApp` で既定有効です。運用向けの詳細はデプロイ用テンプレートの [README](templates/standalone/README.ja.md#可観測性) にあります。
+
+### decision ログ
+
+判定 1 件ごとに `decision` という構造化イベントを `info` で 1 行:
+
+```json
+{"msg":"decision","requestId":"6f1c…","sub":"user-42","resource":"project:7","action":"read","decision":"deny","code":"invalid_scope","deniedBy":{"ruleType":"scope","refused":["invalid_scope"]},"durationMs":0.412}
+```
+
+allow のときは `deniedBy` の代わりに `satisfiedBy` が入り、各グループを満たしたルールを示します。N 件の `POST /verify/batch` は同一 `requestId` を持つ N 行を出力します。`durationMs` はパイプラインと evaluator に費やした時間であり、HTTP の往復時間ではありません。
+
+スイッチは `logging.level`（`LOG_LEVEL`）です — この行は `info` なので `warn` にすればストリームごと止まり、2 つ目のフラグはありません。deny は decision point にとって障害ではなく正常な結果なので `warn` には送っていません。送れば任意の呼び出し元が warn レベルのノイズを製造できてしまいます。アラートはメトリクスに、「なぜ」はログに求めてください。
+
+**決してログに載らないもの:** 生の bearer トークン、`sub` を超えるクレーム集合、そして呼び出し元の `context` オブジェクト — 自由形式で collector にそのまま渡されるため、呼び出し側サービスのリクエストペイロードが行き着く場所そのものです。
+
+### メトリクス
+
+`GET /metrics`、Prometheus text exposition format:
+
+| メトリクス | 種別 | ラベル |
+|---|---|---|
+| `auth_decisions_total` | counter | `decision` |
+| `auth_denials_total` | counter | `code` |
+| `auth_decision_duration_seconds` | histogram | `decision` |
+| `http_request_duration_seconds` | histogram | `method`, `route`, `status` |
+| `auth_policy_verifier_*` | 各種 | Node プロセス既定メトリクス |
+
+`http_request_duration_seconds` は [auth.provider](https://github.com/o3co/auth.provider) と名前もラベル集合も一致するので、1 つの Prometheus job でスタックの両側を賄えます。
+
+**すべてのラベルは有界です。** 有界でないラベルは値ごとに新しい時系列を作り出し、それは監視すべき対象を監視する仕組みそのものをメトリクスエンドポイントが落とす経路だからです。`resource` / `action` / `sub` はそもそもラベルにしていません — これらはリクエスト（ボディまたはトークン）由来で、高カーディナリティが意味を持つログ行の側に属します。`route` は Express の route パターンでマッチしないものは `route="unmatched"` に潰れ、`method` は allowlist でそれ以外は `"other"`、`code` は異なる値 32 個で打ち止めです。
+
+**`/metrics` は `http.callerAuth` でゲートしていません。** Prometheus の scrape config が持つのは `authorization` / `basic_auth` / `oauth2` であって任意ヘッダではないため、`x-caller-token` でゲートすると標準の scraper から scrape 不能になり、*判定* を認可する資格情報を監視システムに渡す運用へ追い込むことになります。このエンドポイントが公開するのは有界ラベル上のカウントとレイテンシだけで、個々の判定に関する情報は含みません。境界となるのは bind アドレスで、既定はループバックです（#108）— scraper はホスト側に置き（同一 Kubernetes Pod のサイドカーはネットワーク名前空間を共有するので、既定のまま `127.0.0.1:3000/metrics` に到達できます）、`0.0.0.0` に bind せざるを得ない場合は `/verify` と同様にネットワーク層でポートを制限してください。
 
 ## 開発
 

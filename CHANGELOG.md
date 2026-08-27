@@ -146,6 +146,95 @@ and version sections follow the release labeling policy in
 
 ### Added
 
+- **A per-decision audit log and a `GET /metrics` endpoint, so the PDP can
+  answer "why was this denied?" from its own output**
+  ([#111](https://github.com/o3co/auth.policy-verifier/issues/111)). There was
+  no decision logging and no metrics anywhere: no record of allow/deny, no
+  counter of decisions by outcome, no `/metrics`. `x-request-id` was read off
+  the request and handed to collectors but never emitted, so a decision could
+  not even be correlated with the caller's own trace. For an authorization
+  decision point those are not optional telemetry — they are the operational
+  surface, and without them an incident involving the PDP is undiagnosable.
+
+  **The decision log.** Every decision now emits one structured event named
+  `decision`, at `info`, through the same injected logger the failure events
+  (#107) already used:
+
+  ```json
+  {"msg":"decision","requestId":"6f1c…","sub":"user-42","resource":"project:7","action":"read","decision":"deny","code":"invalid_scope","deniedBy":{"ruleType":"scope","refused":["invalid_scope"]},"durationMs":0.412}
+  ```
+
+  On an allow, `satisfiedBy` names the rule that satisfied each group —
+  `RuleGroupOutcome.satisfiedBy` from
+  [#135](https://github.com/o3co/auth.policy-verifier/issues/135), which is the
+  rule that *decided* rather than merely the last one that ran. On a deny,
+  `deniedBy` names the first failing group and every alternative in it that
+  refused. One line per decision, so a `POST /verify/batch` of N entries emits N
+  lines sharing one `requestId`, and `durationMs` measures the collector
+  pipelines plus the evaluator rather than the HTTP round trip.
+
+  `logging.level` (`LOG_LEVEL`) is the switch: the line is `info`, so `warn`
+  turns the stream off and there is no second flag to forget. It is deliberately
+  **not** at `warn` — a deny is a normal outcome for a decision point, and
+  routing it there would let any caller manufacture warn-level noise until
+  `warn` stopped meaning "something is wrong".
+
+  **Never on the line:** the raw bearer token, the claim set beyond `sub`, and
+  the caller's `context` object. The last of those is free-form and forwarded
+  verbatim to collectors, so it is exactly where a calling service's own request
+  payload ends up; logging it would make the audit stream a copy of that
+  payload. This record is written on every request, successes included, and
+  shipped to an aggregator whose blast radius is not the token's.
+
+  **`GET /metrics`** serves the Prometheus text exposition format:
+  `auth_decisions_total{decision}` (the allow/deny rate, exactly two series),
+  `auth_denials_total{code}` (which rule is denying — the aggregate of the log
+  line's `deniedBy`), `auth_decision_duration_seconds{decision}`,
+  `http_request_duration_seconds{method,route,status}`, and the Node process
+  defaults under `auth_policy_verifier_`. The HTTP histogram carries the same
+  name and label set as auth.provider's, so one Prometheus job and one dashboard
+  convention cover both halves of the stack.
+
+  **Every label is bounded**, because an unbounded one mints a fresh time series
+  per distinct value — which is how a metrics endpoint takes down the monitoring
+  that was supposed to watch it, and none of these needs access to `/metrics` to
+  reach. `resource`, `action` and `sub` are **not labels at all**: they come from
+  the request body or the token and are unbounded by construction, so they live
+  on the log line, where high cardinality is the point. `route` is the Express
+  route pattern with unmatched requests collapsing to `route="unmatched"`;
+  `method` is an allowlist of the nine methods this service serves, everything
+  else `"other"` (Node's parser hands the server every method llhttp knows);
+  and `code` — operator-bounded in practice, but a field on the `Rule` interface
+  that a custom collector could derive per request — is capped at 32 distinct
+  values, after which the rest collapse to `code="other"`.
+
+  **`/metrics` is not gated by `http.callerAuth` (#108).** Prometheus scrape
+  configs carry `authorization`, `basic_auth` and `oauth2` — not an arbitrary
+  header — so gating it on `x-caller-token` would make it unscrapable by a stock
+  scraper, and the workaround would be handing the credential that authorizes
+  *decisions* to the monitoring system. The endpoint publishes counts and
+  latencies over bounded labels and nothing about any individual decision. The
+  boundary is the bind address, which is loopback by default (#108): put the
+  scraper on the host — a sidecar in the same Kubernetes pod shares the network
+  namespace and reaches `127.0.0.1:3000/metrics` with the default untouched —
+  and where the bind must be `0.0.0.0` (containers), restrict the port at the
+  network layer exactly as for `/verify`. `http.pathPrefix` moves the endpoint
+  with everything else, so `pathPrefix = "/pdp"` means `/pdp/metrics` and the
+  scrape config's `metrics_path` has to match.
+
+  **Deliberately not published yet:** a per-dependency `up` gauge like
+  auth.provider's. The equivalent here is the JWKS endpoint and there is no
+  readiness-probe registry to sample; a gauge built from a second,
+  hand-maintained list of dependencies is the drift auth.provider avoided by
+  sampling its probes. Until then a JWKS outage stays visible as the
+  `jwt_verification_unavailable` log event, emitted at `error` so it can be
+  alerted on.
+
+  **Operator note:** `/metrics` is a new **unauthenticated** endpoint that every
+  deployment picks up on upgrade, and the decision log is new output on stdout.
+  Neither needs configuration. A deployment that must not expose `/metrics`
+  should keep the bind loopback (the default) or restrict the port; a deployment
+  that does not want the decision stream sets `LOG_LEVEL=warn`.
 - HS256 signing-secret rotation, so the algorithm this stack ships as its
   default can be rotated without a coordinated outage
   ([#112](https://github.com/o3co/auth.policy-verifier/issues/112)). The
@@ -319,6 +408,22 @@ and version sections follow the release labeling policy in
 
 ### Changed
 
+- **BREAKING (types only)**: the `EventLogger` port
+  (`@o3co/auth.policy-verifier.core`) now requires `info` alongside `warn` and
+  `error` ([#111](https://github.com/o3co/auth.policy-verifier/issues/111)).
+  `EventLogger` is the narrow shape this project is willing to *demand* of a
+  caller, and until now every event it carried was a failure. The per-decision
+  audit line is emitted on the **successful** path, so a port with no
+  non-failure level would have forced it to `warn` — which stops `warn` meaning
+  "something is wrong" the moment a caller sends a request that is correctly
+  denied.
+
+  Nothing that satisfied the port before is excluded by this: every logger with
+  `warn` and `error` has `info`, `Logger` still satisfies it, and a pino
+  instance still needs no adapter. Only a hand-built object literal with
+  *exactly* those two methods — a test double, typically — stops compiling. Add
+  a no-op `info` to it. There is no runtime behaviour change for such a logger
+  beyond receiving the new event.
 - **BREAKING**: `DotNotationResourceParser`
   (`@o3co/auth.policy-verifier.builtins`) now validates a canonical grammar and
   refuses what it used to repair

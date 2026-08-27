@@ -69,8 +69,18 @@ export interface Logger {
  * and so does a leaner host logger. Use `Logger` where the full surface is
  * genuinely used; use this where the alternative is a caller who cannot pass
  * anything at all.
+ *
+ * `info` is here because not every event worth emitting is a failure: an
+ * authorization service's per-decision audit line (#111) is written on the
+ * successful path and is the only record of what was decided and why. A port
+ * with no non-failure level would have forced that line to `warn`, which makes
+ * "warn" stop meaning "something is wrong" the moment a caller sends a request
+ * that is correctly denied. Three levels is still narrow — every logger that
+ * has `warn` and `error` has `info` — so nothing this port previously admitted
+ * is excluded by asking for it.
  */
 export interface EventLogger {
+	info(obj: Record<string, unknown>, msg: string): void;
 	warn(obj: Record<string, unknown>, msg: string): void;
 	error(obj: Record<string, unknown>, msg: string): void;
 }

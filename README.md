@@ -56,6 +56,7 @@ POST /verify/batch — the same contract, N decisions per round trip
 - **RFC 9068 §4 token validation** — `iss`, `aud` and the `typ` header are checked alongside the signature, so an `id_token`, refresh token or logout token signed with the same key, or a token minted for another service, is rejected. `issuer` and `audience` are required whenever `mode = "verify"` (the default).
 - **Bounded token lifetime** — `exp` and `iat` are **required**, not merely honoured when present, and `maxTokenAgeSeconds` caps how long after issuance a token is accepted whatever `exp` its issuer chose. A token minted or forged without an expiry is refused rather than accepted forever. `clockToleranceSeconds` (0 by default, capped at 300) is the skew allowance. Every one of these applies in `insecure-decode` mode too, so the two modes never disagree about the same token.
 - **JWKS support** — Point `jwksUri` at auth.provider's `https://.../.well-known/jwks.json` for automatic key rotation. The endpoint must be TLS-protected (loopback hosts excepted for local development), and the fetch is bounded by an operator-set timeout, cooldown and cache age so a provider outage cannot stall the decision path.
+- **Answerable in production** — one structured `decision` event per decision (subject, resource, action, the rule that decided, request id, latency) and a Prometheus `/metrics` endpoint with allow/deny counters. Every metric label is bounded; the bearer token, the claim set beyond `sub`, and the caller's `context` never reach the log. See [Observability](#observability).
 - **Pluggable architecture** — Module system for registering custom collectors, rules, and resource parsers via factories.
 - **No DSL lock-in** — Authorization logic is TypeScript. No Rego, no Cedar policy language. If you outgrow this, swap to OPA or Cedar via [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) — the interceptor abstracts over the backend.
 
@@ -335,6 +336,42 @@ Notes:
 - A token that carries **no** `kid` is still accepted: it is tried against every secret configured, current and previous. That costs one signature check per secret, which is why `previousSecrets` is capped at **3** entries.
 - The list is HS256-only, and **an empty `previousSecrets = []` under RS256/ES256/EdDSA is refused too** — the check is on the key being present, not on it having entries. Those algorithms rotate through the JWKS at `jwksUri`, which already carries every key the issuer publishes, so the block configures nothing and is rejected at boot rather than silently ignored. Do not leave it behind when switching a config to an asymmetric algorithm.
 - `kid` is the exception: it is HS256-only in effect but *accepted and ignored* under the asymmetric algorithms, which match `kid` against the JWKS they fetch. It will not break an asymmetric boot.
+
+## Observability
+
+An authorization service that cannot answer "why was this request denied?" from its own output is undiagnosable during the incident it is at the centre of. Both surfaces below are on by default in `createApp`; the deployable template's [README](templates/standalone/README.md#observability) has the operator detail.
+
+### The decision log
+
+One structured event per decision, named `decision`, at `info`:
+
+```json
+{"msg":"decision","requestId":"6f1c…","sub":"user-42","resource":"project:7","action":"read","decision":"deny","code":"invalid_scope","deniedBy":{"ruleType":"scope","refused":["invalid_scope"]},"durationMs":0.412}
+```
+
+`satisfiedBy` replaces `deniedBy` on an allow, naming the rule that satisfied each group. A `POST /verify/batch` of N entries emits N lines sharing one `requestId`. `durationMs` is time in the pipelines and the evaluator, not the HTTP round trip.
+
+`logging.level` (`LOG_LEVEL`) is the switch — the line is `info`, so `warn` turns the stream off, and there is no second flag. A deny is a normal outcome for a decision point rather than a fault, so it is not routed to `warn`: that would let any caller manufacture warn-level noise. Alert on the metrics, read the log for the "why".
+
+**Never logged:** the raw bearer token, the claim set beyond `sub`, and the caller's `context` object — free-form, forwarded verbatim to collectors, and therefore exactly where a calling service's own request payload ends up.
+
+### Metrics
+
+`GET /metrics`, Prometheus text exposition format:
+
+| Metric | Type | Labels |
+|---|---|---|
+| `auth_decisions_total` | counter | `decision` |
+| `auth_denials_total` | counter | `code` |
+| `auth_decision_duration_seconds` | histogram | `decision` |
+| `http_request_duration_seconds` | histogram | `method`, `route`, `status` |
+| `auth_policy_verifier_*` | various | Node process defaults |
+
+`http_request_duration_seconds` matches [auth.provider](https://github.com/o3co/auth.provider)'s name and label set, so one Prometheus job covers both halves of the stack.
+
+**Every label is bounded**, because an unbounded one mints a fresh time series per distinct value — which is how a metrics endpoint takes down the monitoring meant to watch it. `resource`, `action` and `sub` are not labels at all: they come from the request (body or token) and belong on the log line, where high cardinality is the point. `route` is the Express route pattern with unmatched requests collapsing to `route="unmatched"`; `method` is an allowlist with everything else `"other"`; `code` is capped at 32 distinct values.
+
+**`/metrics` is not gated by `http.callerAuth`.** Prometheus scrape configs carry `authorization` / `basic_auth` / `oauth2` and no arbitrary header, so gating it on `x-caller-token` would make it unscrapable by a stock scraper and push operators into handing the credential that authorizes *decisions* to the monitoring system. The endpoint publishes counts and latencies with bounded labels and nothing about any individual decision. The boundary is the bind address, which is loopback by default (#108) — put the scraper on the host (a sidecar in the same Kubernetes pod shares the network namespace and reaches `127.0.0.1:3000/metrics` with the default untouched), and where the bind must be `0.0.0.0`, restrict the port at the network layer as you already do for `/verify`.
 
 ## Development
 

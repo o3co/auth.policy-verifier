@@ -17,6 +17,7 @@
  * the allow/deny paths in isolation.
  */
 import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
+import { consoleLogger } from "@o3co/auth.policy-verifier.core";
 import {
 	AppConfigSchema,
 	builtinKeyResolversModule,
@@ -254,5 +255,64 @@ describe("standalone smoke", () => {
 
 		expect(res.status).toBe(403);
 		expect(res.body.decision).toBe("deny");
+	});
+});
+
+/*
+ * #111. The template is the deployable shape, so these assert what an operator
+ * of *this* composition actually gets — not what the library can be wired to do.
+ */
+describe("standalone observability", () => {
+	it("GET /metrics serves the Prometheus text format with the decision counters", async () => {
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: baseConfig,
+			modules: [builtinCollectorsModule, builtinKeyResolversModule],
+		});
+
+		const token = await signToken({ sub: "user-1", scope: "read:document" });
+		await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "document", action: "read" });
+
+		const res = await request(app).get("/metrics");
+		expect(res.status).toBe(200);
+		expect(res.headers["content-type"]).toContain("text/plain");
+		expect(res.text).toContain('auth_decisions_total{decision="allow"} 1');
+		expect(res.text).toContain("auth_policy_verifier_process_cpu_user_seconds_total");
+	});
+
+	it("emits the per-decision audit line through the injected logger", async () => {
+		// main.mts injects pino here; a capturing stand-in proves the line reaches
+		// whatever the composition root wired, at the level `logging.level` gates.
+		const lines: Array<{ obj: Record<string, unknown>; msg?: string }> = [];
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: baseConfig,
+			modules: [builtinCollectorsModule, builtinKeyResolversModule],
+			logger: {
+				...consoleLogger,
+				info(obj: Record<string, unknown> | string, msg?: string) {
+					if (typeof obj === "object") lines.push({ obj, msg });
+				},
+			},
+		});
+
+		const token = await signToken({ sub: "user-1", scope: "read:document" });
+		await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.set("x-request-id", "trace-1")
+			.send({ resource: "document:9", action: "read" });
+
+		const decision = lines.find((l) => l.msg === "decision");
+		expect(decision?.obj).toMatchObject({
+			sub: "user-1",
+			resource: "document:9",
+			action: "read",
+			decision: "allow",
+			requestId: "trace-1",
+		});
 	});
 });

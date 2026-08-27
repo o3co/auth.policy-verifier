@@ -13,6 +13,7 @@ function captureLogger(): { calls: Array<{ level: string; msg: string }>; logger
 	return {
 		calls,
 		logger: {
+			info: (_obj, msg) => calls.push({ level: "info", msg }),
 			warn: (_obj, msg) => calls.push({ level: "warn", msg }),
 			error: (_obj, msg) => calls.push({ level: "error", msg }),
 		},

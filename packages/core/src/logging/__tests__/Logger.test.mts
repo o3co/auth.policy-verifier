@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { consoleLogger } from "../consoleLogger.mjs";
-import type { Logger } from "../Logger.mjs";
+import type { EventLogger, Logger } from "../Logger.mjs";
 
 describe("Logger interface contract", () => {
 	it("consoleLogger satisfies the Logger interface with all 6 levels + child", () => {
@@ -32,6 +32,26 @@ describe("Logger interface contract", () => {
 			},
 		};
 		expect(candidate.warn).toBeTypeOf("function");
+	});
+
+	it("EventLogger demands info as well as warn and error (compile-time check)", () => {
+		// #111: the per-decision audit line is emitted on the SUCCESS path, so the
+		// narrow port a seam is willing to demand of a caller needs a non-failure
+		// level. Excess-property checking on this literal is what enforces the
+		// method set — remove `info` from the interface and this stops compiling.
+		const candidate: EventLogger = {
+			info: () => {},
+			warn: () => {},
+			error: () => {},
+		};
+		expect(candidate.info).toBeTypeOf("function");
+	});
+
+	it("a full Logger satisfies EventLogger, so one host logger serves both seams", () => {
+		const sink: EventLogger = consoleLogger;
+		expect(sink.info).toBeTypeOf("function");
+		expect(sink.warn).toBeTypeOf("function");
+		expect(sink.error).toBeTypeOf("function");
 	});
 
 	it("Logger.child returns a Logger (structural recursion)", () => {
