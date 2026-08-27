@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from "zod";
-import { DEFAULT_MAX_BATCH_SIZE } from "../routes/verify.mjs";
+import { DEFAULT_MAX_BATCH_SIZE } from "./defaults.mjs";
 
 const collectorSchema = z
 	.object({

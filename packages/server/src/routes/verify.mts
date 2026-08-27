@@ -15,6 +15,7 @@ import {
 } from "@o3co/auth.policy-verifier.core";
 import express from "express";
 import { decodeJwt, errors, type JWTPayload, jwtVerify } from "jose";
+import { DEFAULT_MAX_BATCH_SIZE } from "../config/defaults.mjs";
 
 /**
  * JWT parameters used when signature validation is on. Every field a resource
@@ -72,12 +73,6 @@ export interface VerifyRouterConfig {
 	 */
 	logger?: EventLogger;
 }
-
-/**
- * Default cap on `POST /verify/batch` entries when the config does not set one.
- * Single definition — `AppConfigSchema`'s `verify.maxBatchSize` default imports it.
- */
-export const DEFAULT_MAX_BATCH_SIZE = 50;
 
 /**
  * One decision the caller is asking for. The subject is deliberately absent:
