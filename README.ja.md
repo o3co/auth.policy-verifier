@@ -94,7 +94,8 @@ curl -X POST http://localhost:3000/verify \
       {
         "ruleType": "scope",
         "passed": true,
-        "rules": [{ "code": "invalid_scope", "message": "…", "passed": true }]
+        "evaluated": [{ "code": "invalid_scope", "message": "…", "passed": true }],
+        "satisfiedBy": { "code": "invalid_scope", "message": "…", "passed": true }
       }
     ]
   }
@@ -146,8 +147,10 @@ standalone → server   → core
 - **グループ内:** OR — 1つでも通ればそのグループは通過
 - **グループ間:** AND — 全グループが通過する必要あり
 
-最初に失敗したグループ以降も含め、**全グループを評価する**。決定には各グループの通過可否と
-その根拠となったルールを並べた `reason` が付く。途中で打ち切ると「残りのグループも失敗したのか」に
+最初に失敗したグループ以降も含め、**全グループを評価する**。決定には各グループの通過可否と、
+そのグループで実際に走ったルールを評価順に並べた `evaluated` を持つ `reason` が付く。
+通過グループは最初に通ったルールで評価を打ち切り、そのルールを `satisfiedBy` として明示する。
+失敗グループは全代替ルールを走らせている。途中で打ち切ると「残りのグループも失敗したのか」に
 答えられず、それこそが deny の説明が存在する理由だからである。ルールは契約上 attributes の純関数なので
 全部走らせても安全。deny の `code` / `message` は従来どおり最初に失敗したグループから取る。
 

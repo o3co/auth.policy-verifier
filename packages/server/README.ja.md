@@ -149,7 +149,8 @@ HTTP/1.1 200 OK
       {
         "ruleType": "scope",
         "passed": true,
-        "rules": [{ "code": "invalid_scope", "message": "...", "passed": true }]
+        "evaluated": [{ "code": "invalid_scope", "message": "...", "passed": true }],
+        "satisfiedBy": { "code": "invalid_scope", "message": "...", "passed": true }
       }
     ]
   }
@@ -172,8 +173,11 @@ HTTP/1.1 403 Forbidden
 }
 ```
 
-`reason.groups` は評価順に全ルールグループを列挙します — `passed` と、失敗グループなら全代替ルール、
-通過グループなら満たしたルールが入ります。`code` / `message` は従来どおり最初に失敗したグループから取ります。
+`reason.groups` は評価順に全ルールグループを列挙します — `passed` と、そのグループで実際に走ったルールを
+評価順に並べた `evaluated` が入ります。失敗グループは全代替ルールを走らせて（列挙して）います。
+通過グループは最初に通ったルールで打ち切るため、`evaluated` は先に試して失敗した代替ルールに続けて
+そのルールで終わり、決め手となったルールは `satisfiedBy` として明示されます。
+`code` / `message` は従来どおり最初に失敗したグループから取ります。
 
 **レスポンス — 予期しないエラー**
 
