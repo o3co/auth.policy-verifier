@@ -20,6 +20,24 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
+      # docs/release-policy.md R2/R6: a release is cut by renaming
+      # `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and tagging that commit.
+      # Checked here, before anything is built or published, so a tag pushed at
+      # an unstamped CHANGELOG fails while it is still free to delete the tag.
+      - name: Verify tag and CHANGELOG
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          if ! printf '%s' "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::tag must be vX.Y.Z (optionally with a -prerelease suffix); got '${TAG}'"
+            exit 1
+          fi
+          if ! grep -qF -- "## [${VERSION}]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [${VERSION}]' section. Per docs/release-policy.md R2, rename '## [Unreleased]' to '## [${VERSION}] - YYYY-MM-DD', commit, and tag that commit."
+            exit 1
+          fi
+
       - name: Get pnpm store path
         id: pnpm-store
         shell: bash
@@ -32,6 +50,10 @@ jobs:
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-store-
 
+      # Every workspace package carries the placeholder version `0.0.0`; the tag
+      # is the only source of the real one (AGENTS.md, Release Process). The
+      # private packages are stamped too, harmlessly — pnpm rewrites the
+      # `workspace:*` ranges between them to this exact version on publish.
       - name: Set version from tag
         run: pnpm -r exec pnpm version "${GITHUB_REF#refs/tags/v}" --no-git-tag-version --no-commit-hooks
 
@@ -46,27 +68,27 @@ jobs:
           draft: true
           generate_release_notes: true
 
-      - name: Check if already published
-        id: npm_check
-        shell: bash
-        run: |
-          PACKAGE_VERSION="${GITHUB_REF#refs/tags/v}"
-          set +e
-          OUTPUT="$(npm view "@o3co/auth.policy-verifier.core@${PACKAGE_VERSION}" version 2>&1)"
-          STATUS=$?
-          set -e
-          if [ "$STATUS" -eq 0 ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          elif printf '%s\n' "$OUTPUT" | grep -qE 'E404|404 Not Found'; then
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "npm view failed unexpectedly:" >&2
-            printf '%s\n' "$OUTPUT" >&2
-            exit "$STATUS"
-          fi
-
+      # `pnpm -r publish` decides package by package: it asks the registry about
+      # each publishable workspace package and skips the ones already at this
+      # version. Rerunning a tag therefore republishes exactly the packages that
+      # are missing, which is what makes a half-finished publish recoverable —
+      # and is why there is deliberately no upfront "is this version already
+      # out?" gate in front of this step.
+      #
+      # The gate this replaces asked npm about one package
+      # (@o3co/auth.policy-verifier.core) and skipped the whole step when it
+      # answered. Publishing this workspace is four independent registry writes
+      # — .core, .builtins, .server and create-auth-policy-verifier — so if core
+      # landed and any of the other three failed (npm outage, per-package
+      # trusted-publisher drift), the gate turned every retag into a no-op and
+      # the missing packages could never be published at that version at all.
+      # auth.provider hit exactly this on its v0.5.0 cut (5 of 9 packages
+      # published, retag skipped the rest) and removed the gate for the same
+      # reason: o3co/auth.provider#111.
+      #
+      # templates/standalone and tests/integration are `private: true`, so pnpm
+      # never offers them to the registry.
       - name: Publish packages
-        if: steps.npm_check.outputs.skip != 'true'
         run: pnpm -r publish --access public --no-git-checks --provenance
 
       - name: Publish GitHub Release

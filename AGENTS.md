@@ -72,17 +72,20 @@ Releases are triggered by pushing a `v*` tag to GitHub. There is no manual publi
 
 ### Flow
 
-1. Create and push a version tag: `git tag v0.2.1 && git push origin v0.2.1`
-2. GitHub Actions (`release.yml`) is triggered by the `v*` tag push
-3. The workflow rewrites every package's `package.json` `version` to match the tag (via `pnpm -r exec pnpm version`), builds, typechecks, tests, then runs `pnpm -r publish --access public --provenance` across the monorepo
-4. A GitHub Release is published with auto-generated notes
+1. Cut the CHANGELOG: rename `## [Unreleased]` to `## [0.2.1] - YYYY-MM-DD` and commit (see `docs/release-policy.md` R2/R6 for the full pre-tag audit)
+2. Create and push a version tag on that commit: `git tag v0.2.1 && git push origin v0.2.1`
+3. GitHub Actions (`release.yml`) is triggered by the `v*` tag push
+4. The workflow checks the tag shape and that `CHANGELOG.md` has a section for it, rewrites every package's `package.json` `version` to match the tag (via `pnpm -r exec pnpm version`), builds, typechecks, tests, then runs `pnpm -r publish --access public --provenance` across the monorepo
+5. A GitHub Release is published with auto-generated notes
 
 ### Implications
 
 - **All packages share a single version** derived from the tag. Do not set per-package versions in `package.json` manually; the workflow overwrites them.
 - **`package.json` `version` is effectively a placeholder** (`0.0.0`). It exists because npm requires the field, but the real version comes from the tag at publish time.
-- **Idempotent re-runs:** if a given version already exists on npm, the workflow skips publishing and only (re)publishes the GitHub Release.
-- **Tag format must be `vX.Y.Z`** (leading `v`). The workflow strips the `v` prefix when computing the npm version.
+- **The published set is four packages**: `@o3co/auth.policy-verifier.core`, `.builtins`, `.server` and `@o3co/create-auth-policy-verifier`. `templates/standalone` and `tests/integration` are `private: true` and are stamped with the version but never published.
+- **Idempotent re-runs, per package:** `pnpm -r publish` skips each package that is already on the registry at this version and publishes the rest. Rerunning a tag after a publish that failed partway through therefore publishes exactly the packages that are missing — there is no whole-job "already published" short-circuit, and re-adding one would make a partial publish unrecoverable (see the comment in `release.yml`).
+- **The CHANGELOG must be cut before the tag.** The workflow refuses to publish a tag whose version has no `## [X.Y.Z]` section in `CHANGELOG.md`.
+- **Tag format must be `vX.Y.Z`** (leading `v`, optional `-prerelease` suffix). The workflow strips the `v` prefix when computing the npm version and rejects anything else.
 
 ### For Agents / Contributors
 
@@ -90,7 +93,8 @@ When asked to "release 0.2.1" or similar:
 
 1. Ensure all changes are merged to `main` (releases are cut from `main`, not feature branches)
 2. Verify the change set warrants the requested version bump (breaking change → major, feature → minor, fix → patch)
-3. Propose the tag command to the user; do not push tags without explicit user approval (tag push is irreversible from an npm-publish perspective once the workflow succeeds)
+3. Run the release-cut audit in `docs/release-policy.md` R6 and land the CHANGELOG rename (`## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD`) first — the workflow refuses a tag whose version has no CHANGELOG section
+4. Propose the tag command to the user; do not push tags without explicit user approval (tag push is irreversible from an npm-publish perspective once the workflow succeeds)
 4. After the tag is pushed, watch the Actions run: `gh run watch` or `gh run list --workflow=release.yml`
 
 Do not edit `package.json` `version` fields as part of a release PR — the workflow handles versioning.

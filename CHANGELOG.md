@@ -273,3 +273,21 @@ and version sections follow the release labeling policy in
   `allowInsecureDecode: true`) is unchanged; only the wire config and the
   wire-to-internal mapping changed. Decode-only deployments still boot with the
   `jwt_validation_disabled` event logged at error level.
+
+- The release workflow no longer gates the whole publish on one package
+  ([#120](https://github.com/o3co/auth.policy-verifier/issues/120)). It used to
+  ask npm whether `@o3co/auth.policy-verifier.core` was already at the tag's
+  version and, if so, skip publishing entirely. Publishing this workspace is
+  four independent registry writes — `.core`, `.builtins`, `.server` and
+  `@o3co/create-auth-policy-verifier` — so a run that published core and then
+  failed on another package left that version half-released, and every retag
+  from then on hit the gate, did nothing, and never published the missing
+  packages. `pnpm -r publish` already skips per package what is already on the
+  registry, so the gate is now gone: rerunning a tag publishes exactly the
+  packages that are missing. `auth.provider` removed the same gate for the same
+  reason in [o3co/auth.provider#111](https://github.com/o3co/auth.provider/pull/111).
+
+  The workflow also now refuses a tag that is not `vX.Y.Z`, or whose version has
+  no `## [X.Y.Z]` section in this file, before it builds or publishes anything —
+  the CHANGELOG cut required by [`docs/release-policy.md`](docs/release-policy.md)
+  R2/R6 is now checked rather than assumed.
