@@ -269,7 +269,7 @@ describe("POST /verify", () => {
 		expect(readUntrustedRequestContext(seen[0])).toEqual({ role: "admin" });
 	});
 
-	it("leaves requestContext absent when the body carried no context", async () => {
+	it("tells an omitted context apart from an empty one", async () => {
 		const seen: Array<UntrustedRequestContext | undefined> = [];
 		const recordingCollector: AttributeCollector = {
 			async collect(context: CollectorContext) {
@@ -299,11 +299,18 @@ describe("POST /verify", () => {
 			.post("/verify")
 			.set("Authorization", `Bearer ${token}`)
 			.send({ resource: "project:1", action: "read" });
+		await request(recordingApp)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read", context: {} });
 
-		// An omitted context stays `undefined` rather than becoming an empty
-		// marked record, so `readUntrustedRequestContext(...)?.field` still tells
-		// "no context" apart from "context with nothing in it".
-		expect(seen).toEqual([undefined]);
+		// An omitted context stays `undefined` instead of becoming an empty marked
+		// record. The distinction is observable on the unwrapped record itself —
+		// `undefined` versus `{}` — and not on a field read through it, since
+		// `readUntrustedRequestContext(...)?.field` is `undefined` either way.
+		expect(seen[0]).toBeUndefined();
+		expect(readUntrustedRequestContext(seen[0])).toBeUndefined();
+		expect(readUntrustedRequestContext(seen[1])).toEqual({});
 	});
 
 	it("returns 401 for expired JWT", async () => {
