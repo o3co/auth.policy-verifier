@@ -50,8 +50,22 @@ export interface CollectorContext {
  * Map of attribute keys to values produced by attribute collectors.
  * Values are `unknown` so collectors can contribute any shape; downstream rules
  * are responsible for narrowing.
+ *
+ * Mutable on purpose: a collector builds its slice by writing into one, and
+ * `AttributePipeline` merges those slices the same way. It is the *rule's* view
+ * of the merged result that is narrowed — see {@link ReadonlyAttributes}.
  */
 export type Attributes = Map<string, unknown>;
+
+/**
+ * The read-only view of {@link Attributes} that a rule is judged against.
+ *
+ * The evaluator hands the same live map to every rule in every group, so a rule
+ * that wrote into it would silently change the inputs of every group evaluated
+ * after it. Rules only ever read, so they are handed something that can only be
+ * read — see AGENTS.md "Collector / Rule / Attribute Contract".
+ */
+export type ReadonlyAttributes = ReadonlyMap<string, unknown>;
 
 /**
  * Produces attributes for a request. One collector contributes one logical slice
@@ -65,12 +79,18 @@ export interface AttributeCollector {
  * A single authorization rule. `verify` runs against the merged attributes and
  * returns whether the rule passes; `ruleType` groups alternative rules (OR within
  * a group), and `code` / `message` surface on deny.
+ *
+ * `verify` must be a deterministic, side-effect-free function of `attrs`: equal
+ * attributes give equal answers, and nothing the engine cannot see may decide
+ * the outcome. A rule may hold values fixed at collect time — *what it looks
+ * for* — but must not retain the `CollectorContext` and read it here. See
+ * AGENTS.md "Collector / Rule / Attribute Contract".
  */
 export interface Rule {
 	ruleType: string;
 	code: string;
 	message: string;
-	verify(attrs: Attributes): boolean;
+	verify(attrs: ReadonlyAttributes): boolean;
 }
 
 /**

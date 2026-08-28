@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Attributes, Rule } from "@o3co/auth.policy-verifier.core";
+import type { ReadonlyAttributes, Rule } from "@o3co/auth.policy-verifier.core";
 import { requireAttrName, requireOptionalGroup } from "./_sharedValidation.mjs";
 
 export interface AttrPairNotEqualConfig {
@@ -43,7 +43,7 @@ export class AttrPairNotEqual implements Rule {
 		this.message = `Attribute constraint not satisfied: ${config.a} must not equal ${config.b}.`;
 	}
 
-	verify(attrs: Attributes): boolean {
+	verify(attrs: ReadonlyAttributes): boolean {
 		const a = attrs.get(this.config.a);
 		const b = attrs.get(this.config.b);
 		if (typeof a !== "string" || a.length === 0) return false;

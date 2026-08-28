@@ -284,6 +284,36 @@ and version sections follow the release labeling policy in
 
 ### Added
 
+- **A rule-purity conformance suite, so the contract `evaluate()` spends is one
+  something can fail** ([#152](https://github.com/o3co/auth.policy-verifier/issues/152)).
+  `evaluate()` runs every rule group rather than stopping at the first failure
+  and justifies it in a comment — "Rules are pure predicates over attributes by
+  contract, so running them all is safe." Nothing checked that: not a runtime
+  check, not the type system, not lint, not CI, not a conformance suite. The
+  four existing suites are all engine-level; none could be pointed at a rule.
+
+  `describeRulePurityConformance` (and the `assertRuleIndependentOfContext`
+  primitive under it) joins them in `tests/integration/src/conformance/`. It
+  runs the contract's deciding test literally: the rules are collected through a
+  **revocable** view of the `CollectorContext`, the view is revoked, and every
+  rule is asked again. A rule that copied a string out at collect time answers
+  identically; a rule that kept the request — or any object reached through it,
+  which is why the view is revoked all the way down rather than at the top
+  level — throws on the access, named in the failure. Determinism and
+  non-mutation are checked in the same pass.
+
+  Because the check is behavioural, it cannot be satisfied by renaming a
+  variable, and its own negative cases are part of the suite: the violating
+  shapes from `app.test.mts` and `metrics.test.mts` are run through it to prove
+  it rejects them. Both builtin rule collectors are held to it and both pass.
+
+  CI additionally greps `verify` bodies for `ctx.` / `context.` reads. That is a
+  textual backstop for the obvious shape — it brace-matches the body rather than
+  reading a line, but it is still a string search and does not see a context
+  reached through a differently-named binding or a helper. It exists because the
+  violation has now been written twice by copy-paste; the conformance suite is
+  the check.
+
 - **A per-decision audit log and a `GET /metrics` endpoint, so the PDP can
   answer "why was this denied?" from its own output**
   ([#111](https://github.com/o3co/auth.policy-verifier/issues/111)). There was
@@ -557,6 +587,81 @@ and version sections follow the release labeling policy in
   result rather than throwing.
 
 ### Changed
+
+- **BREAKING (types only)**: `Rule.verify` now takes a `ReadonlyAttributes`
+  (`ReadonlyMap<string, unknown>`) instead of `Attributes`
+  ([#152](https://github.com/o3co/auth.policy-verifier/issues/152)).
+
+  The evaluator hands the **same live map** to every rule in every group, so a
+  rule that wrote into it would silently change the inputs of every group
+  evaluated after it — and nothing said it must not. `Object.freeze` was
+  considered and rejected: it does not affect a `Map`'s contents, whose entries
+  live in an internal slot, so `map.set(...)` still succeeds on a frozen one. It
+  would have been a guard that guards nothing. The type is the guard instead.
+
+  **What a rule author must change:** a rule that annotates its parameter,
+  one line each.
+
+  ```diff
+  -verify(attrs: Attributes): boolean {
+  +verify(attrs: ReadonlyAttributes): boolean {
+  ```
+
+  `ReadonlyAttributes` is exported from `@o3co/auth.policy-verifier.core`. Every
+  read a rule already does — `get`, `has`, `size`, iteration — is unchanged; only
+  `set` / `delete` / `clear` are gone, and a rule that called one of those was
+  violating the contract already. A rule written as an object literal typed
+  `Rule` needs no change at all: it picks the parameter type up contextually.
+  Note that TypeScript's method-parameter bivariance means an implementation
+  that keeps the old `Attributes` annotation still *compiles* — it simply keeps
+  write access it is not supposed to use, which is why the builtins were all
+  moved over rather than left to the compiler.
+
+  `Attributes` itself is **unchanged** and still a mutable `Map`:
+  `AttributeCollector.collect` builds one by writing into it, and
+  `AttributePipeline` merges them the same way. Only the rule's view is narrowed.
+
+- **BREAKING (meaning, not signature)**: the Collector / Rule / Attribute
+  contract in `AGENTS.md` has been rewritten, and it now forbids a different set
+  of things ([#152](https://github.com/o3co/auth.policy-verifier/issues/152)).
+  Anyone who wrote a custom rule against the old text should re-read it.
+
+  The old sentence — "Rules must not reference `CollectorContext`, close over
+  request state, or perform side effects" — was wrong in two opposite
+  directions. It **illegalized** the project's own flagship pattern:
+  `ResourceActionScopeRuleCollector` computes
+  `` `${context.action}:${context.resource.resourceType}` `` at collect time and
+  hands the string to `new HasScope(...)`, which "closes over request state" by
+  the letter of the rule while leaving `HasScope.verify` a perfectly
+  deterministic function of `attrs`. And the violation pattern it described —
+  a rule returning a captured comparison "while ignoring `attrs`" — was too
+  narrow to catch the real violation in this repo, which read `attrs` *and* the
+  request.
+
+  The prohibition has moved from **capturing at collect time** to **reading the
+  context at verify time**:
+
+  - `verify` must be a deterministic, side-effect-free function of `attrs`.
+  - A rule **may** hold values fixed at collect time — *what it looks for*.
+  - A rule **must not** retain `CollectorContext`, or any live reference into
+    it, and read it inside `verify`.
+  - The deciding test: collect the rule, discard the context, call
+    `verify(attrs)` — the answer must be unchanged.
+
+  So a rule that was legal under the old *text* may be illegal now (one that
+  keeps `ctx` and reads it in `verify` — previously indistinguishable from the
+  blessed pattern), and one that looked illegal is explicitly legal (fixing a
+  comparand at collect time). No runtime behaviour changed for a rule that was
+  already pure.
+
+  Also **dropped**: the old text's prescribed fix, "a collector writes both
+  values into attributes under well-known keys". For the scope rule that would
+  have meant adding `ATTR_ACTION` / `ATTR_RESOURCE_TYPE` to core, which the
+  Core Vocabulary Scope section directly below it forbids — those keys are
+  request-shaped, not the transport-neutral OAuth/OIDC/RBAC subject facts
+  `ATTR_*` is reserved for. Promoting both operands into attributes remains a
+  fine thing for a *consuming project* to do under its own keys (see
+  `metrics.test.mts`); it is no longer prescribed as the only correct shape.
 
 - **BREAKING (types only)**: the `EventLogger` port
   (`@o3co/auth.policy-verifier.core`) now requires `info` alongside `warn` and

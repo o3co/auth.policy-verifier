@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Attributes, Rule } from "@o3co/auth.policy-verifier.core";
+import type { ReadonlyAttributes, Rule } from "@o3co/auth.policy-verifier.core";
 import { ATTR_SCOPES } from "@o3co/auth.policy-verifier.core";
 
 /** Options accepted by `HasScope`. */
@@ -60,7 +60,7 @@ export class HasScope implements Rule {
 		this.allowBareScopeRewrite = options?.allowBareScopeRewrite ?? false;
 	}
 
-	verify(attrs: Attributes): boolean {
+	verify(attrs: ReadonlyAttributes): boolean {
 		const scopes: unknown = attrs.get(ATTR_SCOPES);
 		if (!Array.isArray(scopes)) return false;
 		return scopes.some((s) => typeof s === "string" && this.matchScope(s, this.scope));

@@ -33,6 +33,7 @@ export type {
 	Decision,
 	DecisionReason,
 	KeyResolver,
+	ReadonlyAttributes,
 	Resource,
 	ResourceParser,
 	Role,

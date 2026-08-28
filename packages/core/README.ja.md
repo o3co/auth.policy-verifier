@@ -101,9 +101,10 @@ interface ModuleContext {
 | `ResourceParseError` | `raw`（拒否した文字列）と `detail`（理由）を持つ `Error` サブクラス。サーバーエラーではなく**リクエスト**エラーであり、トランスポート層は 400 系で応答する。クラスとして export されるため `instanceof` で絞り込める |
 | `CollectorContext` | 各コレクターに渡される入力: `payload`、`resource`、`action`、省略可能な `headers` と `requestContext` |
 | `UntrustedRequestContext` | `requestContext` の型 — 呼び出し側のデータであり、読むには明示的な `readUntrustedRequestContext(...)` が必要な形で封じられている。トランスポート境界で生成するのは `markUntrustedRequestContext(...)`。[docs/extending.ja.md — 信頼境界](../../docs/extending.ja.md#信頼境界-requestcontext-は呼び出し側のもの) を参照 |
-| `Attributes` | `Map<string, unknown>` — サブジェクト属性のバッグ |
+| `Attributes` | `Map<string, unknown>` — サブジェクト属性のバッグ。可変: コレクターがこれを組み立て、`AttributePipeline` がマージする |
+| `ReadonlyAttributes` | `ReadonlyMap<string, unknown>` — Rule が判定対象として受け取るビュー。評価器は同一の live map をすべての Rule に渡すため、書き込む Rule は以降の全グループの入力を書き換えてしまう |
 | `AttributeCollector` | `collect(context: CollectorContext): Promise<Attributes>` |
-| `Rule` | `{ ruleType: string; code: string; message: string; verify(attrs: Attributes): boolean }` |
+| `Rule` | `{ ruleType: string; code: string; message: string; verify(attrs: ReadonlyAttributes): boolean }` — `verify` は `attrs` の決定的かつ副作用のない関数でなければならない。[AGENTS.md — Collector / Rule / Attribute Contract](../../AGENTS.md#collector--rule--attribute-contract) を参照 |
 | `RuleCollector` | `collect(context: CollectorContext): Promise<Rule[]>` |
 | `Decision` | `{ decision: "allow"; reason: DecisionReason } \| { decision: "deny"; code: string; message: string; reason: DecisionReason }` |
 | `DecisionReason` | `{ groups: RuleGroupOutcome[] }` |

@@ -52,21 +52,23 @@ const ATTR_REQUIRED_SCOPE = "requiredScope";
  *
  * Deliberately not built per request inside the rule collector. AGENTS.md's
  * Collector/Rule/Attribute contract makes collectors the only layer that reads
- * `CollectorContext`; a rule is a predicate over attributes whose verdict must
- * be derivable from `attrs` alone. A `verify` that closed over the collector's
- * `ctx` to recompute `${ctx.action}:${ctx.resource.resourceType}` would be the
- * violation the contract names by name — it bakes the decision at collect time
- * and holds a reference to the whole request.
+ * `CollectorContext`; a rule's `verify` must be a deterministic function of
+ * `attrs`. A `verify` that kept the collector's `ctx` and read
+ * `${ctx.action}:${ctx.resource.resourceType}` out of it at verify time would be
+ * the violation — not because the value is request-derived, which is fine, but
+ * because the read happens where the evaluator cannot see it.
  *
- * Hoisting it to a constant is what makes the compliance checkable rather than
- * asserted: this object is created once, before any request exists, so it
- * *cannot* carry request state. Everything it compares comes from `attrs`,
- * promoted there by the attribute collector below. `code` is a constant too, as
- * every builtin rule's is — which is what keeps it a bounded metric label.
+ * Hoisting it to a constant is the strongest form of compliance available:
+ * this object is created once, before any request exists, so it *cannot* carry
+ * request state at all. Everything it compares comes from `attrs`, promoted
+ * there by the attribute collector below. `code` is a constant too, as every
+ * builtin rule's is — which is what keeps it a bounded metric label.
  *
- * Nothing in the engine enforces any of this today — no runtime check, no lint,
- * no conformance suite — which is #152. Until that lands, the shape is upheld
- * by hand, so it is written down here rather than left to be inferred.
+ * The weaker-but-legal form is what the builtins do: fix the comparand at
+ * collect time and hold it as a plain value (see `app.test.mts`). #152 added
+ * the check that tells the two apart from the violation —
+ * `tests/integration/src/conformance/rulePurity.mts` collects a rule, revokes
+ * the request, and asks it again.
  */
 const SCOPE_RULE: Rule = {
 	ruleType: "scope",

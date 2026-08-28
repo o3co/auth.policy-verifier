@@ -32,11 +32,12 @@ interface Rule {
   ruleType: string;
   code: string;
   message: string;
-  verify(attrs: Attributes): boolean;
+  verify(attrs: ReadonlyAttributes): boolean;
 }
 ```
 
 - `verify(attrs)` は述語です。通過時に `true`、失敗時に `false` を返します。**safe-deny 規約:** 欠落・型不一致・不正な属性は `false` を返してください。例外を投げない。例外を投げるとポリシー失敗がエラー応答になり、評価状態が漏れます。
+- `attrs` はコレクターが返す `Attributes` ではなく `ReadonlyAttributes`（`ReadonlyMap<string, unknown>`）です。評価器は同一の live map を全グループの全 Rule に渡すため、書き込む Rule は以降のグループが判定される対象そのものを書き換えてしまいます。read-only ビューはそれをデバッグ作業ではなくコンパイルエラーにします。コレクター側は従来どおり可変の `Map` を組み立てて返します。
 - `ruleType` は評価器が Rule をグループ化するのに使います。同じ `ruleType` の Rule は OR 結合されます（いずれか 1 つ通ればグループ通過）。異なる `ruleType` の Rule はグループ間 AND 結合されます（全グループ通過が必要）。**既定の `ruleType` は、暗黙の衝突を避けるためにルール設定を十分にエンコードしてください。** 例えば `AttrLiteralEqual` は `attr_literal_equal:${a}:${typeof v}:${String(v)}` を使います — `typeof v` セグメントは `v=true` と `v="true"` が同じ `ruleType` に畳み込まれて意図に反して OR 結合されるのを防ぎます。
 - `code` は短く安定した識別子（例: `"no_permission"`、`"attr_not_equal"`）で、下流のプログラム的ハンドリングに適した文字列にしてください。**1 つの Rule が生成しうる code の集合は小さく固定に保つこと。** `code` は `auth_denials_total` メトリクスの `code` ラベルと decision ログ行の `deniedBy` になるため、リクエストごとに導出される code（例えばリソース ID を畳み込んだもの）は有界でないメトリクスラベルになります。これは、監視すべき対象を監視する仕組みそのものをメトリクスエンドポイントが落とす経路です。サーバー側は異なる値 32 個で打ち止め、それ以降を `code="other"` に潰すので、最悪でも「Prometheus が死ぬ」ではなく「メトリクスが役に立たなくなる」で済みますが、変動する部分はラベルにならない `message` に入れてください。
 - `message` は人間可読な denial メッセージです。有益な情報を載せつつ、機微な属性値は漏らさないこと。
@@ -46,7 +47,7 @@ interface Rule {
 `userLevel` が設定値以上の数値のときに通過する Rule:
 
 ```ts
-import type { Attributes, Rule } from "@o3co/auth.policy-verifier.core";
+import type { ReadonlyAttributes, Rule } from "@o3co/auth.policy-verifier.core";
 
 export interface UserLevelAtLeastConfig {
   threshold: number;
@@ -68,7 +69,7 @@ export class UserLevelAtLeast implements Rule {
     this.message = `User level must be at least ${String(config.threshold)}.`;
   }
 
-  verify(attrs: Attributes): boolean {
+  verify(attrs: ReadonlyAttributes): boolean {
     const level = attrs.get("userLevel");
     if (typeof level !== "number") return false;
     return level >= this.config.threshold;
@@ -179,7 +180,9 @@ RuleCollector は `CollectorContext` 全体を見られるため、エンジン�
 
 成立していなければならない性質は、`verify(attrs)` が `attrs` の決定的かつ副作用のない関数であることです — 評価器が最初の失敗で止まらず全グループを実行できるのは、この性質があるからです。Rule が *探す値* を collect 時に固定することはこれを壊しませんが、context を保持して *verify 時に読む* ことは壊します。
 
-**そしてこれは規約であって検査ではありません。** `verify(attrs)` は attribute しか受け取りませんが、Collector の context を Rule が保持してそこで参照することは何も妨げておらず、コンパイラもテストスイートも教えてくれません。答えを焼き込んでしまった Rule の直し方は次のとおりです: *検査される側の値* は `attrs.get(...)` から取得し、*それが照合される相手の値* はリクエストから捕捉したままでよい。
+**そしてこれは今や規約であるだけでなく検査でもあります。** 決め手となるテストは「Rule を collect し、context を捨て、`verify(attrs)` を呼ぶ — 答えが変わらないこと」です。[`tests/integration/src/conformance/rulePurity.mts`](../tests/integration/src/conformance/rulePurity.mts) の `describeRulePurityConformance` がまさにこれを実行します: revoke 可能な context ビュー経由で Rule を collect し、revoke してから再び問う。context を保持した Rule はアクセス時に throw し、値をコピーしただけの Rule は throw しません。自作の RuleCollector もこれに通してください。（CI も `verify` の本体に `ctx.` / `context.` がないか grep しますが、それは分かりやすい形に対する backstop であり、実際に判定するのは conformance suite です。）
+
+答えを焼き込んでしまった Rule の直し方は次のとおりです: *検査される側の値* は `attrs.get(...)` から取得し、*それが照合される相手の値* はリクエストから捕捉したままでよい — ただし context への live な参照ではなく、コピーされた値として。
 
 ## 関連資料
 

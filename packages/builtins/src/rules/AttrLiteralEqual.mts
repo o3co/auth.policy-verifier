@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Attributes, Rule } from "@o3co/auth.policy-verifier.core";
+import type { ReadonlyAttributes, Rule } from "@o3co/auth.policy-verifier.core";
 import {
 	type LiteralValue,
 	requireAttrName,
@@ -51,7 +51,7 @@ export class AttrLiteralEqual implements Rule {
 		this.message = `Attribute constraint not satisfied: ${config.a} must equal ${String(config.v)}.`;
 	}
 
-	verify(attrs: Attributes): boolean {
+	verify(attrs: ReadonlyAttributes): boolean {
 		const x = attrs.get(this.config.a);
 		if (typeof x !== typeof this.config.v) return false;
 		return x === this.config.v;
