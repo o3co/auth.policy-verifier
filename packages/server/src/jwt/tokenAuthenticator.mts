@@ -25,12 +25,7 @@
 
 import type { EventLogger, VerifierPayload } from "@o3co/auth.policy-verifier.core";
 import { decodeJwt, errors, type JWTPayload, jwtVerify } from "jose";
-import { resolveBound } from "../config/bounds.mjs";
-import {
-	DEFAULT_CLOCK_TOLERANCE_SECONDS,
-	DEFAULT_MAX_TOKEN_AGE_SECONDS,
-	MAX_CLOCK_TOLERANCE_SECONDS,
-} from "../config/defaults.mjs";
+import { NUMERIC_BOUNDS, resolveBound } from "../config/bounds.mjs";
 
 /**
  * Bounds on a presented token's own lifetime (#110), settable in either mode
@@ -86,6 +81,10 @@ const REQUIRED_CLAIMS = ["exp"] as const;
  * string handed to jose is silently ignored in favour of *its* default, which
  * for `maxTokenAge` means no ceiling at all.
  *
+ * The bounds themselves live in `config/bounds.mts` and are the very specs
+ * `AppConfigSchema` reads a config file through (#157), so the two boundaries
+ * cannot diverge on what a knob admits or on how it says so.
+ *
  * @param path Config path of the JWT block at the calling boundary. The router
  * sees it as `jwt`; `createApp` passes `oauth.jwt`, the key the operator wrote.
  */
@@ -93,24 +92,13 @@ export function resolveJwtTimeClaimBounds(
 	config: JwtTimeClaimConfig,
 	path = "jwt",
 ): JwtTimeClaimBounds {
-	const seconds = { path, unit: "seconds" } as const;
 	return {
-		maxTokenAge: resolveBound(config.maxTokenAgeSeconds, {
-			...seconds,
-			field: "maxTokenAgeSeconds",
-			fallback: DEFAULT_MAX_TOKEN_AGE_SECONDS,
-			minimum: 1,
-		}),
-		// Zero is the default and a deliberate choice ("trust the clocks"), so the
-		// floor is 0 and the absent case is told apart by `undefined`, never by
-		// falsiness. Bounded above because tolerance lengthens every token's life.
-		clockTolerance: resolveBound(config.clockToleranceSeconds, {
-			...seconds,
-			field: "clockToleranceSeconds",
-			fallback: DEFAULT_CLOCK_TOLERANCE_SECONDS,
-			minimum: 0,
-			maximum: MAX_CLOCK_TOLERANCE_SECONDS,
-		}),
+		maxTokenAge: resolveBound(config.maxTokenAgeSeconds, NUMERIC_BOUNDS.maxTokenAgeSeconds, path),
+		clockTolerance: resolveBound(
+			config.clockToleranceSeconds,
+			NUMERIC_BOUNDS.clockToleranceSeconds,
+			path,
+		),
 	};
 }
 

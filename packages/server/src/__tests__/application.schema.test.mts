@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import { AppConfigSchema, JWT_MODE_MIGRATION_MESSAGE } from "#/config/application.schema.mjs";
 import { MAX_PREVIOUS_SECRETS, MIN_SECRET_ENTROPY_BYTES } from "#/config/defaults.mjs";
 import { checkHs256Rotation, parseHs256Rotation } from "#/jwt/hs256Rotation.mjs";
+import { type JwksFetchConfig, resolveJwksFetchBounds } from "#/jwt/jwks.mjs";
+import { type JwtTimeClaimConfig, resolveJwtTimeClaimBounds } from "#/jwt/tokenAuthenticator.mjs";
 
 const baseBody = {
 	attribute: { collectors: [] },
@@ -419,6 +421,257 @@ describe("AppConfigSchema — token lifetime bounds (#110)", () => {
 
 	it("accepts the clock-tolerance ceiling itself", () => {
 		expect(parseWithBounds({ clockToleranceSeconds: 300 }).success).toBe(true);
+	});
+});
+
+describe("AppConfigSchema — one numeric reader at both boundaries (#157)", () => {
+	// The doctrine `checkJwksUri` and `checkHs256Rotation` follow: an invariant is
+	// stated once and spent twice, so a hand-built config cannot get a different
+	// answer from a parsed one. The numeric knobs were the exception — the schema
+	// re-implemented each as a `z.coerce.number()` chain and shared only the
+	// constants with `resolveBound`, which is how the two rows below came to
+	// disagree. Every case here asserts the two boundaries character for
+	// character, because a message that drifts is a check that has drifted.
+	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
+
+	/** Parses a valid verify config whose `oauth.jwt` knobs the case under test overrides. */
+	const parseJwt = (jwt: Record<string, unknown>) =>
+		AppConfigSchema.safeParse({ oauth: { jwt: { ...validJwt, ...jwt } }, ...baseBody });
+
+	/** The schema's message for one key, or `undefined` when it accepted the value. */
+	function schemaRefusal(config: Record<string, unknown>, key: string): string | undefined {
+		const result = parseJwt(config);
+		if (result.success) {
+			return undefined;
+		}
+		return result.error.issues.find((issue) => issue.path.at(-1) === key)?.message;
+	}
+
+	/** The runtime guard's message for the same value, or `undefined` when it accepted it. */
+	function guardRefusal(resolve: () => unknown): string | undefined {
+		try {
+			resolve();
+			return undefined;
+		} catch (cause) {
+			return (cause as Error).message;
+		}
+	}
+
+	/**
+	 * Every `oauth.jwt` numeric knob, paired with the resolver that reads it for a
+	 * config `createApp` was handed rather than one it parsed. The casts are the
+	 * point: a hand-built config's static types cannot be trusted, which is why
+	 * the guard exists at all.
+	 */
+	const jwtKnobs = [
+		{
+			key: "jwksTimeoutMs",
+			resolve: (value: unknown) =>
+				resolveJwksFetchBounds({ jwksTimeoutMs: value } as JwksFetchConfig, "oauth.jwt"),
+		},
+		{
+			key: "jwksCooldownMs",
+			resolve: (value: unknown) =>
+				resolveJwksFetchBounds({ jwksCooldownMs: value } as JwksFetchConfig, "oauth.jwt"),
+		},
+		{
+			key: "jwksCacheMaxAgeMs",
+			resolve: (value: unknown) =>
+				resolveJwksFetchBounds({ jwksCacheMaxAgeMs: value } as JwksFetchConfig, "oauth.jwt"),
+		},
+		{
+			key: "maxTokenAgeSeconds",
+			resolve: (value: unknown) =>
+				resolveJwtTimeClaimBounds({ maxTokenAgeSeconds: value } as JwtTimeClaimConfig, "oauth.jwt"),
+		},
+		{
+			key: "clockToleranceSeconds",
+			resolve: (value: unknown) =>
+				resolveJwtTimeClaimBounds(
+					{ clockToleranceSeconds: value } as JwtTimeClaimConfig,
+					"oauth.jwt",
+				),
+		},
+	] as const;
+
+	/**
+	 * Values no numeric knob may take, whatever its floor. `false` and `""` are
+	 * here rather than in a per-knob list on purpose: `Number(false)` and
+	 * `Number("")` are both 0, which the knobs whose floor is 0 would otherwise
+	 * accept as a deliberate zero.
+	 */
+	const refusedEverywhere: [string, unknown][] = [
+		["true", true],
+		["false", false],
+		["null", null],
+		["an empty string", ""],
+		["a non-numeric string", "abc"],
+		["a fractional value", 1.5],
+		["an array", []],
+		["an object", {}],
+	];
+
+	for (const knob of jwtKnobs) {
+		describe(knob.key, () => {
+			it.each(refusedEverywhere)(
+				"refuses %s at both boundaries, in one wording",
+				(_label, value) => {
+					const fromGuard = guardRefusal(() => knob.resolve(value));
+					expect(fromGuard).toBeDefined();
+					expect(schemaRefusal({ [knob.key]: value }, knob.key)).toBe(fromGuard);
+				},
+			);
+		});
+	}
+
+	// The two rows of #157's table, named so the regression is recognisable: the
+	// schema read `false` as a zero cooldown and `true` as a one-millisecond
+	// timeout, each of which the runtime guard refused to boot on.
+	it("refuses jwksCooldownMs = false, which used to parse to 0", () => {
+		expect(schemaRefusal({ jwksCooldownMs: false }, "jwksCooldownMs")).toBe(
+			"oauth.jwt.jwksCooldownMs must be a non-negative integer number of milliseconds, got false",
+		);
+	});
+
+	it("refuses jwksTimeoutMs = true, which used to become a 1 ms timeout", () => {
+		expect(schemaRefusal({ jwksTimeoutMs: true }, "jwksTimeoutMs")).toBe(
+			"oauth.jwt.jwksTimeoutMs must be a positive integer number of milliseconds, got true",
+		);
+	});
+
+	it("still takes the strings a HOCON env substitution delivers, for every knob", () => {
+		// The whole point of routing through `resolveBound` is that it coerces the
+		// string form itself. A knob that stopped accepting "2000" would break
+		// every deployment configured through the environment.
+		const result = parseJwt({
+			jwksTimeoutMs: "2000",
+			jwksCooldownMs: "0",
+			jwksCacheMaxAgeMs: "120000",
+			maxTokenAgeSeconds: "600",
+			clockToleranceSeconds: "60",
+		});
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.data.oauth.jwt).toMatchObject({
+				jwksTimeoutMs: 2000,
+				jwksCooldownMs: 0,
+				jwksCacheMaxAgeMs: 120_000,
+				maxTokenAgeSeconds: 600,
+				clockToleranceSeconds: 60,
+			});
+		}
+	});
+
+	it("reports two bad knobs in one block, not just the first", () => {
+		// The reason the wrapper's issue is non-fatal. A fatal one would abort the
+		// block at the first refusal and make a two-mistake config a two-round-trip
+		// fix, which is the property `checkHs256Rotation` is built around.
+		const result = parseJwt({ jwksTimeoutMs: false, clockToleranceSeconds: 999 });
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.error.issues.map((issue) => issue.path.at(-1)).sort()).toEqual([
+				"clockToleranceSeconds",
+				"jwksTimeoutMs",
+			]);
+		}
+	});
+
+	it("leaves a sibling block's superRefine running when a knob elsewhere is refused", () => {
+		// zod skips a block's `superRefine` once a field *in that block* failed, so
+		// a refused `oauth.jwt` knob hides the RFC 9068 checks beside it. A refused
+		// `http.port` does not: different block, so the jwt checks still report.
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: { algorithm: "HS256", mode: "verify", audience: "https://api.test" } },
+			...baseBody,
+			http: { port: false },
+		});
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			const messages = result.error.issues.map((issue) => issue.message);
+			expect(messages).toContain("http.port must be an integer between 1 and 65535, got false");
+			expect(messages).toContain('issuer is required when mode is "verify" (RFC 9068 §4)');
+			expect(messages).toContain("secret is required for HS256");
+		}
+	});
+
+	it("keeps the defaults reachable through the same reader", () => {
+		const result = parseJwt({});
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.data.oauth.jwt).toMatchObject({
+				jwksTimeoutMs: 5_000,
+				jwksCooldownMs: 30_000,
+				jwksCacheMaxAgeMs: 600_000,
+				maxTokenAgeSeconds: 86_400,
+				clockToleranceSeconds: 0,
+			});
+		}
+	});
+});
+
+describe("AppConfigSchema — http.port (#157)", () => {
+	// The one numeric knob that predates the campaign and was never bounded
+	// (noted in #158): `z.coerce.number()` with no `.int().positive()` at all.
+	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
+
+	const parsePort = (port: unknown) =>
+		AppConfigSchema.safeParse({ oauth: { jwt: validJwt }, ...baseBody, http: { port } });
+
+	it("defaults to 3000 when the http section is absent", () => {
+		const result = AppConfigSchema.parse({ oauth: { jwt: validJwt }, ...baseBody });
+		expect(result.http.port).toBe(3000);
+	});
+
+	it("defaults to 3000 when the http section omits it", () => {
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			http: { hostname: "0.0.0.0" },
+		});
+		expect(result.http.port).toBe(3000);
+	});
+
+	it("takes the string HTTP_PORT delivers", () => {
+		const result = parsePort("8080");
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.data.http.port).toBe(8080);
+		}
+	});
+
+	it.each([
+		// 0 is a real hazard, not a formality: listen(0) binds an arbitrary free
+		// port, so the enforcement layer's configured address stops resolving to
+		// this process — and 0 is what `Number(false)` and `Number(null)` produced.
+		["zero", 0],
+		["a negative port", -1],
+		["a port above the 16-bit range", 65_536],
+		["a fractional port", 3.5],
+		["a non-numeric string", "abc"],
+		["an empty string", ""],
+		["true", true],
+		["false", false],
+		["null", null],
+	])("refuses %s", (_label, port) => {
+		const result = parsePort(port);
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.error.issues.some((issue) => issue.path.join(".") === "http.port")).toBe(true);
+		}
+	});
+
+	it("accepts the last usable port", () => {
+		expect(parsePort(65_535).success).toBe(true);
+	});
+
+	it("names the key the operator wrote, in the shape every other knob uses", () => {
+		const result = parsePort("abc");
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.error.issues.find((issue) => issue.path.at(-1) === "port")?.message).toBe(
+				'http.port must be an integer between 1 and 65535, got "abc"',
+			);
+		}
 	});
 });
 

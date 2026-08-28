@@ -144,6 +144,21 @@ export const MAX_PREVIOUS_SECRETS = 3;
  */
 export const DEFAULT_HOSTNAME = "127.0.0.1";
 
+/** Port the server listens on when the config does not set one. */
+export const DEFAULT_HTTP_PORT = 3000;
+
+/**
+ * Largest bindable TCP port — the 16-bit ceiling, and the only thing
+ * `http.port` is held to beyond being a positive integer.
+ *
+ * The floor is 1 rather than 0 although `listen(0)` is legal: it asks the OS
+ * for an arbitrary free port, so the address the enforcement layer was
+ * configured to call stops resolving to this process. That is not a deployment
+ * an operator writes on purpose, and `0` is precisely what `false` or a `null`
+ * in this slot used to coerce to (#157).
+ */
+export const MAX_TCP_PORT = 65_535;
+
 /**
  * Default header carrying the caller credential when `http.callerAuth` sets a
  * token but no header name (#108).

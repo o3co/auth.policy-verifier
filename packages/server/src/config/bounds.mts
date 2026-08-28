@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * One reader for the numeric knobs an operator sets on a config block.
+ * The numeric knobs an operator sets on a config block: what each one admits,
+ * and the one reader that admits it.
  *
  * Every such knob arrives the same way and fails the same way: absent (take the
  * default), a number, or the string a HOCON env substitution delivers — and a
@@ -12,27 +13,147 @@
  * both need exactly that, so it is written once here rather than restated per
  * knob, and the rejection message has a single shape operators learn once.
  *
- * Dependency-free on purpose: `AppConfigSchema` sits upstream of this, so
- * config-only consumers must not pull jose or express in behind it.
+ * Both boundaries read a knob through this one function (#157). `AppConfigSchema`
+ * serves config files and the runtime resolvers serve the hand-built configs
+ * `createApp` also accepts; until #157 the schema re-implemented each knob as a
+ * `z.coerce.number().int()…` chain and shared only the constants, which is how
+ * `jwksCooldownMs = false` came to mean 0 through the schema and a boot failure
+ * through the resolver. That is the divergence `checkJwksUri` and
+ * `checkHs256Rotation` exist to prevent, and the reasoning written on
+ * `checkHs256Rotation` (the `previousSecrets` `null` contract, #147) is the same
+ * one: a hand-built config must not get a different answer from a parsed one.
+ *
+ * {@link NUMERIC_BOUNDS} is the whole table, in one place, for the same reason
+ * the reader is: a spec kept beside the module that consumes it could not be
+ * shared with `AppConfigSchema` without dragging that module's dependencies in
+ * behind it — `jwt/tokenAuthenticator.mts` brings jose with it, and
+ * `routes/verify.mts` brings express.
+ *
+ * Which is also why this module imports nothing but `config/defaults.mts`. The
+ * arrows all point *at* it: `AppConfigSchema` imports it to read config files,
+ * and `jwt/jwks.mts`, `jwt/tokenAuthenticator.mts` and `routes/verify.mts`
+ * import it to read the hand-built ones. Anything it reached back for would
+ * arrive in every one of those — a config-only consumer of the schema included,
+ * which must not end up with jose or express behind a numeric bound.
  */
 
-/** How one numeric knob is read: where it lives, what it defaults to, what it admits. */
+import {
+	DEFAULT_CLOCK_TOLERANCE_SECONDS,
+	DEFAULT_HTTP_PORT,
+	DEFAULT_JWKS_CACHE_MAX_AGE_MS,
+	DEFAULT_JWKS_COOLDOWN_MS,
+	DEFAULT_JWKS_TIMEOUT_MS,
+	DEFAULT_MAX_BATCH_SIZE,
+	DEFAULT_MAX_TOKEN_AGE_SECONDS,
+	MAX_CLOCK_TOLERANCE_SECONDS,
+	MAX_TCP_PORT,
+} from "./defaults.mjs";
+
+/** How one numeric knob is read: what it defaults to and what it admits. */
 export interface BoundSpec {
 	/** Config key as the operator wrote it, e.g. `"jwksTimeoutMs"`. */
 	field: string;
-	/** Config path of the block at the calling boundary, e.g. `"oauth.jwt"`. */
-	path: string;
 	/** Value taken when the key is absent. */
 	fallback: number;
 	/** Smallest accepted value. */
 	minimum: number;
 	/** Largest accepted value, for a knob bounded above; unbounded when omitted. */
 	maximum?: number;
-	/** Unit named in the rejection message, e.g. `"milliseconds"`. */
-	unit: string;
+	/**
+	 * Unit named in the rejection message, e.g. `"milliseconds"`. Omitted for a
+	 * knob that counts nothing — a TCP port is a number, not a quantity of
+	 * anything, and "between 1 and 65535 ports" reads as a mistake.
+	 */
+	unit?: string;
 }
 
-/** Renders a rejected value for an error message: `JSON.stringify` turns NaN into `null`. */
+/**
+ * Every numeric knob in the wire config, with the bound each one is held to at
+ * both boundaries.
+ *
+ * The path an operator wrote is deliberately not here: the same knob is read at
+ * more than one path (`resolveJwtTimeClaimBounds` sees `jwt` from the router and
+ * `oauth.jwt` from `createApp`), so the path belongs to the calling boundary and
+ * is passed to {@link resolveBound} rather than baked into the spec.
+ */
+export const NUMERIC_BOUNDS = {
+	/**
+	 * TCP port to bind. `0` is excluded on purpose even though `listen(0)`
+	 * accepts it: it asks the OS for an arbitrary free port, which is unusable
+	 * for a service the enforcement layer has to find — and `0` is exactly what
+	 * `Number(false)` produced here before #157.
+	 */
+	port: {
+		field: "port",
+		fallback: DEFAULT_HTTP_PORT,
+		minimum: 1,
+		maximum: MAX_TCP_PORT,
+	},
+	/** Abort a JWKS fetch after this long. */
+	jwksTimeoutMs: {
+		field: "jwksTimeoutMs",
+		fallback: DEFAULT_JWKS_TIMEOUT_MS,
+		minimum: 1,
+		unit: "milliseconds",
+	},
+	/**
+	 * Minimum spacing between JWKS fetches. Zero is a valid cooldown — "refetch
+	 * on every miss", at the cost of letting an attacker-chosen `kid` drive
+	 * fetches at the provider — so the floor is 0 and the absent case is told
+	 * apart by `undefined`, never by falsiness.
+	 */
+	jwksCooldownMs: {
+		field: "jwksCooldownMs",
+		fallback: DEFAULT_JWKS_COOLDOWN_MS,
+		minimum: 0,
+		unit: "milliseconds",
+	},
+	/** How long a fetched JWKS is served from cache. */
+	jwksCacheMaxAgeMs: {
+		field: "jwksCacheMaxAgeMs",
+		fallback: DEFAULT_JWKS_CACHE_MAX_AGE_MS,
+		minimum: 1,
+		unit: "milliseconds",
+	},
+	/** Ceiling on `now - iat`. */
+	maxTokenAgeSeconds: {
+		field: "maxTokenAgeSeconds",
+		fallback: DEFAULT_MAX_TOKEN_AGE_SECONDS,
+		minimum: 1,
+		unit: "seconds",
+	},
+	/**
+	 * Skew allowance on every time-claim comparison. Zero is the default and a
+	 * deliberate choice ("trust the clocks"), so the floor is 0 and the absent
+	 * case is told apart by `undefined`, never by falsiness. Bounded above
+	 * because tolerance lengthens every token's accepted life.
+	 */
+	clockToleranceSeconds: {
+		field: "clockToleranceSeconds",
+		fallback: DEFAULT_CLOCK_TOLERANCE_SECONDS,
+		minimum: 0,
+		maximum: MAX_CLOCK_TOLERANCE_SECONDS,
+		unit: "seconds",
+	},
+	/** Cap on `POST /verify/batch` entries. */
+	maxBatchSize: {
+		field: "maxBatchSize",
+		fallback: DEFAULT_MAX_BATCH_SIZE,
+		minimum: 1,
+		unit: "entries",
+	},
+} satisfies Record<string, BoundSpec>;
+
+/**
+ * Renders a rejected value for an error message: quoted through `JSON.stringify`
+ * for a string, so an empty or whitespace-only one is visible in the message,
+ * and `String(...)` for everything else.
+ *
+ * `JSON.stringify` is deliberately *not* what renders the rest: it turns NaN and
+ * Infinity into `null`, and a hand-built config can put either in a numeric slot.
+ * Reporting `got null` for a value the caller wrote as `NaN` names something
+ * they never wrote.
+ */
 export function describeValue(value: unknown): string {
 	if (typeof value === "string") {
 		return JSON.stringify(value);
@@ -50,33 +171,52 @@ export function describeValue(value: unknown): string {
  */
 function describeRange({ minimum, maximum, unit }: BoundSpec): string {
 	if (maximum !== undefined) {
-		return `an integer between ${minimum} and ${maximum} ${unit}`;
+		const range = `an integer between ${minimum} and ${maximum}`;
+		return unit === undefined ? range : `${range} ${unit}`;
 	}
 	const requirement = minimum > 0 ? "a positive integer" : "a non-negative integer";
-	return `${requirement} number of ${unit}`;
+	return unit === undefined ? requirement : `${requirement} number of ${unit}`;
+}
+
+/**
+ * True for the two forms a knob is actually written in: a number, or the string
+ * a HOCON env substitution delivers.
+ *
+ * A blank string is not one of them. `VAR=` substitutes an empty string and
+ * `Number("")` is 0, so the knobs whose floor is 0 — `jwksCooldownMs`,
+ * `clockToleranceSeconds` — would read a variable that was exported empty as a
+ * deliberate zero. A zero cooldown is "refetch on every miss", which is the
+ * fetch storm the knob exists to prevent; this is the same silent failure
+ * `http.callerAuth.token` already refuses (#108).
+ */
+function isWrittenAsNumber(value: unknown): value is number | string {
+	return typeof value === "number" || (typeof value === "string" && value.trim() !== "");
 }
 
 /**
  * Reads one bound, coercing the string form on the way. Only numbers and
  * strings are coerced: `Number(true)` is 1 and `Number(null)` is 0, so running
  * anything else through `Number` would invent a bound the operator never wrote.
- * Non-integers, NaN and Infinity are refused for the same reason the schema
- * refuses them — a bound that cannot be stated in whole units is a mistake, and
- * `Infinity` is precisely the unbounded case these knobs exist to prevent.
+ * Non-integers, NaN and Infinity are refused for the same reason — a bound that
+ * cannot be stated in whole units is a mistake, and `Infinity` is precisely the
+ * unbounded case these knobs exist to prevent.
+ *
+ * @param path Config path of the block at the calling boundary, e.g.
+ * `"oauth.jwt"`. It names the key the operator actually wrote, which is why it
+ * is the boundary's to supply and not the spec's.
  */
-export function resolveBound(value: unknown, spec: BoundSpec): number {
+export function resolveBound(value: unknown, spec: BoundSpec, path: string): number {
 	if (value === undefined) {
 		return spec.fallback;
 	}
-	const numeric =
-		typeof value === "number" || typeof value === "string" ? Number(value) : Number.NaN;
+	const numeric = isWrittenAsNumber(value) ? Number(value) : Number.NaN;
 	if (
 		!Number.isInteger(numeric) ||
 		numeric < spec.minimum ||
 		(spec.maximum !== undefined && numeric > spec.maximum)
 	) {
 		throw new Error(
-			`${spec.path}.${spec.field} must be ${describeRange(spec)}, got ${describeValue(value)}`,
+			`${path}.${spec.field} must be ${describeRange(spec)}, got ${describeValue(value)}`,
 		);
 	}
 	return numeric;

@@ -33,6 +33,12 @@ const envKeys = [
 	"HTTP_PATH_PREFIX",
 	"HTTP_CALLER_AUTH_TOKEN",
 	"HTTP_CALLER_AUTH_HEADER",
+	"OAUTH_JWT_JWKS_TIMEOUT_MS",
+	"OAUTH_JWT_JWKS_COOLDOWN_MS",
+	"OAUTH_JWT_JWKS_CACHE_MAX_AGE_MS",
+	"OAUTH_JWT_MAX_TOKEN_AGE_SECONDS",
+	"OAUTH_JWT_CLOCK_TOLERANCE_SECONDS",
+	"VERIFY_MAX_BATCH_SIZE",
 ] as const;
 
 /** application.conf leaves issuer/audience unset, so every load must supply them. */
@@ -193,6 +199,82 @@ describe("loadAppConfig — RFC 9068 requirements (#105)", () => {
 	it("fails to load when the audience is not supplied", () => {
 		process.env.OAUTH_JWT_SECRET = TEST_SECRET;
 		process.env.OAUTH_JWT_ISSUER = "https://issuer.test";
+
+		expect(() => loadAppConfig(configDirPath, "development")).toThrow();
+	});
+});
+
+describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#157)", () => {
+	// The knobs are read by `resolveBound` at both boundaries now, and this is the
+	// path that proves the schema half still works where it actually runs: HOCON
+	// substitutes `${?VAR}` as a STRING, and the ts.hocon zod adapter's coercion
+	// walk only rewrites fields it recognises as numbers. A knob it cannot see
+	// through must therefore coerce the string itself — which is exactly what
+	// `resolveBound` does, and what a hand-built config already relied on.
+
+	it("takes the numbers application.conf states when nothing overrides them", () => {
+		setRequiredEnv();
+
+		const config = loadAppConfig(configDirPath, "development");
+
+		expect(config.http.port).toBe(3000);
+		expect(config.oauth.jwt.jwksTimeoutMs).toBe(5000);
+		expect(config.oauth.jwt.jwksCooldownMs).toBe(30_000);
+		expect(config.oauth.jwt.jwksCacheMaxAgeMs).toBe(600_000);
+		expect(config.oauth.jwt.maxTokenAgeSeconds).toBe(86_400);
+		expect(config.oauth.jwt.clockToleranceSeconds).toBe(0);
+		expect(config.verify.maxBatchSize).toBe(50);
+	});
+
+	it("reads every numeric knob from the environment, where each arrives as a string", () => {
+		setRequiredEnv();
+		process.env.HTTP_PORT = "8080";
+		process.env.OAUTH_JWT_JWKS_TIMEOUT_MS = "2500";
+		process.env.OAUTH_JWT_JWKS_COOLDOWN_MS = "0";
+		process.env.OAUTH_JWT_JWKS_CACHE_MAX_AGE_MS = "120000";
+		process.env.OAUTH_JWT_MAX_TOKEN_AGE_SECONDS = "600";
+		process.env.OAUTH_JWT_CLOCK_TOLERANCE_SECONDS = "60";
+		process.env.VERIFY_MAX_BATCH_SIZE = "25";
+
+		const config = loadAppConfig(configDirPath, "development");
+
+		expect(config.http.port).toBe(8080);
+		expect(config.oauth.jwt.jwksTimeoutMs).toBe(2500);
+		expect(config.oauth.jwt.jwksCooldownMs).toBe(0);
+		expect(config.oauth.jwt.jwksCacheMaxAgeMs).toBe(120_000);
+		expect(config.oauth.jwt.maxTokenAgeSeconds).toBe(600);
+		expect(config.oauth.jwt.clockToleranceSeconds).toBe(60);
+		expect(config.verify.maxBatchSize).toBe(25);
+	});
+
+	it.each([
+		["HTTP_PORT", "0"],
+		["HTTP_PORT", "70000"],
+		["OAUTH_JWT_JWKS_TIMEOUT_MS", "0"],
+		["OAUTH_JWT_JWKS_COOLDOWN_MS", "-1"],
+		["OAUTH_JWT_MAX_TOKEN_AGE_SECONDS", "1.5"],
+		["OAUTH_JWT_CLOCK_TOLERANCE_SECONDS", "301"],
+		["VERIFY_MAX_BATCH_SIZE", "0"],
+	])("refuses to boot on %s=%s", (key, value) => {
+		setRequiredEnv();
+		process.env[key] = value;
+
+		expect(() => loadAppConfig(configDirPath, "development")).toThrow();
+	});
+
+	it.each([
+		"HTTP_PORT",
+		"OAUTH_JWT_JWKS_COOLDOWN_MS",
+		"OAUTH_JWT_CLOCK_TOLERANCE_SECONDS",
+		"VERIFY_MAX_BATCH_SIZE",
+	])("refuses %s exported empty rather than reading it as zero", (key) => {
+		// `VAR=` substitutes an empty string, and `Number("")` is 0 — which the
+		// knobs whose floor is 0 would otherwise accept as a deliberate setting.
+		// A zero cooldown is "refetch on every miss", the fetch storm the knob
+		// exists to prevent; the same silent failure `http.callerAuth.token`
+		// already refuses above.
+		setRequiredEnv();
+		process.env[key] = "";
 
 		expect(() => loadAppConfig(configDirPath, "development")).toThrow();
 	});

@@ -663,6 +663,81 @@ and version sections follow the release labeling policy in
   fine thing for a *consuming project* to do under its own keys (see
   `metrics.test.mts`); it is no longer prescribed as the only correct shape.
 
+- **BREAKING**: every numeric config knob is now read by one function at both
+  boundaries, and a value that is not a whole number in range refuses to boot
+  instead of being coerced into one
+  ([#157](https://github.com/o3co/auth.policy-verifier/issues/157)).
+
+  `AppConfigSchema` validates config files; the runtime guards validate the
+  hand-built config objects `createApp` also accepts. Since #109 and #112 the
+  URI and rotation invariants have shared **one** check function across both —
+  `checkJwksUri`, `checkHs256Rotation` — precisely so that a hand-built config
+  cannot get a different answer from a parsed one, which is the tiebreaker the
+  `previousSecrets` `null` contract was decided on. The numeric knobs were the
+  exception: the schema re-implemented each as a `z.coerce.number().int()…`
+  chain and shared only the *constants* with `resolveBound`. They had already
+  drifted, and silently:
+
+  | config value | before, via a config file | before, hand-built | now, both |
+  | --- | --- | --- | --- |
+  | `oauth.jwt.jwksCooldownMs = false` | `0` — refetch on every miss | refused at boot | refused at boot |
+  | `oauth.jwt.jwksTimeoutMs = true` | a 1 ms fetch timeout | refused at boot | refused at boot |
+  | `oauth.jwt.clockToleranceSeconds = false` | `0` | refused at boot | refused at boot |
+  | `oauth.jwt.maxTokenAgeSeconds = true` | a 1-second ceiling | refused at boot | refused at boot |
+  | `verify.maxBatchSize = null` | refused at boot | the 50-entry default | refused at boot |
+  | `http.port = "abc"` | `NaN` → an arbitrary bound port | — | refused at boot |
+  | `http.port = false` | `0` → an arbitrary bound port | — | refused at boot |
+
+  Both boundaries now call `resolveBound` with the same spec, so each knob has
+  one default, one accepted range, and one refusal message naming the key the
+  operator wrote. The specs live in one table (`config/bounds.mts`) rather than
+  beside their consumers, because `jwt/tokenAuthenticator.mts` pulls in jose and
+  `routes/verify.mts` pulls in express — a spec that lived next to either could
+  not be shared with the schema without dragging those in behind it.
+
+  **A boolean is refused rather than coerced**, at both boundaries. `Number(true)`
+  is 1 and `Number(false)` is 0, so coercing invents a bound the operator never
+  wrote — a one-millisecond JWKS timeout, or the zero cooldown that is exactly
+  the fetch storm the knob exists to prevent. A boolean in a numeric slot is a
+  configuration mistake, and HOCON hands the value over as a string in any case.
+  A **blank string** is refused for the same reason: `VAR=` substitutes an empty
+  string and `Number("")` is 0, which the knobs whose floor is 0 would otherwise
+  read as a deliberate zero — the silent failure `http.callerAuth.token` already
+  refuses.
+
+  **The seven knobs, and what each now accepts** (unchanged unless noted):
+
+  - `http.port` — 1 to 65535. **New bound**: this knob predated the doctrine and
+    carried no `.int().positive()` at all, so `-1`, `70000`, `3.5` and `NaN` all
+    reached `listen()`. `0` is excluded although `listen(0)` accepts it: it binds
+    an arbitrary free port, so the address the enforcement layer was configured
+    to call stops resolving to this process. (This is the straggler noted in
+    [#158](https://github.com/o3co/auth.policy-verifier/issues/158), which can
+    now drop it.)
+  - `oauth.jwt.jwksTimeoutMs` — a positive integer number of milliseconds.
+  - `oauth.jwt.jwksCooldownMs` — a non-negative integer number of milliseconds.
+  - `oauth.jwt.jwksCacheMaxAgeMs` — a positive integer number of milliseconds.
+  - `oauth.jwt.maxTokenAgeSeconds` — a positive integer number of seconds.
+  - `oauth.jwt.clockToleranceSeconds` — an integer between 0 and 300 seconds.
+  - `verify.maxBatchSize` — a positive integer number of entries.
+
+  **`createVerifyRouter` now validates its `maxBatchSize` at construction.** It
+  was the one knob with no runtime guard at all: `config.maxBatchSize ?? 50`
+  read `null` as "unset" where the schema refused to boot, and let a `0` through
+  as a cap that rejects every batch there is. Its type widens from `number` to
+  `number | string`, matching `JwksFetchConfig` and `JwtTimeClaimConfig` — this
+  is also a boundary a caller assembling a config from `process.env` reaches.
+
+  **Not changed**: every value a working deployment already sets parses to the
+  same number it did before, the defaults are the same, and the string form a
+  HOCON `${?VAR}` substitution delivers is still accepted for every knob — the
+  shared reader coerces it, which is what the schema's `z.coerce` used to do.
+  `@o3co/auth.policy-verifier.server` additionally exports `DEFAULT_HTTP_PORT`
+  and `MAX_TCP_PORT`.
+
+  **Migration**: if a deployment sets any of these from a config file with a
+  boolean, a `null`, an empty variable, or a fractional/out-of-range number, it
+  now fails at boot with a message naming the key. Write the number it meant.
 - **BREAKING (types only)**: the `EventLogger` port
   (`@o3co/auth.policy-verifier.core`) now requires `info` alongside `warn` and
   `error` ([#111](https://github.com/o3co/auth.policy-verifier/issues/111)).
