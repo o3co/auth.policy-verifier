@@ -90,6 +90,28 @@ export const DEFAULT_CLOCK_TOLERANCE_SECONDS = 0;
 export const MAX_CLOCK_TOLERANCE_SECONDS = 300;
 
 /**
+ * Floor on the key material an HS256 secret must carry, in bytes (#114).
+ *
+ * 32 bytes = 256 bits = the output width of SHA-256, which is the most an HS256
+ * key can contribute. RFC 7518 §3.2 states the requirement directly: "A key of
+ * the same size as the hash output ... or larger MUST be used." Before this the
+ * only check was non-emptiness, so a one-character secret booted — and with a
+ * symmetric algorithm, guessing the secret is not read access to tokens, it is
+ * the ability to MINT them for any subject.
+ *
+ * The same number auth.provider enforces (its #282), deliberately: the two
+ * services share one secret, so a floor that either side applies alone is a
+ * floor neither side has. This is the one statement of that reasoning in the
+ * code — `config/secretEntropy.mts` and `jwt/hs256Rotation.mts` point here
+ * rather than restating it, so a later clarification lands once.
+ *
+ * It is measured on DECODED material at the smallest plausible reading — see
+ * `config/secretEntropy.mts`, which is what makes `openssl rand -hex 16` (32
+ * characters, 16 bytes) fail rather than sneak through on its character count.
+ */
+export const MIN_SECRET_ENTROPY_BYTES = 32;
+
+/**
  * Ceiling on `oauth.jwt.previousSecrets` — how many retired HS256 secrets a
  * deployment may hold alongside the current one (#112).
  *

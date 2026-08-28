@@ -72,11 +72,13 @@ POST /verify/batch — 同じ契約で、1 往復に N 件の decision
 npx @o3co/create-auth-policy-verifier my-policy-verifier
 cd my-policy-verifier
 pnpm install
-OAUTH_JWT_SECRET=your-secret \
+OAUTH_JWT_SECRET=$(openssl rand -hex 32) \
   OAUTH_JWT_ISSUER=https://issuer.example.com \
   OAUTH_JWT_AUDIENCE=https://api.example.com \
   pnpm start
 ```
+
+HS256 シークレットは鍵素材として **32 バイト（256 ビット）以上**を要求し、これを下回ると起動を拒否する — 詳細は [HS256 シークレットのローテーション](#hs256-シークレットのローテーション)。auth.provider が署名に使うのと同じ値を設定すること。
 
 ```bash
 curl -X POST http://localhost:3000/verify \
@@ -194,7 +196,7 @@ oauth {
     algorithm = ${?OAUTH_JWT_ALGORITHM}
 
     # ---- HS256 専用。以下 2 グループのどちらか一方だけを使うこと。 --------
-    secret = ${?OAUTH_JWT_SECRET}
+    secret = ${?OAUTH_JWT_SECRET}            # デコード後 32 バイト以上 — `openssl rand -hex 32`
     kid = ${?OAUTH_JWT_KID}                  # 上の secret に名前を付ける。未設定ならトークンヘッダを参照しない
     # previousSecrets — 重複期間中の旧シークレット、最大 3 件。ここにあえて
     # 書いていない: このキーは RS256/ES256/EdDSA では（空リストであっても）
@@ -299,6 +301,22 @@ oauth.jwt {
 }
 ```
 
+**HS256 シークレットは鍵素材として 32 バイト（256 ビット）以上を持つこと。** 足りない値は最初のリクエストではなく起動時に拒否される。HS256 は対称鍵であり、トークンを検証する値がトークンを署名する値そのものなので、推測されることは読み取りではなく「任意の subject のトークンを発行できる」ことを意味する。RFC 7518 §3.2 はハッシュ出力幅以上の鍵を要求しており、auth.provider も同じ値に同じ下限を課している。
+
+生成は `openssl rand -hex 32`（または `openssl rand -base64 32`）。判定は**デコード後**の素材に対して、もっとも小さく読める解釈で行う:
+
+| 値 | 読み取り結果 | 判定 |
+| --- | --- | --- |
+| `openssl rand -hex 32` — 16 進 64 文字 | 32 バイト | 通る |
+| `openssl rand -hex 16` — 16 進 32 文字 | 16 バイト | 拒否 |
+| `openssl rand -base64 32` — 43 文字 + `=` | 32 バイト | 通る |
+| ランダムな英数字 32 文字 | 24 バイト（base64 本体として読める） | 拒否 |
+| 記号を含む 32 文字のパスフレーズ | 32 バイト | 通る |
+
+見えるのは長さだけで、40 文字の英文は 40 バイトと数えられるが実際の強度ははるかに低い。シークレットは必ずランダムに生成すること。この検査は下限であって審査ではない。
+
+下限は `secret` と下記 `previousSecrets` の全エントリに 1 つのルールとして適用される — 退役したシークレットも重複期間中は検証鍵であり、現行と同じようにトークンを発行できるからである。
+
 ### HS256 シークレットのローテーション
 
 共有シークレットが 1 つしかない状態では、無停止でシークレットを変更する方法が存在しない。auth.provider が新しい値で署名を始めた瞬間、すでに発行済みのトークンは両サービスを同時に再起動し終えるまですべてここで弾かれる。`previousSecrets` はその同時再起動を不要にする重複期間であり、auth.provider がローテーションに使うのと同じ `kid` + `secret` + `expiresAt` の形なので、同じ 1 組の値を両側で動かすだけで済む。
@@ -384,7 +402,7 @@ cd my-verifier
 docker build -t my-verifier .
 docker run -p 3000:3000 \
   -e HTTP_HOSTNAME=0.0.0.0 -e HTTP_CALLER_AUTH_TOKEN=<secret> \
-  -e OAUTH_JWT_SECRET=secret my-verifier
+  -e OAUTH_JWT_SECRET=$(openssl rand -hex 32) my-verifier
 ```
 
 スキャフォルダーが `pnpm-lock.yaml` を生成します。イメージは

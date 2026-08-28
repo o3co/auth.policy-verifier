@@ -99,7 +99,7 @@ const AppConfigSchema = z.object({
   }),
   oauth: z.object({
     jwt: z.object({
-      secret: z.string(),
+      secret: z.string().optional(),                                   // HS256: >= 32 decoded bytes
       mode: z.enum(["verify", "insecure-decode"]).default("verify"),
       issuer: z.union([z.string(), z.array(z.string())]).optional(),   // required when mode is "verify"
       audience: z.union([z.string(), z.array(z.string())]).optional(), // required when mode is "verify"
@@ -126,6 +126,8 @@ type AppConfig = z.infer<typeof AppConfigSchema>;
 ```
 
 Each entry in `attribute.collectors` and `rule.collectors` requires a `collector` field (the registered factory name). Additional fields are passed through to the factory as configuration.
+
+**HS256 secrets must carry at least 32 bytes (256 bits) of key material.** The floor applies to `oauth.jwt.secret` and to every `oauth.jwt.previousSecrets[].secret` in one rule, since a retired secret verifies for its whole overlap window and can mint tokens exactly as the current one can. It is measured on decoded material at the smallest plausible reading, so 64 hex characters pass (32 bytes) and 32 hex characters do not (16 bytes); generate one with `openssl rand -hex 32`. `AppConfigSchema` rejects a short secret at config-parse time and the HS256 `KeyResolverFactory` repeats the check for hand-built configs. `measureSecretEntropyBytes` / `describeWeakSecret` / `MIN_SECRET_ENTROPY_BYTES` are exported for consumers registering their own HS256 key resolver; `createVerifyRouter` takes key material directly and does not apply the floor, so a caller wiring a `KeyObject` by hand owns that check.
 
 ### Trust boundary
 

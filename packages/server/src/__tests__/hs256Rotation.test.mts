@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { MAX_PREVIOUS_SECRETS } from "#/config/defaults.mjs";
+import { MAX_PREVIOUS_SECRETS, MIN_SECRET_ENTROPY_BYTES } from "#/config/defaults.mjs";
 import { checkHs256Rotation, parseHs256Rotation } from "#/jwt/hs256Rotation.mjs";
 
 /** 64 hex characters — 32 decoded bytes, the floor auth.provider#282 set. */
@@ -195,6 +195,108 @@ describe("checkHs256Rotation — the invariants rotation depends on", () => {
 	});
 });
 
+describe("checkHs256Rotation — the entropy floor (#114)", () => {
+	/** 32 characters, but only 16 decoded bytes: the value the floor is for. */
+	const SHORT_HEX = "ab".repeat(16);
+
+	it("refuses a one-character current secret", () => {
+		const result = checkHs256Rotation({ secret: "x" });
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.issues).toEqual([
+				{ path: ["secret"], message: expect.stringContaining("at least 32 bytes") },
+			]);
+		}
+	});
+
+	it("measures the current secret on its decoded length, so 32 hex characters is 16 bytes", () => {
+		const result = checkHs256Rotation({ secret: SHORT_HEX });
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.issues[0]?.path).toEqual(["secret"]);
+			expect(result.issues[0]?.message).toMatch(/carries 16/);
+		}
+	});
+
+	it("accepts a current secret at exactly the floor", () => {
+		// '!' is outside both base64 alphabets, so the 32-byte UTF-8 reading is
+		// the only plausible one.
+		const atFloor = `${"a".repeat(MIN_SECRET_ENTROPY_BYTES - 1)}!`;
+		expect(checkHs256Rotation({ secret: atFloor }).ok).toBe(true);
+	});
+
+	it("refuses a current secret one byte below the floor", () => {
+		const belowFloor = `${"a".repeat(MIN_SECRET_ENTROPY_BYTES - 2)}!`;
+		expect(checkHs256Rotation({ secret: belowFloor }).ok).toBe(false);
+	});
+
+	it("holds a retired secret to the same floor as the current one", () => {
+		// A retired secret verifies for the whole overlap window, so it can mint
+		// tokens exactly as the current one can.
+		const result = checkHs256Rotation({
+			secret: SECRET,
+			kid: "v1",
+			previousSecrets: [{ kid: "v0", secret: "x", expiresAt: future }],
+		});
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.issues).toEqual([
+				{
+					path: ["previousSecrets", 0, "secret"],
+					message: expect.stringContaining("previousSecrets[0].secret"),
+				},
+			]);
+		}
+	});
+
+	it("reports the current secret and every weak entry in one pass", () => {
+		// The point of putting the floor here rather than in either boundary
+		// alone: one rule, one round trip, no laxer half.
+		const result = checkHs256Rotation({
+			secret: "weak",
+			kid: "v2",
+			previousSecrets: [
+				{ kid: "v0", secret: "x", expiresAt: future },
+				{ kid: "v1", secret: OLD_SECRET, expiresAt: future },
+			],
+		});
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.issues.map((issue) => issue.path)).toEqual([
+				["secret"],
+				["previousSecrets", 0, "secret"],
+			]);
+		}
+	});
+
+	it("leaves an absent secret to the required-secret check at each boundary", () => {
+		// Nothing to measure, and "secret is required for HS256" is already said
+		// once by the schema and once by the key resolver factory.
+		expect(checkHs256Rotation({ previousSecrets: [] }).ok).toBe(true);
+	});
+
+	it("does not report a weak secret twice when the entry is also malformed", () => {
+		const result = checkHs256Rotation({
+			secret: SECRET,
+			kid: "v1",
+			previousSecrets: [{ kid: "v0", secret: "", expiresAt: future }],
+		});
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.issues).toHaveLength(1);
+			expect(result.issues[0]?.message).toMatch(/non-empty string/);
+		}
+	});
+
+	it("accepts the umbrella E2E's shared secret", () => {
+		// Defined once in o3co/auth's Makefile and given to both the provider and
+		// this verifier: 32 decoded bytes, exactly at the floor.
+		expect(checkHs256Rotation({ secret: "qmV+afsq/SMZ7hPGs9edVQDvPzNmjXemJNjqti181v0=" }).ok).toBe(
+			true,
+		);
+	});
+});
+
 describe("parseHs256Rotation", () => {
 	it("returns the narrowed rotation config", () => {
 		expect(
@@ -222,5 +324,21 @@ describe("parseHs256Rotation", () => {
 		expect(() => parseHs256Rotation({ secret: SECRET, previousSecrets: 7 }, "jwt")).toThrow(
 			/^jwt\.previousSecrets must be an array/,
 		);
+	});
+
+	it("throws on a current secret under the floor (#114)", () => {
+		expect(() => parseHs256Rotation({ secret: "x" })).toThrow(
+			/^oauth\.jwt\.secret must carry at least 32 bytes/,
+		);
+	});
+
+	it("throws on a retired secret under the floor (#114)", () => {
+		expect(() =>
+			parseHs256Rotation({
+				secret: SECRET,
+				kid: "v1",
+				previousSecrets: [{ kid: "v0", secret: "x", expiresAt: future }],
+			}),
+		).toThrow(/^oauth\.jwt\.previousSecrets\[0\]\.secret must carry at least 32 bytes/);
 	});
 });

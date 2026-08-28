@@ -6,11 +6,13 @@ Deployable server template for auth.policy-verifier. This is the composition roo
 
 ```sh
 pnpm install
-OAUTH_JWT_SECRET=your-secret \
+OAUTH_JWT_SECRET=$(openssl rand -hex 32) \
   OAUTH_JWT_ISSUER=https://issuer.example.com \
   OAUTH_JWT_AUDIENCE=https://api.example.com \
   pnpm run start
 ```
+
+`OAUTH_JWT_SECRET` must carry at least 32 bytes (256 bits) of key material, measured on its decoded length — a shorter value is refused at boot. See [HS256 secret strength](#hs256-secret-strength).
 
 ## Configuration
 
@@ -34,7 +36,7 @@ Individual values can also be overridden with environment variables.
 | `HTTP_PATH_PREFIX` | `""` | URL path prefix |
 | `HTTP_CALLER_AUTH_TOKEN` | (unset) | Shared credential the calling service must present. Unset means any caller who can reach the port may ask for decisions |
 | `HTTP_CALLER_AUTH_HEADER` | `x-caller-token` | Header carrying that credential |
-| `OAUTH_JWT_SECRET` | (required) | HMAC-HS256 JWT signing secret |
+| `OAUTH_JWT_SECRET` | (required) | HMAC-HS256 JWT signing secret. At least 32 decoded bytes — see [HS256 secret strength](#hs256-secret-strength) |
 | `OAUTH_JWT_ISSUER` | (required) | Issuer this deployment accepts — RFC 9068 §4 `iss` |
 | `OAUTH_JWT_AUDIENCE` | (required) | Audience identifying this resource server — RFC 9068 §4 `aud` |
 | `OAUTH_JWT_JWKS_URI` | — | JWKS endpoint for RS256/ES256/EdDSA. Must be `https://`; plaintext `http://` is accepted only for loopback hosts (`localhost`, `127.0.0.0/8`, `[::1]`) |
@@ -46,6 +48,27 @@ Individual values can also be overridden with environment variables.
 | `RULE_ON_EMPTY_RULE_SET` | `deny` | Decision when no rule is collected (`deny` \| `allow`) |
 | `VERIFY_MAX_BATCH_SIZE` | `50` | Cap on `POST /verify/batch` entries |
 | `LOG_LEVEL` | `info` | Minimum level emitted: `trace`\|`debug`\|`info`\|`warn`\|`error`\|`fatal`\|`silent`. Also the switch for the decision log — see [Observability](#observability) |
+
+## HS256 secret strength
+
+`OAUTH_JWT_SECRET` must carry at least **32 bytes (256 bits)** of key material. A shorter one is refused when the config is parsed, so the process fails at boot rather than serving with a guessable key.
+
+HS256 is symmetric: the value that verifies a token is the value that signs one, so anyone who guesses it can mint tokens for any subject — not merely read the ones already issued. RFC 7518 §3.2 requires a key at least as wide as the hash output, and auth.provider holds the same shared value to the same floor.
+
+```sh
+OAUTH_JWT_SECRET=$(openssl rand -hex 32)      # 64 characters, 32 bytes
+OAUTH_JWT_SECRET=$(openssl rand -base64 32)   # 44 characters, 32 bytes
+```
+
+The measurement is on **decoded** material at the smallest plausible reading, which is the one an attacker gets to use:
+
+- `openssl rand -hex 16` produces 32 *characters* but only 16 *bytes* — refused.
+- 32 random alphanumerics read as a base64 body (24 bytes) — refused, and rightly: 62 possibilities per character is ~5.95 bits, not 8.
+- A passphrase containing punctuation is measured on its UTF-8 length, so 32 characters passes.
+
+The same floor applies to every `previousSecrets[].secret` in the rotation block — a retired secret verifies for its whole overlap window and can mint tokens exactly as the current one can.
+
+Length is all the check can see. A 40-character sentence measures 40 bytes and carries far less; generate the value randomly.
 
 ## Trust boundary
 
@@ -214,7 +237,7 @@ docker run \
   -p 3000:3000 \
   -e HTTP_HOSTNAME=0.0.0.0 \
   -e HTTP_CALLER_AUTH_TOKEN=<secret> \
-  -e OAUTH_JWT_SECRET=secret \
+  -e OAUTH_JWT_SECRET=$(openssl rand -hex 32) \
   -e OAUTH_JWT_ISSUER=https://issuer.example.com \
   -e OAUTH_JWT_AUDIENCE=https://api.example.com \
   auth-policy-verifier

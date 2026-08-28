@@ -3,13 +3,21 @@
 
 import { describe, expect, it } from "vitest";
 import { AppConfigSchema, JWT_MODE_MIGRATION_MESSAGE } from "#/config/application.schema.mjs";
-import { MAX_PREVIOUS_SECRETS } from "#/config/defaults.mjs";
+import { MAX_PREVIOUS_SECRETS, MIN_SECRET_ENTROPY_BYTES } from "#/config/defaults.mjs";
 import { checkHs256Rotation, parseHs256Rotation } from "#/jwt/hs256Rotation.mjs";
 
 const baseBody = {
 	attribute: { collectors: [] },
 	rule: { collectors: [] },
 };
+
+/**
+ * 64 hex characters — 32 decoded bytes, the entropy floor #114 enforces on
+ * every HS256 secret. Every HS256 fixture in this file has to clear it, so the
+ * cases about other keys are not silently testing a rejected secret instead.
+ */
+const SECRET = "11".repeat(32);
+const OLD_SECRET = "22".repeat(32);
 
 /** Issuer/audience are required whenever validation is on; most cases here only care about keys. */
 const rfc9068 = { issuer: "https://issuer.test", audience: "https://api.test" };
@@ -55,7 +63,7 @@ describe("AppConfigSchema — JWT algorithm validation", () => {
 
 	it("accepts HS256 with secret", () => {
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { algorithm: "HS256", secret: "s", mode: "verify", ...rfc9068 } },
+			oauth: { jwt: { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 } },
 			...baseBody,
 		});
 		expect(result.success).toBe(true);
@@ -64,6 +72,70 @@ describe("AppConfigSchema — JWT algorithm validation", () => {
 	it("skips key-material validation in insecure-decode mode", () => {
 		const result = AppConfigSchema.safeParse({
 			oauth: { jwt: { algorithm: "RS256", mode: "insecure-decode" } },
+			...baseBody,
+		});
+		expect(result.success).toBe(true);
+	});
+});
+
+describe("AppConfigSchema — HS256 secret entropy floor (#114)", () => {
+	const FUTURE = "2999-01-01T00:00:00Z";
+
+	/** Parses an `oauth.jwt` HS256 block with the RFC 9068 fields in place. */
+	const parseJwt = (jwt: Record<string, unknown>) =>
+		AppConfigSchema.safeParse({
+			oauth: { jwt: { algorithm: "HS256", mode: "verify", ...rfc9068, ...jwt } },
+			...baseBody,
+		});
+
+	it.each([
+		["a one-character secret", "x"],
+		["the README's old example value", "your-secret"],
+		["a 32-character hex secret — 16 decoded bytes", "ab".repeat(16)],
+		["32 alphanumerics — a base64 body carrying 24 bytes", "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"],
+	])("refuses %s at config-parse time", (_label, secret) => {
+		const result = parseJwt({ secret });
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			const issue = result.error.issues.find((i) => i.path.at(-1) === "secret");
+			expect(issue?.message).toMatch(/at least 32 bytes/);
+			expect(issue?.message).toMatch(/openssl rand -hex 32/);
+		}
+	});
+
+	it("never echoes the rejected secret into the failure", () => {
+		const result = parseJwt({ secret: "hunter2-do-not-leak" });
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(JSON.stringify(result.error.issues)).not.toContain("hunter2-do-not-leak");
+		}
+	});
+
+	it.each([
+		["a 64-character hex secret", SECRET],
+		["a padded base64 secret", "qmV+afsq/SMZ7hPGs9edVQDvPzNmjXemJNjqti181v0="],
+		["a passphrase at exactly the floor", `${"a".repeat(MIN_SECRET_ENTROPY_BYTES - 1)}!`],
+	])("accepts %s", (_label, secret) => {
+		expect(parseJwt({ secret }).success).toBe(true);
+	});
+
+	it("holds every previousSecrets entry to the same floor (#112 rotation)", () => {
+		const result = parseJwt({
+			secret: SECRET,
+			kid: "v1",
+			previousSecrets: [{ kid: "v0", secret: "x", expiresAt: FUTURE }],
+		});
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			const issue = result.error.issues.find((i) => i.message.includes("previousSecrets[0]"));
+			expect(issue?.path).toEqual(["oauth", "jwt", "previousSecrets", 0, "secret"]);
+			expect(issue?.message).toMatch(/at least 32 bytes/);
+		}
+	});
+
+	it("does not apply the floor in insecure-decode mode — no key material is used", () => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: { algorithm: "HS256", mode: "insecure-decode", secret: "x" } },
 			...baseBody,
 		});
 		expect(result.success).toBe(true);
@@ -163,7 +235,7 @@ describe("AppConfigSchema — JWKS transport security (#109)", () => {
 describe("AppConfigSchema — empty rule set policy", () => {
 	it("defaults rule.onEmptyRuleSet to deny", () => {
 		const result = AppConfigSchema.parse({
-			oauth: { jwt: { algorithm: "HS256", secret: "s", mode: "verify", ...rfc9068 } },
+			oauth: { jwt: { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 } },
 			...baseBody,
 		});
 		expect(result.rule.onEmptyRuleSet).toBe("deny");
@@ -171,7 +243,7 @@ describe("AppConfigSchema — empty rule set policy", () => {
 
 	it("accepts an explicit allow opt-out", () => {
 		const result = AppConfigSchema.parse({
-			oauth: { jwt: { algorithm: "HS256", secret: "s", mode: "verify", ...rfc9068 } },
+			oauth: { jwt: { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 } },
 			attribute: { collectors: [] },
 			rule: { collectors: [], onEmptyRuleSet: "allow" },
 		});
@@ -180,7 +252,7 @@ describe("AppConfigSchema — empty rule set policy", () => {
 
 	it("rejects an unrecognized onEmptyRuleSet value", () => {
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { algorithm: "HS256", secret: "s", mode: "verify", ...rfc9068 } },
+			oauth: { jwt: { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 } },
 			attribute: { collectors: [] },
 			rule: { collectors: [], onEmptyRuleSet: "maybe" },
 		});
@@ -189,7 +261,7 @@ describe("AppConfigSchema — empty rule set policy", () => {
 });
 
 describe("AppConfigSchema — RFC 9068 token validation (#105)", () => {
-	const hs256 = { algorithm: "HS256", secret: "s" };
+	const hs256 = { algorithm: "HS256", secret: SECRET };
 
 	it('rejects mode="verify" without an issuer', () => {
 		const result = AppConfigSchema.safeParse({
@@ -254,7 +326,7 @@ describe("AppConfigSchema — RFC 9068 token validation (#105)", () => {
 });
 
 describe("AppConfigSchema — batch decisions (#124)", () => {
-	const validJwt = { algorithm: "HS256", secret: "s", mode: "verify", ...rfc9068 };
+	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
 
 	it("defaults verify.maxBatchSize to 50", () => {
 		const result = AppConfigSchema.parse({ oauth: { jwt: validJwt }, ...baseBody });
@@ -290,7 +362,7 @@ describe("AppConfigSchema — batch decisions (#124)", () => {
 });
 
 describe("AppConfigSchema — token lifetime bounds (#110)", () => {
-	const validJwt = { algorithm: "HS256", secret: "s", mode: "verify", ...rfc9068 };
+	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
 
 	/** Parses a valid verify config whose lifetime bounds the case under test overrides. */
 	const parseWithBounds = (jwt: Record<string, unknown>) =>
@@ -351,7 +423,7 @@ describe("AppConfigSchema — token lifetime bounds (#110)", () => {
 });
 
 describe("AppConfigSchema — multiple acceptable issuers (#105)", () => {
-	const hs256 = { algorithm: "HS256", secret: "s" };
+	const hs256 = { algorithm: "HS256", secret: SECRET };
 
 	it("accepts an issuer list, matching the router's issuer type", () => {
 		const result = AppConfigSchema.safeParse({
@@ -427,7 +499,7 @@ describe("AppConfigSchema — oauth.jwt.mode (#134)", () => {
 
 	it('defaults mode to "verify"', () => {
 		const result = AppConfigSchema.parse({
-			oauth: { jwt: { secret: "s", ...rfc9068 } },
+			oauth: { jwt: { secret: SECRET, ...rfc9068 } },
 			...baseBody,
 		});
 		expect(result.oauth.jwt.mode).toBe("verify");
@@ -437,7 +509,7 @@ describe("AppConfigSchema — oauth.jwt.mode (#134)", () => {
 		// The default must not be a way to skip iss/aud: an omitted mode is
 		// verify mode, so a config with no issuer still fails to parse.
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { secret: "s" } },
+			oauth: { jwt: { secret: SECRET } },
 			...baseBody,
 		});
 		expect(result.success).toBe(false);
@@ -453,7 +525,7 @@ describe("AppConfigSchema — oauth.jwt.mode (#134)", () => {
 
 	it("rejects an unknown mode value", () => {
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { mode: "decode", secret: "s", ...rfc9068 } },
+			oauth: { jwt: { mode: "decode", secret: SECRET, ...rfc9068 } },
 			...baseBody,
 		});
 		expect(result.success).toBe(false);
@@ -461,7 +533,7 @@ describe("AppConfigSchema — oauth.jwt.mode (#134)", () => {
 
 	it("rejects a boolean mode — an accidental env-var flip cannot select insecure-decode", () => {
 		const result = AppConfigSchema.safeParse({
-			oauth: { jwt: { mode: false, secret: "s", ...rfc9068 } },
+			oauth: { jwt: { mode: false, secret: SECRET, ...rfc9068 } },
 			...baseBody,
 		});
 		expect(result.success).toBe(false);
@@ -471,7 +543,7 @@ describe("AppConfigSchema — oauth.jwt.mode (#134)", () => {
 		"hard-errors on the removed key %s with the migration message",
 		(staleKey) => {
 			const result = AppConfigSchema.safeParse({
-				oauth: { jwt: { secret: "s", ...rfc9068, [staleKey]: true } },
+				oauth: { jwt: { secret: SECRET, ...rfc9068, [staleKey]: true } },
 				...baseBody,
 			});
 			expect(result.success).toBe(false);
@@ -494,7 +566,7 @@ describe("AppConfigSchema — oauth.jwt.mode (#134)", () => {
 });
 
 describe("AppConfigSchema — http bind address (#108)", () => {
-	const validJwt = { algorithm: "HS256", secret: "s", mode: "verify", ...rfc9068 };
+	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
 
 	it("defaults http.hostname to loopback when the http section is absent", () => {
 		// A verifier is a sidecar by default: reachable only from the process
@@ -524,7 +596,7 @@ describe("AppConfigSchema — http bind address (#108)", () => {
 });
 
 describe("AppConfigSchema — http.callerAuth (#108)", () => {
-	const validJwt = { algorithm: "HS256", secret: "s", mode: "verify", ...rfc9068 };
+	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
 
 	it("leaves http.callerAuth absent when nothing configures it", () => {
 		const result = AppConfigSchema.parse({ oauth: { jwt: validJwt }, ...baseBody });
@@ -584,9 +656,6 @@ describe("AppConfigSchema — http.callerAuth (#108)", () => {
 });
 
 describe("AppConfigSchema — HS256 secret rotation (#112)", () => {
-	/** 64 hex characters — 32 decoded bytes, the floor auth.provider#282 set. */
-	const SECRET = "11".repeat(32);
-	const OLD_SECRET = "22".repeat(32);
 	const FUTURE = "2999-01-01T00:00:00Z";
 
 	/** Parses an `oauth.jwt` block with the RFC 9068 fields already in place. */

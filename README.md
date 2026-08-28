@@ -72,11 +72,13 @@ POST /verify/batch — the same contract, N decisions per round trip
 npx @o3co/create-auth-policy-verifier my-policy-verifier
 cd my-policy-verifier
 pnpm install
-OAUTH_JWT_SECRET=your-secret \
+OAUTH_JWT_SECRET=$(openssl rand -hex 32) \
   OAUTH_JWT_ISSUER=https://issuer.example.com \
   OAUTH_JWT_AUDIENCE=https://api.example.com \
   pnpm start
 ```
+
+The HS256 secret must carry at least **32 bytes (256 bits)** of key material or the process refuses to boot — see [Rotating the HS256 secret](#rotating-the-hs256-secret). Use the same value auth.provider signs with.
 
 ```bash
 curl -X POST http://localhost:3000/verify \
@@ -198,7 +200,7 @@ oauth {
     algorithm = ${?OAUTH_JWT_ALGORITHM}
 
     # ---- HS256 only. Keep exactly one of these two groups. --------------
-    secret = ${?OAUTH_JWT_SECRET}
+    secret = ${?OAUTH_JWT_SECRET}            # >= 32 decoded bytes — `openssl rand -hex 32`
     kid = ${?OAUTH_JWT_KID}                  # names the secret above; unset means the token header is not consulted
     # previousSecrets — retired secrets still inside their overlap window,
     # max 3. Omitted here on purpose: the key is REFUSED at boot under
@@ -304,6 +306,22 @@ oauth.jwt {
 }
 ```
 
+**Every HS256 secret must carry at least 32 bytes (256 bits) of key material**, and a shorter one is refused at boot rather than at the first request. HS256 is symmetric: the value that verifies a token is the value that signs one, so guessing it is not read access, it is the ability to mint tokens for any subject. RFC 7518 §3.2 requires a key at least as wide as the hash output, and auth.provider enforces the same floor on the same value.
+
+Generate one with `openssl rand -hex 32` (or `openssl rand -base64 32`). The measurement is on **decoded** material, at the smallest plausible reading:
+
+| Value | Reads as | Verdict |
+| --- | --- | --- |
+| `openssl rand -hex 32` — 64 hex characters | 32 bytes | passes |
+| `openssl rand -hex 16` — 32 hex characters | 16 bytes | refused |
+| `openssl rand -base64 32` — 43 characters + `=` | 32 bytes | passes |
+| 32 random alphanumerics | 24 bytes (a base64 body) | refused |
+| a 32-character passphrase with punctuation | 32 bytes | passes |
+
+Length is all this can see: a 40-character English sentence measures 40 bytes and carries far less. Generate the secret randomly; the check is a floor, not a review.
+
+The floor applies to `secret` and to every entry of `previousSecrets` below, in one rule — a retired secret verifies for its whole overlap window, so it can mint tokens exactly as the current one can.
+
 ### Rotating the HS256 secret
 
 Under a single shared secret there is no way to change it without an outage: the moment auth.provider signs with a new value, every token already in flight fails here until both services have restarted in lockstep. `previousSecrets` is the overlap window that removes the lockstep — the same `kid` + `secret` + `expiresAt` shape auth.provider rotates with, so one pair of values moves on both sides.
@@ -389,7 +407,7 @@ cd my-verifier
 docker build -t my-verifier .
 docker run -p 3000:3000 \
   -e HTTP_HOSTNAME=0.0.0.0 -e HTTP_CALLER_AUTH_TOKEN=<secret> \
-  -e OAUTH_JWT_SECRET=secret my-verifier
+  -e OAUTH_JWT_SECRET=$(openssl rand -hex 32) my-verifier
 ```
 
 The scaffolder generates `pnpm-lock.yaml`; the image builds with

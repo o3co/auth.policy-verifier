@@ -29,7 +29,8 @@ import { createVerifyRouter } from "#/routes/verify.mjs";
 
 const generateKeyPairAsync = promisify(generateKeyPair);
 
-const JWT_SECRET = "test-secret";
+/** 64 hex characters — 32 decoded bytes, the entropy floor #114 enforces. */
+const JWT_SECRET = "11".repeat(32);
 const hs256Key = await HS256KeyResolverFactory({ secret: JWT_SECRET });
 
 /** Canonical issuer/audience this verifier deployment pins (RFC 9068 §4). */

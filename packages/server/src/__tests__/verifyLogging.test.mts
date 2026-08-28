@@ -39,9 +39,10 @@ import { describe, expect, it, vi } from "vitest";
 import { HS256KeyResolverFactory, type VerifyRouterJwtConfig } from "#/jwt/index.mjs";
 import { createVerifyRouter } from "#/routes/verify.mjs";
 
-const JWT_SECRET = "test-secret";
+/** 64 hex characters each — 32 decoded bytes, the entropy floor #114 enforces. */
+const JWT_SECRET = "11".repeat(32);
 const hs256Key = await HS256KeyResolverFactory({ secret: JWT_SECRET });
-const wrongKey = await HS256KeyResolverFactory({ secret: "a-different-secret" });
+const wrongKey = await HS256KeyResolverFactory({ secret: "22".repeat(32) });
 
 const ISSUER = "https://issuer.test";
 const AUDIENCE = "https://api.test";

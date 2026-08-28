@@ -59,7 +59,12 @@ describe("builtinKeyResolversModule", () => {
 		await builtinKeyResolversModule.init(context);
 
 		const factory = context.keyResolverRegistry.get("HS256");
-		const resolver = await factory({ algorithm: "HS256", secret: "test-secret", validate: true });
+		// 64 hex characters — 32 decoded bytes, the entropy floor #114 enforces.
+		const resolver = await factory({
+			algorithm: "HS256",
+			secret: "11".repeat(32),
+			validate: true,
+		});
 
 		expect(resolver.algorithms).toEqual(["HS256"]);
 		expect(resolver.key).toBeDefined();
@@ -462,6 +467,26 @@ describe("HS256KeyResolverFactory — secret rotation (#112)", () => {
 				previousSecrets: [{ kid: "v0", secret: PREVIOUS, expiresAt: "soon" }],
 			},
 			/^oauth\.jwt\.previousSecrets\[0\]\.expiresAt is not a valid timestamp/,
+		],
+		[
+			"a current secret under the entropy floor (#114)",
+			{ algorithm: "HS256", secret: "your-secret" },
+			/^oauth\.jwt\.secret must carry at least 32 bytes/,
+		],
+		[
+			"a current secret that is 32 hex characters — 16 decoded bytes (#114)",
+			{ algorithm: "HS256", secret: "ab".repeat(16) },
+			/^oauth\.jwt\.secret must carry at least 32 bytes/,
+		],
+		[
+			"a retired secret under the entropy floor (#114)",
+			{
+				algorithm: "HS256",
+				secret: CURRENT,
+				kid: "v1",
+				previousSecrets: [{ kid: "v0", secret: "your-secret", expiresAt: FUTURE }],
+			},
+			/^oauth\.jwt\.previousSecrets\[0\]\.secret must carry at least 32 bytes/,
 		],
 	])("refuses %s at construction", async (_label, config, message) => {
 		// AppConfigSchema rejects these at config-parse time; the factory re-checks

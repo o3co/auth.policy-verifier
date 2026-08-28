@@ -44,7 +44,8 @@ import { HS256KeyResolverFactory, type VerifyRouterJwtConfig } from "#/jwt/index
 import { decisionEvent } from "#/observability/decisionEvent.mjs";
 import { createVerifyRouter } from "#/routes/verify.mjs";
 
-const JWT_SECRET = "test-secret";
+/** 64 hex characters — 32 decoded bytes, the entropy floor #114 enforces. */
+const JWT_SECRET = "11".repeat(32);
 const hs256Key = await HS256KeyResolverFactory({ secret: JWT_SECRET });
 const ISSUER = "https://issuer.test";
 const AUDIENCE = "https://api.test";
