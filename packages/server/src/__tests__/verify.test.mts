@@ -1252,6 +1252,56 @@ describe("createVerifyRouter — maxBatchSize, one reader at both boundaries (#1
 	});
 });
 
+describe("createVerifyRouter — collectors disagreeing on a scalar attribute deny (#174)", () => {
+	const writesDepartment = (value: string): AttributeCollector => ({
+		collect: async () =>
+			new Map<string, unknown>([
+				["department", value],
+				["scopes", ["read:project"]],
+			]),
+	});
+
+	const conflictedApp = () => {
+		const app = express();
+		app.use(
+			createVerifyRouter({
+				jwt: {
+					validate: true,
+					key: hs256Key.key,
+					algorithms: hs256Key.algorithms,
+					issuer: ISSUER,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				},
+				resourceParser: new DotNotationResourceParser(),
+				attributePipeline: new AttributePipeline([
+					writesDepartment("sales"),
+					writesDepartment("eng"),
+				]),
+				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
+			}),
+		);
+		return app;
+	};
+
+	it("answers 403 with an attribute_conflict deny", async () => {
+		const token = await signHS256Token({ scope: "read:project" });
+		const res = await request(conflictedApp())
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.status).toBe(403);
+		expect(res.body.decision).toBe("deny");
+		expect(res.body.code).toBe("attribute_conflict");
+		// No rule group was evaluated, and the reason says so.
+		expect(res.body.reason).toEqual({ groups: [] });
+		// The caller's message names neither the key nor the values — those
+		// reach the operator's log line only.
+		expect(res.body.message).not.toMatch(/department|sales|eng/);
+	});
+});
+
 describe("createVerifyRouter — a collector that runs out of time denies (#115)", () => {
 	/** Stalls only for the action named, so one batch can mix stalled and decided entries. */
 	const stallingOn = (action: string): AttributeCollector => ({

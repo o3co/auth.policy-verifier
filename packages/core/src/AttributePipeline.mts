@@ -7,6 +7,7 @@ import {
 	resolveCollectorLimits,
 	runCollectors,
 } from "./collectorLimits.mjs";
+import { AttributeConflictError } from "./errors.mjs";
 import type { AttributeCollector, Attributes, CollectorRequest } from "./types.mjs";
 
 /**
@@ -43,9 +44,18 @@ export class AttributePipeline {
 
 /**
  * Merges attribute maps into a single map. Array-valued entries concatenate
- * in input order; non-array values are overwritten by later maps — and a
- * non-array value also resets any accumulation, so a later array starts fresh
- * rather than concatenating onto something that was already overwritten.
+ * in input order. A non-array value may be written once — or re-written with
+ * the **identical** value (same primitive, or same object reference); two
+ * maps writing *different* values to the same scalar key throw
+ * {@link AttributeConflictError}, which the transport answers as a deny
+ * (#174). Last-writer-wins let a collector-ordering mistake silently weaken
+ * decisions (#126 item 2); an ambiguous attribute map is not something to
+ * authorize from.
+ *
+ * A scalar write still resets any array accumulation for its key, and a later
+ * array still replaces an earlier scalar — the mixed-type semantics are
+ * unchanged (and pinned by tests); only the scalar-vs-scalar disagreement is
+ * a conflict.
  *
  * Array fragments are collected per key and concatenated once at the end
  * (#126 item 3): the previous shape re-copied the whole accumulated array for
@@ -62,6 +72,11 @@ function merge(maps: Attributes[]): Attributes {
 				if (parts === undefined) fragments.set(key, [value]);
 				else parts.push(value);
 			} else {
+				// `Object.is`, not `===`: a NaN re-written as NaN is the same
+				// value, not a disagreement.
+				if (merged.has(key) && !Object.is(merged.get(key), value)) {
+					throw new AttributeConflictError(key);
+				}
 				fragments.delete(key);
 				merged.set(key, value);
 			}

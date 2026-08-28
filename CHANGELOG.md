@@ -864,6 +864,22 @@ and version sections follow the release labeling policy in
 
 ### Changed
 
+- **BREAKING**: two collectors writing **different** values to the same scalar
+  attribute key now deny the decision instead of silently last-writer-winning
+  ([#174](https://github.com/o3co/auth.policy-verifier/issues/174), from #126
+  item 2). A collector-ordering mistake used to weaken authorization with no
+  signal anywhere; an attribute map whose content depends on collector order is
+  not something to authorize from. The merge throws the new
+  `AttributeConflictError` (exported from core; message names the KEY only —
+  values are claims and may be sensitive), and `/verify` answers it exactly as
+  it answers a #115 timeout: `403` with `decision: "deny"`, `code:
+  "attribute_conflict"`, an empty `reason`, and the detail on the operator's
+  log line. Identical re-writes (same primitive value, or the same object
+  reference) are not conflicts, so trivially-redundant collectors keep working;
+  array-valued keys are unaffected and still concatenate. **Migration** for a
+  deployment that relied on deliberate override chains: give the key one owning
+  collector, or namespace the keys.
+
 - A scaffolded project keeps `"private": true`
   ([#126](https://github.com/o3co/auth.policy-verifier/issues/126) item 4).
   `create-auth-policy-verifier` used to delete the field, so the project it

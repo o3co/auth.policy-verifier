@@ -14,7 +14,7 @@ export {
 	resolveCollectorLimits,
 } from "./collectorLimits.mjs";
 export type { CollectorTimeoutDetail, CollectorTimeoutLimit } from "./errors.mjs";
-export { CollectorTimeoutError, ResourceParseError } from "./errors.mjs";
+export { AttributeConflictError, CollectorTimeoutError, ResourceParseError } from "./errors.mjs";
 export type { EvaluateOptions } from "./evaluate.mjs";
 export { evaluate } from "./evaluate.mjs";
 export {

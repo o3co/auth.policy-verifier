@@ -91,3 +91,31 @@ export class CollectorTimeoutError extends Error {
 		this.collector = detail.limit === "collector" ? detail.collector : undefined;
 	}
 }
+
+/**
+ * Raised when two attribute maps write **different** values to the same
+ * scalar (non-array) key (#174). An identical re-write — same primitive
+ * value, or the same object reference — is not a conflict.
+ *
+ * **This is a deny, not a degradation** — the same stance as
+ * {@link CollectorTimeoutError}: an attribute map whose content depends on
+ * collector ordering is not something to authorize from, and the previous
+ * last-writer-wins silently weakened decisions when collectors disagreed
+ * (#126 item 2). Array-valued keys are unaffected; they concatenate.
+ *
+ * The message names the KEY only, never the values: attribute values are
+ * claims and may be sensitive, and this message travels into logs.
+ */
+export class AttributeConflictError extends Error {
+	readonly key: string;
+
+	constructor(key: string) {
+		super(
+			`two collectors wrote different values to the scalar attribute ${JSON.stringify(key)}; ` +
+				"a map whose content depends on collector order is refused. Give the key one " +
+				"owning collector, or namespace it (identical re-writes are allowed)",
+		);
+		this.name = "AttributeConflictError";
+		this.key = key;
+	}
+}
