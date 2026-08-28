@@ -645,12 +645,17 @@ describe("POST /verify — resource the parser refuses (#117)", () => {
 		expect(res.body.code).toBe("internal_error");
 	});
 
-	it("rejects an unauthenticated request before parsing the resource", async () => {
-		// 401 outranks 400: an anonymous caller learns nothing about the grammar.
+	it("refuses the resource before authenticating (#118)", async () => {
+		// BREAKING in #118, and the reverse of what this pinned before: 400 now
+		// outranks 401, because the body checks are bounded while verifying the
+		// token is the half that can reach the network. The cost is that an
+		// anonymous caller learns the grammar refused their string;
+		// `http.callerAuth` is the gate for a deployment that must not disclose
+		// even that. See the ordering paragraph on `createVerifyRouter`.
 		const res = await request(app).post("/verify").send({ resource: "a..b", action: "read" });
 
-		expect(res.status).toBe(401);
-		expect(res.body.code).toBe("missing_token");
+		expect(res.status).toBe(400);
+		expect(res.body.code).toBe("invalid_request");
 	});
 });
 
@@ -945,11 +950,26 @@ describe("POST /verify — decision contract (#124)", () => {
 	it("never takes the subject from the request body", async () => {
 		// The token is the only authority on who is asking; accepting a body-supplied
 		// subject would let any token holder ask for a decision about anyone else.
+		// Since #118 the request is refused rather than silently stripped — a caller
+		// that sent one was being told nothing while believing it had been honoured.
 		const token = await signHS256Token({ sub: "user-1", scope: "read:project" });
 		const res = await request(app)
 			.post("/verify")
 			.set("Authorization", `Bearer ${token}`)
 			.send({ resource: "project:1", action: "read", subject: "admin" });
+
+		expect(res.status).toBe(400);
+		expect(res.body.code).toBe("invalid_request");
+		expect(res.body.message).toContain("subject");
+		expect(res.body.subject).toBeUndefined();
+	});
+
+	it("answers with the token's subject, never one the body could have named", async () => {
+		const token = await signHS256Token({ sub: "user-1", scope: "read:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
 
 		expect(res.body.subject).toBe("user-1");
 	});

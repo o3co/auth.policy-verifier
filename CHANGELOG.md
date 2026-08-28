@@ -10,6 +10,110 @@ and version sections follow the release labeling policy in
 
 ### Security
 
+- **BREAKING**: `/verify` and `/verify/batch` now hold the request body to
+  stated limits, refuse unknown properties and whitespace, and **validate the
+  body before verifying the token**
+  ([#118](https://github.com/o3co/auth.policy-verifier/issues/118)).
+
+  Input validation was thin: Express's unstated 100 KB JSON default, and a
+  check that `resource` and `action` were non-empty strings. A whitespace-only
+  value passed, `context` could be arbitrarily wide and deep, unknown
+  properties rode along in silence — and the expensive half of the request, JWT
+  verification, ran first, so an unauthenticated caller could spend it on a body
+  that was never usable.
+
+  **The limits**, each a numeric knob on the `verify` config block, read through
+  the same `resolveBound` at both boundaries (#157) and settable from the
+  environment:
+
+  | Key | Env | Default | Bounds |
+  | --- | --- | --- | --- |
+  | `verify.maxBodyBytes` | `VERIFY_MAX_BODY_BYTES` | `65536` (64 KiB) | the `limit` on `express.json()` |
+  | `verify.maxResourceLength` | `VERIFY_MAX_RESOURCE_LENGTH` | `512` | characters in `resource` |
+  | `verify.maxActionLength` | `VERIFY_MAX_ACTION_LENGTH` | `64` | characters in `action` |
+  | `verify.maxContextEntries` | `VERIFY_MAX_CONTEXT_ENTRIES` | `64` | properties + array elements in the whole `context` tree |
+  | `verify.maxContextValueLength` | `VERIFY_MAX_CONTEXT_VALUE_LENGTH` | `1024` | characters in any `context` string, keys included |
+
+  `maxBodyBytes` is below Express's old default, so it is a tightening, and it
+  is the outer envelope: it binds first on a large batch, because the per-field
+  limits bound *one* entry rather than N of them. A deployment sending wide
+  contexts across a full 50-entry batch raises it.
+
+  `maxContextEntries` counts every property and every array element at every
+  depth, so nesting is **bounded rather than forbidden** —
+  `RequestContextAttributeCollector` reads dot paths such as `tenant.id`, and a
+  flat-only rule would have broken a documented feature. Since each level of
+  nesting costs at least one entry, it bounds the depth too, which is why there
+  is no separate depth knob.
+
+  **Whitespace is refused, not trimmed**, in `resource` and `action` alike —
+  the doctrine the resource grammar already applies (#117), extended to `action`
+  and to a deployment that registered its own `ResourceParser`. Both are
+  concatenated into the `{action}:{resourceType}` scope an issuer has to have
+  granted, and RFC 6749 §3.3 makes space the delimiter between scope values, so
+  a value carrying whitespace names something no issuer could grant. Trimming
+  would make `"read "` and `"read"` one action here while a collector reading
+  the raw string still saw two.
+
+  **Unknown properties are refused.**
+  `{"resource": "project:1", "action": "read", "subject": "admin"}` is now
+  `400 invalid_request` rather than a decision with `subject` quietly dropped.
+  The subject comes from the verified token and never from the body; a caller
+  who sent one was being told nothing while believing it had been honoured. The same applies to a misspelled `contxt`, and to anything beside
+  `decisions` on a batch body.
+
+  **The ordering change, which is the wire-visible one.** The body is validated
+  first, so a malformed request is answered `400` whether or not a token was
+  presented:
+
+  | Request | Before | After |
+  | --- | --- | --- |
+  | malformed body, no token | `401 missing_token` | `400 invalid_request` |
+  | malformed body, bad token | `401 invalid_token` | `400 invalid_request` |
+  | well-formed body, no/bad token | `401` | `401` (unchanged) |
+  | body over the size limit | Express HTML `413` | `413 payload_too_large` (deny envelope) |
+  | malformed JSON | Express HTML `400` | `400 invalid_request` (deny envelope) |
+  | unreadable content type / charset | Express HTML `415` | `415 unsupported_media_type` (deny envelope) |
+
+  It is the order the costs argue for: the body checks are bounded by the limits
+  above, while verifying a token is the half that can reach the network — an
+  attacker-chosen `kid` sends the JWKS path to the provider, and an HS256
+  rotation tries every configured secret. What it costs is that an anonymous
+  caller now learns whether a body was well-formed, the resource grammar
+  included. `http.callerAuth` (#108) is the gate for a deployment that must not
+  disclose even that, and it is **unchanged**: it still runs ahead of this
+  router and ahead of `express.json()`, so a rejected caller is still answered
+  before a body is parsed at all.
+
+  **A terminal error handler** now turns a body-parser failure into the deny
+  envelope instead of Express's default HTML page, which could also carry a
+  stack trace outside production:
+
+  ```json
+  {"decision": "deny", "code": "invalid_request", "message": "Request body is not valid JSON"}
+  ```
+
+  That example is the response body verbatim, and it is the same line the two
+  READMEs carry — `verifyInputValidation.test.mts` asserts it appears in all
+  three and parses to what the endpoint emits, so no copy can drift from the
+  code or from the others.
+  The handler is mounted on the router, so a consumer mounting
+  `createVerifyRouter` on their own app gets it without wiring anything. This
+  covers item 6 of
+  [#126](https://github.com/o3co/auth.policy-verifier/issues/126) in full,
+  including its "whitespace-only `resource`" sibling, item 7. Neither message
+  echoes the body: a parse failure is reported as a parse failure, not by
+  quoting the bytes that caused it, and the unknown-property message bounds the
+  names it shows.
+
+  **Operator migration.** No configuration key is required, and every default is
+  generous for a real caller: `project:1` / `read` and a handful of context
+  fields are far inside all five. Callers to check are the ones sending bodies
+  over 64 KiB, whitespace in `resource` or `action`, extra properties beside
+  `resource` / `action` / `context`, or `context` objects with more than 64
+  entries or strings over 1 KiB — and any client that special-cased the `401`
+  it used to get for a malformed unauthenticated request.
+
 - **BREAKING**: `CollectorContext.requestContext` is now an opaque
   `UntrustedRequestContext` instead of a `Record<string, unknown>`, so
   caller-supplied request data cannot be read without saying that is what it is

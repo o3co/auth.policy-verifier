@@ -44,6 +44,33 @@ export interface VerifyRouterConfig {
 	 */
 	maxBatchSize?: number | string;
 	/**
+	 * Ceiling on the JSON body, in bytes — the `limit` handed to
+	 * `express.json()`. Defaults to 64 KiB (`DEFAULT_MAX_BODY_BYTES`), below
+	 * Express's unstated 100 KB default, and is the outer envelope: it is what
+	 * binds first on a large batch, since the per-field limits below bound one
+	 * entry rather than N of them.
+	 *
+	 * This and the four limits after it are held to the same bounds
+	 * `AppConfigSchema` holds `verify.*` to (#118, #157), and admit the string
+	 * form for the same reason `maxBatchSize` does.
+	 */
+	maxBodyBytes?: number | string;
+	/** Ceiling on the `resource` string, in characters. Defaults to 512. */
+	maxResourceLength?: number | string;
+	/** Ceiling on the `action` string, in characters. Defaults to 64. */
+	maxActionLength?: number | string;
+	/**
+	 * Ceiling on the size of `context`, counted as every property and every
+	 * array element in the whole tree, at every depth. Defaults to 64, which
+	 * also bounds the depth — each level costs at least one entry.
+	 */
+	maxContextEntries?: number | string;
+	/**
+	 * Ceiling on every string inside `context`, property names included, in
+	 * characters. Defaults to 1024.
+	 */
+	maxContextValueLength?: number | string;
+	/**
 	 * Sink for the router's failure events (`jwt_token_rejected`,
 	 * `jwt_verification_unavailable`, `verify_internal_error`) and for the
 	 * per-decision `decision` audit line (#111). Defaults to the console-backed
@@ -124,6 +151,146 @@ type ParsedDecisionRequest =
 	| { ok: false; error: string };
 
 /**
+ * The bounds one decision request is held to (#118), resolved once at router
+ * construction. Body bytes are not here: that limit is spent by `express.json()`
+ * before a body is ever an object.
+ */
+interface RequestLimits {
+	maxResourceLength: number;
+	maxActionLength: number;
+	maxContextEntries: number;
+	maxContextValueLength: number;
+}
+
+/** Properties a decision request may carry. Anything else is refused (#118). */
+const DECISION_REQUEST_KEYS = new Set(["resource", "action", "context"]);
+
+/** How many unknown property names a refusal names before it stops listing them. */
+const MAX_RENDERED_KEYS = 3;
+
+/**
+ * Longest a rendered property name may be, the ellipsis that replaces the tail
+ * included — so a truncated name is exactly this long, never one character over.
+ */
+const MAX_RENDERED_KEY_LENGTH = 32;
+
+/**
+ * Renders unknown property names for an error message.
+ *
+ * The names are the caller's own text, so what reaches the response is bounded
+ * here rather than by whatever they sent: at most {@link MAX_RENDERED_KEYS}
+ * names, each at most {@link MAX_RENDERED_KEY_LENGTH} characters *including*
+ * the ellipsis that stands in for the tail. The truncation is stated that way,
+ * and spelled `MAX_RENDERED_KEY_LENGTH - 1`, because a bound whose own error
+ * path runs one character past what it documents is the shape this whole change
+ * is against.
+ *
+ * Quoting happens after: each name goes through `JSON.stringify`, so one
+ * carrying quotes or control characters cannot reshape the message. That adds
+ * the two quotes and any escape expansion on top of the length above — the
+ * bound is on the name, not on its JSON rendering, which is the only honest way
+ * to state it when a single character can escape to six.
+ */
+function describeUnknownKeys(keys: readonly string[]): string {
+	const shown = keys
+		.slice(0, MAX_RENDERED_KEYS)
+		.map((key) =>
+			JSON.stringify(
+				key.length > MAX_RENDERED_KEY_LENGTH
+					? `${key.slice(0, MAX_RENDERED_KEY_LENGTH - 1)}…`
+					: key,
+			),
+		);
+	return keys.length > shown.length ? `${shown.join(", ")}, …` : shown.join(", ");
+}
+
+/**
+ * Rejects a `resource` / `action` that is absent, empty, over its length bound,
+ * or carries whitespace. Returns the string once it is known to be one, so the
+ * caller reads a `string` rather than re-narrowing the `unknown` it passed in.
+ *
+ * **Whitespace is refused, not trimmed**, which is the doctrine
+ * `DotNotationResourceParser` already applies to `resource` (#117), applied here
+ * so it also covers `action` and a deployment that registered its own parser.
+ * Both strings are structural identifiers rather than free text: they are echoed
+ * back in the decision, and `ResourceActionScopeRuleCollector` concatenates them
+ * into the `{action}:{resourceType}` scope an issuer has to have granted — and
+ * RFC 6749 §3.3 makes space the delimiter between scope values, so a value
+ * carrying whitespace names something no issuer could grant. Trimming would
+ * instead make `"read "` and `"read"` one action here while a collector reading
+ * the raw string still saw two.
+ *
+ * The value is never echoed: the message names the field. These strings are
+ * chosen by the caller and end up in logs and pasted bug reports.
+ */
+function checkIdentifier(
+	value: unknown,
+	field: string,
+	label: string,
+	maxLength: number,
+): { ok: true; value: string } | { ok: false; error: string } {
+	if (typeof value !== "string" || value === "") {
+		return { ok: false, error: `${label}.${field} must be a non-empty string` };
+	}
+	if (value.length > maxLength) {
+		return {
+			ok: false,
+			error: `${label}.${field} must not be longer than ${maxLength} characters`,
+		};
+	}
+	if (/\s/.test(value)) {
+		return { ok: false, error: `${label}.${field} must not contain whitespace` };
+	}
+	return { ok: true, value };
+}
+
+/**
+ * Holds the caller's `context` to its size bounds, or explains which one it
+ * broke.
+ *
+ * Nesting is counted rather than forbidden: `RequestContextAttributeCollector`
+ * reads dot paths such as `tenant.id`, so a flat-only rule would break a
+ * documented feature. Every property and every array element counts, at every
+ * depth, which is also what keeps this walk finite — a context inside
+ * `maxContextEntries` can be at most that deep, so no separate depth bound is
+ * needed and the traversal is iterative regardless.
+ *
+ * Neither message echoes a key or a value. The whole object is caller-supplied,
+ * which is exactly why it is bounded, and a message that quoted part of it would
+ * hand the size back to the caller.
+ */
+function checkContext(
+	context: Record<string, unknown>,
+	label: string,
+	limits: RequestLimits,
+): string | undefined {
+	const tooMany =
+		`${label}.context must not carry more than ${limits.maxContextEntries} entries ` +
+		"(every property and array element counts, at every depth)";
+	const tooLong =
+		`${label}.context must not carry a string longer than ${limits.maxContextValueLength} ` +
+		"characters (property names included)";
+
+	let entries = 0;
+	const pending: object[] = [context];
+	while (pending.length > 0) {
+		// Non-null by construction: only containers are pushed.
+		const node = pending.pop() as object;
+		const isArray = Array.isArray(node);
+		for (const [key, value] of Object.entries(node)) {
+			entries += 1;
+			if (entries > limits.maxContextEntries) return tooMany;
+			// An array's `Object.entries` keys are its indices, which the caller
+			// did not write and which no bound applies to.
+			if (!isArray && key.length > limits.maxContextValueLength) return tooLong;
+			if (typeof value === "string" && value.length > limits.maxContextValueLength) return tooLong;
+			if (typeof value === "object" && value !== null) pending.push(value);
+		}
+	}
+	return undefined;
+}
+
+/**
  * Validates one entry of a decision request. Returns the entry or the reason it
  * is unusable, phrased with `label` so a batch can name the offending index.
  *
@@ -131,21 +298,38 @@ type ParsedDecisionRequest =
  * parser refuses is a malformed request, not a server fault, and it belongs
  * with the other body validation so a batch names the offending index and no
  * entry is decided before the whole batch is known to be usable.
+ *
+ * Unknown properties are refused rather than ignored (#118). A caller sending
+ * `subject` was being told nothing while believing it had been honoured — and
+ * the subject comes from the verified token, never from the body. The same
+ * reasoning covers a misspelled `contxt`, which used to be dropped in silence.
  */
 function parseDecisionRequest(
 	raw: unknown,
 	label: string,
 	resourceParser: ResourceParser,
+	limits: RequestLimits,
 ): ParsedDecisionRequest {
 	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
 		return { ok: false, error: `${label} must be an object` };
 	}
-	const { resource, action, context } = raw as Record<string, unknown>;
-	if (typeof resource !== "string" || resource === "") {
-		return { ok: false, error: `${label}.resource must be a non-empty string` };
+	const unknownKeys = Object.keys(raw).filter((key) => !DECISION_REQUEST_KEYS.has(key));
+	if (unknownKeys.length > 0) {
+		return {
+			ok: false,
+			error:
+				`${label} has unknown properties: ${describeUnknownKeys(unknownKeys)} ` +
+				"(only resource, action and context are accepted)",
+		};
 	}
-	if (typeof action !== "string" || action === "") {
-		return { ok: false, error: `${label}.action must be a non-empty string` };
+	const { resource, action, context } = raw as Record<string, unknown>;
+	const checkedResource = checkIdentifier(resource, "resource", label, limits.maxResourceLength);
+	if (!checkedResource.ok) {
+		return checkedResource;
+	}
+	const checkedAction = checkIdentifier(action, "action", label, limits.maxActionLength);
+	if (!checkedAction.ok) {
+		return checkedAction;
 	}
 	// `typeof [] === "object"`, so arrays need excluding explicitly — an array
 	// reaching `CollectorContext.requestContext` is a shape no collector expects.
@@ -155,10 +339,16 @@ function parseDecisionRequest(
 	) {
 		return { ok: false, error: `${label}.context must be an object` };
 	}
+	if (context !== undefined) {
+		const badContext = checkContext(context as Record<string, unknown>, label, limits);
+		if (badContext !== undefined) {
+			return { ok: false, error: badContext };
+		}
+	}
 
 	let parsedResource: Resource;
 	try {
-		parsedResource = resourceParser.parse(resource);
+		parsedResource = resourceParser.parse(checkedResource.value);
 	} catch (cause) {
 		// Only a ResourceParseError means "the caller's string is malformed".
 		// Anything else is a fault in the parser and must keep surfacing as a 500.
@@ -172,7 +362,11 @@ function parseDecisionRequest(
 	return {
 		ok: true,
 		entry: {
-			request: { resource, action, context: context as Record<string, unknown> | undefined },
+			request: {
+				resource: checkedResource.value,
+				action: checkedAction.value,
+				context: context as Record<string, unknown> | undefined,
+			},
 			resource: parsedResource,
 		},
 	};
@@ -193,8 +387,24 @@ function parseDecisionRequest(
  *
  * Both answer 400 for a malformed body — including a `resource` the configured
  * `ResourceParser` refuses, which is the caller's syntax error rather than a
- * server fault — 401 for authentication failures, and 500 for anything
- * unexpected.
+ * server fault — 401 for authentication failures, 413 for a body over
+ * `maxBodyBytes`, 415 for a content type the parser cannot read, and 500 for
+ * anything unexpected. Every one of those answers is the deny envelope
+ * `{ decision: "deny", code, message }`, the body-parser failures included
+ * (#118): a caller that parses only decision JSON must never be handed
+ * Express's HTML error page.
+ *
+ * **The body is validated before the token is verified** (#118), which is why a
+ * malformed unauthenticated request is answered 400 rather than 401. It is the
+ * order the costs argue for: the body checks are bounded by the limits above,
+ * while verifying a token is the half that can reach the network — an
+ * attacker-chosen `kid` sends the JWKS path to the provider, and an HS256
+ * rotation tries every configured secret — so doing it first let an
+ * unauthenticated caller spend it on a body that was never usable. What it
+ * costs is that an anonymous caller now learns whether a body was well-formed,
+ * the resource grammar included; `http.callerAuth` (#108) is the gate for
+ * deployments that must not disclose even that, and it stays ahead of this
+ * router and of `express.json()`.
  *
  * Every decision — one per `/verify` call, one per entry of a batch — emits a
  * `decision` event at info and, when `metrics` is wired, increments the
@@ -210,6 +420,26 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	// the schema refused to boot — and let a `0` through as a cap that rejects
 	// every batch there is.
 	const maxBatchSize = resolveBound(config.maxBatchSize, NUMERIC_BOUNDS.maxBatchSize, "verify");
+	// The request limits (#118), read the same way and at the same boundary.
+	const maxBodyBytes = resolveBound(config.maxBodyBytes, NUMERIC_BOUNDS.maxBodyBytes, "verify");
+	const limits: RequestLimits = {
+		maxResourceLength: resolveBound(
+			config.maxResourceLength,
+			NUMERIC_BOUNDS.maxResourceLength,
+			"verify",
+		),
+		maxActionLength: resolveBound(config.maxActionLength, NUMERIC_BOUNDS.maxActionLength, "verify"),
+		maxContextEntries: resolveBound(
+			config.maxContextEntries,
+			NUMERIC_BOUNDS.maxContextEntries,
+			"verify",
+		),
+		maxContextValueLength: resolveBound(
+			config.maxContextValueLength,
+			NUMERIC_BOUNDS.maxContextValueLength,
+			"verify",
+		),
+	};
 	const logger = config.logger ?? consoleLogger;
 	// Constructing the authenticator runs assertVerifyRouterJwtConfig, so an
 	// invalid hand-built jwt config still fails here, at router construction.
@@ -281,19 +511,25 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	}
 
 	const router = express.Router();
-	router.use(express.json());
+	// An explicit limit, not Express's unstated 100 KB default (#118). It is the
+	// only one of the five spent here: a body over it never becomes an object,
+	// and `bodyParserFailure` below turns the refusal into the deny envelope.
+	router.use(express.json({ limit: maxBodyBytes }));
 
 	router.post("/verify", async (req: express.Request, res: express.Response) => {
 		try {
-			const auth = await authenticator.authenticate(req.get("authorization"));
-			if (!auth.ok) {
-				res.status(401).json(errorBody(auth.code, auth.message));
+			// Body first, token second (#118) — see the ordering paragraph on
+			// `createVerifyRouter`. This is what makes a malformed unauthenticated
+			// request a 400 rather than a 401.
+			const parsed = parseDecisionRequest(req.body, "body", config.resourceParser, limits);
+			if (!parsed.ok) {
+				res.status(400).json(errorBody("invalid_request", parsed.error));
 				return;
 			}
 
-			const parsed = parseDecisionRequest(req.body, "body", config.resourceParser);
-			if (!parsed.ok) {
-				res.status(400).json(errorBody("invalid_request", parsed.error));
+			const auth = await authenticator.authenticate(req.get("authorization"));
+			if (!auth.ok) {
+				res.status(401).json(errorBody(auth.code, auth.message));
 				return;
 			}
 
@@ -307,13 +543,27 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 
 	router.post("/verify/batch", async (req: express.Request, res: express.Response) => {
 		try {
-			const auth = await authenticator.authenticate(req.get("authorization"));
-			if (!auth.ok) {
-				res.status(401).json(errorBody(auth.code, auth.message));
+			// The whole body — envelope, cap and every entry — before the token, for
+			// the reason `/verify` does it: the batch is the shape that can make an
+			// unauthenticated caller's mistake expensive.
+			const body: unknown = req.body;
+			if (typeof body !== "object" || body === null || Array.isArray(body)) {
+				res.status(400).json(errorBody("invalid_request", "body must be an object"));
 				return;
 			}
-
-			const raw = (req.body as { decisions?: unknown } | undefined)?.decisions;
+			const unknownKeys = Object.keys(body).filter((key) => key !== "decisions");
+			if (unknownKeys.length > 0) {
+				res
+					.status(400)
+					.json(
+						errorBody(
+							"invalid_request",
+							`body has unknown properties: ${describeUnknownKeys(unknownKeys)} (only decisions is accepted)`,
+						),
+					);
+				return;
+			}
+			const raw = (body as { decisions?: unknown }).decisions;
 			if (!Array.isArray(raw) || raw.length === 0) {
 				res.status(400).json(errorBody("invalid_request", "decisions must be a non-empty array"));
 				return;
@@ -334,12 +584,23 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			// one malformed entry gets told which, rather than a partial answer.
 			const entries: ValidatedDecisionRequest[] = [];
 			for (const [index, item] of raw.entries()) {
-				const parsed = parseDecisionRequest(item, `decisions[${index}]`, config.resourceParser);
+				const parsed = parseDecisionRequest(
+					item,
+					`decisions[${index}]`,
+					config.resourceParser,
+					limits,
+				);
 				if (!parsed.ok) {
 					res.status(400).json(errorBody("invalid_request", parsed.error));
 					return;
 				}
 				entries.push(parsed.entry);
+			}
+
+			const auth = await authenticator.authenticate(req.get("authorization"));
+			if (!auth.ok) {
+				res.status(401).json(errorBody(auth.code, auth.message));
+				return;
 			}
 
 			const decisions = await Promise.all(entries.map((entry) => decide(req, auth.payload, entry)));
@@ -350,7 +611,81 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 		}
 	});
 
+	/*
+	 * Terminal error handler (#118, and item 6 of #126).
+	 *
+	 * `express.json()` rejects before either route runs, so its failures never
+	 * reached the try/catch above and fell through to Express's default handler
+	 * — an HTML page, carrying a stack trace outside production. A client that
+	 * parses only decision JSON has no way to read that, and "every non-allow
+	 * answer is a deny" stops being something the endpoint actually does.
+	 *
+	 * It is mounted on the router rather than on the app so that
+	 * `createVerifyRouter` is self-contained: a consumer mounting it on their own
+	 * Express app gets the envelope without wiring anything, and `createApp`
+	 * inherits it. Four arguments, because that is how Express tells an error
+	 * handler from a middleware.
+	 */
+	const denyOnBodyFailure: express.ErrorRequestHandler = (err, req, res, next) => {
+		// A failure after the response started is not ours to rewrite; handing it
+		// back lets Express close the connection.
+		if (res.headersSent) {
+			next(err);
+			return;
+		}
+		const failure = bodyParserFailure(err);
+		if (failure) {
+			res.status(failure.status).json(errorBody(failure.code, failure.message));
+			return;
+		}
+		// `req.path`, not a literal: this handler covers both routes, and anything
+		// mounted on the router that never reached one of them.
+		logger.error({ err, endpoint: req.path }, "verify_internal_error");
+		res.status(500).json(errorBody("internal_error", "Internal server error"));
+	};
+	router.use(denyOnBodyFailure);
+
 	return router;
+}
+
+/**
+ * Maps a body-parser failure onto a status and a deny code, or `undefined` when
+ * the error is not one.
+ *
+ * body-parser tags every failure it raises with a stable `type`, which is what
+ * is matched here — `err.message` carries a fragment of the caller's body and
+ * `err.status` alone would not tell an oversized body from an unreadable
+ * charset. None of the messages echo anything the caller sent: a parse failure
+ * is reported as a parse failure, not by quoting the bytes that caused it.
+ */
+function bodyParserFailure(
+	err: unknown,
+): { status: number; code: string; message: string } | undefined {
+	switch ((err as { type?: unknown } | null)?.type) {
+		case "entity.too.large":
+			return {
+				status: 413,
+				code: "payload_too_large",
+				message: "Request body exceeds the configured limit",
+			};
+		case "entity.parse.failed":
+			return { status: 400, code: "invalid_request", message: "Request body is not valid JSON" };
+		case "encoding.unsupported":
+		case "charset.unsupported":
+			return {
+				status: 415,
+				code: "unsupported_media_type",
+				message: "Request body must be application/json encoded as UTF-8",
+			};
+		case "request.aborted":
+			return {
+				status: 400,
+				code: "invalid_request",
+				message: "Request body was not fully received",
+			};
+		default:
+			return undefined;
+	}
 }
 
 /**

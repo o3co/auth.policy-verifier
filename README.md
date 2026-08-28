@@ -265,8 +265,55 @@ resource {
 verify {
   maxBatchSize = 50             # cap on POST /verify/batch entries
   maxBatchSize = ${?VERIFY_MAX_BATCH_SIZE}
+  maxBodyBytes = 65536          # JSON body ceiling; over it → 413 payload_too_large
+  maxBodyBytes = ${?VERIFY_MAX_BODY_BYTES}
+  maxResourceLength = 512       # characters in `resource`
+  maxResourceLength = ${?VERIFY_MAX_RESOURCE_LENGTH}
+  maxActionLength = 64          # characters in `action`
+  maxActionLength = ${?VERIFY_MAX_ACTION_LENGTH}
+  maxContextEntries = 64        # properties + array elements in `context`, at every depth
+  maxContextEntries = ${?VERIFY_MAX_CONTEXT_ENTRIES}
+  maxContextValueLength = 1024  # characters in any `context` string, keys included
+  maxContextValueLength = ${?VERIFY_MAX_CONTEXT_VALUE_LENGTH}
 }
 ```
+
+### Request Limits
+
+Every input a caller controls is bounded, and each bound is one of the knobs above. `maxBodyBytes`
+is the outer envelope — `express.json()`'s limit, below Express's unstated 100 KB default — and it
+is what binds first on a large batch, since the per-field limits bound *one* entry rather than N of
+them. `maxContextEntries` counts every property and every array element in the whole `context`
+tree, so nesting is bounded rather than forbidden (`RequestContextAttributeCollector` reads dot
+paths such as `tenant.id`); because each level of nesting costs at least one entry, it bounds the
+depth too.
+
+Three refusals are worth stating outright:
+
+- **Whitespace in `resource` or `action` is refused, not trimmed** — the doctrine the resource
+  grammar already applies, extended to `action` and to a deployment that registered its own parser.
+  Both are concatenated into the `{action}:{resourceType}` scope an issuer has to have granted, and
+  RFC 6749 §3.3 makes space the delimiter between scope values.
+- **Unknown properties are refused** — `{"resource": "project:1", "action": "read", "subject": "admin"}`
+  is `400 invalid_request` rather than a decision with the `subject` quietly ignored. The subject
+  comes from the verified token and never from the body; refusing is how a caller finds that out.
+- **The body is validated before the token is verified**, so a malformed request is `400` whether or
+  not a token was presented. The body checks are bounded by the limits above, while verifying a
+  token is the half that can reach the network. An anonymous caller therefore learns whether a body
+  was well-formed; `http.callerAuth` is the gate for a deployment that must not disclose even that.
+
+A body the parser itself refuses answers the same deny envelope as everything else — the endpoint
+never falls back to Express's HTML error page:
+
+```json
+{"decision": "deny", "code": "invalid_request", "message": "Request body is not valid JSON"}
+```
+
+That is `400` for malformed JSON, `413 payload_too_large` over `maxBodyBytes`, and
+`415 unsupported_media_type` for a content type or charset it cannot read. The example above is the
+response body verbatim; `verifyInputValidation.test.mts` asserts that this exact line appears in
+`README.md`, `README.ja.md` and `CHANGELOG.md` and parses to what the endpoint emits, so the three
+copies cannot drift from the code or from each other.
 
 ### Resource String Format (DotNotation)
 

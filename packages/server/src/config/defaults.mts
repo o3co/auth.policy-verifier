@@ -17,6 +17,80 @@
 export const DEFAULT_MAX_BATCH_SIZE = 50;
 
 /*
+ * Bounds on what one `/verify` request may carry (#118).
+ *
+ * Before these, the endpoint relied on Express's default 100 KB JSON limit and
+ * checked only that `resource` and `action` were non-empty strings: a
+ * whitespace-only resource passed, `context` could be arbitrarily wide and
+ * deep, and unknown properties rode along silently. Every one of them is an
+ * input a caller chooses, and none of them had a stated size.
+ *
+ * They are numeric knobs like every other, read through `resolveBound` at both
+ * boundaries (#157). The values below are deliberately generous for a real
+ * caller and small for a prober: `resource` and `action` are structural
+ * identifiers, not free text, and `context` is a handful of declared fields a
+ * collector was configured to promote.
+ */
+
+/**
+ * Ceiling on the JSON body `POST /verify` and `POST /verify/batch` will read,
+ * in bytes — the `limit` handed to `express.json()`.
+ *
+ * 64 KiB, which is below Express's unstated 100 KB default and therefore a
+ * tightening: a body over it is refused by the parser before any of it is held
+ * in memory as objects. This is the outer envelope, and it is the bound that
+ * binds first on a large batch — the per-field limits below say what *one*
+ * entry may carry, not what N of them add up to. A deployment sending wide
+ * contexts across a full 50-entry batch raises this knob.
+ */
+export const DEFAULT_MAX_BODY_BYTES = 65_536;
+
+/**
+ * Ceiling on the `resource` string, in characters.
+ *
+ * Generous for the identifiers the shipped grammar describes
+ * (`org:123.project:abc.document:42` is 31 characters) and for a percent-encoded
+ * id, while still bounding what the configured `ResourceParser` — which the
+ * router now runs before the token is verified — is handed.
+ */
+export const DEFAULT_MAX_RESOURCE_LENGTH = 512;
+
+/**
+ * Ceiling on the `action` string, in characters.
+ *
+ * Shorter than `resource` because an action is a verb, not a path: `read`,
+ * `write`, `admin:manage`. It is also concatenated into the
+ * `{action}:{resourceType}` scope `ResourceActionScopeRuleCollector` requires,
+ * so a long one names a scope no issuer could grant.
+ */
+export const DEFAULT_MAX_ACTION_LENGTH = 64;
+
+/**
+ * Ceiling on the size of the request `context`, counted as every property and
+ * every array element in the whole tree, at every depth.
+ *
+ * Counted over the tree rather than over the top-level keys because nesting is
+ * a supported shape — `RequestContextAttributeCollector` reads dot paths such
+ * as `tenant.id` — so forbidding it would break a documented feature while
+ * bounding only the shallowest measure of size.
+ *
+ * It is also what bounds the *depth*: each level of nesting costs at least one
+ * entry, so a context inside this bound can be at most this deep, and no
+ * separate depth knob is needed to keep the validating walk finite.
+ */
+export const DEFAULT_MAX_CONTEXT_ENTRIES = 64;
+
+/**
+ * Ceiling on every string inside `context`, in characters — property names and
+ * string values alike.
+ *
+ * A collector reads declared fields out of `requestContext` and promotes them
+ * into attributes that rules compare; a kilobyte is far more than any such
+ * field is, and a value larger than that is a payload rather than an attribute.
+ */
+export const DEFAULT_MAX_CONTEXT_VALUE_LENGTH = 1_024;
+
+/*
  * Bounds on the remote JWKS fetch (#109). A key resolution that misses the
  * cache happens inside a verify request, so an unbounded fetch is a stall
  * vector on the decision hot path: every caller of a deployment whose provider
