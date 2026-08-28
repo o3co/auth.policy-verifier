@@ -31,7 +31,7 @@ This contract guarantees that rules are pure functions of attributes: testable i
 
 - `ATTR_*` constants are restricted to well-known OAuth 2.0 / OIDC and RBAC concepts: scopes, permissions, roles, subject user id (JWT `sub`), client id (JWT `azp`). These are concepts every consumer of the ABAC engine shares, and they originate from transport-neutral standards (not tied to a specific interceptor or wire format).
 - Domain-specific attribute keys (business identifiers, tenant flags, protocol-specific fields) **must not** be added to core. They belong to the consuming service, which declares its own constants and reads/writes the same `Attributes` map.
-- Core **does not** assume a shape for `CollectorContext.requestContext`. This field is a free-form container whose contents are defined by the interceptor/transport layer of each consuming project. Core provides only the hook — consumers provide the interpretation via their own `AttributeCollector` implementations.
+- Core **does not** assume a shape for `CollectorContext.requestContext`. This field is a free-form container whose contents are defined by the interceptor/transport layer of each consuming project. Core provides only the hook — consumers provide the interpretation via their own `AttributeCollector` implementations. It is also the only caller-controlled input on the context, so its type is the opaque `UntrustedRequestContext`: reading it takes an explicit `readUntrustedRequestContext(...)`. See [docs/extending.md — The trust boundary](docs/extending.md#the-trust-boundary-requestcontext-is-the-callers).
 
 When tempted to add a new `ATTR_*` or a built-in collector that reads a specific `requestContext` key, stop and ask:
 
@@ -43,19 +43,20 @@ When tempted to add a new `ATTR_*` or a built-in collector that reads a specific
 Consuming projects wire their interceptor's `requestContext` into attributes by implementing focused collectors, one per field they care about (or grouped logically). A collector should:
 
 1. Read exactly the fields it intends to promote.
-2. Validate the shape of each value (type, non-empty, format) — `requestContext` is unvalidated free-form data.
+2. Validate the shape of each value (type, non-empty, format) — `requestContext` is unvalidated free-form data, supplied by the caller.
 3. Write into the `Attributes` map under the project's own constant keys.
 
 ```typescript
 // project-side: collectors/SubscriberDidCollector.mts
 import type { AttributeCollector, Attributes, CollectorContext } from "@o3co/auth.policy-verifier.core";
+import { readUntrustedRequestContext } from "@o3co/auth.policy-verifier.core";
 
 export const ATTR_SUBSCRIBER_DID = "subscriberDid" as const;
 
 export class SubscriberDidCollector implements AttributeCollector {
   async collect(context: CollectorContext): Promise<Attributes> {
     const attrs: Attributes = new Map();
-    const v = context.requestContext?.subscriber_did;
+    const v = readUntrustedRequestContext(context.requestContext)?.subscriber_did;
     if (typeof v === "string" && v.length > 0) {
       attrs.set(ATTR_SUBSCRIBER_DID, v);
     }

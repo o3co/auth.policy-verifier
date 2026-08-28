@@ -100,6 +100,7 @@ interface ModuleContext {
 | `ResourceParser` | `parse(raw: string): Resource` — 生のリソース文字列を `Resource` に変換する。パース対象の構文に合わない文字列には `ResourceParseError` を送出する |
 | `ResourceParseError` | `raw`（拒否した文字列）と `detail`（理由）を持つ `Error` サブクラス。サーバーエラーではなく**リクエスト**エラーであり、トランスポート層は 400 系で応答する。クラスとして export されるため `instanceof` で絞り込める |
 | `CollectorContext` | 各コレクターに渡される入力: `payload`、`resource`、`action`、省略可能な `headers` と `requestContext` |
+| `UntrustedRequestContext` | `requestContext` の型 — 呼び出し側のデータであり、読むには明示的な `readUntrustedRequestContext(...)` が必要な形で封じられている。トランスポート境界で生成するのは `markUntrustedRequestContext(...)`。[docs/extending.ja.md — 信頼境界](../../docs/extending.ja.md#信頼境界-requestcontext-は呼び出し側のもの) を参照 |
 | `Attributes` | `Map<string, unknown>` — サブジェクト属性のバッグ |
 | `AttributeCollector` | `collect(context: CollectorContext): Promise<Attributes>` |
 | `Rule` | `{ ruleType: string; code: string; message: string; verify(attrs: Attributes): boolean }` |

@@ -17,6 +17,8 @@ import {
 	type Rule,
 	type RuleCollector,
 	RulePipeline,
+	readUntrustedRequestContext,
+	type UntrustedRequestContext,
 } from "@o3co/auth.policy-verifier.core";
 import express from "express";
 import { exportSPKI, SignJWT } from "jose";
@@ -155,7 +157,7 @@ describe("POST /verify", () => {
 	class SubscriberDidCollector implements AttributeCollector {
 		async collect(context: CollectorContext): Promise<Attributes> {
 			const attrs: Attributes = new Map();
-			const v = context.requestContext?.subscriber_did;
+			const v = readUntrustedRequestContext(context.requestContext)?.subscriber_did;
 			if (typeof v === "string" && v.length > 0) {
 				attrs.set(ATTR_SUBSCRIBER_DID, v);
 			}
@@ -223,6 +225,85 @@ describe("POST /verify", () => {
 		expect(res.status).toBe(403);
 		expect(res.body.decision).toBe("deny");
 		expect(res.body.code).toBe("missing_subscriber_did");
+	});
+
+	it("hands collectors the body context marked untrusted, not the raw object", async () => {
+		// The body's `context` is whatever the caller typed. It must not arrive at a
+		// collector shaped like the claim set next to it, or promoting
+		// `requestContext.role` into an attribute reads like promoting `payload.sub`
+		// and the caller has written its own authorization input.
+		const seen: Array<UntrustedRequestContext | undefined> = [];
+		const recordingCollector: AttributeCollector = {
+			async collect(context: CollectorContext) {
+				seen.push(context.requestContext);
+				return new Map();
+			},
+		};
+		const recordingApp = express();
+		recordingApp.use(
+			createVerifyRouter({
+				jwt: {
+					validate: true,
+					key: hs256Key.key,
+					algorithms: hs256Key.algorithms,
+					issuer: ISSUER,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				},
+				resourceParser: new DotNotationResourceParser(),
+				attributePipeline: new AttributePipeline([recordingCollector]),
+				rulePipeline: new RulePipeline([]),
+			}),
+		);
+
+		const token = await signHS256Token({});
+		await request(recordingApp)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read", context: { role: "admin" } });
+
+		expect(seen).toHaveLength(1);
+		// Sealed: nothing readable without the accessor, so a serializer walking
+		// the collector context cannot copy the caller's payload out of it either.
+		expect(Object.keys(seen[0] as object)).toEqual([]);
+		expect(readUntrustedRequestContext(seen[0])).toEqual({ role: "admin" });
+	});
+
+	it("leaves requestContext absent when the body carried no context", async () => {
+		const seen: Array<UntrustedRequestContext | undefined> = [];
+		const recordingCollector: AttributeCollector = {
+			async collect(context: CollectorContext) {
+				seen.push(context.requestContext);
+				return new Map();
+			},
+		};
+		const recordingApp = express();
+		recordingApp.use(
+			createVerifyRouter({
+				jwt: {
+					validate: true,
+					key: hs256Key.key,
+					algorithms: hs256Key.algorithms,
+					issuer: ISSUER,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				},
+				resourceParser: new DotNotationResourceParser(),
+				attributePipeline: new AttributePipeline([recordingCollector]),
+				rulePipeline: new RulePipeline([]),
+			}),
+		);
+
+		const token = await signHS256Token({});
+		await request(recordingApp)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		// An omitted context stays `undefined` rather than becoming an empty
+		// marked record, so `readUntrustedRequestContext(...)?.field` still tells
+		// "no context" apart from "context with nothing in it".
+		expect(seen).toEqual([undefined]);
 	});
 
 	it("returns 401 for expired JWT", async () => {
@@ -895,7 +976,7 @@ describe("POST /verify/batch (#124)", () => {
 		const contexts: Array<Record<string, unknown> | undefined> = [];
 		const recordingCollector: AttributeCollector = {
 			async collect(context: CollectorContext) {
-				contexts.push(context.requestContext);
+				contexts.push(readUntrustedRequestContext(context.requestContext));
 				return new Map();
 			},
 		};

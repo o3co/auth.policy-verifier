@@ -38,7 +38,7 @@ npm install @o3co/auth.policy-verifier.builtins
 
 各マッピングは `{ from: string; to?: string; type?: "string" | "number" | "boolean" | "string[]" }` で、`type` の既定は `"string"` です。マッピング定義が不正ならコンストラクタで throw しますが、*値* が使えない場合は throw しません — `requestContext` は呼び出し側が渡すリクエストデータなので、欠落・空文字・宣言した型に合わない値は単に昇格されません。
 
-この宣言が信頼境界です。`requestContext` は自由形式かつ未検証なので、**宣言していないフィールドは attribute になりません**。dot path は own property のみを辿るため `constructor.name` のような指定は何も読みません。このコレクター自身は語彙を持ち込みません — フィールド名もキー名も運用者が決めるため、[AGENTS.md — Core Vocabulary Scope](../../AGENTS.md#core-vocabulary-scope) の方針を崩さずに実用的なものを提供できます。read-check-write を超える処理（値の導出、外部ストア参照など）が必要な場合は、同節が説明するプロジェクト側の `AttributeCollector` を書いてください。
+この宣言が信頼境界です — [docs/extending.ja.md](../../docs/extending.ja.md#信頼境界-requestcontext-は呼び出し側のもの) が説明する境界の、既製の守り方がこのコレクターです。`requestContext` は自由形式かつ未検証なので、**宣言していないフィールドは attribute になりません**。dot path は own property のみを辿るため `constructor.name` のような指定は何も読みません。このコレクター自身は語彙を持ち込みません — フィールド名もキー名も運用者が決めるため、[AGENTS.md — Core Vocabulary Scope](../../AGENTS.md#core-vocabulary-scope) の方針を崩さずに実用的なものを提供できます。read-check-write を超える処理（値の導出、外部ストア参照など）が必要な場合は、同節が説明するプロジェクト側の `AttributeCollector` を書いてください。
 
 ## Rules
 

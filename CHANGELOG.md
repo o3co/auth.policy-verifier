@@ -10,6 +10,57 @@ and version sections follow the release labeling policy in
 
 ### Security
 
+- **BREAKING**: `CollectorContext.requestContext` is now an opaque
+  `UntrustedRequestContext` instead of a `Record<string, unknown>`, so
+  caller-supplied request data cannot be read without saying that is what it is
+  ([#123](https://github.com/o3co/auth.policy-verifier/issues/123)).
+
+  The request body's `context` is forwarded verbatim to every collector, and it
+  arrived shaped exactly like the claim set beside it. A collector promoting
+  `requestContext.role` into `ATTR_ROLES` is one line, indistinguishable at a
+  glance from the line promoting `payload.sub` — and it hands any token holder
+  the authorization input for its own request. Nothing in the type system marked
+  the difference between "the issuer signed this" and "the caller typed this".
+
+  Now the type marks it. `requestContext` carries its record behind a private
+  symbol, which makes property access a compile error and leaves exactly one way
+  in — `readUntrustedRequestContext(...)`, named for what it hands back. The
+  brand is not a validation step and does not decide what a deployment may
+  trust; it makes the trust level of every read visible at the line that reads
+  it, and in review.
+
+  **What a collector author must change** — every collector or rule collector
+  that touches `requestContext`, one line each:
+
+  ```diff
+  -const v = context.requestContext?.subscriber_did;
+  +const v = readUntrustedRequestContext(context.requestContext)?.subscriber_did;
+  ```
+
+  `readUntrustedRequestContext` is exported from
+  `@o3co/auth.policy-verifier.core` and returns `Record<string, unknown> |
+  undefined`, so an existing `?.` chain and the narrowing after it are unchanged
+  — only the access is. Collectors that never read `requestContext` need no
+  change, and no configuration key moves. `RequestContextAttributeCollector` in
+  `builtins` is already updated, so a deployment that promotes context fields
+  through config sees nothing at all.
+
+  **A transport that builds a `CollectorContext` by hand** — a custom
+  interceptor, or a test fixture — marks the record on the way in with
+  `markUntrustedRequestContext(raw)`, which is the only thing that mints the
+  brand. This repo's verify route does it for the HTTP body; a raw object no
+  longer type-checks as a `requestContext`, which is what stops one reaching
+  collectors unmarked.
+
+  The seal is a runtime one as well: the payload hangs off a symbol key, so a
+  serializer walking a `CollectorContext` — an audit line, a debug dump —
+  cannot copy the caller's data out of it by accident.
+
+  **Not changed, deliberately:** nothing validates or allowlists context keys at
+  the framework level. Which fields a deployment may trust is not something the
+  framework can know, and `RequestContextAttributeCollector` already offers the
+  declared-allowlist shape for operators who want one.
+
 - **BREAKING**: a bearer token must now carry `exp` **and** `iat`, and is
   refused if it does not
   ([#110](https://github.com/o3co/auth.policy-verifier/issues/110)). jose

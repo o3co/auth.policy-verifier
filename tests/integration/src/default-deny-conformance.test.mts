@@ -3,7 +3,7 @@
 
 import { ResourceActionScopeRuleCollector } from "@o3co/auth.policy-verifier.builtins";
 import type { Attributes, CollectorContext } from "@o3co/auth.policy-verifier.core";
-import { evaluate } from "@o3co/auth.policy-verifier.core";
+import { evaluate, markUntrustedRequestContext } from "@o3co/auth.policy-verifier.core";
 import {
 	type AuthorizationRequest,
 	describeDefaultDenyConformance,
@@ -16,7 +16,10 @@ function toCollectorContext(request: AuthorizationRequest): CollectorContext {
 		payload: { sub: request.subject },
 		resource: { raw: request.resource, resourceType, resourceId },
 		action: request.action,
-		requestContext: request.context,
+		// The engine-neutral request's `context` is the caller's own, the same as
+		// an HTTP body's — an adapter marks it on the way in, exactly as the verify
+		// route does.
+		requestContext: request.context ? markUntrustedRequestContext(request.context) : undefined,
 	};
 }
 
