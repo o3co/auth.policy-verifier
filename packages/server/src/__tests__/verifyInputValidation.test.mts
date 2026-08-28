@@ -4,7 +4,7 @@
 /*
  * Request validation on the decision endpoints (#118).
  *
- * Three things are pinned here, and #125 will pin them again from the outside:
+ * Three things are pinned here:
  *
  * 1. Every input a caller controls is bounded by a stated limit — body bytes,
  *    `resource` and `action` length, and the shape of `context` — and each
@@ -12,6 +12,15 @@
  * 2. The body is validated BEFORE the token is verified, so a malformed
  *    unauthenticated request is answered 400 rather than 401.
  * 3. A body-parser failure answers the deny envelope, not Express's HTML page.
+ *
+ * Points 2 and 3 are wire-visible, and #125 now pins them from outside this
+ * package too, in `tests/integration/src/conformance/wireContract.mts`. The two
+ * suites are not copies of one another: this one holds the limits to their
+ * *configured numbers* and to the two-boundary agreement, which is
+ * package-internal; the conformance suite holds the *answers* to the shape an
+ * enforcement layer implements against. Where they would otherwise have stated
+ * the same literal — the deny envelope the READMEs print — this file reads the
+ * conformance fixture rather than keeping a second copy of it.
  */
 
 import { readFileSync } from "node:fs";
@@ -42,13 +51,32 @@ import {
 import { HS256KeyResolverFactory } from "#/jwt/index.mjs";
 import { createVerifyRouter, type VerifyRouterConfig } from "#/routes/verify.mjs";
 
+/** Repo root, four levels up from `packages/server/src/__tests__`. */
+const repoRoot = new URL("../../../../", import.meta.url);
+
 /**
  * The deny envelope exactly as `README.md`, `README.ja.md` and `CHANGELOG.md`
- * print it for a body the parser refuses. One literal, checked against the
- * route's own answer and against all three files — see the last describe.
+ * print it for a body the parser refuses, checked against the route's own
+ * answer and against all three files — see the last describe.
+ *
+ * **Read from the #125 conformance fixture, not restated here.** That file is
+ * the contract an enforcement layer implements against, and a literal here
+ * would have been a fourth copy of a shape whose three existing copies are the
+ * reason this describe exists. It is read as bytes rather than imported because
+ * the fixture is a data file another repository consumes by path — see
+ * `tests/integration/src/conformance/wireContract.mts`.
  */
-const DOCUMENTED_DENY_ENVELOPE =
-	'{"decision": "deny", "code": "invalid_request", "message": "Request body is not valid JSON"}';
+const DOCUMENTED_DENY_ENVELOPE = (
+	JSON.parse(
+		readFileSync(
+			new URL(
+				"tests/integration/src/conformance/fixtures/wireContract/responseEnvelopes.json",
+				repoRoot,
+			),
+			"utf8",
+		),
+	) as { error: { documentedExample: string } }
+).error.documentedExample;
 
 /** 64 hex characters — 32 decoded bytes, the entropy floor #114 enforces. */
 const JWT_SECRET = "11".repeat(32);
@@ -530,13 +558,11 @@ describe("the documented deny envelope is the one the endpoint emits (#118, #125
 	 * literal, asserted to be valid JSON, to equal what the route actually
 	 * answers, and to appear verbatim in every file that documents it.
 	 *
-	 * #125 will pin the same contract from outside the repo. Both should be
-	 * describing this object.
+	 * #125 pins the same contract from outside the repo, and `DOCUMENTED_DENY_
+	 * ENVELOPE` above is now read from its fixture: there is one object, and
+	 * both suites describe it.
 	 */
 	const documentedIn = ["README.md", "README.ja.md", "CHANGELOG.md"] as const;
-
-	/** Repo root, four levels up from `packages/server/src/__tests__`. */
-	const repoRoot = new URL("../../../../", import.meta.url);
 
 	it("is valid JSON", () => {
 		expect(() => JSON.parse(DOCUMENTED_DENY_ENVELOPE)).not.toThrow();

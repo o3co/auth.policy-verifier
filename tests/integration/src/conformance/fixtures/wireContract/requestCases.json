@@ -1,0 +1,393 @@
+{
+	"about": [
+		"Every request the decision endpoints refuse, and the status and code each one is",
+		"refused with. One row per wire-visible behaviour, as data rather than as test code,",
+		"so an enforcement layer implementing against this endpoint can read the same table.",
+		"`credential` names what the sender puts in the Authorization header; the adapter",
+		"mints it. `payload.kind` is `json` (sent as application/json), `text` (sent",
+		"verbatim under `contentType`), `overBodyLimit` or `overBatchSize` (the adapter",
+		"builds one past the limit its own deployment is configured with — the contract is",
+		"that a limit exists and how it answers, not what the number is).",
+		"The whole table is pinned as it stands AFTER #118 reordered body validation ahead",
+		"of authentication. Three rows below answered 401 before that change and answer 400",
+		"now, and three more answered with Express's HTML error page and now answer this",
+		"envelope. All six carry \"issue\": \"#118\", so a reader who finds an older client",
+		"disagreeing with this table knows which side moved and when."
+	],
+	"cases": [
+		{
+			"id": "verify/body-is-an-array",
+			"pins": "the body must be an object; a JSON array is not one",
+			"issue": "#118",
+			"endpoint": "/verify",
+			"credential": "valid",
+			"payload": { "kind": "json", "value": [] },
+			"expect": { "status": 400, "code": "invalid_request" }
+		},
+		{
+			"id": "verify/resource-missing",
+			"pins": "resource is required",
+			"issue": "#18",
+			"endpoint": "/verify",
+			"credential": "valid",
+			"payload": { "kind": "json", "value": { "action": "read" } },
+			"expect": { "status": 400, "code": "invalid_request" }
+		},
+		{
+			"id": "verify/action-missing",
+			"pins": "action is required",
+			"issue": "#18",
+			"endpoint": "/verify",
+			"credential": "valid",
+			"payload": { "kind": "json", "value": { "resource": "project:1" } },
+			"expect": { "status": 400, "code": "invalid_request" }
+		},
+		{
+			"id": "verify/resource-empty",
+			"pins": "an empty resource is not a resource",
+			"issue": "#18",
+			"endpoint": "/verify",
+			"credential": "valid",
+			"payload": { "kind": "json", "value": { "resource": "", "action": "read" } },
+			"expect": { "status": 400, "code": "invalid_request" }
+		},
+		{
+			"id": "verify/action-empty",
+			"pins": "an empty action is not an action",
+			"issue": "#18",
+			"endpoint": "/verify",
+			"credential": "valid",
+			"payload": { "kind": "json", "value": { "resource": "project:1", "action": "" } },
+			"expect": { "status": 400, "code": "invalid_request" }
+		},
+		{
+			"id": "verify/resource-not-a-string",
+			"pins": "resource is a string, and a number is not coerced into one",
+			"issue": "#18",
+			"endpoint": "/verify",
+			"credential": "valid",
+			"payload": { "kind": "json", "value": { "resource": 42, "action": "read" } },
+			"expect": { "status": 400, "code": "invalid_request" }
+		},
+		{
+			"id": "verify/resource-with-inner-whitespace",
+			"pins": "whitespace inside resource is refused, not trimmed away",
+			"issue": "#118",
+			"endpoint": "/verify",
+			"credential": "valid",
+			"payload": { "kind": "json", "value": { "resource": "project: 1", "action": "read" } },
+			"expect": { "status": 400, "code": "invalid_request" }
+		},
+		{
+			"id": "verify/resource-with-surrounding-whitespace",
+			"pins": "a padded resource is refused rather than trimmed into a different one",
+			"issue": "#118",
+			"endpoint": "/verify",
+			"credential": "valid",
+			"payload": { "kind": "json", "value": { "resource": " project:1 ", "action": "read" } },
+			"expect": { "status": 400, "code": "invalid_request" }
+		},
+		{
+			"id": "verify/action-with-whitespace",
+			"pins": "whitespace in action is refused too — RFC 6749 §3.3 makes space the scope delimiter",
+			"issue": "#118",
+			"endpoint": "/verify",
+			"credential": "valid",
+			"payload": { "kind": "json", "value": { "resource": "project:1", "action": "read all" } },
+			"expect": { "status": 400, "code": "invalid_request" }
+		},
+		{
+			"id": "verify/resource-the-parser-refuses",
+			"pins": "a resource string the configured parser refuses is the caller's syntax error, not a 500",
+			"issue": "#117",
+			"endpoint": "/verify",
+			"credential": "valid",
+			"payload": { "kind": "json", "value": { "resource": "a..b", "action": "read" } },
+			"expect": { "status": 400, "code": "invalid_request" }
+		},
+		{
+			"id": "verify/unknown-property-subject",
+			"pins": "a body-supplied subject is refused and named, never quietly dropped",
+			"issue": "#118",
+			"endpoint": "/verify",
+			"credential": "valid",
+			"payload": {
+				"kind": "json",
+				"value": { "resource": "project:1", "action": "read", "subject": "admin" }
+			},
+			"expect": { "status": 400, "code": "invalid_request" },
+			"messageMentions": ["subject"]
+		},
+		{
+			"id": "verify/unknown-property-misspelled",
+			"pins": "a misspelled property is named rather than ignored",
+			"issue": "#118",
+			"endpoint": "/verify",
+			"credential": "valid",
+			"payload": {
+				"kind": "json",
+				"value": { "resource": "project:1", "action": "read", "contxt": { "tenant_id": "acme" } }
+			},
+			"expect": { "status": 400, "code": "invalid_request" },
+			"messageMentions": ["contxt"]
+		},
+		{
+			"id": "verify/context-is-an-array",
+			"pins": "context is an object; an array is a shape no collector expects",
+			"issue": "#124",
+			"endpoint": "/verify",
+			"credential": "valid",
+			"payload": {
+				"kind": "json",
+				"value": { "resource": "project:1", "action": "read", "context": [] }
+			},
+			"expect": { "status": 400, "code": "invalid_request" }
+		},
+		{
+			"id": "verify/context-is-null",
+			"pins": "an explicit null context is refused rather than read as an absent one",
+			"issue": "#118",
+			"endpoint": "/verify",
+			"credential": "valid",
+			"payload": {
+				"kind": "json",
+				"value": { "resource": "project:1", "action": "read", "context": null }
+			},
+			"expect": { "status": 400, "code": "invalid_request" }
+		},
+		{
+			"id": "verify/malformed-json",
+			"pins": "a body the parser cannot read answers the deny envelope, never Express's HTML page",
+			"issue": "#118",
+			"endpoint": "/verify",
+			"credential": "none",
+			"contentType": "application/json",
+			"payload": { "kind": "text", "text": "{\"resource\": \"project:1\", \"leaked-key\": " },
+			"expect": { "status": 400, "code": "invalid_request" },
+			"matchesDocumentedExample": true,
+			"mustNotEcho": ["leaked-key"]
+		},
+		{
+			"id": "verify/body-over-the-size-limit",
+			"pins": "a body over maxBodyBytes is a payload_too_large deny, not an Express 413 page",
+			"issue": "#118",
+			"endpoint": "/verify",
+			"credential": "valid",
+			"contentType": "application/json",
+			"payload": { "kind": "overBodyLimit" },
+			"expect": { "status": 413, "code": "payload_too_large" }
+		},
+		{
+			"id": "verify/unreadable-charset",
+			"pins": "a charset the parser cannot decode is 415, as the deny envelope",
+			"issue": "#118",
+			"endpoint": "/verify",
+			"credential": "valid",
+			"contentType": "application/json; charset=iso-8859-1",
+			"payload": { "kind": "text", "text": "{\"resource\":\"project:1\",\"action\":\"read\"}" },
+			"expect": { "status": 415, "code": "unsupported_media_type" }
+		},
+		{
+			"id": "verify/body-sent-as-text-plain",
+			"pins": "a content type express.json skips never becomes an object, and is refused as malformed",
+			"issue": "#118",
+			"endpoint": "/verify",
+			"credential": "valid",
+			"contentType": "text/plain",
+			"payload": { "kind": "text", "text": "resource=project:1&action=read" },
+			"expect": { "status": 400, "code": "invalid_request" },
+			"mustNotEcho": ["resource=project:1"]
+		},
+		{
+			"id": "verify/malformed-body-no-token",
+			"pins": "the body is checked before the token: 400, where this answered 401 missing_token before #118",
+			"issue": "#118",
+			"endpoint": "/verify",
+			"credential": "none",
+			"payload": { "kind": "json", "value": { "resource": "project:1" } },
+			"expect": { "status": 400, "code": "invalid_request" }
+		},
+		{
+			"id": "verify/malformed-body-unverifiable-token",
+			"pins": "same ordering with a token present that would not verify: 400, not 401 invalid_token",
+			"issue": "#118",
+			"endpoint": "/verify",
+			"credential": "unverifiable",
+			"payload": { "kind": "json", "value": { "resource": "   ", "action": "read" } },
+			"expect": { "status": 400, "code": "invalid_request" }
+		},
+		{
+			"id": "verify/well-formed-body-no-token",
+			"pins": "a usable body with no credential still falls through to 401 missing_token",
+			"issue": "#118",
+			"endpoint": "/verify",
+			"credential": "none",
+			"payload": { "kind": "json", "value": { "resource": "project:1", "action": "read" } },
+			"expect": { "status": 401, "code": "missing_token" }
+		},
+		{
+			"id": "verify/well-formed-body-unverifiable-token",
+			"pins": "a usable body with a token that does not verify is 401 invalid_token",
+			"issue": "#118",
+			"endpoint": "/verify",
+			"credential": "unverifiable",
+			"payload": { "kind": "json", "value": { "resource": "project:1", "action": "read" } },
+			"expect": { "status": 401, "code": "invalid_token" }
+		},
+		{
+			"id": "verify/unsupported-authorization-scheme",
+			"pins": "only the Bearer scheme is accepted, and the refusal has its own code",
+			"issue": "#17",
+			"endpoint": "/verify",
+			"credential": "unsupportedScheme",
+			"payload": { "kind": "json", "value": { "resource": "project:1", "action": "read" } },
+			"expect": { "status": 401, "code": "unsupported_scheme" }
+		},
+		{
+			"id": "batch/malformed-body-no-token",
+			"pins": "the batch endpoint checks its body before the token exactly as /verify does",
+			"issue": "#118",
+			"endpoint": "/verify/batch",
+			"credential": "none",
+			"payload": { "kind": "json", "value": { "decisions": [] } },
+			"expect": { "status": 400, "code": "invalid_request" }
+		},
+		{
+			"id": "batch/well-formed-body-no-token",
+			"pins": "a usable batch with no credential still falls through to 401 missing_token",
+			"issue": "#118",
+			"endpoint": "/verify/batch",
+			"credential": "none",
+			"payload": {
+				"kind": "json",
+				"value": { "decisions": [{ "resource": "project:1", "action": "read" }] }
+			},
+			"expect": { "status": 401, "code": "missing_token" }
+		},
+		{
+			"id": "batch/body-is-an-array",
+			"pins": "the batch envelope is an object, not the array of entries itself",
+			"issue": "#124",
+			"endpoint": "/verify/batch",
+			"credential": "valid",
+			"payload": { "kind": "json", "value": [{ "resource": "project:1", "action": "read" }] },
+			"expect": { "status": 400, "code": "invalid_request" }
+		},
+		{
+			"id": "batch/decisions-absent",
+			"pins": "decisions is required",
+			"issue": "#124",
+			"endpoint": "/verify/batch",
+			"credential": "valid",
+			"payload": { "kind": "json", "value": {} },
+			"expect": { "status": 400, "code": "invalid_request" }
+		},
+		{
+			"id": "batch/decisions-not-an-array",
+			"pins": "decisions is an array",
+			"issue": "#124",
+			"endpoint": "/verify/batch",
+			"credential": "valid",
+			"payload": { "kind": "json", "value": { "decisions": {} } },
+			"expect": { "status": 400, "code": "invalid_request" }
+		},
+		{
+			"id": "batch/decisions-empty",
+			"pins": "an empty batch is a malformed request rather than an empty answer",
+			"issue": "#124",
+			"endpoint": "/verify/batch",
+			"credential": "valid",
+			"payload": { "kind": "json", "value": { "decisions": [] } },
+			"expect": { "status": 400, "code": "invalid_request" }
+		},
+		{
+			"id": "batch/unknown-envelope-property",
+			"pins": "nothing rides beside decisions, and the refusal names what did",
+			"issue": "#118",
+			"endpoint": "/verify/batch",
+			"credential": "valid",
+			"payload": {
+				"kind": "json",
+				"value": {
+					"decisions": [{ "resource": "project:1", "action": "read" }],
+					"parallel": true
+				}
+			},
+			"expect": { "status": 400, "code": "invalid_request" },
+			"messageMentions": ["parallel"]
+		},
+		{
+			"id": "batch/entry-is-not-an-object",
+			"pins": "a batch names the offending index rather than the offending value",
+			"issue": "#124",
+			"endpoint": "/verify/batch",
+			"credential": "valid",
+			"payload": {
+				"kind": "json",
+				"value": { "decisions": [{ "resource": "project:1", "action": "read" }, "project:2"] }
+			},
+			"expect": { "status": 400, "code": "invalid_request" },
+			"messageMentions": ["decisions[1]"]
+		},
+		{
+			"id": "batch/entry-missing-action",
+			"pins": "one unusable entry refuses the whole batch, and the index says which",
+			"issue": "#124",
+			"endpoint": "/verify/batch",
+			"credential": "valid",
+			"payload": {
+				"kind": "json",
+				"value": {
+					"decisions": [{ "resource": "project:1", "action": "read" }, { "resource": "project:2" }]
+				}
+			},
+			"expect": { "status": 400, "code": "invalid_request" },
+			"messageMentions": ["decisions[1]"]
+		},
+		{
+			"id": "batch/entry-unknown-property",
+			"pins": "an entry's unknown property is refused, named, and located by index",
+			"issue": "#118",
+			"endpoint": "/verify/batch",
+			"credential": "valid",
+			"payload": {
+				"kind": "json",
+				"value": {
+					"decisions": [
+						{ "resource": "project:1", "action": "read" },
+						{ "resource": "project:2", "action": "read", "subject": "admin" }
+					]
+				}
+			},
+			"expect": { "status": 400, "code": "invalid_request" },
+			"messageMentions": ["decisions[1]", "subject"]
+		},
+		{
+			"id": "batch/entry-resource-the-parser-refuses",
+			"pins": "the resource grammar applies per entry, and the index says which entry broke it",
+			"issue": "#117",
+			"endpoint": "/verify/batch",
+			"credential": "valid",
+			"payload": {
+				"kind": "json",
+				"value": {
+					"decisions": [
+						{ "resource": "project:1", "action": "read" },
+						{ "resource": "a..b", "action": "read" }
+					]
+				}
+			},
+			"expect": { "status": 400, "code": "invalid_request" },
+			"messageMentions": ["decisions[1]"]
+		},
+		{
+			"id": "batch/over-the-entry-cap",
+			"pins": "a batch past maxBatchSize is refused whole, before any entry is decided",
+			"issue": "#157",
+			"endpoint": "/verify/batch",
+			"credential": "valid",
+			"payload": { "kind": "overBatchSize" },
+			"expect": { "status": 400, "code": "invalid_request" }
+		}
+	]
+}

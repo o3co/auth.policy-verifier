@@ -1,0 +1,53 @@
+{
+	"about": [
+		"The response envelopes POST /verify and POST /verify/batch answer with, as data.",
+		"Consumed by tests/integration/src/conformance/wireContract.mts and by",
+		"packages/server/src/__tests__/verifyInputValidation.test.mts, which reads",
+		"`error.documentedExample` rather than keeping a second copy of it. An enforcement",
+		"layer implementing against this endpoint (o3co/protobuf.interceptors) can read the",
+		"same file: it is JSON at a stable path, not a TypeScript literal.",
+		"Key lists are EXHAUSTIVE. A response carrying a key not named here is drift, and",
+		"the suite fails on the extra key as readily as on a missing one — an enforcement",
+		"layer that switched on a field this contract never promised is exactly the coupling",
+		"#125 exists to prevent."
+	],
+	"error": {
+		"keys": ["decision", "code", "message"],
+		"decision": "deny",
+		"documentedExample": "{\"decision\": \"deny\", \"code\": \"invalid_request\", \"message\": \"Request body is not valid JSON\"}"
+	},
+	"decision": {
+		"required": ["resource", "action", "decision", "reason"],
+		"optional": ["subject"],
+		"denyAlsoCarries": ["code", "message"],
+		"allowNeverCarries": ["code", "message"]
+	},
+	"batch": {
+		"keys": ["decisions"]
+	},
+	"ruleGroup": {
+		"required": ["ruleType", "passed", "evaluated"],
+		"onlyOnAPassingGroup": ["satisfiedBy"]
+	},
+	"ruleOutcome": {
+		"keys": ["code", "message", "passed"]
+	},
+	"status": {
+		"allow": 200,
+		"deny": 403,
+		"batchDecided": 200,
+		"invalidRequest": 400,
+		"unauthenticated": 401,
+		"payloadTooLarge": 413,
+		"unsupportedMediaType": 415
+	},
+	"codes": {
+		"invalidRequest": "invalid_request",
+		"missingToken": "missing_token",
+		"invalidToken": "invalid_token",
+		"unsupportedScheme": "unsupported_scheme",
+		"payloadTooLarge": "payload_too_large",
+		"unsupportedMediaType": "unsupported_media_type",
+		"collectorTimeout": "collector_timeout"
+	}
+}

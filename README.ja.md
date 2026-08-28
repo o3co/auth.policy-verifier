@@ -23,19 +23,21 @@ Authorization: Bearer <jwt>
   ┌──────────────────────────────────────────────────┐
   │                  /verify ハンドラ                  │
   │                                                   │
-  │  1. JWT 検証 (HS256 / RS256 / ES256 / EdDSA)     │
+  │  1. body 検証 (上限・文法・未知キー)               │
   │                                                   │
-  │  2. AttributeCollectors (並列)                    │
+  │  2. JWT 検証 (HS256 / RS256 / ES256 / EdDSA)     │
+  │                                                   │
+  │  3. AttributeCollectors (並列)                    │
   │     ├─ PayloadScopeCollector → JWT からスコープ   │
   │     ├─ PayloadSubjectIdCollector → サブジェクトID  │
   │     └─ (カスタム Collector...)                    │
   │                                                   │
-  │  3. RuleCollectors (並列)                         │
+  │  4. RuleCollectors (並列)                         │
   │     ├─ ResourceActionScopeRuleCollector            │
   │     │   → HasScope("read:project")                │
   │     └─ (カスタム RuleCollector...)                │
   │                                                   │
-  │  4. 評価                                          │
+  │  5. 評価                                          │
   │     ルールグループ内は OR、グループ間は AND          │
   │     全グループを評価 → 構造化 reason                │
   │                                                   │
@@ -47,6 +49,13 @@ POST /verify/batch — 同じ契約で、1 往復に N 件の decision
 {"decisions": [{"resource": "project:1", "action": "read"}, …]}
   → 200 {"decisions": [{…}, …]}   (順序は保持。全部 deny でも 200)
 ```
+
+ステップ 1 はステップ 2 の **前** に走る。不正な body は資格情報の有無にかかわらず
+`400 invalid_request` であり、body で拒否されたリクエストでは Collector は 1 つも動かない。
+その順序の理由と、匿名の呼び出し元が何を知り得るかは [リクエストの上限](#リクエストの上限) を参照。
+上図のステータス・コード・レスポンスキーを含む wire 契約全体は
+[`tests/integration/src/conformance/`](tests/integration/src/conformance/) が固定しており、
+そのフィクスチャは JSON なので enforcement 層は同じ表に対して実装できる。
 
 ## 特徴
 
