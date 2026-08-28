@@ -21,13 +21,13 @@ import {
 // belongs to the fan-out, and here the harness is the fan-out — it supplies a
 // revocable one of its own, for the same reason it wraps the rest.
 const scopeContext: CollectorRequest = {
-	payload: { sub: "user-1", scope: "read:project write:project" },
+	subject: { sub: "user-1", scope: "read:project write:project" },
 	resource: { raw: "project:1", resourceType: "project", resourceId: "1" },
 	action: "read",
 };
 
 const permissionContext: CollectorRequest = {
-	payload: { sub: "user-1" },
+	subject: { sub: "user-1" },
 	resource: { raw: "project:1", resourceType: "project", resourceId: "1" },
 	action: "read",
 };
@@ -169,9 +169,9 @@ describe("rule purity conformance — the check itself", () => {
 			const second = ctx.resource;
 			sameObjectTwice = first === second;
 			// Memoization must not collapse two different objects into one proxy.
-			distinctFieldsStayDistinct = (ctx.resource as object) !== (ctx.payload as object);
+			distinctFieldsStayDistinct = (ctx.resource as object) !== (ctx.subject as object);
 			// Identity holds through a nested read, not just a repeated top-level one.
-			survivesRoundTrip = new Set([ctx.resource, ctx.resource, ctx.payload]).size === 2;
+			survivesRoundTrip = new Set([ctx.resource, ctx.resource, ctx.subject]).size === 2;
 
 			const required = `${ctx.action}:${ctx.resource.resourceType}`;
 			return [

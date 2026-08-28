@@ -16,8 +16,8 @@ npm install @o3co/auth.policy-verifier.builtins
 
 | 名前 | 読み取り元 | 出力 | コンストラクタ引数 |
 | --- | --- | --- | --- |
-| `PayloadScopeCollector` | `payload.scope`（スペース区切り文字列） | `ATTR_SCOPES: string[]` | なし |
-| `PayloadSubjectIdCollector` | `payload.sub`、`payload.azp` | `ATTR_USER_ID`、`ATTR_CLIENT_ID` | なし |
+| `PayloadScopeCollector` | `subject.scope`（スペース区切り文字列） | `ATTR_SCOPES: string[]` | なし |
+| `PayloadSubjectIdCollector` | `subject.sub`、`subject.azp` | `ATTR_USER_ID`、`ATTR_CLIENT_ID` | なし |
 | `StaticPermissionCollector` | — | `ATTR_PERMISSIONS: string[]` | `{ permissions: string[] }` |
 | `StaticRoleCollector` | — | `ATTR_ROLES: Role[]` | `{ roles: Role[] }` |
 | `RequestContextAttributeCollector` | `requestContext` の宣言済みフィールド | 運用者が決めたキー | `{ attributes: Mapping[] }` |

@@ -48,7 +48,7 @@ describe("UntrustedRequestContext", () => {
 
 	it("types CollectorContext.requestContext as the marked form", () => {
 		const context: CollectorContext = {
-			payload: {},
+			subject: {},
 			resource: { raw: "project:1", resourceType: "project", resourceId: "1" },
 			action: "read",
 			requestContext: markUntrustedRequestContext({ tenant: "acme" }),

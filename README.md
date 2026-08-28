@@ -138,7 +138,7 @@ standalone → server   → core
           → builtins  → core
 ```
 
-- **core** — Types, `evaluate()`, `AttributePipeline`, `RulePipeline`, Module infrastructure. No runtime dependencies.
+- **core** — Types, `evaluate()`, `AttributePipeline`, `RulePipeline`, Module infrastructure. No runtime dependencies. Engine-neutral input: core consumes `(subject, resource, action, requestContext)` where `subject` is an attribute bag — it never sees a JWT. The default server populates the bag from verified JWT claims; that mapping lives at the server's edge, which is what keeps the engine swappable.
 - **builtins** — Built-in collectors (scope, permission, role, subject ID), rules (HasScope, HasPermission, attribute comparison rules), DotNotation resource parser. Does not depend on server. See [`docs/extending.md`](docs/extending.md) for writing custom rules and collectors.
 - **server** — Express HTTP server, `createApp()`, `POST /verify` route, JWT key resolution, config schema. Does not depend on builtins.
 - **standalone** — Composition root: reads HOCON config, selects modules, starts the server.

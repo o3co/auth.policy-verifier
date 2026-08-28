@@ -85,9 +85,9 @@ A named registry. `register` throws on duplicate names; `get` throws if the name
 ### Module / ModuleContext
 
 ```typescript
-interface Module {
+interface Module<C extends ModuleContext = ModuleContext> {
   name: string
-  init(context: ModuleContext): Promise<void>
+  init(context: C): Promise<void>
 }
 
 interface ModuleContext {
@@ -96,11 +96,10 @@ interface ModuleContext {
   attributeCollectorRegistry: Registry<AttributeCollectorFactory>
   ruleCollectorRegistry: Registry<RuleCollectorFactory>
   resourceParserRegistry: Registry<ResourceParserFactory>
-  keyResolverRegistry: Registry<KeyResolverFactory>
 }
 ```
 
-A module registers collector, parser, and key resolver factories into the provided registries during `init`. Configuration is passed through `config`.
+A module registers attribute-collector, rule-collector, and resource-parser factories into the provided registries during `init`. Configuration is passed through `config`. A host may initialize modules with a wider context: the default server's `ServerModuleContext` (in `@o3co/auth.policy-verifier.server`) extends this with a JWT key-resolver registry, and a module that needs it declares `Module<ServerModuleContext>`.
 
 ### Types
 
@@ -109,7 +108,7 @@ A module registers collector, parser, and key resolver factories into the provid
 | `Resource` | `{ raw: string; resourceType: string; resourceId?: string }` — parsed resource |
 | `ResourceParser` | `parse(raw: string): Resource` — converts a raw resource string into a `Resource`; throws `ResourceParseError` when the string is not in the syntax it parses |
 | `ResourceParseError` | `Error` subclass carrying `raw` (the refused string) and `detail` (why). A **request** error, not a server error — the transport layer answers it 400-class. Exported as a class, so `instanceof` narrows it |
-| `CollectorContext` | Input passed to every collector: `payload`, `resource`, `action`, `signal`, optional `headers` and `requestContext` |
+| `CollectorContext` | Input passed to every collector: `subject`, `resource`, `action`, `signal`, optional `headers` and `requestContext` |
 | `CollectorRequest` | What a pipeline is handed: a `CollectorContext` without the per-collector `signal`, which the pipeline supplies. Its own optional `signal` is caller-side cancellation, linked into the pipeline's |
 | `CollectorLimits` | `{ collectorTimeoutMs?, deadlineMs?, concurrency? }` — the bounds a pipeline runs its fan-out under. See [Collector limits](#collector-limits) |
 | `CollectorTimeoutError` | `Error` subclass thrown when a collector overruns its budget or a fan-out overruns its deadline. Carries `pipeline`, `limit`, `timeoutMs` and (for a per-collector timeout) `collector`. **A deny, not a degradation** — the pipeline returns nothing at all |
@@ -124,13 +123,13 @@ A module registers collector, parser, and key resolver factories into the provid
 | `RuleGroupOutcome` | `{ ruleType: string; passed: true; evaluated: RuleOutcome[]; satisfiedBy: RuleOutcome } \| { ruleType: string; passed: false; evaluated: RuleOutcome[] }` — `evaluated` is every rule that ran, in order; `satisfiedBy` names the rule that satisfied a passing group |
 | `RuleOutcome` | `{ code: string; message: string; passed: boolean }` |
 | `Role` | `{ name: string; permissions: string[] }` |
-| `VerifierPayload` | Decoded JWT claims: `sub`, `azp`, `scope`, `iss`, `aud`, `exp`, `iat`, `token`, `authScheme` (the `Authorization` scheme the token arrived under, not a claim), plus arbitrary extra claims |
+| `SubjectAttributes` | `{ readonly [key: string]: unknown }` — verified attributes of the subject, populated by the transport. Core names no field; under the default server the keys are the verified JWT's claims (`sub`, `azp`, `scope`, …) plus `authScheme` (the `Authorization` scheme the token arrived under, not a claim) |
 | `PathResolver` | `(specifier: string) => string` — resolves module-relative paths |
 | `AttributeCollectorFactory` | Factory function that produces an `AttributeCollector` from config |
 | `RuleCollectorFactory` | Factory function that produces a `RuleCollector` from config |
 | `ResourceParserFactory` | Factory function that produces a `ResourceParser` from config |
-| `KeyResolver` | `{ key: unknown; algorithms: string[] }` — abstract JWT key material; concrete `key` type is owned by the consuming JWT library (jose in the default server) |
-| `KeyResolverFactory` | Factory function `(config: any) => Promise<KeyResolver>` that produces a `KeyResolver` for a given algorithm |
+
+`KeyResolver` / `KeyResolverFactory` are not core types: they are token-credential plumbing and live in `@o3co/auth.policy-verifier.server` (#170).
 
 ### Constants
 
@@ -156,7 +155,9 @@ import {
 
 const parser = new DotNotationResourceParser()
 const resource = parser.parse('project:1')
-const context = { payload: decodedJwt, resource, action: 'read' }
+// `subject` is whatever your transport vouches for — the default server
+// spreads verified JWT claims into it.
+const context = { subject: verifiedClaims, resource, action: 'read' }
 
 const attrs = await new AttributePipeline([new PayloadScopeCollector()]).collect(context)
 const rules = await new RulePipeline([new ResourceActionScopeRuleCollector()]).collect(context)

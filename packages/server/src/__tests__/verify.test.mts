@@ -232,7 +232,7 @@ describe("POST /verify", () => {
 	it("hands collectors the body context marked untrusted, not the raw object", async () => {
 		// The body's `context` is whatever the caller typed. It must not arrive at a
 		// collector shaped like the claim set next to it, or promoting
-		// `requestContext.role` into an attribute reads like promoting `payload.sub`
+		// `requestContext.role` into an attribute reads like promoting `subject.sub`
 		// and the caller has written its own authorization input.
 		const seen: Array<UntrustedRequestContext | undefined> = [];
 		const recordingCollector: AttributeCollector = {
@@ -473,7 +473,7 @@ describe("POST /verify — scopeless JWT (DID grant) (#27, #104)", () => {
 
 	const didAttributeCollector: AttributeCollector = {
 		async collect(context: CollectorContext) {
-			return new Map<string, unknown>([["sub", context.payload.sub]]);
+			return new Map<string, unknown>([["sub", context.subject.sub]]);
 		},
 	};
 
@@ -1253,12 +1253,12 @@ describe("createVerifyRouter — maxBatchSize, one reader at both boundaries (#1
 });
 
 describe("createVerifyRouter — the credential reaches collectors only by stated opt-in (#175)", () => {
-	const seen: Array<{ credential: string | undefined; payloadToken: unknown }> = [];
+	const seen: Array<{ credential: string | undefined; subjectToken: unknown }> = [];
 	const capturing = (): AttributeCollector => ({
 		collect: async (context: CollectorContext) => {
 			seen.push({
 				credential: context.credential,
-				payloadToken: (context.payload as Record<string, unknown>).token,
+				subjectToken: context.subject.token,
 			});
 			return new Map<string, unknown>([["scopes", ["read:project"]]]);
 		},
@@ -1285,7 +1285,7 @@ describe("createVerifyRouter — the credential reaches collectors only by state
 		return app;
 	};
 
-	it("default: the collector sees neither context.credential nor a payload token", async () => {
+	it("default: the collector sees neither context.credential nor a token on the subject bag", async () => {
 		seen.length = 0;
 		const token = await signHS256Token({ scope: "read:project" });
 		await request(appWith())
@@ -1295,12 +1295,12 @@ describe("createVerifyRouter — the credential reaches collectors only by state
 
 		expect(seen).toHaveLength(1);
 		expect(seen[0]?.credential).toBeUndefined();
-		// #175 removed VerifierPayload.token — the claims object carries no
-		// replayable credential for a context-logging collector to leak.
-		expect(seen[0]?.payloadToken).toBeUndefined();
+		// #175 removed the token from the verified-claims bag — the subject
+		// carries no replayable credential for a context-logging collector to leak.
+		expect(seen[0]?.subjectToken).toBeUndefined();
 	});
 
-	it('"expose": context.credential is the raw bearer token, and the payload still carries none', async () => {
+	it('"expose": context.credential is the raw bearer token, and the subject bag still carries none', async () => {
 		seen.length = 0;
 		const token = await signHS256Token({ scope: "read:project" });
 		await request(appWith("expose"))
@@ -1310,7 +1310,7 @@ describe("createVerifyRouter — the credential reaches collectors only by state
 
 		expect(seen).toHaveLength(1);
 		expect(seen[0]?.credential).toBe(token);
-		expect(seen[0]?.payloadToken).toBeUndefined();
+		expect(seen[0]?.subjectToken).toBeUndefined();
 	});
 });
 

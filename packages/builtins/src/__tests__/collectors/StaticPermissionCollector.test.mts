@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { CollectorContext, VerifierPayload } from "@o3co/auth.policy-verifier.core";
+import type { CollectorContext, SubjectAttributes } from "@o3co/auth.policy-verifier.core";
 import { ATTR_PERMISSIONS } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 import { StaticPermissionCollector } from "#/collectors/StaticPermissionCollector.mjs";
@@ -14,7 +14,7 @@ import { StaticPermissionCollector } from "#/collectors/StaticPermissionCollecto
 const NEVER_CANCELLED = new AbortController().signal;
 
 const stubContext: CollectorContext = {
-	payload: {} satisfies VerifierPayload,
+	subject: {} satisfies SubjectAttributes,
 	resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 	action: "read",
 	signal: NEVER_CANCELLED,

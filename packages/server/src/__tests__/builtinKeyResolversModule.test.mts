@@ -12,7 +12,6 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 import {
 	type AttributeCollectorFactory,
-	type KeyResolverFactory,
 	Registry,
 	type ResourceParserFactory,
 	type RuleCollectorFactory,
@@ -29,6 +28,7 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import { MAX_PREVIOUS_SECRETS } from "#/config/defaults.mjs";
 import { builtinKeyResolversModule } from "#/jwt/builtinKeyResolversModule.mjs";
+import type { KeyResolverFactory } from "#/jwt/keyResolver.mjs";
 
 const generateKeyPairAsync = promisify(generateKeyPair);
 

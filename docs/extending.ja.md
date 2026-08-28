@@ -90,14 +90,14 @@ export class UserLevelAtLeast implements Rule {
 
 | フィールド | 出どころ | 信頼度 |
 |---|---|---|
-| `payload` | bearer token。署名・issuer・audience・有効期限の検証を通過済み | 検証済み |
+| `subject` | トランスポートが検証したクレデンシャルから組み立てる — デフォルト server は署名・issuer・audience・有効期限の検証を通過した bearer token のクレームを展開する | 検証済み |
 | `resource` / `action` | リクエストボディ。形は route が検証し、`resource` は設定された `ResourceParser` が parse する | 値は呼び出し側が選ぶ／形は検証済み |
 | `headers` | トランスポートが設定（現状は `x-request-id`） | トランスポート由来 |
 | `requestContext` | リクエストボディの `context` をそのまま転送 | **未検証（untrusted）** |
 
 （5 つ目のフィールド `signal` は入力ではなく、pipeline のキャンセルハンドルです。[デッドラインとキャンセル](#デッドラインとキャンセル) を参照。）
 
-有効なトークンを持つ者は `context` に何でも書けます。`requestContext.role` を `ATTR_ROLES` に昇格させる Collector は、呼び出し側に「自分の認可入力を自分で書く」権限を渡したことになります — トークンが「誰であるか」を述べ、そのすぐ後にボディが「何をしてよいか」を述べる形です。しかもそれはたった 1 行で、隣にある `payload.sub` を昇格させる行と見分けがつきません。
+有効なトークンを持つ者は `context` に何でも書けます。`requestContext.role` を `ATTR_ROLES` に昇格させる Collector は、呼び出し側に「自分の認可入力を自分で書く」権限を渡したことになります — トークンが「誰であるか」を述べ、そのすぐ後にボディが「何をしてよいか」を述べる形です。しかもそれはたった 1 行で、隣にある `subject.sub` を昇格させる行と見分けがつきません。
 
 データ自体には両者を区別する手がかりがないため、型に区別させます。`requestContext` の型は `UntrustedRequestContext` — プロパティアクセスでは中身に到達できない不透明な brand です:
 
@@ -113,7 +113,7 @@ readUntrustedRequestContext(context.requestContext)?.clientIp; // OK
 unwrap した後の指針:
 
 - **読むフィールドは毎回検証する。** 型と形を確認すること。`readUntrustedRequestContext` が返すのは `Record<string, unknown> | undefined` なので、narrowing は実装者の責任です。
-- **identity や entitlement をここから昇格させない。** role、permission、scope、subject id、テナント所属は、検証済みの `payload` か、検証済み ID で問い合わせたストアから取得すること。ボディからではありません。
+- **identity や entitlement をここから昇格させない。** role、permission、scope、subject id、テナント所属は、検証済みの `subject` か、検証済み ID で問い合わせたストアから取得すること。ボディからではありません。
 - **呼び出し側が嘘をついても得をしないリクエスト事実は昇格させてよい** — locale、UI ヒント、操作の形など。判断基準は「攻撃者がこのフィールドを好きな値にしたとき、何が手に入るか」です。答えが「permission」なら、それは誤った出どころです。
 - **場当たり的な読み取りより宣言的な allowlist を優先する。** `builtins` の `RequestContextAttributeCollector` は、運用者が設定で名前と型を宣言したフィールドだけを昇格させます。誰も宣言していないフィールドは Rule に到達できません。
 

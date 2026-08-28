@@ -187,8 +187,8 @@ The following collectors are registered via `builtinCollectorsModule`:
 
 **Attribute collectors**:
 
-- `PayloadScopeCollector` — extracts OAuth scopes from the JWT payload
-- `PayloadSubjectIdCollector` — extracts the subject identifier from the JWT payload
+- `PayloadScopeCollector` — extracts OAuth scopes from the verified subject attributes (the JWT's claims)
+- `PayloadSubjectIdCollector` — extracts the subject identifier from the verified subject attributes (the JWT's claims)
 - `RequestContextAttributeCollector` — promotes declared fields of the request body's `context` into attributes (not wired by default; add it to `attribute.collectors` with an `attributes` mapping list)
 
 **Rule collectors** (resolve authorization rules):

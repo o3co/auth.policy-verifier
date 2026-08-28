@@ -35,15 +35,27 @@ That test is executable, not rhetorical. `describeRulePurityConformance` in [`te
 
 ## Core Vocabulary Scope
 
-`packages/core` intentionally exports a narrow vocabulary.
+`packages/core` intentionally exports a narrow vocabulary, and its input shape is engine-neutral.
 
-- `ATTR_*` constants are restricted to well-known OAuth 2.0 / OIDC and RBAC concepts: scopes, permissions, roles, subject user id (JWT `sub`), client id (JWT `azp`). These are concepts every consumer of the ABAC engine shares, and they originate from transport-neutral standards (not tied to a specific interceptor or wire format).
+**Core consumes `(subject-attribute-bag, resource, action, requestContext)`.** `CollectorContext.subject` is a `SubjectAttributes` — `{ readonly [key: string]: unknown }` — and core neither names nor reads any field of it (#170). The engine can therefore receive a subject however a deployment authenticates one; it is what makes "drop-in replaceable with OPA or Cedar" true of the core layer and not just of the wire.
+
+**The default server populates the bag from verified JWT claims.** That mapping lives at one edge — `createTokenAuthenticator` in `packages/server/src/jwt/tokenAuthenticator.mts` spreads the signature-verified claims into the bag (plus `authScheme`) — so under this server the bag's keys are the token's claims, and the claim vocabulary belongs to the layers on either side of core: the server writes it, the builtins collectors narrow it back out. The builtin mapping from claims to attribute keys (`core/src/keys.mts`):
+
+| JWT claim | Read by | Attribute key |
+| --- | --- | --- |
+| `sub` | `PayloadSubjectIdCollector` (builtins) | `ATTR_USER_ID` |
+| `azp` | `PayloadSubjectIdCollector` (builtins) | `ATTR_CLIENT_ID` |
+| `scope` | `PayloadScopeCollector`, `ResourceActionScopeRuleCollector` (builtins) | `ATTR_SCOPES` |
+
+`iss` / `aud` / `exp` / `iat` are enforced inside the authenticator before the bag is built and are read by nothing downstream. `KeyResolver` / `KeyResolverFactory` are server types for the same reason: token-credential plumbing, not engine vocabulary.
+
+- `ATTR_*` constants are restricted to well-known OAuth 2.0 / OIDC and RBAC concepts: scopes, permissions, roles, subject user id, client id. These are concepts every consumer of the ABAC engine shares, and they originate from transport-neutral standards (not tied to a specific interceptor or wire format). The constants name attributes, not claims — the claim reading happens in builtins, per the table above.
 - Domain-specific attribute keys (business identifiers, tenant flags, protocol-specific fields) **must not** be added to core. They belong to the consuming service, which declares its own constants and reads/writes the same `Attributes` map.
 - Core **does not** assume a shape for `CollectorContext.requestContext`. This field is a free-form container whose contents are defined by the interceptor/transport layer of each consuming project. Core provides only the hook — consumers provide the interpretation via their own `AttributeCollector` implementations. It is also the only caller-controlled input on the context, so its type is the opaque `UntrustedRequestContext`: reading it takes an explicit `readUntrustedRequestContext(...)`. See [docs/extending.md — The trust boundary](docs/extending.md#the-trust-boundary-requestcontext-is-the-callers).
 
-When tempted to add a new `ATTR_*` or a built-in collector that reads a specific `requestContext` key, stop and ask:
+When tempted to add a new `ATTR_*`, a named field on `SubjectAttributes`, or a built-in collector that reads a specific `requestContext` key, stop and ask:
 
-- Is this concept universal across every service using the engine (JWT/OIDC/RBAC standards)? If yes, it can live in core.
+- Is this concept universal across every service using the engine (JWT/OIDC/RBAC standards)? If yes, the *attribute constant* can live in core — the claim it is derived from is still read in builtins, and `SubjectAttributes` stays fieldless either way.
 - Is it a particular consumer's vocabulary, or tied to a specific interceptor's payload shape? If yes, the constant and its collector belong to that consuming service.
 
 ### Writing Project-Specific Attribute Collectors

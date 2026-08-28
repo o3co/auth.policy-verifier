@@ -186,8 +186,8 @@ scrape_configs:
 
 **Attribute collectors**:
 
-- `PayloadScopeCollector` — JWT ペイロードから OAuth スコープを抽出する
-- `PayloadSubjectIdCollector` — JWT ペイロードからサブジェクト識別子を抽出する
+- `PayloadScopeCollector` — 検証済みサブジェクト属性（JWT のクレーム）から OAuth スコープを抽出する
+- `PayloadSubjectIdCollector` — 検証済みサブジェクト属性（JWT のクレーム）からサブジェクト識別子を抽出する
 - `RequestContextAttributeCollector` — リクエストボディの `context` の宣言済みフィールドを属性に昇格させる（既定では未接続。`attribute.collectors` に `attributes` マッピングを付けて追加する）
 
 **Rule collectors**（認可ルールを解決）:

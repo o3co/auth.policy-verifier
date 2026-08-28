@@ -223,8 +223,8 @@ describe("createTokenAuthenticator — construction and bearer parsing", () => {
 		expect(result).toMatchObject({ ok: false, code: "missing_token" });
 	});
 
-	// #158: the payload field carrying the `Authorization` scheme used to be
-	// called `tokenType`, which is also the config key for the accepted `typ`
+	// #158: the subject-bag field carrying the `Authorization` scheme used to
+	// be called `tokenType`, which is also the config key for the accepted `typ`
 	// header — two unrelated meanings under one name, one of them right beside
 	// the other in this very module. The scheme is now `authScheme`, and this
 	// pins the split so the collision cannot be reintroduced by either side.
@@ -234,17 +234,17 @@ describe("createTokenAuthenticator — construction and bearer parsing", () => {
 
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
-		expect(result.payload.authScheme).toBe("Bearer");
+		expect(result.subject.authScheme).toBe("Bearer");
 		// The accepted `typ` is config, not a fact about the presented token, so
-		// nothing puts it on the payload under any name.
-		expect(result.payload.tokenType).toBeUndefined();
+		// nothing puts it on the subject bag under any name.
+		expect(result.subject.tokenType).toBeUndefined();
 	});
 
 	// The other half of the rename, and the part a migrating consumer has to see:
 	// the verifier used to write `tokenType` *after* spreading the claims, so a
 	// token carrying a claim of that name had it silently overwritten by
-	// `"Bearer"`. Nothing writes that slot now, so the claim reaches the payload
-	// like any other custom claim. A consumer still reading `payload.tokenType`
+	// `"Bearer"`. Nothing writes that slot now, so the claim reaches the subject
+	// bag like any other custom claim. A consumer still reading `subject.tokenType`
 	// is therefore reading the token, not the verifier — which is the opposite of
 	// what it read before.
 	it("no longer shadows a `tokenType` claim the token itself carries", async () => {
@@ -254,10 +254,10 @@ describe("createTokenAuthenticator — construction and bearer parsing", () => {
 
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
-		expect(result.payload.tokenType).toBe("from-the-token");
+		expect(result.subject.tokenType).toBe("from-the-token");
 		// The scheme is unaffected: it has its own slot now, so a claim cannot
 		// displace it and it cannot displace a claim.
-		expect(result.payload.authScheme).toBe("Bearer");
+		expect(result.subject.authScheme).toBe("Bearer");
 	});
 
 	// The time-claim bounds are resolved once at construction, so a config that

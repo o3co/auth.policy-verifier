@@ -21,7 +21,7 @@ const UNTRUSTED_REQUEST_CONTEXT: unique symbol = Symbol.for(
  * put anything in it. It reaches every collector alongside claims that a
  * signature vouches for, and nothing about a plain `Record<string, unknown>`
  * told the two apart — a collector promoting `requestContext.role` into an
- * attribute reads exactly like one promoting `payload.sub`, and the caller has
+ * attribute reads exactly like one promoting `subject.sub`, and the caller has
  * then written its own authorization input.
  *
  * So the type does the telling. The record hangs off a private symbol, which
@@ -31,10 +31,10 @@ const UNTRUSTED_REQUEST_CONTEXT: unique symbol = Symbol.for(
  * which fields a deployment may trust, but it can refuse to let one be consumed
  * without saying so out loud.
  *
- * Verified input stays where it was: `payload` (signature-checked claims),
- * `resource` and `action` (validated by the route), `headers` (set by the
- * transport). Only this one field is marked, because only this one is the
- * caller's to fill.
+ * Verified input stays where it was: `subject` (attributes the transport
+ * vouches for), `resource` and `action` (validated by the route), `headers`
+ * (set by the transport). Only this one field is marked, because only this one
+ * is the caller's to fill.
  */
 export interface UntrustedRequestContext {
 	readonly [UNTRUSTED_REQUEST_CONTEXT]: Record<string, unknown>;

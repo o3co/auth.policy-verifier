@@ -13,7 +13,7 @@ import {
 function toCollectorContext(request: AuthorizationRequest): CollectorContext {
 	const [resourceType, resourceId] = request.resource.split(":");
 	return {
-		payload: { sub: request.subject },
+		subject: { sub: request.subject },
 		resource: { raw: request.resource, resourceType, resourceId },
 		action: request.action,
 		// The engine-neutral request's `context` is the caller's own, the same as

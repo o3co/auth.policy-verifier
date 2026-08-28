@@ -91,9 +91,9 @@ class Registry<T> {
 ### Module / ModuleContext
 
 ```typescript
-interface Module {
+interface Module<C extends ModuleContext = ModuleContext> {
   name: string
-  init(context: ModuleContext): Promise<void>
+  init(context: C): Promise<void>
 }
 
 interface ModuleContext {
@@ -102,11 +102,10 @@ interface ModuleContext {
   attributeCollectorRegistry: Registry<AttributeCollectorFactory>
   ruleCollectorRegistry: Registry<RuleCollectorFactory>
   resourceParserRegistry: Registry<ResourceParserFactory>
-  keyResolverRegistry: Registry<KeyResolverFactory>
 }
 ```
 
-モジュールは `init` 内でコレクター・パーサー・鍵リゾルバーのファクトリーをレジストリに登録します。設定値は `config` を通じて渡されます。
+モジュールは `init` 内で attribute collector・rule collector・resource parser のファクトリーをレジストリに登録します。設定値は `config` を通じて渡されます。ホスト側はこれより広いコンテキストでモジュールを初期化できます: デフォルト server の `ServerModuleContext`（`@o3co/auth.policy-verifier.server`）はここに JWT 鍵リゾルバーのレジストリを足しており、それを必要とするモジュールは `Module<ServerModuleContext>` を宣言します。
 
 ### 型一覧
 
@@ -115,7 +114,7 @@ interface ModuleContext {
 | `Resource` | `{ raw: string; resourceType: string; resourceId?: string }` — パース済みリソース |
 | `ResourceParser` | `parse(raw: string): Resource` — 生のリソース文字列を `Resource` に変換する。パース対象の構文に合わない文字列には `ResourceParseError` を送出する |
 | `ResourceParseError` | `raw`（拒否した文字列）と `detail`（理由）を持つ `Error` サブクラス。サーバーエラーではなく**リクエスト**エラーであり、トランスポート層は 400 系で応答する。クラスとして export されるため `instanceof` で絞り込める |
-| `CollectorContext` | 各コレクターに渡される入力: `payload`、`resource`、`action`、`signal`、省略可能な `headers` と `requestContext` |
+| `CollectorContext` | 各コレクターに渡される入力: `subject`、`resource`、`action`、`signal`、省略可能な `headers` と `requestContext` |
 | `CollectorRequest` | pipeline が受け取る形: コレクター単位の `signal` を除いた `CollectorContext`。`signal` は pipeline が供給する。こちらの省略可能な `signal` は呼び出し側のキャンセルで、pipeline 側の signal に連結される |
 | `CollectorLimits` | `{ collectorTimeoutMs?, deadlineMs?, concurrency? }` — pipeline が fan-out に課す上限。[コレクターの上限](#コレクターの上限) を参照 |
 | `CollectorTimeoutError` | コレクターが予算を、または fan-out がデッドラインを超えたときに送出される `Error` サブクラス。`pipeline` / `limit` / `timeoutMs` と、コレクター単位のタイムアウトでは `collector` を持つ。**劣化ではなく deny** — pipeline は何も返さない |
@@ -130,13 +129,13 @@ interface ModuleContext {
 | `RuleGroupOutcome` | `{ ruleType: string; passed: true; evaluated: RuleOutcome[]; satisfiedBy: RuleOutcome } \| { ruleType: string; passed: false; evaluated: RuleOutcome[] }` — `evaluated` は実際に走ったルールを評価順に列挙し、`satisfiedBy` は通過グループを満たしたルールを指す |
 | `RuleOutcome` | `{ code: string; message: string; passed: boolean }` |
 | `Role` | `{ name: string; permissions: string[] }` |
-| `VerifierPayload` | デコード済み JWT クレーム: `sub`、`azp`、`scope`、`iss`、`aud`、`exp`、`iat`、`token`、`authScheme`（クレームではなく、トークンが到着した `Authorization` スキーム）、および任意の追加クレーム |
+| `SubjectAttributes` | `{ readonly [key: string]: unknown }` — トランスポートが保証するサブジェクトの検証済み属性バッグ。core はフィールド名を一切定めない。デフォルト server の下ではキーは検証済み JWT のクレーム（`sub`、`azp`、`scope`、…）と `authScheme`（クレームではなく、トークンが到着した `Authorization` スキーム） |
 | `PathResolver` | `(specifier: string) => string` — モジュール相対パスを解決する |
 | `AttributeCollectorFactory` | config から `AttributeCollector` を生成するファクトリー関数 |
 | `RuleCollectorFactory` | config から `RuleCollector` を生成するファクトリー関数 |
 | `ResourceParserFactory` | config から `ResourceParser` を生成するファクトリー関数 |
-| `KeyResolver` | `{ key: unknown; algorithms: string[] }` — 抽象的な JWT 鍵マテリアル。具体的な `key` の型は利用する JWT ライブラリ（デフォルト server では jose）側が決める |
-| `KeyResolverFactory` | アルゴリズムごとに `KeyResolver` を生成するファクトリー関数 `(config: any) => Promise<KeyResolver>` |
+
+`KeyResolver` / `KeyResolverFactory` は core の型ではありません。トークンクレデンシャルの配管であり、`@o3co/auth.policy-verifier.server` にあります (#170)。
 
 ### 定数
 
@@ -162,7 +161,9 @@ import {
 
 const parser = new DotNotationResourceParser()
 const resource = parser.parse('project:1')
-const context = { payload: decodedJwt, resource, action: 'read' }
+// `subject` はトランスポートが保証する属性 — デフォルト server は検証済み
+// JWT クレームを展開して渡す。
+const context = { subject: verifiedClaims, resource, action: 'read' }
 
 const attrs = await new AttributePipeline([new PayloadScopeCollector()]).collect(context)
 const rules = await new RulePipeline([new ResourceActionScopeRuleCollector()]).collect(context)

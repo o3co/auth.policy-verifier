@@ -8,12 +8,12 @@ import type {
 	CollectorRequest,
 	Rule,
 	RuleCollector,
-	VerifierPayload,
+	SubjectAttributes,
 } from "../types.mjs";
 
 // A `CollectorRequest`, not a `CollectorContext` — see AttributePipeline.test.mts.
 const stubContext: CollectorRequest = {
-	payload: {} satisfies VerifierPayload,
+	subject: {} satisfies SubjectAttributes,
 	resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 	action: "read",
 };

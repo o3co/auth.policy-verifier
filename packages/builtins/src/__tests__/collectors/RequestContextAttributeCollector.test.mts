@@ -14,7 +14,7 @@ import { RequestContextAttributeCollector } from "#/collectors/RequestContextAtt
 const NEVER_CANCELLED = new AbortController().signal;
 
 const makeContext = (requestContext?: Record<string, unknown>): CollectorContext => ({
-	payload: {},
+	subject: {},
 	resource: { raw: "document:1", resourceType: "document", resourceId: "1" },
 	action: "read",
 	signal: NEVER_CANCELLED,

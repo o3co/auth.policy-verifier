@@ -6,7 +6,6 @@ import {
 	AttributePipeline,
 	type CollectorLimits,
 	createConsoleLogger,
-	type KeyResolverFactory,
 	type Logger,
 	type Module,
 	type PathResolver,
@@ -25,6 +24,7 @@ import {
 import { NUMERIC_BOUNDS, resolveBound } from "./config/bounds.mjs";
 import { CALLER_AUTH_REQUIRED } from "./config/defaults.mjs";
 import { createCallerAuthMiddleware, resolveCallerAuth } from "./http/callerAuth.mjs";
+import type { KeyResolverFactory, ServerModuleContext } from "./jwt/keyResolver.mjs";
 import {
 	assertVerifyRouterJwtConfig,
 	resolveJwtTimeClaimBounds,
@@ -38,7 +38,12 @@ import { createVerifyRouter } from "./routes/verify.mjs";
 export interface CreateAppOptions {
 	pathResolver: PathResolver;
 	config: AppConfig;
-	modules: Module[];
+	/**
+	 * Initialized with the server's {@link ServerModuleContext}, so both a plain
+	 * `Module` (collectors, rules, parsers) and a `Module<ServerModuleContext>`
+	 * (key resolvers) are accepted.
+	 */
+	modules: Module<ServerModuleContext>[];
 	/**
 	 * Structured logger for boot-time warnings and the verify router's failure
 	 * events. Pino-compatible (a pino instance satisfies it without an adapter).
@@ -98,7 +103,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	const keyResolverRegistry = new Registry<KeyResolverFactory>();
 
 	// 2. Initialize modules — each registers factory functions
-	const context = {
+	const context: ServerModuleContext = {
 		pathResolver,
 		config: config as unknown as Record<string, unknown>,
 		attributeCollectorRegistry,

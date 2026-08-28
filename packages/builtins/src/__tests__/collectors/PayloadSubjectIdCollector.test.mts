@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { CollectorContext, VerifierPayload } from "@o3co/auth.policy-verifier.core";
+import type { CollectorContext, SubjectAttributes } from "@o3co/auth.policy-verifier.core";
 import { ATTR_CLIENT_ID, ATTR_USER_ID } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 import { PayloadSubjectIdCollector } from "#/collectors/PayloadSubjectIdCollector.mjs";
@@ -13,39 +13,41 @@ import { PayloadSubjectIdCollector } from "#/collectors/PayloadSubjectIdCollecto
  */
 const NEVER_CANCELLED = new AbortController().signal;
 
+const makeContext = (subject: SubjectAttributes): CollectorContext => ({
+	subject,
+	resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
+	action: "read",
+	signal: NEVER_CANCELLED,
+});
+
 describe("PayloadSubjectIdCollector", () => {
 	const collector = new PayloadSubjectIdCollector();
 
-	it("extracts userId from payload.sub", async () => {
-		const ctx: CollectorContext = {
-			payload: { sub: "u1" } satisfies VerifierPayload,
-			resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
-			action: "read",
-			signal: NEVER_CANCELLED,
-		};
-		const attrs = await collector.collect(ctx);
+	it("extracts userId from subject.sub", async () => {
+		const attrs = await collector.collect(makeContext({ sub: "u1" }));
 		expect(attrs.get(ATTR_USER_ID)).toBe("u1");
 	});
 
-	it("extracts clientId from payload.azp", async () => {
-		const ctx: CollectorContext = {
-			payload: { azp: "c1" } satisfies VerifierPayload,
-			resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
-			action: "read",
-			signal: NEVER_CANCELLED,
-		};
-		const attrs = await collector.collect(ctx);
+	it("extracts clientId from subject.azp", async () => {
+		const attrs = await collector.collect(makeContext({ azp: "c1" }));
 		expect(attrs.get(ATTR_CLIENT_ID)).toBe("c1");
 	});
 
 	it("returns empty map when neither sub nor azp present", async () => {
-		const ctx: CollectorContext = {
-			payload: {} satisfies VerifierPayload,
-			resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
-			action: "read",
-			signal: NEVER_CANCELLED,
-		};
-		const attrs = await collector.collect(ctx);
+		const attrs = await collector.collect(makeContext({}));
+		expect(attrs.size).toBe(0);
+	});
+
+	it("promotes neither claim when its value is not a string", async () => {
+		// `SubjectAttributes` is a bag of unknowns (#170): the claim vocabulary
+		// and its narrowing are this collector's, so a `sub` that is not a string
+		// must not become an identity attribute.
+		const attrs = await collector.collect(makeContext({ sub: 42, azp: ["c1"] }));
+		expect(attrs.size).toBe(0);
+	});
+
+	it("promotes neither claim when its value is an empty string", async () => {
+		const attrs = await collector.collect(makeContext({ sub: "", azp: "" }));
 		expect(attrs.size).toBe(0);
 	});
 });

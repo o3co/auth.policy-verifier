@@ -9,17 +9,23 @@ import type {
 import { ATTR_CLIENT_ID, ATTR_USER_ID } from "@o3co/auth.policy-verifier.core";
 
 /**
- * Attribute collector that extracts `sub` and `azp` from the JWT payload into
- * `ATTR_USER_ID` and `ATTR_CLIENT_ID`. Either claim may be absent.
+ * Attribute collector that extracts the OAuth/OIDC `sub` and `azp` claims from
+ * the subject bag into `ATTR_USER_ID` and `ATTR_CLIENT_ID`. Either claim may
+ * be absent.
+ *
+ * The claim vocabulary lives here, not in core (#170): `SubjectAttributes` is
+ * a bag of unknowns, so this collector narrows what it promotes — a claim that
+ * is not a non-empty string is not an identity and is left out.
  */
 export class PayloadSubjectIdCollector implements AttributeCollector {
 	async collect(context: CollectorContext): Promise<Attributes> {
 		const attrs: Attributes = new Map();
-		if (context.payload.sub) {
-			attrs.set(ATTR_USER_ID, context.payload.sub);
+		const { sub, azp } = context.subject;
+		if (typeof sub === "string" && sub) {
+			attrs.set(ATTR_USER_ID, sub);
 		}
-		if (context.payload.azp) {
-			attrs.set(ATTR_CLIENT_ID, context.payload.azp);
+		if (typeof azp === "string" && azp) {
+			attrs.set(ATTR_CLIENT_ID, azp);
 		}
 		return attrs;
 	}

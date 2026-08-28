@@ -20,25 +20,16 @@ export interface ResourceParser {
 }
 
 /**
- * Abstract JWT key resolver. The concrete `key` type is determined by the
- * consuming JWT library (e.g. jose's `KeyObject | CryptoKey | Uint8Array | JWTVerifyGetKey`).
- * Core keeps it `unknown` so new algorithms can be introduced without touching core.
- */
-export interface KeyResolver {
-	key: unknown;
-	algorithms: string[];
-}
-
-/**
  * Request-scoped input shared across every attribute and rule collector for a single verify call.
  *
- * Every field but one is input the deployment vouches for: `payload` survived
- * signature verification, `resource` and `action` were validated by the
- * transport, `headers` were set by it. `requestContext` is the caller's own —
- * see {@link UntrustedRequestContext} for why it is sealed rather than plain.
+ * Every field but one is input the deployment vouches for: `subject` was
+ * populated by the transport from a credential it verified, `resource` and
+ * `action` were validated by it, `headers` were set by it. `requestContext` is
+ * the caller's own — see {@link UntrustedRequestContext} for why it is sealed
+ * rather than plain.
  */
 export interface CollectorContext {
-	payload: VerifierPayload;
+	subject: SubjectAttributes;
 	resource: Resource;
 	action: string;
 	headers?: Record<string, string>;
@@ -205,33 +196,19 @@ export interface Role {
 }
 
 /**
- * Decoded JWT claims consumed by the verifier, with an open index signature so
- * custom claims (e.g. `tenant`, `scope_*`) can be propagated without changing core.
+ * Verified attributes of the subject a decision is being asked about — the
+ * first element of the `(subject, resource, action, context)` quadruple every
+ * engine behind the decision contract consumes.
+ *
+ * A bag, not a claim set: core names no field, reads no field, and does not
+ * know what credential the transport verified. The transport that admitted the
+ * request populates it — this repo's server spreads a signature-verified JWT's
+ * claims into it, so under that server the keys are the token's claims (`sub`,
+ * `azp`, `scope`, …) — and collectors narrow the values they promote, which is
+ * where claim vocabulary belongs (see the builtins). Read-only because it is
+ * shared across every collector of a decision: a collector writes attributes
+ * into its own result, never into its input.
  */
-export interface VerifierPayload {
-	sub?: string;
-	azp?: string;
-	scope?: string;
-	iss?: string;
-	aud?: string | string[];
-	exp?: number;
-	iat?: number;
-	/**
-	 * The `Authorization` scheme the token arrived under, as the caller wrote it
-	 * — `"Bearer"` (RFC 6750), whose casing is not normalized because it is
-	 * reported, not compared.
-	 *
-	 * Not a claim, and not the accepted `typ` header: that one is a config value
-	 * named `tokenType`, and this field carried the same name until #158. Two
-	 * unrelated things called `tokenType` is a mistake a reader makes silently,
-	 * so the one that is not a token type gave the name up.
-	 *
-	 * A consequence worth knowing when migrating: nothing writes `tokenType` on
-	 * the payload any more. It used to be written over the spread claims, which
-	 * silently discarded a token's own `tokenType` claim; such a claim now
-	 * reaches the payload like any other. Whatever is read there is the token's,
-	 * not the verifier's.
-	 */
-	authScheme?: string;
-	[key: string]: unknown;
+export interface SubjectAttributes {
+	readonly [key: string]: unknown;
 }
