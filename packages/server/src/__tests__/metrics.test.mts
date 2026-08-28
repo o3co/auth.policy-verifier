@@ -20,7 +20,7 @@
  * and one dashboard convention serve the whole stack.
  */
 import { request as httpRequest } from "node:http";
-import type { Module } from "@o3co/auth.policy-verifier.core";
+import type { Module, Rule } from "@o3co/auth.policy-verifier.core";
 import express from "express";
 import { SignJWT } from "jose";
 import request from "supertest";
@@ -43,28 +43,59 @@ async function signToken(payload: Record<string, unknown>): Promise<string> {
 		.sign(secretKey);
 }
 
-/** Registers a scope rule whose `code` is a constant, as every builtin's is. */
+const ATTR_SCOPES = "scopes";
+const ATTR_REQUIRED_SCOPE = "requiredScope";
+
+/**
+ * The scope rule, as a single module-level value shared by every request.
+ *
+ * Deliberately not built per request inside the rule collector. AGENTS.md's
+ * Collector/Rule/Attribute contract makes collectors the only layer that reads
+ * `CollectorContext`; a rule is a predicate over attributes whose verdict must
+ * be derivable from `attrs` alone. A `verify` that closed over the collector's
+ * `ctx` to recompute `${ctx.action}:${ctx.resource.resourceType}` would be the
+ * violation the contract names by name — it bakes the decision at collect time
+ * and holds a reference to the whole request.
+ *
+ * Hoisting it to a constant is what makes the compliance checkable rather than
+ * asserted: this object is created once, before any request exists, so it
+ * *cannot* carry request state. Everything it compares comes from `attrs`,
+ * promoted there by the attribute collector below. `code` is a constant too, as
+ * every builtin rule's is — which is what keeps it a bounded metric label.
+ *
+ * Nothing in the engine enforces any of this today — no runtime check, no lint,
+ * no conformance suite — which is #152. Until that lands, the shape is upheld
+ * by hand, so it is written down here rather than left to be inferred.
+ */
+const SCOPE_RULE: Rule = {
+	ruleType: "scope",
+	code: "invalid_scope",
+	message: "Insufficient scope",
+	verify(attrs) {
+		const scopes = attrs.get(ATTR_SCOPES);
+		const required = attrs.get(ATTR_REQUIRED_SCOPE);
+		// Safe-deny: a missing or malformed attribute denies, it does not throw.
+		return typeof required === "string" && Array.isArray(scopes) && scopes.includes(required);
+	},
+};
+
 const testModule: Module = {
 	name: "metrics-test-module",
 	async init(context) {
-		context.attributeCollectorRegistry.register("TestScopeCollector", () => ({
+		// The context-reading layer, and the only one. It promotes both sides of
+		// the comparison into attributes under well-known keys, which is what
+		// leaves the rule above with nothing to capture.
+		context.attributeCollectorRegistry.register("TestRequestCollector", () => ({
 			async collect(ctx) {
-				return new Map([["scopes", ((ctx.payload.scope as string) ?? "").split(" ")]]);
+				return new Map<string, unknown>([
+					[ATTR_SCOPES, ((ctx.payload.scope as string) ?? "").split(" ")],
+					[ATTR_REQUIRED_SCOPE, `${ctx.action}:${ctx.resource.resourceType}`],
+				]);
 			},
 		}));
 		context.ruleCollectorRegistry.register("TestScopeRuleCollector", () => ({
-			async collect(ctx) {
-				return [
-					{
-						ruleType: "scope",
-						code: "invalid_scope",
-						message: "Insufficient scope",
-						verify(attrs) {
-							const scopes = (attrs.get("scopes") as string[]) ?? [];
-							return scopes.includes(`${ctx.action}:${ctx.resource.resourceType}`);
-						},
-					},
-				];
+			async collect() {
+				return [SCOPE_RULE];
 			},
 		}));
 		context.resourceParserRegistry.register("SimpleParser", () => ({
@@ -76,7 +107,7 @@ const testModule: Module = {
 function configWith(overrides: Record<string, unknown> = {}) {
 	return AppConfigSchema.parse({
 		oauth: { jwt: { secret: JWT_SECRET, mode: "verify", issuer: ISSUER, audience: AUDIENCE } },
-		attribute: { collectors: [{ collector: "TestScopeCollector" }] },
+		attribute: { collectors: [{ collector: "TestRequestCollector" }] },
 		rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
 		resource: { parser: "SimpleParser" },
 		...overrides,
