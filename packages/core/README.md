@@ -35,23 +35,39 @@ An **empty rule set is denied** (`code: "no_applicable_rule"`): a request no rul
 
 ```typescript
 class AttributePipeline {
-  constructor(collectors: AttributeCollector[])
-  collect(context: CollectorContext): Promise<Attributes>
+  constructor(collectors: AttributeCollector[], limits?: CollectorLimits)
+  collect(request: CollectorRequest): Promise<Attributes>
 }
 ```
 
 Runs all collectors in parallel and merges the results. Array values are concatenated; for all other types, the last writer wins.
 
+The fan-out is bounded — see [Collector limits](#collector-limits). `collect` takes a `CollectorRequest` (the request without a `signal`); the pipeline supplies each collector its own.
+
 ### RulePipeline
 
 ```typescript
 class RulePipeline {
-  constructor(collectors: RuleCollector[])
-  collect(context: CollectorContext): Promise<Rule[]>
+  constructor(collectors: RuleCollector[], limits?: CollectorLimits)
+  collect(request: CollectorRequest): Promise<Rule[]>
 }
 ```
 
-Runs all collectors in parallel and flattens their results into a single array.
+Runs all collectors in parallel and flattens their results into a single array, under the same bounds as `AttributePipeline`.
+
+### Collector limits
+
+```typescript
+interface CollectorLimits {
+  collectorTimeoutMs?: number; // one collector's budget;      default 2000
+  deadlineMs?: number;         // the whole fan-out, per pipeline; default 5000
+  concurrency?: number;        // collectors in flight at once;    default 8
+}
+```
+
+Collectors call databases and HTTP APIs, so a pipeline that ran them under a bare `Promise.all` had no way to stop waiting. Each collector is handed its own `AbortSignal` on `CollectorContext.signal` and its own budget; the wave gets a deadline; and only `concurrency` collectors run at once. Every default is applied when nothing is passed, so a pipeline constructed with no limits is still bounded. A limit that is not a positive integer is refused by the constructor (`RangeError`) rather than ignored — `concurrency: 0` would otherwise resolve with nothing collected.
+
+**A bound that trips throws `CollectorTimeoutError`; it never resolves partially.** Partial attributes weaken a rule's inputs, and partial rules weaken the policy — an empty rule set is an allow under `{ onEmptyRuleSet: "allow" }`. There is no safe "answer with what we got" on an authorization path.
 
 ### Registry\<T\>
 
@@ -93,7 +109,10 @@ A module registers collector, parser, and key resolver factories into the provid
 | `Resource` | `{ raw: string; resourceType: string; resourceId?: string }` — parsed resource |
 | `ResourceParser` | `parse(raw: string): Resource` — converts a raw resource string into a `Resource`; throws `ResourceParseError` when the string is not in the syntax it parses |
 | `ResourceParseError` | `Error` subclass carrying `raw` (the refused string) and `detail` (why). A **request** error, not a server error — the transport layer answers it 400-class. Exported as a class, so `instanceof` narrows it |
-| `CollectorContext` | Input passed to every collector: `payload`, `resource`, `action`, optional `headers` and `requestContext` |
+| `CollectorContext` | Input passed to every collector: `payload`, `resource`, `action`, `signal`, optional `headers` and `requestContext` |
+| `CollectorRequest` | What a pipeline is handed: a `CollectorContext` without the per-collector `signal`, which the pipeline supplies. Its own optional `signal` is caller-side cancellation, linked into the pipeline's |
+| `CollectorLimits` | `{ collectorTimeoutMs?, deadlineMs?, concurrency? }` — the bounds a pipeline runs its fan-out under. See [Collector limits](#collector-limits) |
+| `CollectorTimeoutError` | `Error` subclass thrown when a collector overruns its budget or a fan-out overruns its deadline. Carries `pipeline`, `limit`, `timeoutMs` and (for a per-collector timeout) `collector`. **A deny, not a degradation** — the pipeline returns nothing at all |
 | `UntrustedRequestContext` | The type of `requestContext` — the caller's own data, sealed so it takes an explicit `readUntrustedRequestContext(...)` to read. `markUntrustedRequestContext(...)` mints one at the transport boundary. See [docs/extending.md — The trust boundary](../../docs/extending.md#the-trust-boundary-requestcontext-is-the-callers) |
 | `Attributes` | `Map<string, unknown>` — subject attribute bag. Mutable: collectors build one, and `AttributePipeline` merges them |
 | `ReadonlyAttributes` | `ReadonlyMap<string, unknown>` — the view a rule is judged against. The evaluator hands the same live map to every rule, so a rule that wrote into it would change the inputs of every group after it |

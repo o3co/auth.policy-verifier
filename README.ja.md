@@ -271,6 +271,16 @@ verify {
   maxContextEntries = ${?VERIFY_MAX_CONTEXT_ENTRIES}
   maxContextValueLength = 1024  # `context` 内の文字列の文字数（キー名を含む）
   maxContextValueLength = ${?VERIFY_MAX_CONTEXT_VALUE_LENGTH}
+
+  # 各決定で 2 つの pipeline が走らせる collector fan-out の上限 (#115)。
+  # いずれかを超えた決定は deny になる — 部分的な結果は決して返さない。
+  # 下記「コレクターのデッドライン」を参照。
+  collectorTimeoutMs   = 2000   # コレクター 1 本あたりの予算
+  collectorTimeoutMs   = ${?VERIFY_COLLECTOR_TIMEOUT_MS}
+  collectorDeadlineMs  = 5000   # pipeline 単位の fan-out 全体
+  collectorDeadlineMs  = ${?VERIFY_COLLECTOR_DEADLINE_MS}
+  collectorConcurrency = 8      # 同時に走らせるコレクター数
+  collectorConcurrency = ${?VERIFY_COLLECTOR_CONCURRENCY}
 }
 ```
 
@@ -308,6 +318,20 @@ charset は `415 unsupported_media_type` です。上の例はレスポンスボ
 `README.md` / `README.ja.md` / `CHANGELOG.md` に現れ、かつエンドポイントが実際に返す内容へ
 parse されることを `verifyInputValidation.test.mts` が検証しています。3 か所のコピーがコードから
 も互いからも drift しないのはそのためです。
+
+### コレクターのデッドライン
+
+Attribute / Rule コレクターはデータベースや HTTP API を呼ぶ層であり、つまり停止しうる層です。fan-out は 3 つの上限で守られており、既定で有効です — 何も設定していない deployment にも適用されます:
+
+| 設定キー | 既定値 | 何を制限するか |
+| --- | --- | --- |
+| `verify.collectorTimeoutMs` | `2000` | コレクター 1 本の所要時間。予算はそのコレクターが**開始した時点**から数えるので、同時実行上限による順番待ちで消費されることはない |
+| `verify.collectorDeadlineMs` | `5000` | pipeline 単位の fan-out 全体の所要時間。個々の予算は超えていないのに合計では超えている、というケースを捕える |
+| `verify.collectorConcurrency` | `8` | 1 決定・1 pipeline あたりの同時実行数。現実的なコレクター構成より大きいので通常は何も変わらず、依存先が遅くなって処理が積み上がり始めたときだけ効く |
+
+各コレクターには `CollectorContext.signal` で `AbortSignal` が渡されます。そのコレクターの予算切れ、pipeline のデッドライン超過、兄弟コレクターの失敗による決定の中止、呼び出し側の切断のいずれでも abort します。コレクターが待つ相手にそのまま渡してください — `fetch(url, { signal: context.signal })` — そうすれば外向きの処理も実際に取り消されます。
+
+**上限を超えた決定は deny です。** `403` と `code: "collector_timeout"`、`reason.groups` は空で応答し、詳細は呼び出し側ではなく `collector_timeout` ログ行に出ます。意図的に `5xx` にはせず、「時間内に集まったぶんで判定する」こともしません — ルールが少ないことは**ポリシーが弱いこと**であり、1 つも無ければ `rule.onEmptyRuleSet = "allow"` の deployment では **allow** になるからです。そのため評価器には到達させません。バッチでは上限は決定単位なので、1 エントリの超過はそのエントリだけを deny にし、残りは通常どおり判定されます。
 
 ### リソース文字列形式 (DotNotation)
 

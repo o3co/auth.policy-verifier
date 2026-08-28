@@ -7,7 +7,19 @@ import {
 	JWT_MODE_MIGRATION_MESSAGE,
 	JWT_MODE_REMOVED_KEYS,
 } from "#/config/application.schema.mjs";
-import { MAX_PREVIOUS_SECRETS, MIN_SECRET_ENTROPY_BYTES } from "#/config/defaults.mjs";
+import {
+	DEFAULT_COLLECT_DEADLINE_MS,
+	DEFAULT_COLLECTOR_CONCURRENCY,
+	DEFAULT_COLLECTOR_TIMEOUT_MS,
+	DEFAULT_MAX_ACTION_LENGTH,
+	DEFAULT_MAX_BATCH_SIZE,
+	DEFAULT_MAX_BODY_BYTES,
+	DEFAULT_MAX_CONTEXT_ENTRIES,
+	DEFAULT_MAX_CONTEXT_VALUE_LENGTH,
+	DEFAULT_MAX_RESOURCE_LENGTH,
+	MAX_PREVIOUS_SECRETS,
+	MIN_SECRET_ENTROPY_BYTES,
+} from "#/config/defaults.mjs";
 import { checkHs256Rotation, parseHs256Rotation } from "#/jwt/hs256Rotation.mjs";
 import { type JwksFetchConfig, resolveJwksFetchBounds } from "#/jwt/jwks.mjs";
 import { type JwtTimeClaimConfig, resolveJwtTimeClaimBounds } from "#/jwt/tokenAuthenticator.mjs";
@@ -364,6 +376,63 @@ describe("AppConfigSchema — batch decisions (#124)", () => {
 			verify: { maxBatchSize: value },
 		});
 		expect(result.success).toBe(false);
+	});
+});
+
+describe("AppConfigSchema — collector bounds (#115)", () => {
+	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
+
+	const parseVerify = (verify: Record<string, unknown>) =>
+		AppConfigSchema.safeParse({ oauth: { jwt: validJwt }, ...baseBody, verify });
+
+	it("defaults to the bounds core ships", () => {
+		const result = AppConfigSchema.parse({ oauth: { jwt: validJwt }, ...baseBody });
+		expect(result.verify.collectorTimeoutMs).toBe(DEFAULT_COLLECTOR_TIMEOUT_MS);
+		expect(result.verify.collectorDeadlineMs).toBe(DEFAULT_COLLECT_DEADLINE_MS);
+		expect(result.verify.collectorConcurrency).toBe(DEFAULT_COLLECTOR_CONCURRENCY);
+	});
+
+	it("takes operator-set bounds", () => {
+		const result = parseVerify({
+			collectorTimeoutMs: 500,
+			collectorDeadlineMs: 1_500,
+			collectorConcurrency: 4,
+		});
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.data.verify.collectorTimeoutMs).toBe(500);
+			expect(result.data.verify.collectorDeadlineMs).toBe(1_500);
+			expect(result.data.verify.collectorConcurrency).toBe(4);
+		}
+	});
+
+	it("coerces the strings a HOCON env substitution produces", () => {
+		const result = parseVerify({
+			collectorTimeoutMs: "500",
+			collectorDeadlineMs: "1500",
+			collectorConcurrency: "4",
+		});
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.data.verify.collectorTimeoutMs).toBe(500);
+			expect(result.data.verify.collectorDeadlineMs).toBe(1_500);
+			expect(result.data.verify.collectorConcurrency).toBe(4);
+		}
+	});
+
+	it.each([
+		["a zero timeout — every collector dead on arrival", { collectorTimeoutMs: 0 }],
+		["a negative timeout", { collectorTimeoutMs: -1 }],
+		["a fractional timeout", { collectorTimeoutMs: 1.5 }],
+		["a non-numeric timeout", { collectorTimeoutMs: "abc" }],
+		["an empty timeout — `VAR=` substituted", { collectorTimeoutMs: "" }],
+		["`false`, which `Number` reads as 0", { collectorTimeoutMs: false }],
+		["a null deadline", { collectorDeadlineMs: null }],
+		["a zero deadline", { collectorDeadlineMs: 0 }],
+		["a zero concurrency — a fan-out that runs nothing", { collectorConcurrency: 0 }],
+		["a fractional concurrency", { collectorConcurrency: 1.5 }],
+	])("rejects %s", (_label, verify) => {
+		expect(parseVerify(verify).success).toBe(false);
 	});
 });
 
@@ -1091,5 +1160,76 @@ describe("AppConfigSchema — HS256 secret rotation (#112)", () => {
 			...baseBody,
 		});
 		expect(result.success).toBe(true);
+	});
+});
+
+describe("AppConfigSchema — the verify block's default names every knob", () => {
+	/*
+	 * The `verify` block has two ways of being produced, and they are two
+	 * different pieces of code:
+	 *
+	 *   - the block is PRESENT (`verify {}`) → each key's own `boundedNumber`
+	 *     runs, and `resolveBound(undefined, spec)` returns that spec's fallback;
+	 *   - the block is ABSENT → zod takes the `.default(() => ({…}))` object
+	 *     VERBATIM. It never parses it back through the shape, so a key missing
+	 *     from that literal is `undefined` rather than defaulted.
+	 *
+	 * A knob added to the shape but not to the literal therefore works in every
+	 * test that writes `verify: {…}` and silently disappears for the deployment
+	 * shape that omits the block entirely — which is the common one, since an
+	 * overlay config only repeats the sections it changes. This nearly happened
+	 * when #115 and #118 both added knobs here and landed a day apart.
+	 *
+	 * Comparing the two productions is what makes that unmissable, and it is why
+	 * this is written as an equality rather than as a list of keys: a tenth knob
+	 * added to the shape alone fails here without anyone remembering to come
+	 * back and extend an assertion.
+	 */
+	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
+
+	const parseWith = (verify?: Record<string, unknown>) =>
+		AppConfigSchema.parse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			...(verify === undefined ? {} : { verify }),
+		});
+
+	it("answers identically whether the block is absent or empty", () => {
+		// Verified by mutation, not by hope: deleting one line from the
+		// `.default()` literal fails this case and the one below it.
+		expect(parseWith(undefined).verify).toEqual(parseWith({}).verify);
+	});
+
+	it("carries every knob the shape declares, at its documented default", () => {
+		// Spelled out as well as compared, so the equality above cannot pass by
+		// both productions being wrong in the same way.
+		expect(parseWith(undefined).verify).toEqual({
+			maxBatchSize: DEFAULT_MAX_BATCH_SIZE,
+			maxBodyBytes: DEFAULT_MAX_BODY_BYTES,
+			maxResourceLength: DEFAULT_MAX_RESOURCE_LENGTH,
+			maxActionLength: DEFAULT_MAX_ACTION_LENGTH,
+			maxContextEntries: DEFAULT_MAX_CONTEXT_ENTRIES,
+			maxContextValueLength: DEFAULT_MAX_CONTEXT_VALUE_LENGTH,
+			collectorTimeoutMs: DEFAULT_COLLECTOR_TIMEOUT_MS,
+			collectorDeadlineMs: DEFAULT_COLLECT_DEADLINE_MS,
+			collectorConcurrency: DEFAULT_COLLECTOR_CONCURRENCY,
+		});
+	});
+
+	it("names each knob in the block whose keys came from the shape", () => {
+		// Keyed off the EMPTY-block production, whose keys come from the shape
+		// rather than from the literal — so a knob the literal omits shows up
+		// here as a missing key rather than as a present `undefined`. (Iterating
+		// the absent-block production instead would skip it silently, which is
+		// the shape of the bug and not a check for it.)
+		const fromShape = parseWith({}).verify as Record<string, unknown>;
+		const fromDefault = parseWith(undefined).verify as Record<string, unknown>;
+
+		for (const key of Object.keys(fromShape)) {
+			expect(
+				fromDefault[key],
+				`verify.${key} is missing from the block's .default() literal`,
+			).toBeTypeOf("number");
+		}
 	});
 });

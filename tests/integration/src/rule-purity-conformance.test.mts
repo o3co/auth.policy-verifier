@@ -5,20 +5,28 @@ import {
 	ResourceActionPermissionRuleCollector,
 	ResourceActionScopeRuleCollector,
 } from "@o3co/auth.policy-verifier.builtins";
-import type { Attributes, CollectorContext, Rule } from "@o3co/auth.policy-verifier.core";
+import type {
+	Attributes,
+	CollectorContext,
+	CollectorRequest,
+	Rule,
+} from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 import {
 	assertRuleIndependentOfContext,
 	describeRulePurityConformance,
 } from "./conformance/rulePurity.mjs";
 
-const scopeContext: CollectorContext = {
+// `CollectorRequest`, not `CollectorContext`: the per-collector `signal` (#115)
+// belongs to the fan-out, and here the harness is the fan-out — it supplies a
+// revocable one of its own, for the same reason it wraps the rest.
+const scopeContext: CollectorRequest = {
 	payload: { sub: "user-1", scope: "read:project write:project" },
 	resource: { raw: "project:1", resourceType: "project", resourceId: "1" },
 	action: "read",
 };
 
-const permissionContext: CollectorContext = {
+const permissionContext: CollectorRequest = {
 	payload: { sub: "user-1" },
 	resource: { raw: "project:1", resourceType: "project", resourceId: "1" },
 	action: "read",
@@ -184,6 +192,108 @@ describe("rule purity conformance — the check itself", () => {
 		expect(sameObjectTwice).toBe(true);
 		expect(distinctFieldsStayDistinct).toBe(true);
 		expect(survivesRoundTrip).toBe(true);
+	});
+
+	/*
+	 * The `signal` #115 put on `CollectorContext` is the first field a collector
+	 * is *expected* to hold live for the length of `collect` — it is a
+	 * cancellation handle, not a fact about the request, and the whole point is
+	 * to pass it to `fetch`. That pulls the harness in two directions at once,
+	 * and the three cases below pin both halves.
+	 *
+	 * It must stay revocable: a signal is a live view of request state (`aborted`
+	 * moves under the rule's feet), so a rule that kept one and read it inside
+	 * `verify` is the exact violation this suite exists to catch — and no less so
+	 * for the field being new. And it must stay *usable*: a plain revocable Proxy
+	 * over an `AbortSignal` fails every brand check on it (`addEventListener`,
+	 * `AbortSignal.any`, `fetch`), so wrapping it the way every other object is
+	 * wrapped would make honest collectors fail this suite for a reason that
+	 * exists only inside the harness.
+	 */
+	it("rejects a rule that kept the collector's AbortSignal and read it at verify time", async () => {
+		const collect = async (ctx: CollectorContext): Promise<Rule[]> => {
+			// A live handle into the request, held past `collect` — `aborted` moves
+			// on its own, so the rule's answer is not a function of `attrs`.
+			const signal = ctx.signal;
+			return [
+				{
+					ruleType: "scope",
+					code: "invalid_scope",
+					message: "Insufficient scope",
+					verify(attributes) {
+						const scopes = attributes.get("scopes");
+						return !signal.aborted && Array.isArray(scopes) && scopes.includes("read:project");
+					},
+				},
+			];
+		};
+
+		await expect(assertRuleIndependentOfContext(collect, scopeContext, attrs)).rejects.toThrow(
+			/read its collector's context/,
+		);
+	});
+
+	it("hands the collector an AbortSignal every real use of one still works on", async () => {
+		let usable = false;
+		const collect = async (ctx: CollectorContext): Promise<Rule[]> => {
+			// Everything a collector legitimately does with it. Each of these
+			// throws on a `Proxy`-wrapped signal, because the receiver fails the
+			// brand check on `AbortSignal`'s internal slots.
+			ctx.signal.addEventListener("abort", () => {});
+			ctx.signal.throwIfAborted();
+			const linked = AbortSignal.any([ctx.signal]);
+			usable = ctx.signal instanceof AbortSignal && ctx.signal.aborted === false && !linked.aborted;
+
+			const required = `${ctx.action}:${ctx.resource.resourceType}`;
+			return [
+				{
+					ruleType: "scope",
+					code: "invalid_scope",
+					message: "Insufficient scope",
+					verify(attributes) {
+						const scopes = attributes.get("scopes");
+						return Array.isArray(scopes) && scopes.includes(required);
+					},
+				},
+			];
+		};
+
+		await assertRuleIndependentOfContext(collect, scopeContext, attrs);
+
+		expect(usable).toBe(true);
+	});
+
+	it("keeps the collector's signal linked to the one the case supplied", async () => {
+		// The harness hands out a view, not the case's own signal — so the view
+		// has to follow it, or a case that cancels mid-collect would be testing
+		// nothing.
+		const controller = new AbortController();
+		let cancelled = false;
+
+		const collect = async (ctx: CollectorContext): Promise<Rule[]> => {
+			ctx.signal.addEventListener("abort", () => {
+				cancelled = true;
+			});
+			// `AbortSignal.any` forwards the abort synchronously, so by the next
+			// line the collector's view has already fired.
+			controller.abort(new Error("caller went away"));
+			return [
+				{
+					ruleType: "scope",
+					code: "invalid_scope",
+					message: "Insufficient scope",
+					verify: () => true,
+				},
+			];
+		};
+
+		await assertRuleIndependentOfContext(
+			collect,
+			{ ...scopeContext, signal: controller.signal },
+			attrs,
+		);
+
+		expect(cancelled).toBe(true);
 	});
 
 	it("rejects a rule that mutates the attributes it is judged against", async () => {

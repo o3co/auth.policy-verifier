@@ -7,6 +7,9 @@ import { checkJwksUri } from "../jwt/jwks.mjs";
 import { type BoundSpec, NUMERIC_BOUNDS, resolveBound } from "./bounds.mjs";
 import {
 	DEFAULT_CALLER_AUTH_HEADER,
+	DEFAULT_COLLECT_DEADLINE_MS,
+	DEFAULT_COLLECTOR_CONCURRENCY,
+	DEFAULT_COLLECTOR_TIMEOUT_MS,
 	DEFAULT_HOSTNAME,
 	DEFAULT_HTTP_PORT,
 	DEFAULT_MAX_ACTION_LENGTH,
@@ -429,9 +432,46 @@ export const AppConfigSchema = z.object({
 			maxActionLength: boundedNumber(NUMERIC_BOUNDS.maxActionLength, "verify"),
 			maxContextEntries: boundedNumber(NUMERIC_BOUNDS.maxContextEntries, "verify"),
 			maxContextValueLength: boundedNumber(NUMERIC_BOUNDS.maxContextValueLength, "verify"),
+			/**
+			 * Bounds on the collector fan-out both pipelines run for every
+			 * decision (#115). Collectors call databases and HTTP APIs, and before
+			 * these they ran under a bare `Promise.all`: one stalled collector
+			 * held the decision open for as long as its socket did.
+			 *
+			 * `collectorTimeoutMs` is what one collector may take;
+			 * `collectorDeadlineMs` is what the whole wave may take, which a
+			 * per-collector budget cannot bound once collectors queue; and
+			 * `collectorConcurrency` is how many run at once, which is what stops
+			 * a slow dependency from being handed more simultaneous work as it
+			 * slows. Read through `resolveBound` so `createApp` — which builds the
+			 * pipelines, and accepts hand-built configs this schema never saw —
+			 * refuses the same values in the same words (#157).
+			 *
+			 * Exceeding any of them **denies**: see `CollectorTimeoutError` in
+			 * core for why a partial answer is never the safe one.
+			 */
+			collectorTimeoutMs: boundedNumber(NUMERIC_BOUNDS.collectorTimeoutMs, "verify"),
+			collectorDeadlineMs: boundedNumber(NUMERIC_BOUNDS.collectorDeadlineMs, "verify"),
+			collectorConcurrency: boundedNumber(NUMERIC_BOUNDS.collectorConcurrency, "verify"),
 		})
-		// Taken verbatim, like `http` above — zod does not parse a default back
-		// through the shape, so every key has to be stated here as well.
+		/*
+		 * Taken verbatim, like `http` above — zod does not parse a default back
+		 * through the shape, so **every key of the block has to be repeated here**.
+		 *
+		 * This object is the one place in the schema where an omission is silent.
+		 * A knob added to the shape above but not to this literal is simply
+		 * `undefined` for every config that has no `verify` block at all — which
+		 * is the ordinary deployment shape, since an overlay config only repeats
+		 * the sections it changes. Nothing throws; the bound just stops existing,
+		 * and for #115's knobs that means the collector deadlines quietly stop
+		 * applying. It has already nearly happened once, when #115 and #118 both
+		 * added knobs here and landed a day apart.
+		 *
+		 * So it is asserted rather than reviewed: `AppConfigSchema — the verify
+		 * block's default names every knob` walks the shape's own key list and
+		 * fails on any key this literal does not answer for. Add the knob to both,
+		 * and that test will tell you if you forgot.
+		 */
 		.default(() => ({
 			maxBatchSize: DEFAULT_MAX_BATCH_SIZE,
 			maxBodyBytes: DEFAULT_MAX_BODY_BYTES,
@@ -439,6 +479,9 @@ export const AppConfigSchema = z.object({
 			maxActionLength: DEFAULT_MAX_ACTION_LENGTH,
 			maxContextEntries: DEFAULT_MAX_CONTEXT_ENTRIES,
 			maxContextValueLength: DEFAULT_MAX_CONTEXT_VALUE_LENGTH,
+			collectorTimeoutMs: DEFAULT_COLLECTOR_TIMEOUT_MS,
+			collectorDeadlineMs: DEFAULT_COLLECT_DEADLINE_MS,
+			collectorConcurrency: DEFAULT_COLLECTOR_CONCURRENCY,
 		})),
 	// Defaulted (not shape-only): deployments mount an overlay config OVER the
 	// template's application.conf, so a section the overlay does not repeat is

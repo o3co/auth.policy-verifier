@@ -91,6 +91,28 @@ export const DEFAULT_MAX_CONTEXT_ENTRIES = 64;
 export const DEFAULT_MAX_CONTEXT_VALUE_LENGTH = 1_024;
 
 /*
+ * Bounds on the collector fan-out (#115), re-exported from core rather than
+ * restated here.
+ *
+ * The numbers belong to the engine: `AttributePipeline` and `RulePipeline`
+ * enforce them, and a library consumer who never loads this package still gets
+ * them. Restating them would recreate exactly the fault #157 catalogued, one
+ * package boundary further out — two readers of one bound, drifting silently,
+ * with the config file's default and the pipeline's disagreeing about what an
+ * unset knob means.
+ *
+ * This is the one import this module has. Core carries no dependencies of its
+ * own, so a config-only consumer of `AppConfigSchema` still pulls in nothing but
+ * the engine's own vocabulary — which is the property `config/bounds.mts`
+ * guards, and the reason nothing heavier may ever be reached for from here.
+ */
+export {
+	DEFAULT_COLLECT_DEADLINE_MS,
+	DEFAULT_COLLECTOR_CONCURRENCY,
+	DEFAULT_COLLECTOR_TIMEOUT_MS,
+} from "@o3co/auth.policy-verifier.core";
+
+/*
  * Bounds on the remote JWKS fetch (#109). A key resolution that misses the
  * cache happens inside a verify request, so an unbounded fetch is a stall
  * vector on the decision hot path: every caller of a deployment whose provider

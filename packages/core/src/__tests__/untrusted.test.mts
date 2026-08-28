@@ -52,6 +52,7 @@ describe("UntrustedRequestContext", () => {
 			resource: { raw: "project:1", resourceType: "project", resourceId: "1" },
 			action: "read",
 			requestContext: markUntrustedRequestContext({ tenant: "acme" }),
+			signal: new AbortController().signal,
 		};
 
 		expect(readUntrustedRequestContext(context.requestContext)).toEqual({ tenant: "acme" });

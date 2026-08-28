@@ -10,6 +10,134 @@ and version sections follow the release labeling policy in
 
 ### Security
 
+- **BREAKING**: collectors now run under a deadline, a cancellation signal and a
+  concurrency bound, and **a bound that trips denies the decision**
+  ([#115](https://github.com/o3co/auth.policy-verifier/issues/115)).
+
+  Both pipelines ran their collectors under a bare `Promise.all`. Collectors are
+  the layer designed to call databases and HTTP APIs, and a `Promise.all` has no
+  deadline, no cancellation and no bound on how much work it starts — so a
+  single collector holding a dead socket held the authorization decision with
+  it, for as long as the socket took to notice. Siblings kept running after one
+  of them had already failed the request, and a dependency slowdown piled up
+  unbounded in-flight work instead of shedding it. On a PDP's hot path that is
+  both a latency failure and a DoS amplifier: one `POST /verify/batch` is up to
+  50 decisions, each fanning out across every configured collector.
+
+  **`CollectorContext` gained a required `signal: AbortSignal`** — the breaking
+  half. It aborts when that collector overruns its budget, when the pipeline
+  overruns its deadline, when a sibling has already failed the decision, or when
+  the caller went away.
+
+  *What a collector author must change:* nothing to keep compiling — a collector
+  only reads the context. What you should change is to pass the signal to
+  whatever the collector waits on, which is the only thing that makes
+  cancellation real:
+
+  ```diff
+  -const res = await fetch(this.endpoint);
+  +const res = await fetch(this.endpoint, { signal: context.signal });
+  ```
+
+  The pipeline stops waiting on a collector that ignores its signal — the bound
+  does not depend on cooperation — but that collector's outbound call goes on
+  running against a dependency that has already lost the request it belonged to.
+
+  *What breaks* is code that **builds** a `CollectorContext`: a custom
+  transport or interceptor, and every test fixture with a context literal. Add
+  the field. A transport that has no cancellation of its own passes
+  `new AbortController().signal`. Callers of `AttributePipeline.collect` /
+  `RulePipeline.collect` are unaffected: those now take a `CollectorRequest` —
+  the same shape *without* `signal`, since the per-collector signal is the
+  pipeline's to mint. A caller with an outer deadline may still set the optional
+  `signal` on the request, and the pipeline links it into its own, so aborting
+  it cancels every collector in flight.
+
+  **The bounds, and why these numbers.** All three are on by default, so a
+  library consumer who configures nothing is still bounded:
+
+  | Knob | Default | What it bounds |
+  | --- | --- | --- |
+  | `verify.collectorTimeoutMs` | `2000` | one collector. A healthy lookup against a dependency the deployment runs answers in single-digit milliseconds; 2s is far past "slow" and short of the timeouts callers put on `/verify` itself, so the verifier is the layer that notices — and it can name *which* collector, which a caller-side timeout never can. The budget starts when that collector starts, so queueing behind the concurrency cap does not spend it |
+  | `verify.collectorDeadlineMs` | `5000` | the whole fan-out, per pipeline. A per-collector budget cannot bound a *set*: once collectors queue, enough of them each finishing just inside their own budget still adds up to a request nobody is waiting for |
+  | `verify.collectorConcurrency` | `8` | collectors in flight at once, per pipeline, per decision. More than any realistic collector set, so a normal configuration still fans out in one wave and nothing about its latency changes. What it removes is the tail — dozens of collectors, or a 50-entry batch, multiplying into simultaneous outbound calls against a dependency that has just started to slow down |
+
+  Each knob routes through `resolveBound` at both config boundaries — the schema
+  for config files, `createApp` for the hand-built configs it also accepts —
+  with one spec table in `config/bounds.mts`, per AGENTS.md "Two-Boundary Config
+  Validation". The defaults themselves are `packages/core`'s and are re-exported
+  by `config/defaults.mts` rather than restated, so the config file's default and
+  the pipeline's cannot drift. `0` is refused for all three: a zero timeout
+  cancels every collector before it can answer, and a zero concurrency is a
+  fan-out that starts nothing and resolves with no attributes and no rules — a
+  fail-open dressed as a setting. The shipped `templates/standalone` config
+  writes all three out with their `VERIFY_COLLECTOR_*` env substitutions, beside
+  the `#118` limits.
+
+  **A note on the `verify` block's own default, because this nearly went wrong.**
+  The block carries a `.default(() => ({…}))`, and zod takes that object
+  *verbatim* — it never parses it back through the shape. A knob added to the
+  shape but not to that literal is therefore `undefined` for every config that
+  omits the `verify` block entirely, which is the ordinary deployment shape,
+  since an overlay config repeats only the sections it changes. Nothing throws;
+  the bound simply stops existing. #115 and #118 both added knobs here and landed
+  a day apart, so the second merge could have looked clean and silently dropped
+  the first's defaults. It is now asserted instead of reviewed: the two
+  productions of the block — present-and-empty (which runs the shape's per-key
+  defaults) and absent (which takes the literal) — must be deeply equal, so a
+  future knob added to one and not the other fails without anyone remembering to
+  extend a list. `loadConfig.test.mts` proves the same end-to-end through the
+  real HOCON loader, on a config directory with no `verify` block at all.
+
+  **A collector whose decision is already lost is never invoked.** Not started
+  and then cancelled — not started. Handing a collector an aborted signal and
+  relying on it to notice is a different thing: the documented way to use the
+  signal is to pass it to `fetch`, so a collector that does not check
+  `signal.aborted` before its first `await` has already put the request on the
+  wire. That is an outbound call for an answer nobody will read, usually against
+  the very dependency whose slowness ended the decision. The check sits at the
+  point of invocation rather than in the loop above it, so it holds however the
+  fan-out is driven, and the failure it raises is the *set's* reason — the
+  deadline, a sibling's error, the caller leaving — never a timeout attributed to
+  a collector that never ran and never overran anything.
+
+  **Fail closed: a timeout denies, and can never allow.** The pipeline throws
+  `CollectorTimeoutError` and returns nothing at all — never the results that
+  arrived in time. That is the whole design decision. Partial attributes merely
+  weaken a rule's inputs, but partial rules weaken the *policy*, and an empty
+  rule set is an **allow** wherever `rule.onEmptyRuleSet = "allow"` is set. So
+  the evaluator is never reached: `routes/verify.mts` catches the error and
+  builds the deny itself — `403`, `code: "collector_timeout"`, empty
+  `reason.groups` — which means there is no code path on which a timeout can
+  become a permit. Pinned by `createApp — a stalled collector denies (#115)`,
+  which asserts a deployment that *does* allow an empty rule set still denies a
+  stalled one.
+
+  It is a deny and not a `5xx` on purpose: a 5xx invites the enforcement layer
+  to retry the same stalled dependency, or to conclude the PDP is down and apply
+  a fallback nobody in this repo wrote. The wire message names no collector and
+  no bound — that reaches the caller, and the collector set is deployment
+  topology; the detail goes to the `collector_timeout` log line. The decision
+  still emits its `decision` audit line and increments the deny counters, so a
+  timeout is visible as what it is rather than disappearing into the 500 rate.
+  In a batch the bound is per decision: one entry timing out denies that entry
+  and leaves the rest decided.
+
+  **Rule purity is unchanged in strength.** The signal lands on the very object
+  `describeRulePurityConformance` revokes, and it is the first context field a
+  collector is *meant* to hold live — but only for the length of `collect`.
+  `aborted` moves on its own, so a rule that carried a signal into `verify`
+  would not be a function of `attrs`, and the suite revokes it exactly as it
+  revokes `ctx.resource`. What had to change is the mechanism, not the check: an
+  `AbortSignal` cannot be wrapped in a `Proxy` — its members are brand-checked
+  against the receiver, so a proxied signal throws on `addEventListener`,
+  `AbortSignal.any` and `fetch`, and the harness would have begun failing honest
+  collectors for an artefact of its own. The view is now a real signal minted by
+  `AbortSignal.any` (linked to the case's own, so cancellation still propagates),
+  and revoking shadows its members with accessors throwing the same `TypeError` a
+  revoked proxy throws. Both halves are pinned: a rule holding the signal is
+  rejected, and a collector using it in every legitimate way passes.
+
 - **BREAKING**: `/verify` and `/verify/batch` now hold the request body to
   stated limits, refuse unknown properties and whitespace, and **validate the
   body before verifying the token**

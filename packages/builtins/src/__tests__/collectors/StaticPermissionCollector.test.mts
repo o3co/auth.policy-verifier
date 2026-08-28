@@ -6,10 +6,18 @@ import { ATTR_PERMISSIONS } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 import { StaticPermissionCollector } from "#/collectors/StaticPermissionCollector.mjs";
 
+/**
+ * `CollectorContext.signal` is required (#115): a pipeline supplies one per
+ * collector, so a hand-built context carries one too. These fixtures are not
+ * about cancellation, so it is a signal that never aborts.
+ */
+const NEVER_CANCELLED = new AbortController().signal;
+
 const stubContext: CollectorContext = {
 	payload: {} satisfies VerifierPayload,
 	resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 	action: "read",
+	signal: NEVER_CANCELLED,
 };
 
 describe("StaticPermissionCollector", () => {

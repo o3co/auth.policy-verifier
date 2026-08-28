@@ -6,10 +6,18 @@ import { ATTR_SCOPES } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 import { PayloadScopeCollector } from "#/collectors/PayloadScopeCollector.mjs";
 
+/**
+ * `CollectorContext.signal` is required (#115): a pipeline supplies one per
+ * collector, so a hand-built context carries one too. These fixtures are not
+ * about cancellation, so it is a signal that never aborts.
+ */
+const NEVER_CANCELLED = new AbortController().signal;
+
 const makeContext = (scope?: string): CollectorContext => ({
 	payload: { scope } satisfies VerifierPayload,
 	resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 	action: "read",
+	signal: NEVER_CANCELLED,
 });
 
 describe("PayloadScopeCollector", () => {
@@ -25,6 +33,7 @@ describe("PayloadScopeCollector", () => {
 			payload: {} satisfies VerifierPayload,
 			resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 			action: "read",
+			signal: NEVER_CANCELLED,
 		};
 		const attrs = await collector.collect(ctx);
 		expect(attrs.get(ATTR_SCOPES)).toEqual([]);

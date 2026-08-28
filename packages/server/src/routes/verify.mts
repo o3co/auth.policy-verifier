@@ -3,6 +3,7 @@
 
 import {
 	type AttributePipeline,
+	CollectorTimeoutError,
 	consoleLogger,
 	type Decision,
 	type DecisionReason,
@@ -138,6 +139,24 @@ const errorBody = (code: string, message: string): ErrorBody => ({
 	code,
 	message,
 });
+
+/**
+ * The deny a collector fan-out that ran out of time is answered with (#115).
+ *
+ * A deny, and specifically not a 5xx. The caller asked whether this request is
+ * authorized; what the verifier can stand behind when a collector stalled is
+ * "not established", and the safe rendering of that is a refusal. A 500 invites
+ * the enforcement layer to retry the same stalled dependency, or to conclude the
+ * PDP is down and apply a fallback of its own — and a fallback nobody in this
+ * repo wrote is precisely the fail-open being closed here.
+ *
+ * The message is fixed and says nothing about which collector or which bound:
+ * that reaches the caller, and the collector set is deployment topology. The
+ * detail is in the `collector_timeout` log line instead, where an operator can
+ * act on it.
+ */
+const COLLECTOR_TIMEOUT_CODE = "collector_timeout";
+const COLLECTOR_TIMEOUT_MESSAGE = "Authorization could not be decided in time";
 
 /** One validated entry: the request as sent, plus its resource already parsed. */
 interface ValidatedDecisionRequest {
@@ -471,11 +490,32 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 		// request is many decisions, and it is the per-decision cost that a
 		// collector reaching out to a store makes worse.
 		const startedAt = performance.now();
-		const [attrs, rules] = await Promise.all([
-			config.attributePipeline.collect(context),
-			config.rulePipeline.collect(context),
-		]);
-		const decision = evaluate(attrs, rules, config.evaluateOptions);
+		let decision: Decision;
+		try {
+			const [attrs, rules] = await Promise.all([
+				config.attributePipeline.collect(context),
+				config.rulePipeline.collect(context),
+			]);
+			decision = evaluate(attrs, rules, config.evaluateOptions);
+		} catch (cause) {
+			// Anything else is a genuine fault and keeps surfacing as a 500.
+			if (!(cause instanceof CollectorTimeoutError)) throw cause;
+			// The evaluator is deliberately never reached: it is the one place a
+			// short rule list could still be read as a policy, and `onEmptyRuleSet:
+			// "allow"` would then turn a timed-out rule pipeline into a permit. A
+			// deny is built here instead, with an empty `reason` because no rule
+			// group was evaluated — which is the honest account of what happened.
+			logger.error(
+				{ err: cause, resource: entry.resource, action: entry.action, requestId },
+				COLLECTOR_TIMEOUT_CODE,
+			);
+			decision = {
+				decision: "deny",
+				code: COLLECTOR_TIMEOUT_CODE,
+				message: COLLECTOR_TIMEOUT_MESSAGE,
+				reason: { groups: [] },
+			};
+		}
 		const durationMs = performance.now() - startedAt;
 
 		// Derived once and spent twice — on the audit line below and on the

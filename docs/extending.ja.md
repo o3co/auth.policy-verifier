@@ -95,6 +95,8 @@ export class UserLevelAtLeast implements Rule {
 | `headers` | トランスポートが設定（現状は `x-request-id`） | トランスポート由来 |
 | `requestContext` | リクエストボディの `context` をそのまま転送 | **未検証（untrusted）** |
 
+（5 つ目のフィールド `signal` は入力ではなく、pipeline のキャンセルハンドルです。[デッドラインとキャンセル](#デッドラインとキャンセル) を参照。）
+
 有効なトークンを持つ者は `context` に何でも書けます。`requestContext.role` を `ATTR_ROLES` に昇格させる Collector は、呼び出し側に「自分の認可入力を自分で書く」権限を渡したことになります — トークンが「誰であるか」を述べ、そのすぐ後にボディが「何をしてよいか」を述べる形です。しかもそれはたった 1 行で、隣にある `payload.sub` を昇格させる行と見分けがつきません。
 
 データ自体には両者を区別する手がかりがないため、型に区別させます。`requestContext` の型は `UntrustedRequestContext` — プロパティアクセスでは中身に到達できない不透明な brand です:
@@ -117,6 +119,27 @@ unwrap した後の指針:
 
 `CollectorContext` を自前で組み立てるトランスポート（自作の interceptor やテスト）は、`markUntrustedRequestContext` で受け取った時点の record をマークします。本リポジトリの verify route はボディの `context` に対してまさにこれを行っており、brand を生成できるのはこの関数だけなので、生のボディオブジェクトが誤って Collector に届くことはありません。
 
+## デッドラインとキャンセル
+
+各コレクターには `CollectorContext.signal` で `AbortSignal` が渡され、そのコレクターが属する fan-out には 3 つの上限が掛かります: コレクター単位のタイムアウト（既定 2 秒）、fan-out 全体のデッドライン（5 秒）、同時実行数の上限（8）。運用側は `verify.collectorTimeoutMs` / `verify.collectorDeadlineMs` / `verify.collectorConcurrency` で調整します。
+
+**待つ相手には signal をそのまま渡してください。** キャンセルが名目でなく実効になるのはそれによってです:
+
+```ts
+async collect(context: CollectorContext): Promise<Attributes> {
+  const res = await fetch(this.endpoint, { signal: context.signal });
+  // …
+}
+```
+
+signal を無視するコレクターも pipeline は待つのをやめます — 上限はコレクターの協力に依存しません — が、そのコレクターが始めた外向きの呼び出しは、すでに失われた決定のために依存先へ走り続けます。同時実行上限が防ごうとしているのはまさにこの積み上がりであり、signal を尊重することがそれに加担しないための手段です。
+
+signal が abort する理由は 4 つあり、`signal.reason` がどれかを示します: このコレクターが予算を超えた、pipeline がデッドラインを超えた、兄弟コレクターがすでに決定を失敗させた、呼び出し側が去った。
+
+**上限を超えたリクエストは deny になります** — `403` と `code: "collector_timeout"`。pipeline は `CollectorTimeoutError` を送出し、何も返しません。これは意図的です: 間に合った attribute は Rule への入力を弱め、間に合った Rule は**ポリシー**を弱め、空になれば `rule.onEmptyRuleSet = "allow"` の deployment では allow と読まれてしまいます。だから部分的な答えはそもそも存在させません。言うことが本当に無いコレクターは、速やかに空の `Map` を返してください。タイムアウトはその表明手段ではありません。
+
+**Rule は signal を `verify` に持ち込んではいけません。** これはリクエストへの live なハンドルであり（`aborted` は勝手に変わります）、保持して `verify` で読むのは `ctx.resource` を保持するのと同じ違反です。[rule purity conformance suite](#rule-は-attrs-だけで判断する) はこれを同じ違反として検出します。
+
 ## カスタム AttributeCollector の書き方
 
 `AttributeCollector` は `@o3co/auth.policy-verifier.core` で定義されます:
@@ -129,7 +152,7 @@ interface AttributeCollector {
 
 - 1 つの Collector は **焦点を絞った属性キー群**を生成してください。関係のない抽出をまとめないこと。IP アドレスと User-Agent を抽出するなら Collector を 2 つに分けてください。
 - 属性キーは文字列定数を使うこと。`@o3co/auth.policy-verifier.core` の `ATTR_SCOPES`、`ATTR_PERMISSIONS`、`ATTR_ROLES`、`ATTR_USER_ID`、`ATTR_CLIENT_ID` を参照。プロジェクト固有のキーは独自の定数を定義し、**core のキーを異なるセマンティクスで再利用しないこと**。
-- `AttributePipeline` は全 Collector を並列実行し、結果をマージします: 配列値は連結、スカラ／オブジェクトは後勝ち。この挙動に合わせて設計し、Collector の実行順序には依存しないこと。
+- `AttributePipeline` は全 Collector を並列実行し、結果をマージします: 配列値は連結、スカラ／オブジェクトは後勝ち。この挙動に合わせて設計し、Collector の実行順序には依存しないこと。同時に走る本数には上限があり、各 Collector には時間制限があります — [デッドラインとキャンセル](#デッドラインとキャンセル) を参照。
 - `CollectorContext.requestContext` は意図的に型付けされていません。エンジンは汎用 `requestContext` Collector を提供しません。`requestContext` の形は consuming project のトランスポート層 / interceptor が定義するものであり、解釈はプロジェクトの責務だからです。必要なフィールドごとに焦点を絞った Collector を書き、形の検証はその Collector 内で行ってください。同時に唯一の未検証入力でもあります — 中身を読む前に [信頼境界](#信頼境界-requestcontext-は呼び出し側のもの) を参照してください。
 
 ### 実例: `ClientIpCollector`

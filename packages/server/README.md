@@ -80,9 +80,10 @@ Request flow:
 4. Either way, enforce the token's own lifetime: `exp` and `iat` are **required** (a token that never states an expiry never expires), `nbf` is honoured when present, `exp` must be in the future, and `now - iat` must not exceed `maxTokenAgeSeconds` — which is what refuses a token whose issuer set `exp` years out. `clockToleranceSeconds` widens every one of those comparisons. Returns 401 on failure. The decode-only path restates these checks by hand rather than skipping them, so both modes answer the same for the same token.
 5. Parse `req.body.resource` with `resourceParser`; read `req.body.action` and `req.body.context`.
 6. Include `x-request-id` header in `CollectorContext.headers` if present (collectors can forward it to upstream calls they make).
-7. Run `attributePipeline.collect` and `rulePipeline.collect` in parallel; call `evaluate`.
+7. Run `attributePipeline.collect` and `rulePipeline.collect` in parallel, under the collector bounds (`verify.collectorTimeoutMs`, `verify.collectorDeadlineMs`, `verify.collectorConcurrency` — each collector is handed an `AbortSignal` on `CollectorContext.signal`); call `evaluate`.
 8. Return `200 { decision: "allow" }` or `403 { decision: "deny", code, message }`.
-9. Return `500 { decision: "deny", code: "internal_error" }` on unexpected errors.
+9. Return `403 { decision: "deny", code: "collector_timeout" }` when a collector or the fan-out ran out of time (#115). The evaluator is never reached — collecting *some* of the rules is a weaker policy, and none of them is an allow under `rule.onEmptyRuleSet = "allow"` — so a timeout can only ever deny. Details go to the `collector_timeout` log line, not to the caller.
+10. Return `500 { decision: "deny", code: "internal_error" }` on unexpected errors.
 
 ### AppConfigSchema / AppConfig
 
@@ -90,7 +91,7 @@ Request flow:
 const AppConfigSchema = z.object({
   http: z.object({
     hostname: z.string().default("127.0.0.1"),   // loopback — see Trust boundary
-    port: z.coerce.number().default(3000),
+    port: boundedNumber(NUMERIC_BOUNDS.port, "http"),               // 1..65535, default 3000
     pathPrefix: z.string().default(""),
     callerAuth: z.object({                        // optional — see Trust boundary
       header: z.string().min(1).default("x-caller-token"),
@@ -104,8 +105,8 @@ const AppConfigSchema = z.object({
       issuer: z.union([z.string(), z.array(z.string())]).optional(),   // required when mode is "verify"
       audience: z.union([z.string(), z.array(z.string())]).optional(), // required when mode is "verify"
       tokenType: z.string().default("at+jwt"),
-      maxTokenAgeSeconds: z.coerce.number().int().positive().default(86400),
-      clockToleranceSeconds: z.coerce.number().int().min(0).max(300).default(0),
+      maxTokenAgeSeconds: boundedNumber(NUMERIC_BOUNDS.maxTokenAgeSeconds, "oauth.jwt"),
+      clockToleranceSeconds: boundedNumber(NUMERIC_BOUNDS.clockToleranceSeconds, "oauth.jwt"),
     }),
   }),
   attribute: z.object({
@@ -118,12 +119,34 @@ const AppConfigSchema = z.object({
     parser: z.string().default("DotNotationResourceParser"),
   }),
   verify: z.object({
-    maxBatchSize: z.coerce.number().int().positive().default(50),
+    maxBatchSize: boundedNumber(NUMERIC_BOUNDS.maxBatchSize, "verify"),           // default 50
+    // What one decision request may carry (#118).
+    maxBodyBytes: boundedNumber(NUMERIC_BOUNDS.maxBodyBytes, "verify"),           // default 65536
+    maxResourceLength: boundedNumber(NUMERIC_BOUNDS.maxResourceLength, "verify"), // default 512
+    maxActionLength: boundedNumber(NUMERIC_BOUNDS.maxActionLength, "verify"),     // default 64
+    maxContextEntries: boundedNumber(NUMERIC_BOUNDS.maxContextEntries, "verify"), // default 64
+    maxContextValueLength:
+      boundedNumber(NUMERIC_BOUNDS.maxContextValueLength, "verify"),              // default 1024
+    // Bounds on the collector fan-out (#115). Exceeding any of them denies.
+    collectorTimeoutMs: boundedNumber(NUMERIC_BOUNDS.collectorTimeoutMs, "verify"),   // default 2000
+    collectorDeadlineMs: boundedNumber(NUMERIC_BOUNDS.collectorDeadlineMs, "verify"), // default 5000
+    collectorConcurrency:
+      boundedNumber(NUMERIC_BOUNDS.collectorConcurrency, "verify"),               // default 8
   }),
 });
 
 type AppConfig = z.infer<typeof AppConfigSchema>;
 ```
+
+**Every numeric knob is read by one function at both boundaries** (#157). `boundedNumber` wraps
+`resolveBound` from [`config/bounds.mts`](src/config/bounds.mts), where `NUMERIC_BOUNDS` states each
+knob's default, range and unit once; the runtime guards (`createApp`, `createVerifyRouter`, the
+`KeyResolverFactory` implementations) call `resolveBound` directly for hand-built configs, so both
+reach the same verdict in the same words. It is deliberately **not** `z.coerce.number()`: a knob
+arrives either as a number or as the string a HOCON `${?VAR}` substitution delivers, and both are
+accepted — but `z.coerce` would also read `true` as `1`, `null` and `""` as `0`, which is how a
+variable exported empty used to become a deliberate zero. Non-integers, `NaN` and `Infinity` are
+refused for the same reason.
 
 Each entry in `attribute.collectors` and `rule.collectors` requires a `collector` field (the registered factory name). Additional fields are passed through to the factory as configuration.
 

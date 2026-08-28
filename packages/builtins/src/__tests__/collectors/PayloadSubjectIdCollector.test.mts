@@ -6,6 +6,13 @@ import { ATTR_CLIENT_ID, ATTR_USER_ID } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 import { PayloadSubjectIdCollector } from "#/collectors/PayloadSubjectIdCollector.mjs";
 
+/**
+ * `CollectorContext.signal` is required (#115): a pipeline supplies one per
+ * collector, so a hand-built context carries one too. These fixtures are not
+ * about cancellation, so it is a signal that never aborts.
+ */
+const NEVER_CANCELLED = new AbortController().signal;
+
 describe("PayloadSubjectIdCollector", () => {
 	const collector = new PayloadSubjectIdCollector();
 
@@ -14,6 +21,7 @@ describe("PayloadSubjectIdCollector", () => {
 			payload: { sub: "u1" } satisfies VerifierPayload,
 			resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 			action: "read",
+			signal: NEVER_CANCELLED,
 		};
 		const attrs = await collector.collect(ctx);
 		expect(attrs.get(ATTR_USER_ID)).toBe("u1");
@@ -24,6 +32,7 @@ describe("PayloadSubjectIdCollector", () => {
 			payload: { azp: "c1" } satisfies VerifierPayload,
 			resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 			action: "read",
+			signal: NEVER_CANCELLED,
 		};
 		const attrs = await collector.collect(ctx);
 		expect(attrs.get(ATTR_CLIENT_ID)).toBe("c1");
@@ -34,6 +43,7 @@ describe("PayloadSubjectIdCollector", () => {
 			payload: {} satisfies VerifierPayload,
 			resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 			action: "read",
+			signal: NEVER_CANCELLED,
 		};
 		const attrs = await collector.collect(ctx);
 		expect(attrs.size).toBe(0);

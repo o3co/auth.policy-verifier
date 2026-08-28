@@ -17,7 +17,7 @@
 
 The engine enforces a strict separation between the context-reading layer and the context-free layer.
 
-- **Collectors** (`AttributeCollector`, `RuleCollector`) are the only layer that reads `CollectorContext`. They transform the raw request into static outputs: attributes or rules.
+- **Collectors** (`AttributeCollector`, `RuleCollector`) are the only layer that reads `CollectorContext`. They transform the raw request into static outputs: attributes or rules. They are also the only layer that does I/O, which is why they are the only layer with deadlines — see `packages/core/src/collectorLimits.mts` and the `signal` note below.
 - **Attributes** are plain values (`Map<string, unknown>`). Once produced by collectors, they carry no reference to the originating request.
 - **Rules** are predicates over attributes (`verify(attrs): boolean`). `verify` must be a **deterministic, side-effect-free function of `attrs`**: equal attributes give equal answers, and it must not mutate its input, perform I/O, or observe anything the engine cannot see. `verify` is handed a `ReadonlyAttributes` (`ReadonlyMap<string, unknown>`), so the "must not mutate" half is a compile error rather than a request.
 
@@ -30,6 +30,8 @@ This contract guarantees that rules are pure functions of attributes: testable i
 **The deciding test:** collect the rule, discard the context, then call `verify(attrs)`. The answer must be unchanged. A rule that copied a string out at collect time answers identically; a rule that kept the request cannot answer at all.
 
 That test is executable, not rhetorical. `describeRulePurityConformance` in [`tests/integration/src/conformance/rulePurity.mts`](tests/integration/src/conformance/rulePurity.mts) collects the rules through a revocable view of the context, revokes it, and re-runs `verify` — so a rule holding the request throws on the access, and one holding a copied value does not. Apply it to every rule collector you add. `.github/workflows/ci.yml` also greps `verify` bodies for context reads, but that is a backstop for the obvious shape; the conformance suite is the check.
+
+**`CollectorContext.signal` is on the same side of the line as everything else.** It is the one field a collector is *meant* to hold live — it is a cancellation handle, and passing it to `fetch` is what it is for — but that licence ends when `collect` returns. `aborted` moves on its own, so a rule holding a signal and reading it inside `verify` is not a function of `attrs` at all, and the suite revokes it exactly as it revokes `ctx.resource`. What the suite could not do is wrap it in a `Proxy`: `AbortSignal`'s members are brand-checked against the receiver, so a proxied signal fails `addEventListener`, `AbortSignal.any` and `fetch` — the harness would have started failing honest collectors for an artefact of its own. So the view is a real signal minted by `AbortSignal.any`, and revoking shadows its members with accessors that throw the same error a revoked proxy does. The check is unchanged in strength; only the mechanism differs, for the one type that cannot be a proxy. The reasoning is written on `revocableSignal`; a future field with internal slots of its own should follow it rather than take an exemption.
 
 ## Core Vocabulary Scope
 

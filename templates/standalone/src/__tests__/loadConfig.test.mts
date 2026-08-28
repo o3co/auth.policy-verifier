@@ -11,6 +11,9 @@
  * exercises parseFile, so a HOCON parser regression is otherwise invisible
  * until the container fails to start.
  */
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadAppConfig } from "../loadConfig.js";
@@ -39,6 +42,19 @@ const envKeys = [
 	"OAUTH_JWT_MAX_TOKEN_AGE_SECONDS",
 	"OAUTH_JWT_CLOCK_TOLERANCE_SECONDS",
 	"VERIFY_MAX_BATCH_SIZE",
+	// Every VERIFY_* the cases below set has to be listed, or it leaks into the
+	// tests after it. Only `VERIFY_MAX_BATCH_SIZE` was here while the #118 cases
+	// set five more, and the leak was invisible for as long as no later case
+	// loaded the shipped config and asserted on `verify` — the first one that
+	// did got a boot failure from an env var a test three screens up had set.
+	"VERIFY_MAX_BODY_BYTES",
+	"VERIFY_MAX_RESOURCE_LENGTH",
+	"VERIFY_MAX_ACTION_LENGTH",
+	"VERIFY_MAX_CONTEXT_ENTRIES",
+	"VERIFY_MAX_CONTEXT_VALUE_LENGTH",
+	"VERIFY_COLLECTOR_TIMEOUT_MS",
+	"VERIFY_COLLECTOR_DEADLINE_MS",
+	"VERIFY_COLLECTOR_CONCURRENCY",
 ] as const;
 
 /** application.conf leaves issuer/audience unset, so every load must supply them. */
@@ -249,6 +265,9 @@ describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#1
 		process.env.VERIFY_MAX_ACTION_LENGTH = "32";
 		process.env.VERIFY_MAX_CONTEXT_ENTRIES = "16";
 		process.env.VERIFY_MAX_CONTEXT_VALUE_LENGTH = "256";
+		process.env.VERIFY_COLLECTOR_TIMEOUT_MS = "750";
+		process.env.VERIFY_COLLECTOR_DEADLINE_MS = "1500";
+		process.env.VERIFY_COLLECTOR_CONCURRENCY = "4";
 
 		const config = loadAppConfig(configDirPath, "development");
 
@@ -264,6 +283,9 @@ describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#1
 		expect(config.verify.maxActionLength).toBe(32);
 		expect(config.verify.maxContextEntries).toBe(16);
 		expect(config.verify.maxContextValueLength).toBe(256);
+		expect(config.verify.collectorTimeoutMs).toBe(750);
+		expect(config.verify.collectorDeadlineMs).toBe(1_500);
+		expect(config.verify.collectorConcurrency).toBe(4);
 	});
 
 	it.each([
@@ -279,6 +301,9 @@ describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#1
 		["VERIFY_MAX_ACTION_LENGTH", "1.5"],
 		["VERIFY_MAX_CONTEXT_ENTRIES", "abc"],
 		["VERIFY_MAX_CONTEXT_VALUE_LENGTH", "0"],
+		["VERIFY_COLLECTOR_TIMEOUT_MS", "0"],
+		["VERIFY_COLLECTOR_DEADLINE_MS", "-1"],
+		["VERIFY_COLLECTOR_CONCURRENCY", "0"],
 	])("refuses to boot on %s=%s", (key, value) => {
 		setRequiredEnv();
 		process.env[key] = value;
@@ -293,6 +318,8 @@ describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#1
 		"VERIFY_MAX_BATCH_SIZE",
 		"VERIFY_MAX_BODY_BYTES",
 		"VERIFY_MAX_CONTEXT_ENTRIES",
+		"VERIFY_COLLECTOR_TIMEOUT_MS",
+		"VERIFY_COLLECTOR_CONCURRENCY",
 	])("refuses %s exported empty rather than reading it as zero", (key) => {
 		// `VAR=` substitutes an empty string, and `Number("")` is 0 — which the
 		// knobs whose floor is 0 would otherwise accept as a deliberate setting.
@@ -303,5 +330,84 @@ describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#1
 		process.env[key] = "";
 
 		expect(() => loadAppConfig(configDirPath, "development")).toThrow();
+	});
+});
+
+describe("loadAppConfig — a config with no verify block at all (#115, #118)", () => {
+	/*
+	 * The shipped `application.conf` writes out every `verify` knob, so loading
+	 * it exercises the schema's per-key defaults and never the block-level one.
+	 * The block-level default is what serves the OTHER shape, and it is the
+	 * common one: an overlay config repeats only the sections it changes, and a
+	 * deployment that has no opinion about batch sizes or collector deadlines
+	 * simply never writes a `verify` block.
+	 *
+	 * zod takes `.default(() => ({…}))` verbatim rather than parsing it back
+	 * through the shape, so a knob missing from that literal is `undefined` for
+	 * exactly this shape — silently, with nothing failing. That is why it is
+	 * proved here through the real loader (`parseFile` → `withFallback` →
+	 * `validate`) rather than inferred from the schema unit tests, which all
+	 * write a `verify` block and would go on passing.
+	 */
+	const withoutVerify = (): string => {
+		const dir = mkdtempSync(path.join(tmpdir(), "policy-verifier-config-"));
+		// The minimum a deployment must state, and not one key more. No `verify`
+		// block, and an env overlay that declares nothing — the shipped
+		// development/production files are comments only, so this is their shape.
+		// The `${"$"}{?VAR}` spelling keeps the HOCON env substitutions literal
+		// `${?VAR}` text rather than JavaScript interpolation — for the parser
+		// under test and for anyone skimming the fixture.
+		writeFileSync(
+			path.join(dir, "application.conf"),
+			`
+oauth {
+  jwt {
+    algorithm = HS256
+    secret = ${"$"}{?OAUTH_JWT_SECRET}
+    issuer = ${"$"}{?OAUTH_JWT_ISSUER}
+    audience = ${"$"}{?OAUTH_JWT_AUDIENCE}
+  }
+}
+attribute { collectors = [ { collector = PayloadScopeCollector } ] }
+rule { collectors = [ { collector = ResourceActionScopeRuleCollector } ] }
+`,
+		);
+		writeFileSync(path.join(dir, "development.conf"), "# overlay declares nothing\n");
+		return dir;
+	};
+
+	it("still applies every documented verify default", () => {
+		setRequiredEnv();
+
+		const config = loadAppConfig(withoutVerify(), "development");
+
+		// All nine, spelled out. A knob that reached the shape but not the
+		// block's `.default()` literal is `undefined` here, and `toEqual` says
+		// which one.
+		expect(config.verify).toEqual({
+			maxBatchSize: 50,
+			maxBodyBytes: 65_536,
+			maxResourceLength: 512,
+			maxActionLength: 64,
+			maxContextEntries: 64,
+			maxContextValueLength: 1_024,
+			collectorTimeoutMs: 2_000,
+			collectorDeadlineMs: 5_000,
+			collectorConcurrency: 8,
+		});
+	});
+
+	it("agrees with the shipped config, which writes the same values out", () => {
+		// The two ways a deployment can arrive at the defaults — stating them in
+		// `application.conf`, or omitting the block — must not disagree. The
+		// shipped file is the documentation operators copy from, so a drift
+		// between it and the schema's fallback is a drift between what the docs
+		// say and what an unconfigured deployment runs.
+		setRequiredEnv();
+
+		const shipped = loadAppConfig(configDirPath, "development");
+		const omitted = loadAppConfig(withoutVerify(), "development");
+
+		expect(omitted.verify).toEqual(shipped.verify);
 	});
 });

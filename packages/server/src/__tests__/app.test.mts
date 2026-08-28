@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Logger, Module } from "@o3co/auth.policy-verifier.core";
+import type { Attributes, Logger, Module, Rule } from "@o3co/auth.policy-verifier.core";
 import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -1039,4 +1039,157 @@ describe("createApp — HS256 secret rotation (#112)", () => {
 			).rejects.toThrow(message);
 		},
 	);
+});
+
+/** A module whose collectors never answer — the stalled dependency #115 is about. */
+const stallingModule: Module = {
+	name: "stalling-module",
+	async init(context) {
+		context.attributeCollectorRegistry.register("StallingCollector", () => ({
+			collect: () => new Promise<Attributes>(() => {}),
+		}));
+		context.ruleCollectorRegistry.register("StallingRuleCollector", () => ({
+			collect: () => new Promise<Rule[]>(() => {}),
+		}));
+	},
+};
+
+describe("createApp — a stalled collector denies (#115)", () => {
+	/** Bounds low enough that the stall is answered well inside the test's own timeout. */
+	const bounds = { collectorTimeoutMs: 20, collectorDeadlineMs: 50 };
+
+	const stalledApp = (config: Record<string, unknown>) =>
+		createApp({
+			pathResolver: (s: string) => s,
+			config: AppConfigSchema.parse({
+				oauth: { jwt: { secret: JWT_SECRET, mode: "verify", issuer: ISSUER, audience: AUDIENCE } },
+				resource: { parser: "SimpleParser" },
+				verify: bounds,
+				...config,
+			}),
+			modules: [testModule, stallingModule, builtinKeyResolversModule],
+		});
+
+	const ask = async (app: Awaited<ReturnType<typeof createApp>>) =>
+		request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${await signToken({ scope: "read:project" })}`)
+			.send({ resource: "project", action: "read" });
+
+	it("answers a deny instead of holding the request open", async () => {
+		const app = await stalledApp({
+			attribute: { collectors: [{ collector: "StallingCollector" }] },
+			rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
+		});
+
+		const res = await ask(app);
+
+		expect(res.status).toBe(403);
+		expect(res.body.decision).toBe("deny");
+		expect(res.body.code).toBe("collector_timeout");
+		// Not a 500: the caller asked whether the request is authorized, and the
+		// answer the verifier can stand behind is "no". A 5xx invites the
+		// enforcement layer to retry, or — worse — to treat the PDP as down and
+		// apply its own fallback.
+		expect(res.body.reason.groups).toEqual([]);
+	});
+
+	it("still denies where the same request with no rules at all would be allowed", async () => {
+		// This is the whole of "fail closed", in one pair of cases. A rule
+		// pipeline that answered with the rules it managed to collect would hand
+		// this deployment an EMPTY rule set — and `onEmptyRuleSet: "allow"` turns
+		// an empty rule set into a permit. A timeout must not be able to walk
+		// through that door, so the timed-out pipeline never reaches the evaluator.
+		const failOpenPolicy = { onEmptyRuleSet: "allow" as const };
+
+		const allowing = await stalledApp({
+			attribute: { collectors: [] },
+			rule: { collectors: [{ collector: "EmptyRuleCollector" }], ...failOpenPolicy },
+		});
+		const control = await ask(allowing);
+		// The control: this deployment really does allow a request that collects
+		// no rules, so the case below is not passing for some other reason.
+		expect(control.status).toBe(200);
+		expect(control.body.decision).toBe("allow");
+
+		const stalled = await stalledApp({
+			attribute: { collectors: [] },
+			rule: { collectors: [{ collector: "StallingRuleCollector" }], ...failOpenPolicy },
+		});
+		const res = await ask(stalled);
+
+		expect(res.status).toBe(403);
+		expect(res.body.decision).toBe("deny");
+		expect(res.body.code).toBe("collector_timeout");
+	});
+});
+
+describe("createApp — collector bounds, one reader at both boundaries (#115)", () => {
+	// `createApp` constructs both pipelines, so it is the runtime guard for the
+	// bounds they run under: a library consumer reaches it with a hand-built
+	// config the schema never saw. It must refuse what `AppConfigSchema` refuses,
+	// naming the same key in the same words.
+	const buildApp = (verify: unknown) =>
+		createApp({
+			pathResolver: (s: string) => s,
+			config: { ...testConfig, verify } as unknown as typeof testConfig,
+			modules: [testModule, builtinKeyResolversModule],
+		});
+
+	/** The message one boundary refused with, or `undefined` when it accepted the value. */
+	const refusal = async (act: () => Promise<unknown>): Promise<string | undefined> => {
+		try {
+			await act();
+			return undefined;
+		} catch (cause) {
+			return (cause as Error).message;
+		}
+	};
+
+	const schemaRefusal = (verify: unknown, field: string): string | undefined => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: { secret: JWT_SECRET, mode: "verify", issuer: ISSUER, audience: AUDIENCE } },
+			attribute: { collectors: [] },
+			rule: { collectors: [] },
+			verify,
+		});
+		return result.success
+			? undefined
+			: result.error.issues.find((issue) => issue.path.at(-1) === field)?.message;
+	};
+
+	it.each([
+		["collectorTimeoutMs", 0],
+		["collectorTimeoutMs", -1],
+		["collectorTimeoutMs", 1.5],
+		["collectorTimeoutMs", null],
+		["collectorTimeoutMs", ""],
+		["collectorDeadlineMs", false],
+		["collectorDeadlineMs", "abc"],
+		["collectorDeadlineMs", 0],
+		["collectorConcurrency", 0],
+		["collectorConcurrency", 2.5],
+	])("refuses verify.%s = %s at boot, in the schema's wording", async (field, value) => {
+		const verify = { [field]: value };
+		const fromApp = await refusal(() => buildApp(verify));
+
+		expect(fromApp).toBeDefined();
+		expect(schemaRefusal(verify, field)).toBe(fromApp);
+	});
+
+	it("takes the strings a hand-built env config carries", async () => {
+		expect(
+			await refusal(() =>
+				buildApp({
+					collectorTimeoutMs: "500",
+					collectorDeadlineMs: "1500",
+					collectorConcurrency: "4",
+				}),
+			),
+		).toBeUndefined();
+	});
+
+	it("defaults when the bounds are absent", async () => {
+		expect(await refusal(() => buildApp({}))).toBeUndefined();
+	});
 });
