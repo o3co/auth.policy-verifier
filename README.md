@@ -175,6 +175,11 @@ configured at all is rejected.
 | `HasScope("read:project")` | `ResourceActionScopeRuleCollector` | JWT `scope` claim contains `read:project` |
 | `HasPermission("project:1.perm:read")` | `ResourceActionPermissionRuleCollector` | User permissions/roles include matching pattern (supports `*` wildcards) |
 
+A rule collector is only half a policy: groups are ANDed, so one enabled without
+the attribute collector that feeds it is a group nothing can satisfy — a verifier
+that denies every request. Pair `ResourceActionPermissionRuleCollector` with a
+collector writing `permissions` / `roles` in the same edit.
+
 ### Built-in Attribute Collectors
 
 | Collector | Reads | Writes |

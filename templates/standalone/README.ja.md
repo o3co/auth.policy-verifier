@@ -192,8 +192,27 @@ scrape_configs:
 
 **Rule collectors**（認可ルールを解決）:
 
-- `ResourceActionScopeRuleCollector` — リソース/アクションをスコープルールと照合する
-- `ResourceActionPermissionRuleCollector` — リソース/アクションをパーミッションルールと照合する
+- `ResourceActionScopeRuleCollector` — トークンがスコープ `<action>:<resourceType>` を持つことを要求する
+- `ResourceActionPermissionRuleCollector` — パーミッション `<resource.raw>.perm:<action>` を要求する（既定では未接続。下記参照）
+
+### 出荷時のポリシー
+
+`config/application.conf` はトークンの `scope` クレームだけで認可します。つまり、
+リクエスト対象の resource と action に対して `<action>:<resourceType>` を bearer
+トークンが持っているときにちょうど許可されます。スコープを発行する IdP があれば
+認可ストアを別途立てなくてもそのまま機能し、かつ fail-closed です — スコープを
+持たないトークンや誤ったスコープは拒否され、ルールが 1 つも集まらなかった
+リクエストも拒否されます（`rule.onEmptyRuleSet = "deny"`）。
+
+ルールは種類ごとにグループ化され、**すべてのグループが通る必要があります**。
+そのため、属性を供給する attribute collector なしに rule collector を有効化すると、
+何をもってしても満たせないグループができ、トークンの内容によらず全リクエストを
+拒否する verifier になります。`ResourceActionPermissionRuleCollector` が
+「未設定」ではなく明示的に無効なのはこのためです — このルールは permissions/roles
+属性を読みますが、出荷時の `attribute.collectors` はそれを生成しません。有効化する
+ときは供給側と同じ編集でセットにしてください（デプロイ単位の固定リストなら
+`StaticPermissionCollector`、サブジェクトごとに異なるなら独自の `AttributeCollector`）。
+`application.conf` の該当コレクターの隣に具体例があります。
 
 使用されるリソースパーサーは `DotNotationResourceParser` です。`segment *( "." segment )`
 （`segment = type [ ":" id ]`）を受け付け、セグメントの type を `.` で結合して `resourceType` を導出します
