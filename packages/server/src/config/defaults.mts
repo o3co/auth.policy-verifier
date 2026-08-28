@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Dependency-light defaults shared by the config schema and the routers.
  *

@@ -915,6 +915,22 @@ describe("POST /verify — decision contract (#124)", () => {
 		expect(res.body.subject).toBeUndefined();
 	});
 
+	it("omits subject when the sub claim is present but empty (#158)", async () => {
+		// The audit line already treats `sub: ""` as no subject at all; the wire
+		// response is the same value and must take the same disposition, or a
+		// consumer reading `subject` sees an empty subject that the log says the
+		// decision did not have. `subject` is optional on `DecisionResponse`, so
+		// omitting it is what the published contract already promises.
+		const token = await signHS256Token({ sub: "", scope: "read:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(res.status).toBe(200);
+		expect(res.body).not.toHaveProperty("subject");
+	});
+
 	it("rejects an array as context on the single endpoint too", async () => {
 		const token = await signHS256Token({ sub: "user-1", scope: "read:project" });
 		const res = await request(app)

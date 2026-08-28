@@ -60,8 +60,8 @@ export interface DecisionEventInput {
 }
 
 /**
- * A value fit to appear on the line, or `undefined` when the key should be
- * omitted entirely.
+ * A value fit to be reported, or `undefined` when the key should be omitted
+ * entirely.
  *
  * Empty counts as absent, and neither empty value is hypothetical. A proxy that
  * stamps `x-request-id` unconditionally sends the header with nothing in it
@@ -71,8 +71,13 @@ export interface DecisionEventInput {
  * exists, and `requestId: ""` is a correlation key that every such record
  * shares — so grouping by it collapses unrelated decisions into one apparent
  * trace, which is precisely the question the field exists to answer.
+ *
+ * Exported because the verify route applies it to the same `sub` before putting
+ * it on the wire (#158). The audit line and the decision response describe one
+ * decision; the empty subject had to be absent from both or from neither, and
+ * one function is what makes that structural rather than remembered.
  */
-function present(value: string | undefined): string | undefined {
+export function present(value: string | undefined): string | undefined {
 	return value !== undefined && value !== "" ? value : undefined;
 }
 

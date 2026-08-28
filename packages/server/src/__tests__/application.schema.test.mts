@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { AppConfigSchema, JWT_MODE_MIGRATION_MESSAGE } from "#/config/application.schema.mjs";
+import {
+	AppConfigSchema,
+	JWT_MODE_MIGRATION_MESSAGE,
+	JWT_MODE_REMOVED_KEYS,
+} from "#/config/application.schema.mjs";
 import { MAX_PREVIOUS_SECRETS, MIN_SECRET_ENTROPY_BYTES } from "#/config/defaults.mjs";
 import { checkHs256Rotation, parseHs256Rotation } from "#/jwt/hs256Rotation.mjs";
 import { type JwksFetchConfig, resolveJwksFetchBounds } from "#/jwt/jwks.mjs";
@@ -792,7 +796,11 @@ describe("AppConfigSchema — oauth.jwt.mode (#134)", () => {
 		expect(result.success).toBe(false);
 	});
 
-	it.each(["validate", "allowInsecureDecode"])(
+	// Driven off the exported list, not a copy of it (#158): the removed keys are
+	// half of the same contract the migration message is, and a fourth key added
+	// to the constant must be covered here without anyone remembering to widen a
+	// literal in a test.
+	it.each([...JWT_MODE_REMOVED_KEYS])(
 		"hard-errors on the removed key %s with the migration message",
 		(staleKey) => {
 			const result = AppConfigSchema.safeParse({

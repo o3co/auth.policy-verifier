@@ -12,7 +12,7 @@
  * `tokenType`. The drift cases are pinned here so the one guard can never
  * regress to the weak form.
  */
-import { errors, type JWTPayload } from "jose";
+import { errors, type JWTPayload, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import {
 	assertTimeClaims,
@@ -31,6 +31,25 @@ const VALID_VERIFYING = {
 	audience: "https://api.test",
 	tokenType: "at+jwt",
 };
+
+/**
+ * The same config with a key long enough to actually sign with — HS256 wants at
+ * least the hash width, and `VALID_VERIFYING`'s short key exists only to be
+ * passed to the guard, which never uses it.
+ */
+const SIGNING_KEY = new TextEncoder().encode("0".repeat(32));
+const SIGNING_CONFIG = { ...VALID_VERIFYING, key: SIGNING_KEY };
+
+/** A token this deployment accepts: right issuer, audience, `typ` and time claims. */
+async function signToken(claims: Record<string, unknown> = {}): Promise<string> {
+	return new SignJWT({ sub: "user-1", ...claims })
+		.setProtectedHeader({ alg: "HS256", typ: VALID_VERIFYING.tokenType })
+		.setIssuedAt()
+		.setExpirationTime("1h")
+		.setIssuer(VALID_VERIFYING.issuer)
+		.setAudience(VALID_VERIFYING.audience)
+		.sign(SIGNING_KEY);
+}
 
 describe("assertVerifyRouterJwtConfig — verifying configs (RFC 9068 §4 presence invariant)", () => {
 	it("accepts a complete verifying config", () => {
@@ -180,6 +199,43 @@ describe("createTokenAuthenticator — construction and bearer parsing", () => {
 		const authenticator = createTokenAuthenticator(VALID_VERIFYING, silentLogger);
 		const result = await authenticator.authenticate("Bearer ");
 		expect(result).toMatchObject({ ok: false, code: "missing_token" });
+	});
+
+	// #158: the payload field carrying the `Authorization` scheme used to be
+	// called `tokenType`, which is also the config key for the accepted `typ`
+	// header — two unrelated meanings under one name, one of them right beside
+	// the other in this very module. The scheme is now `authScheme`, and this
+	// pins the split so the collision cannot be reintroduced by either side.
+	it("names the authorization scheme `authScheme`, distinct from the accepted `typ`", async () => {
+		const authenticator = createTokenAuthenticator(SIGNING_CONFIG, silentLogger);
+		const result = await authenticator.authenticate(`Bearer ${await signToken()}`);
+
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		expect(result.payload.authScheme).toBe("Bearer");
+		// The accepted `typ` is config, not a fact about the presented token, so
+		// nothing puts it on the payload under any name.
+		expect(result.payload.tokenType).toBeUndefined();
+	});
+
+	// The other half of the rename, and the part a migrating consumer has to see:
+	// the verifier used to write `tokenType` *after* spreading the claims, so a
+	// token carrying a claim of that name had it silently overwritten by
+	// `"Bearer"`. Nothing writes that slot now, so the claim reaches the payload
+	// like any other custom claim. A consumer still reading `payload.tokenType`
+	// is therefore reading the token, not the verifier — which is the opposite of
+	// what it read before.
+	it("no longer shadows a `tokenType` claim the token itself carries", async () => {
+		const authenticator = createTokenAuthenticator(SIGNING_CONFIG, silentLogger);
+		const token = await signToken({ tokenType: "from-the-token" });
+		const result = await authenticator.authenticate(`Bearer ${token}`);
+
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		expect(result.payload.tokenType).toBe("from-the-token");
+		// The scheme is unaffected: it has its own slot now, so a claim cannot
+		// displace it and it cannot displace a claim.
+		expect(result.payload.authScheme).toBe("Bearer");
 	});
 
 	// The time-claim bounds are resolved once at construction, so a config that

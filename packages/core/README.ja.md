@@ -111,7 +111,7 @@ interface ModuleContext {
 | `RuleGroupOutcome` | `{ ruleType: string; passed: true; evaluated: RuleOutcome[]; satisfiedBy: RuleOutcome } \| { ruleType: string; passed: false; evaluated: RuleOutcome[] }` — `evaluated` は実際に走ったルールを評価順に列挙し、`satisfiedBy` は通過グループを満たしたルールを指す |
 | `RuleOutcome` | `{ code: string; message: string; passed: boolean }` |
 | `Role` | `{ name: string; permissions: string[] }` |
-| `VerifierPayload` | デコード済み JWT クレーム: `sub`、`azp`、`scope`、`iss`、`aud`、`exp`、`iat`、`token`、`tokenType`、および任意の追加クレーム |
+| `VerifierPayload` | デコード済み JWT クレーム: `sub`、`azp`、`scope`、`iss`、`aud`、`exp`、`iat`、`token`、`authScheme`（クレームではなく、トークンが到着した `Authorization` スキーム）、および任意の追加クレーム |
 | `PathResolver` | `(specifier: string) => string` — モジュール相対パスを解決する |
 | `AttributeCollectorFactory` | config から `AttributeCollector` を生成するファクトリー関数 |
 | `RuleCollectorFactory` | config から `RuleCollector` を生成するファクトリー関数 |

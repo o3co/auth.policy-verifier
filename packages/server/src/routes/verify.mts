@@ -22,7 +22,7 @@ import {
 	createTokenAuthenticator,
 	type VerifyRouterJwtConfig,
 } from "../jwt/tokenAuthenticator.mjs";
-import { DECISION_EVENT, decisionEvent } from "../observability/decisionEvent.mjs";
+import { DECISION_EVENT, decisionEvent, present } from "../observability/decisionEvent.mjs";
 import type { DecisionMetrics } from "../observability/metrics.mjs";
 
 /** Config for `createVerifyRouter`. The `jwt.key` type is library-specific and is narrowed at call-time. */
@@ -82,7 +82,12 @@ export interface DecisionRequest {
  * form its own query, and the response has somewhere to put what decided.
  */
 export interface DecisionResponse {
-	/** JWT `sub` of the token presented. Absent when the token carries none. */
+	/**
+	 * JWT `sub` of the token presented. Absent when the token carries none — and
+	 * an empty `sub` counts as none, the disposition the audit line takes for the
+	 * same value (#158). `subject: ""` would name a subject that does not exist,
+	 * and every token without one would name the same one.
+	 */
 	subject?: string;
 	resource: string;
 	action: string;
@@ -243,10 +248,15 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 		const decision = evaluate(attrs, rules, config.evaluateOptions);
 		const durationMs = performance.now() - startedAt;
 
+		// Derived once and spent twice — on the audit line below and on the
+		// response returned at the end (#158). An empty `sub` is absent from both,
+		// and the only way the two dispositions of one value cannot drift apart
+		// again is for there to be one value.
+		const subject = typeof payload.sub === "string" ? present(payload.sub) : undefined;
+
 		// #111: one structured line per decision, and the counters beside it. Both
 		// are emitted here rather than at each route so a decision is reported
 		// exactly once whether it came through `/verify` or one entry of a batch.
-		const subject = typeof payload.sub === "string" ? payload.sub : undefined;
 		logger.info(
 			decisionEvent({
 				decision,
@@ -267,7 +277,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			durationSeconds: durationMs / 1000,
 		});
 
-		return toResponse(payload, entry, decision);
+		return toResponse(subject, entry, decision);
 	}
 
 	const router = express.Router();
@@ -343,14 +353,20 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	return router;
 }
 
-/** Projects an engine `Decision` onto the wire contract, naming what it was about. */
+/**
+ * Projects an engine `Decision` onto the wire contract, naming what it was about.
+ *
+ * Takes the already-derived `subject` rather than the payload: the audit line
+ * and this response must agree about whether the decision had one, and reading
+ * `payload.sub` a second time here is what let them disagree (#158).
+ */
 function toResponse(
-	payload: VerifierPayload,
+	subject: string | undefined,
 	entry: DecisionRequest,
 	decision: Decision,
 ): DecisionResponse {
 	const base = {
-		...(typeof payload.sub === "string" ? { subject: payload.sub } : {}),
+		...(subject !== undefined ? { subject } : {}),
 		resource: entry.resource,
 		action: entry.action,
 		reason: decision.reason,

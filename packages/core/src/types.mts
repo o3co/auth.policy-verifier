@@ -167,6 +167,22 @@ export interface VerifierPayload {
 	exp?: number;
 	iat?: number;
 	token?: string;
-	tokenType?: string;
+	/**
+	 * The `Authorization` scheme the token arrived under, as the caller wrote it
+	 * — `"Bearer"` (RFC 6750), whose casing is not normalized because it is
+	 * reported, not compared.
+	 *
+	 * Not a claim, and not the accepted `typ` header: that one is a config value
+	 * named `tokenType`, and this field carried the same name until #158. Two
+	 * unrelated things called `tokenType` is a mistake a reader makes silently,
+	 * so the one that is not a token type gave the name up.
+	 *
+	 * A consequence worth knowing when migrating: nothing writes `tokenType` on
+	 * the payload any more. It used to be written over the spread claims, which
+	 * silently discarded a token's own `tokenType` claim; such a claim now
+	 * reaches the payload like any other. Whatever is read there is the token's,
+	 * not the verifier's.
+	 */
+	authScheme?: string;
 	[key: string]: unknown;
 }

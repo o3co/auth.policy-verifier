@@ -468,7 +468,10 @@ export function createTokenAuthenticator(
 				};
 			}
 
-			return { ok: true, payload: { ...decoded, token, tokenType: scheme } };
+			// `authScheme`, not `tokenType` (#158): `jwt.tokenType` a few lines up
+			// is the accepted `typ` header, an entirely different thing, and the
+			// two shared a name in the one module that mentions both.
+			return { ok: true, payload: { ...decoded, token, authScheme: scheme } };
 		},
 	};
 }
