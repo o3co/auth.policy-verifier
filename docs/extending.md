@@ -177,7 +177,9 @@ A rule collector sees the whole `CollectorContext`, which makes it the one place
 
 The builtins show the line. `ResourceActionScopeRuleCollector` builds `new HasScope(\`${context.action}:${context.resource.resourceType}\`)` — request-derived, but only as the value the rule *looks for*; what it decides against is `attrs.get(ATTR_SCOPES)`. The violation is the other shape: unwrapping the context in the collector, comparing two values there, and returning a rule whose `verify(attrs)` ignores `attrs` and reports the comparison already made. That rule is not testable from attributes, and the request state it closed over never passed through a collector — so if any of it came from `readUntrustedRequestContext`, caller-supplied data reached a decision without the attribute layer ever seeing it.
 
-**This is a convention, not a check.** `verify(attrs)` takes only attributes, but nothing stops a rule from closing over anything its collector had in hand, and neither the compiler nor the test suite will tell you. Route the values into attributes and have the rule compare them with `attrs.get(...)`.
+The property that has to hold is that `verify(attrs)` is a deterministic, side-effect-free function of `attrs` — which is what lets the evaluator run every group rather than stopping at the first failure. Fixing what a rule *looks for* at collect time does not break that; retaining the context and reading it *at verify time* does.
+
+**And it is a convention, not a check.** `verify(attrs)` takes only attributes, but nothing stops a rule from holding on to its collector's context and consulting it there, and neither the compiler nor the test suite will tell you. The fix for a rule that has baked its answer in: the value being tested comes from `attrs.get(...)`, while the value it is tested against may still be captured from the request.
 
 ## Further reading
 

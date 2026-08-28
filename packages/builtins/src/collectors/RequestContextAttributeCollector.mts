@@ -95,7 +95,7 @@ export class RequestContextAttributeCollector implements AttributeCollector {
 		// everything below this line is the caller's own data, which is why the
 		// mapping list — not the request — decides what becomes an attribute.
 		const requestContext = readUntrustedRequestContext(context.requestContext);
-		if (requestContext === undefined || requestContext === null) return attrs;
+		if (requestContext === undefined) return attrs;
 
 		for (const mapping of this.mappings) {
 			const raw = readPath(requestContext, mapping.from);

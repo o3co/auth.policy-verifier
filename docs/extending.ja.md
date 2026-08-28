@@ -177,7 +177,9 @@ RuleCollector は `CollectorContext` 全体を見られるため、エンジン�
 
 境界線は builtins が示しています。`ResourceActionScopeRuleCollector` は `new HasScope(\`${context.action}:${context.resource.resourceType}\`)` を組み立てます — リクエスト由来ではありますが、それは Rule が *探す値* にすぎず、判断の対象は `attrs.get(ATTR_SCOPES)` です。違反はもう一方の形です: Collector 内で context を unwrap し、そこで 2 つの値を比較し、`verify(attrs)` が `attrs` を無視して既に済ませた比較結果を返す Rule を生成する。この Rule は attribute からはテストできず、閉じ込めたリクエスト状態は Collector を一度も通っていません — その一部でも `readUntrustedRequestContext` 由来なら、呼び出し側のデータが attribute 層を経ずに判断へ到達したことになります。
 
-**これは規約であって検査ではありません。** `verify(attrs)` は attribute しか受け取りませんが、Collector が手にしていた値を Rule が closure に閉じ込めることは何も妨げておらず、コンパイラもテストスイートも教えてくれません。値は attribute に流し、Rule には `attrs.get(...)` で比較させてください。
+成立していなければならない性質は、`verify(attrs)` が `attrs` の決定的かつ副作用のない関数であることです — 評価器が最初の失敗で止まらず全グループを実行できるのは、この性質があるからです。Rule が *探す値* を collect 時に固定することはこれを壊しませんが、context を保持して *verify 時に読む* ことは壊します。
+
+**そしてこれは規約であって検査ではありません。** `verify(attrs)` は attribute しか受け取りませんが、Collector の context を Rule が保持してそこで参照することは何も妨げておらず、コンパイラもテストスイートも教えてくれません。答えを焼き込んでしまった Rule の直し方は次のとおりです: *検査される側の値* は `attrs.get(...)` から取得し、*それが照合される相手の値* はリクエストから捕捉したままでよい。
 
 ## 関連資料
 
