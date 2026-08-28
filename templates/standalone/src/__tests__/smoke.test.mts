@@ -50,24 +50,42 @@ async function signToken(payload: Record<string, unknown>): Promise<string> {
 	);
 }
 
+/** The three values `application.conf` leaves to the deployment. */
+const DEPLOYMENT_ENV = {
+	OAUTH_JWT_SECRET: JWT_SECRET,
+	OAUTH_JWT_ISSUER: ISSUER,
+	OAUTH_JWT_AUDIENCE: AUDIENCE,
+} as const;
+
 /**
  * The shipped config, loaded the way the container loads it: the development
  * overlay resolved against `config/application.conf`, with the deployment's
  * three values in the environment.
  *
- * The variables are removed again immediately. They are inputs to this one
- * load, not ambient state some later assertion could come to depend on.
+ * `process.env` is process-wide, and a test file does not own it. So each
+ * variable's prior value is **restored**, not deleted — and "was absent" is
+ * restored as absent rather than as `""`, which is a different state this very
+ * config distinguishes (an exported-empty credential is refused rather than read
+ * as "unset"). Deleting unconditionally would hand any file sharing the worker a
+ * value this one happened to clear.
+ *
+ * The window is nil as well as tidy: every step here is synchronous —
+ * `loadAppConfig` parses and validates without awaiting — and this runs at module
+ * scope, so no other file's code can be scheduled between the assignment and the
+ * restore.
  */
 function loadShippedConfig(): AppConfig {
-	process.env.OAUTH_JWT_SECRET = JWT_SECRET;
-	process.env.OAUTH_JWT_ISSUER = ISSUER;
-	process.env.OAUTH_JWT_AUDIENCE = AUDIENCE;
+	const saved: Array<[key: string, previous: string | undefined]> = Object.keys(DEPLOYMENT_ENV).map(
+		(key) => [key, process.env[key]],
+	);
+	Object.assign(process.env, DEPLOYMENT_ENV);
 	try {
 		return loadAppConfig(configDirPath, "development");
 	} finally {
-		delete process.env.OAUTH_JWT_SECRET;
-		delete process.env.OAUTH_JWT_ISSUER;
-		delete process.env.OAUTH_JWT_AUDIENCE;
+		for (const [key, previous] of saved) {
+			if (previous === undefined) delete process.env[key];
+			else process.env[key] = previous;
+		}
 	}
 }
 
