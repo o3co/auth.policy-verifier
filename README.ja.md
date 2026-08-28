@@ -171,6 +171,12 @@ standalone → server   → core
 | `HasScope("read:project")` | `ResourceActionScopeRuleCollector` | JWT の `scope` クレームに `read:project` が含まれる |
 | `HasPermission("project:1.perm:read")` | `ResourceActionPermissionRuleCollector` | ユーザーの permissions/roles にマッチするパターンが含まれる（`*` ワイルドカード対応） |
 
+RuleCollector だけではポリシーになりません。ルールグループは AND で評価されるため、
+属性を供給する AttributeCollector なしに有効化すると、何をもってしても満たせない
+グループができ、全リクエストを拒否する verifier になります。
+`ResourceActionPermissionRuleCollector` は `permissions` / `roles` を書く
+コレクターと同じ編集でセットにしてください。
+
 ### 組み込み AttributeCollector
 
 | Collector | 読む | 書く |

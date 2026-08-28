@@ -192,8 +192,28 @@ The following collectors are registered via `builtinCollectorsModule`:
 
 **Rule collectors** (resolve authorization rules):
 
-- `ResourceActionScopeRuleCollector` — matches resource/action against scope rules
-- `ResourceActionPermissionRuleCollector` — matches resource/action against permission rules
+- `ResourceActionScopeRuleCollector` — requires the token to carry the scope `<action>:<resourceType>`
+- `ResourceActionPermissionRuleCollector` — requires the permission `<resource.raw>.perm:<action>` (not wired by default; see below)
+
+### The shipped policy
+
+`config/application.conf` authorizes from the token's `scope` claim and nothing
+else: a request is allowed exactly when the bearer token carries
+`<action>:<resourceType>` for the resource and action it asks about. It is
+functional against any issuer that mints scopes, with no authorization store to
+stand up first, and it is fail-closed — a token with no scope, or the wrong one,
+is denied, and so is a request that collects no rule at all
+(`rule.onEmptyRuleSet = "deny"`).
+
+Rules are grouped by kind and **every group must pass**. A rule collector enabled
+without the attribute collector that feeds it therefore produces a group nothing
+can satisfy — a verifier that denies every request, whatever the token carries.
+That is why `ResourceActionPermissionRuleCollector` is off rather than merely
+unconfigured: it reads the permissions/roles attributes, and nothing in the
+shipped `attribute.collectors` produces them. Enable it and its supplier in the
+same edit — `StaticPermissionCollector` for a fixed per-deployment list, or your
+own `AttributeCollector` where permissions differ by subject. `application.conf`
+carries the worked example beside the collector.
 
 The resource parser in use is `DotNotationResourceParser`. It accepts
 `segment *( "." segment )` where `segment = type [ ":" id ]`, and derives `resourceType` by joining

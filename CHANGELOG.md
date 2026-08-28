@@ -1091,6 +1091,47 @@ and version sections follow the release labeling policy in
   at all were already answered this way, so a consumer handling that case
   correctly needs no change.
 
+- The standalone template shipped a config that **denied every request**, and
+  the smoke test did not notice because it exercised a different one
+  ([#113](https://github.com/o3co/auth.policy-verifier/issues/113)).
+
+  `templates/standalone/config/application.conf` enabled
+  `ResourceActionPermissionRuleCollector` alongside the scope rule. That
+  collector emits a `HasPermission` rule, rules are grouped by kind and every
+  group must pass — and no collector in the shipped `attribute.collectors`
+  produced permissions or roles. The permission group could not be satisfied by
+  any token, so the scaffolded product answered deny to everything an operator
+  ever asked it. The suite stayed green because `smoke.test.mts` assembled its
+  own config with that collector left out: the one difference between the tested
+  composition and the shipped one was the defect.
+
+  **The shipped policy is now the token's `scope` claim and nothing else.** A
+  request is allowed exactly when the bearer token carries
+  `<action>:<resourceType>`, which `ResourceActionScopeRuleCollector` derives
+  from the request. It is functional against any issuer that mints scopes with
+  no authorization store to stand up first, and it is still fail-closed: a token
+  carrying no scope or the wrong one is denied, and `rule.onEmptyRuleSet` stays
+  `"deny"`. Nothing was granted by wildcard to make this work — the permission
+  rule was removed, not satisfied.
+
+  **For operators**, the change is visible: a deployment on the shipped
+  `application.conf` went from denying everything to deciding on scopes. One that
+  had already edited the file — the only way it could have worked — is
+  unaffected, since a mounted or overlaid config replaces this one. A deployment
+  that does want permission rules enables the rule collector **and** its
+  supplier together; `application.conf` now carries that worked example beside
+  the collector, and both READMEs state why one without the other is a verifier
+  that denies everything.
+
+  **The smoke test now boots from `config/application.conf`** through
+  `loadAppConfig` — the same function `main.mts` calls — so the composition
+  under test is the composition that ships, and the hand-built variant is gone.
+  The HS256 secret, issuer and audience still come from the environment, as they
+  must: the file deliberately carries no credential. One config in the file is
+  still deliberately not the shipped one, the `allowBareScopeRewrite` opt-in, and
+  it is derived from the shipped config so the key under test is the only thing
+  that differs.
+
 - `@o3co/create-auth-policy-verifier` scaffolded an **empty directory** whenever
   it was run the documented way. Its template-copy filter excluded any path
   containing a `node_modules` or `dist` segment, matched against the absolute

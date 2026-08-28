@@ -92,9 +92,12 @@ describe("loadAppConfig", () => {
 			"PayloadScopeCollector",
 			"PayloadSubjectIdCollector",
 		]);
+		// Scope-only, and the two lists are one decision (#113). Rule groups are
+		// ANDed, so a rule reading an attribute no collector above produces is a
+		// group nothing satisfies — which is a verifier that denies every request.
+		// A permission rule may only join this list together with its supplier.
 		expect(config.rule.collectors.map((c) => c.collector)).toEqual([
 			"ResourceActionScopeRuleCollector",
-			"ResourceActionPermissionRuleCollector",
 		]);
 		expect(config.resource.parser).toBe("DotNotationResourceParser");
 	});
