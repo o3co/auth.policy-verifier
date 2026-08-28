@@ -3,9 +3,16 @@
 
 import { describe, expect, it } from "vitest";
 import { RulePipeline } from "../RulePipeline.mjs";
-import type { CollectorContext, Rule, RuleCollector, VerifierPayload } from "../types.mjs";
+import type {
+	CollectorContext,
+	CollectorRequest,
+	Rule,
+	RuleCollector,
+	VerifierPayload,
+} from "../types.mjs";
 
-const stubContext: CollectorContext = {
+// A `CollectorRequest`, not a `CollectorContext` — see AttributePipeline.test.mts.
+const stubContext: CollectorRequest = {
 	payload: {} satisfies VerifierPayload,
 	resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 	action: "read",

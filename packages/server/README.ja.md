@@ -80,9 +80,10 @@ function createVerifyRouter(config: VerifyRouterConfig): express.Router
 4. どちらの経路でもトークン自身の寿命を検証する: `exp` と `iat` は**必須**（有効期限を宣言しないトークンは失効しない）、`nbf` は存在すれば検証、`exp` は未来でなければならず、`now - iat` は `maxTokenAgeSeconds` を超えてはならない — 発行者が何年も先の `exp` を付けたトークンを拒否するのはこれ。`clockToleranceSeconds` はこれら全ての比較に効く。失敗時は 401 を返す。デコード専用経路はこれらの検査を省略せず手書きで再現するので、同一トークンに対して両モードの答えは一致する。
 5. `req.body.resource` を `resourceParser` でパースし、`req.body.action` と `req.body.context` を読み取る。
 6. `x-request-id` ヘッダーが存在する場合、`CollectorContext.headers` に含める（コレクターが上流呼び出し時に転送可能）。
-7. `attributePipeline.collect` と `rulePipeline.collect` を並列実行し、`evaluate` を呼び出す。
+7. `attributePipeline.collect` と `rulePipeline.collect` を collector の上限（`verify.collectorTimeoutMs` / `verify.collectorDeadlineMs` / `verify.collectorConcurrency`。各 collector には `CollectorContext.signal` で `AbortSignal` が渡される）のもとで並列実行し、`evaluate` を呼び出す。
 8. `200 { decision: "allow" }` または `403 { decision: "deny", code, message }` を返す。
-9. 予期しないエラーが発生した場合は `500 { decision: "deny", code: "internal_error" }` を返す。
+9. collector または fan-out が時間切れになった場合は `403 { decision: "deny", code: "collector_timeout" }` を返す (#115)。評価器には到達させない — 一部の Rule しか集まらないことはポリシーが弱いことであり、1 つも集まらなければ `rule.onEmptyRuleSet = "allow"` では allow になるため。タイムアウトは deny にしかなり得ない。詳細は呼び出し側ではなく `collector_timeout` ログ行に出る。
+10. 予期しないエラーが発生した場合は `500 { decision: "deny", code: "internal_error" }` を返す。
 
 ### AppConfigSchema / AppConfig
 
@@ -90,7 +91,7 @@ function createVerifyRouter(config: VerifyRouterConfig): express.Router
 const AppConfigSchema = z.object({
   http: z.object({
     hostname: z.string().default("127.0.0.1"),   // ループバック — 「信頼境界」を参照
-    port: z.coerce.number().default(3000),
+    port: boundedNumber(NUMERIC_BOUNDS.port, "http"),               // 1..65535、既定 3000
     pathPrefix: z.string().default(""),
     callerAuth: z.object({                        // 任意 — 「信頼境界」を参照
       header: z.string().min(1).default("x-caller-token"),
@@ -104,8 +105,8 @@ const AppConfigSchema = z.object({
       issuer: z.union([z.string(), z.array(z.string())]).optional(),   // mode = "verify" のとき必須
       audience: z.union([z.string(), z.array(z.string())]).optional(), // mode = "verify" のとき必須
       tokenType: z.string().default("at+jwt"),
-      maxTokenAgeSeconds: z.coerce.number().int().positive().default(86400),
-      clockToleranceSeconds: z.coerce.number().int().min(0).max(300).default(0),
+      maxTokenAgeSeconds: boundedNumber(NUMERIC_BOUNDS.maxTokenAgeSeconds, "oauth.jwt"),
+      clockToleranceSeconds: boundedNumber(NUMERIC_BOUNDS.clockToleranceSeconds, "oauth.jwt"),
     }),
   }),
   attribute: z.object({
@@ -118,12 +119,33 @@ const AppConfigSchema = z.object({
     parser: z.string().default("DotNotationResourceParser"),
   }),
   verify: z.object({
-    maxBatchSize: z.coerce.number().int().positive().default(50),
+    maxBatchSize: boundedNumber(NUMERIC_BOUNDS.maxBatchSize, "verify"),           // 既定 50
+    // 1 件の決定リクエストが運べる量 (#118)。
+    maxBodyBytes: boundedNumber(NUMERIC_BOUNDS.maxBodyBytes, "verify"),           // 既定 65536
+    maxResourceLength: boundedNumber(NUMERIC_BOUNDS.maxResourceLength, "verify"), // 既定 512
+    maxActionLength: boundedNumber(NUMERIC_BOUNDS.maxActionLength, "verify"),     // 既定 64
+    maxContextEntries: boundedNumber(NUMERIC_BOUNDS.maxContextEntries, "verify"), // 既定 64
+    maxContextValueLength:
+      boundedNumber(NUMERIC_BOUNDS.maxContextValueLength, "verify"),              // 既定 1024
+    // collector fan-out の上限 (#115)。超えた決定は deny になる。
+    collectorTimeoutMs: boundedNumber(NUMERIC_BOUNDS.collectorTimeoutMs, "verify"),   // 既定 2000
+    collectorDeadlineMs: boundedNumber(NUMERIC_BOUNDS.collectorDeadlineMs, "verify"), // 既定 5000
+    collectorConcurrency:
+      boundedNumber(NUMERIC_BOUNDS.collectorConcurrency, "verify"),               // 既定 8
   }),
 });
 
 type AppConfig = z.infer<typeof AppConfigSchema>;
 ```
+
+**数値ノブはすべて、両方の境界で 1 つの関数から読まれます** (#157)。`boundedNumber` は
+[`config/bounds.mts`](src/config/bounds.mts) の `resolveBound` をラップしたもので、各ノブの既定値・
+範囲・単位は `NUMERIC_BOUNDS` に一度だけ記述されます。ランタイム側のガード（`createApp`、
+`createVerifyRouter`、各 `KeyResolverFactory`）は手組み config のために `resolveBound` を直接呼ぶため、
+両境界は同じ判定を同じ文言で返します。`z.coerce.number()` ではないのは意図的です: ノブは数値か、
+HOCON の `${?VAR}` 置換が渡す文字列のいずれかで到着し、その両方を受け付けますが、`z.coerce` は
+`true` を `1`、`null` と `""` を `0` として読んでしまいます — 空で export された環境変数が「意図的な
+ゼロ」になっていたのはこれが原因でした。非整数・`NaN`・`Infinity` も同じ理由で拒否します。
 
 `attribute.collectors` と `rule.collectors` の各エントリには `collector` フィールド（登録済みファクトリ名）が必須です。追加フィールドはファクトリへの設定としてそのまま渡されます。
 

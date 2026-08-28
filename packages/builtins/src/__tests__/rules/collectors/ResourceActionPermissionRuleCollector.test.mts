@@ -5,6 +5,13 @@ import type { CollectorContext, VerifierPayload } from "@o3co/auth.policy-verifi
 import { describe, expect, it } from "vitest";
 import { ResourceActionPermissionRuleCollector } from "#/rules/collectors/ResourceActionPermissionRuleCollector.mjs";
 
+/**
+ * `CollectorContext.signal` is required (#115): a pipeline supplies one per
+ * collector, so a hand-built context carries one too. These fixtures are not
+ * about cancellation, so it is a signal that never aborts.
+ */
+const NEVER_CANCELLED = new AbortController().signal;
+
 describe("ResourceActionPermissionRuleCollector", () => {
 	const collector = new ResourceActionPermissionRuleCollector();
 
@@ -13,6 +20,7 @@ describe("ResourceActionPermissionRuleCollector", () => {
 			payload: {} satisfies VerifierPayload,
 			resource: { raw: "document:12345", resourceType: "document", resourceId: "12345" },
 			action: "read",
+			signal: NEVER_CANCELLED,
 		};
 		const rules = await collector.collect(ctx);
 		expect(rules).toHaveLength(1);
@@ -27,6 +35,7 @@ describe("ResourceActionPermissionRuleCollector", () => {
 			payload: {} satisfies VerifierPayload,
 			resource: { raw: "project:1.member", resourceType: "project_member" },
 			action: "update",
+			signal: NEVER_CANCELLED,
 		};
 		const rules = await collector.collect(ctx);
 		const attrs = new Map([["permissions", ["project:1.member.perm:update"]]]);

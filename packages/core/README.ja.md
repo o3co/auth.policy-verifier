@@ -41,23 +41,39 @@ function evaluate(attrs: Attributes, rules: Rule[], options?: EvaluateOptions): 
 
 ```typescript
 class AttributePipeline {
-  constructor(collectors: AttributeCollector[])
-  collect(context: CollectorContext): Promise<Attributes>
+  constructor(collectors: AttributeCollector[], limits?: CollectorLimits)
+  collect(request: CollectorRequest): Promise<Attributes>
 }
 ```
 
 すべてのコレクターを並列実行し、結果をマージします。配列値は結合され、それ以外の型は後書きが優先されます。
 
+fan-out には上限があります — [コレクターの上限](#コレクターの上限) を参照。`collect` は `CollectorRequest`（`signal` を持たないリクエスト）を受け取り、各コレクター用の `signal` は pipeline が供給します。
+
 ### RulePipeline
 
 ```typescript
 class RulePipeline {
-  constructor(collectors: RuleCollector[])
-  collect(context: CollectorContext): Promise<Rule[]>
+  constructor(collectors: RuleCollector[], limits?: CollectorLimits)
+  collect(request: CollectorRequest): Promise<Rule[]>
 }
 ```
 
-すべてのコレクターを並列実行し、結果を単一の配列にフラット化します。
+すべてのコレクターを並列実行し、結果を単一の配列にフラット化します。上限は `AttributePipeline` と同じです。
+
+### コレクターの上限
+
+```typescript
+interface CollectorLimits {
+  collectorTimeoutMs?: number; // コレクター 1 本の予算;        既定 2000
+  deadlineMs?: number;         // pipeline 単位の fan-out 全体; 既定 5000
+  concurrency?: number;        // 同時実行数;                   既定 8
+}
+```
+
+コレクターはデータベースや HTTP API を呼ぶため、素の `Promise.all` で走らせる pipeline には待つのをやめる手段がありませんでした。各コレクターには `CollectorContext.signal` で専用の `AbortSignal` と専用の予算が渡され、fan-out 全体にはデッドラインが付き、同時に走るのは `concurrency` 本までです。何も渡さなければすべて既定値が適用されるため、上限なしで構築した pipeline も保護されています。正の整数でない上限はコンストラクタが `RangeError` で拒否します（黙って無視しません） — `concurrency: 0` は「何も集めずに解決する」になってしまうためです。
+
+**上限に達した場合は `CollectorTimeoutError` を送出し、部分的な解決は決してしません。** 部分的な attribute は Rule の入力を弱め、部分的な Rule はポリシー自体を弱めます — ルールが空なら `{ onEmptyRuleSet: "allow" }` の下では allow です。認可経路に「集まったぶんで答える」の安全な形は存在しません。
 
 ### Registry\<T\>
 
@@ -99,7 +115,10 @@ interface ModuleContext {
 | `Resource` | `{ raw: string; resourceType: string; resourceId?: string }` — パース済みリソース |
 | `ResourceParser` | `parse(raw: string): Resource` — 生のリソース文字列を `Resource` に変換する。パース対象の構文に合わない文字列には `ResourceParseError` を送出する |
 | `ResourceParseError` | `raw`（拒否した文字列）と `detail`（理由）を持つ `Error` サブクラス。サーバーエラーではなく**リクエスト**エラーであり、トランスポート層は 400 系で応答する。クラスとして export されるため `instanceof` で絞り込める |
-| `CollectorContext` | 各コレクターに渡される入力: `payload`、`resource`、`action`、省略可能な `headers` と `requestContext` |
+| `CollectorContext` | 各コレクターに渡される入力: `payload`、`resource`、`action`、`signal`、省略可能な `headers` と `requestContext` |
+| `CollectorRequest` | pipeline が受け取る形: コレクター単位の `signal` を除いた `CollectorContext`。`signal` は pipeline が供給する。こちらの省略可能な `signal` は呼び出し側のキャンセルで、pipeline 側の signal に連結される |
+| `CollectorLimits` | `{ collectorTimeoutMs?, deadlineMs?, concurrency? }` — pipeline が fan-out に課す上限。[コレクターの上限](#コレクターの上限) を参照 |
+| `CollectorTimeoutError` | コレクターが予算を、または fan-out がデッドラインを超えたときに送出される `Error` サブクラス。`pipeline` / `limit` / `timeoutMs` と、コレクター単位のタイムアウトでは `collector` を持つ。**劣化ではなく deny** — pipeline は何も返さない |
 | `UntrustedRequestContext` | `requestContext` の型 — 呼び出し側のデータであり、読むには明示的な `readUntrustedRequestContext(...)` が必要な形で封じられている。トランスポート境界で生成するのは `markUntrustedRequestContext(...)`。[docs/extending.ja.md — 信頼境界](../../docs/extending.ja.md#信頼境界-requestcontext-は呼び出し側のもの) を参照 |
 | `Attributes` | `Map<string, unknown>` — サブジェクト属性のバッグ。可変: コレクターがこれを組み立て、`AttributePipeline` がマージする |
 | `ReadonlyAttributes` | `ReadonlyMap<string, unknown>` — Rule が判定対象として受け取るビュー。評価器は同一の live map をすべての Rule に渡すため、書き込む Rule は以降の全グループの入力を書き換えてしまう |

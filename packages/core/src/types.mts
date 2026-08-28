@@ -44,7 +44,46 @@ export interface CollectorContext {
 	headers?: Record<string, string>;
 	/** Caller-supplied; read it with `readUntrustedRequestContext`. */
 	requestContext?: UntrustedRequestContext;
+	/**
+	 * Cancellation for this collect, and the one field that is not a fact about
+	 * the request (#115).
+	 *
+	 * It aborts when this collector overruns its budget, when the pipeline
+	 * overruns its end-to-end deadline, when a sibling collector has already
+	 * failed the decision, or when the caller went away. Pass it to whatever
+	 * this collector waits on — `fetch(url, { signal: context.signal })`, a
+	 * driver's cancellation option — so the work stops rather than being merely
+	 * stopped waiting for.
+	 *
+	 * Always present: the pipeline supplies one per collector per decision, so
+	 * there is no `?.` and no "unbounded if nobody wired it" case. Honouring it
+	 * is not what makes the deadline hold — the pipeline abandons a collector
+	 * that ignores it — but a collector that ignores it leaves its outbound call
+	 * running after the decision it belonged to is gone.
+	 *
+	 * It is a live handle on the request, so the rule contract applies to it
+	 * exactly as to the rest of the context: a **collector** may hold it for the
+	 * duration of `collect`; a **rule** must not carry it into `verify`. See
+	 * AGENTS.md, "Collector / Rule / Attribute Contract".
+	 */
+	signal: AbortSignal;
 }
+
+/**
+ * What a pipeline is handed: the request, without the per-collector `signal`
+ * the pipeline itself supplies.
+ *
+ * The two shapes are deliberately different types. A transport builds facts
+ * about a request and has no per-collector signal to give — that one belongs to
+ * the fan-out, is different for every collector, and aborts on bounds the
+ * transport knows nothing about. `signal` here is the optional *caller-side*
+ * cancellation (a client that hung up, an outer deadline); the pipeline links
+ * it into its own, so aborting it cancels every collector in flight.
+ */
+export type CollectorRequest = Omit<CollectorContext, "signal"> & {
+	/** Optional caller-side cancellation, linked into the pipeline's own. */
+	signal?: AbortSignal;
+};
 
 /**
  * Map of attribute keys to values produced by attribute collectors.

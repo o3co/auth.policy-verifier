@@ -35,6 +35,9 @@
 
 import {
 	DEFAULT_CLOCK_TOLERANCE_SECONDS,
+	DEFAULT_COLLECT_DEADLINE_MS,
+	DEFAULT_COLLECTOR_CONCURRENCY,
+	DEFAULT_COLLECTOR_TIMEOUT_MS,
 	DEFAULT_HTTP_PORT,
 	DEFAULT_JWKS_CACHE_MAX_AGE_MS,
 	DEFAULT_JWKS_COOLDOWN_MS,
@@ -183,6 +186,45 @@ export const NUMERIC_BOUNDS = {
 		fallback: DEFAULT_MAX_CONTEXT_VALUE_LENGTH,
 		minimum: 1,
 		unit: "characters",
+	},
+	/**
+	 * How long one collector may take before it is cancelled (#115). The floor
+	 * is 1: a zero budget cancels every collector before it can answer, which is
+	 * a verifier that denies everything — the same shape as the `0` cap
+	 * `maxBatchSize` refuses.
+	 */
+	collectorTimeoutMs: {
+		field: "collectorTimeoutMs",
+		fallback: DEFAULT_COLLECTOR_TIMEOUT_MS,
+		minimum: 1,
+		unit: "milliseconds",
+	},
+	/**
+	 * How long a whole collector fan-out may take. Not bounded above and not
+	 * bounded below by `collectorTimeoutMs`: a deployment may legitimately want
+	 * a deadline tighter than one collector's budget (every stall then reported
+	 * as a deadline, which is a cruder message but a correct decision), and
+	 * cross-knob validation is not something one `BoundSpec` can express.
+	 * `Infinity` is refused like every other knob here — an unbounded deadline
+	 * is the state #115 found.
+	 */
+	collectorDeadlineMs: {
+		field: "collectorDeadlineMs",
+		fallback: DEFAULT_COLLECT_DEADLINE_MS,
+		minimum: 1,
+		unit: "milliseconds",
+	},
+	/**
+	 * How many collectors run at once, per pipeline, per decision. The floor is
+	 * 1 rather than 0 for the reason `http.port`'s is: `0` is not "no limit", it
+	 * is a fan-out that starts nothing and resolves with no attributes and no
+	 * rules — a fail-open dressed as a setting.
+	 */
+	collectorConcurrency: {
+		field: "collectorConcurrency",
+		fallback: DEFAULT_COLLECTOR_CONCURRENCY,
+		minimum: 1,
+		unit: "collectors",
 	},
 } satisfies Record<string, BoundSpec>;
 

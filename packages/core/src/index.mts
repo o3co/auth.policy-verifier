@@ -2,7 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export { AttributePipeline } from "./AttributePipeline.mjs";
-export { ResourceParseError } from "./errors.mjs";
+export type {
+	CollectorLimits,
+	CollectorPipeline,
+	ResolvedCollectorLimits,
+} from "./collectorLimits.mjs";
+export {
+	DEFAULT_COLLECT_DEADLINE_MS,
+	DEFAULT_COLLECTOR_CONCURRENCY,
+	DEFAULT_COLLECTOR_TIMEOUT_MS,
+	resolveCollectorLimits,
+} from "./collectorLimits.mjs";
+export type { CollectorTimeoutDetail, CollectorTimeoutLimit } from "./errors.mjs";
+export { CollectorTimeoutError, ResourceParseError } from "./errors.mjs";
 export type { EvaluateOptions } from "./evaluate.mjs";
 export { evaluate } from "./evaluate.mjs";
 export {
@@ -30,6 +42,7 @@ export type {
 	AttributeCollector,
 	Attributes,
 	CollectorContext,
+	CollectorRequest,
 	Decision,
 	DecisionReason,
 	KeyResolver,

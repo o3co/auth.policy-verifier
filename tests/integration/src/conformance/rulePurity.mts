@@ -4,6 +4,7 @@
 import type {
 	Attributes,
 	CollectorContext,
+	CollectorRequest,
 	ReadonlyAttributes,
 	Rule,
 } from "@o3co/auth.policy-verifier.core";
@@ -16,8 +17,16 @@ export type CollectRules = (context: CollectorContext) => Promise<Rule[]>;
 export interface RulePurityCase {
 	/** Case name, used in test titles. */
 	name: string;
-	/** The request the rules are collected from. */
-	context: CollectorContext;
+	/**
+	 * The request the rules are collected from.
+	 *
+	 * A `CollectorRequest`, so a case states only facts about the request: the
+	 * per-collector `signal` is the fan-out's to supply (#115), and here the
+	 * harness *is* the fan-out. Supplying one anyway is how a case checks what
+	 * its collector does when the request is cancelled — it is linked into the
+	 * view the collector sees.
+	 */
+	context: CollectorRequest;
 	/** Attributes to run the collected rules against. */
 	attrs: Attributes;
 }
@@ -57,7 +66,7 @@ export interface RulePurityAdapter {
  * out is registered, so revocation reaches a rule that kept `ctx.resource` just
  * as it reaches one that kept `ctx`.
  */
-function revocableContext(context: CollectorContext): {
+function revocableContext(request: CollectorRequest): {
 	proxy: CollectorContext;
 	revoke: () => void;
 } {
@@ -67,6 +76,14 @@ function revocableContext(context: CollectorContext): {
 	const wrap = <T extends object>(target: T): T => {
 		const memoized = wrapped.get(target);
 		if (memoized !== undefined) return memoized as T;
+
+		// An `AbortSignal` cannot be a `Proxy` — see `revocableSignal`.
+		if (target instanceof AbortSignal) {
+			const { view, revoke } = revocableSignal(target);
+			wrapped.set(target, view);
+			revokers.push(revoke);
+			return view as unknown as T;
+		}
 
 		const { proxy, revoke } = Proxy.revocable(target, {
 			get(t, prop, receiver) {
@@ -80,6 +97,15 @@ function revocableContext(context: CollectorContext): {
 		return proxy;
 	};
 
+	// The fan-out's job, done here because here the harness is the fan-out: a
+	// collector is always handed a `signal`, so one has to exist before the
+	// context is wrapped. A case that supplied its own is linked through
+	// `revocableSignal`; one that did not gets a signal that never aborts.
+	const context: CollectorContext = {
+		...request,
+		signal: request.signal ?? new AbortController().signal,
+	};
+
 	const proxy = wrap(context);
 	return {
 		proxy,
@@ -87,6 +113,69 @@ function revocableContext(context: CollectorContext): {
 			for (const revoke of revokers) revoke();
 		},
 	};
+}
+
+/**
+ * The `AbortSignal` case, which is the one field of the context a collector is
+ * *meant* to hold live — and the one that cannot be wrapped in a `Proxy`.
+ *
+ * Both halves of that matter, and they pull in opposite directions.
+ *
+ * **It cannot be a `Proxy`.** `AbortSignal`'s members are brand-checked against
+ * the receiver's internal slots, and a proxy is not the signal. `signal.aborted`
+ * happens to read through, but `addEventListener`, `AbortSignal.any([signal])`
+ * and `fetch(url, { signal })` all throw `Method Map.prototype.get called on
+ * incompatible receiver` — so wrapping it the way every other object is wrapped
+ * would fail every collector that uses its signal for the thing it is for. That
+ * is the harness reporting its own artifact as a violation, the mistake the
+ * memoization above already exists to avoid.
+ *
+ * **It still has to be revocable.** A signal is a live view of request state:
+ * `aborted` changes under a rule's feet, so a rule that kept one and read it
+ * inside `verify` is exactly the violation this suite catches, and exempting the
+ * field would have quietly opened a hole in the check the week it was added.
+ *
+ * So the view is a genuine `AbortSignal` — `AbortSignal.any` mints one linked to
+ * the original, which keeps every brand check and the cancellation semantics
+ * intact — and revoking shadows each of its members with an own accessor that
+ * throws the same `TypeError` a revoked proxy throws. `isRevokedProxyError` then
+ * recognises it, and the violation is reported against the rule that committed
+ * it, in the same words as every other one.
+ */
+function revocableSignal(signal: AbortSignal): { view: AbortSignal; revoke: () => void } {
+	const view = AbortSignal.any([signal]);
+	return {
+		view,
+		revoke: () => {
+			// The prototype chain's string-keyed members — `aborted`, `reason`,
+			// `throwIfAborted`, `onabort` and the three `EventTarget` methods. An own
+			// accessor shadows each; the instance's own symbol-keyed internals are
+			// left alone, since nothing reads a signal through those.
+			for (const key of signalMembers(view)) {
+				Object.defineProperty(view, key, {
+					configurable: true,
+					get() {
+						throw new TypeError("Cannot perform 'get' on a proxy that has been revoked");
+					},
+				});
+			}
+		},
+	};
+}
+
+/** Every string-keyed member an `AbortSignal` answers, from its prototype chain. */
+function signalMembers(signal: AbortSignal): string[] {
+	const keys = new Set<string>();
+	for (
+		let proto: object | null = Object.getPrototypeOf(signal) as object | null;
+		proto !== null && proto !== Object.prototype;
+		proto = Object.getPrototypeOf(proto) as object | null
+	) {
+		for (const key of Object.getOwnPropertyNames(proto)) {
+			if (key !== "constructor") keys.add(key);
+		}
+	}
+	return [...keys];
 }
 
 /** Whether an error is the one a revoked proxy throws on any access. */
@@ -122,7 +211,7 @@ function describeRule(rule: Rule, index: number): string {
  */
 export async function assertRuleIndependentOfContext(
 	collect: CollectRules,
-	context: CollectorContext,
+	context: CollectorRequest,
 	attrs: Attributes,
 ): Promise<boolean[]> {
 	const { proxy, revoke } = revocableContext(context);
@@ -197,6 +286,16 @@ export async function assertRuleIndependentOfContext(
  */
 export function describeRulePurityConformance(adapter: RulePurityAdapter): void {
 	describe(`rule purity conformance — ${adapter.name}`, () => {
+		/**
+		 * The case's request as a collector receives it, for the checks below that
+		 * do not need the revocable view. Nothing here cancels — these ask what a
+		 * rule answers, not what a collector does when the request goes away.
+		 */
+		const asContext = (testCase: RulePurityCase): CollectorContext => ({
+			...testCase.context,
+			signal: testCase.context.signal ?? new AbortController().signal,
+		});
+
 		for (const testCase of adapter.cases) {
 			describe(testCase.name, () => {
 				it("answers the same once the request it was collected from is gone", async () => {
@@ -213,7 +312,7 @@ export function describeRulePurityConformance(adapter: RulePurityAdapter): void 
 				it("answers the same for a distinct map carrying equal attributes", async () => {
 					// The map's identity must not be part of the answer, or "cacheable"
 					// and "testable in isolation" both stop being true.
-					const rules = await adapter.collect(testCase.context);
+					const rules = await adapter.collect(asContext(testCase));
 					const copy: Attributes = new Map(testCase.attrs);
 
 					expect(rules.map((rule) => rule.verify(copy))).toEqual(
@@ -224,7 +323,7 @@ export function describeRulePurityConformance(adapter: RulePurityAdapter): void 
 				it("only reads the attributes it is handed", async () => {
 					// The read-only view `Rule.verify` declares, enforced at runtime for
 					// the sake of a rule authored in JavaScript, where the type is gone.
-					const rules = await adapter.collect(testCase.context);
+					const rules = await adapter.collect(asContext(testCase));
 					const readOnly: ReadonlyAttributes = new Map(testCase.attrs);
 					const before = JSON.stringify([...readOnly]);
 

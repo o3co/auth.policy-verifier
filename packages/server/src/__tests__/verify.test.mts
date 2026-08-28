@@ -1251,3 +1251,110 @@ describe("createVerifyRouter — maxBatchSize, one reader at both boundaries (#1
 		expect(refusal(buildRouter(undefined))).toBeUndefined();
 	});
 });
+
+describe("createVerifyRouter — a collector that runs out of time denies (#115)", () => {
+	/** Stalls only for the action named, so one batch can mix stalled and decided entries. */
+	const stallingOn = (action: string): AttributeCollector => ({
+		collect: (context: CollectorContext) =>
+			context.action === action
+				? new Promise<Attributes>(() => {})
+				: Promise.resolve(new Map<string, unknown>([["scopes", ["read:project"]]])),
+	});
+
+	const stalledApp = () => {
+		const app = express();
+		app.use(
+			createVerifyRouter({
+				jwt: {
+					validate: true,
+					key: hs256Key.key,
+					algorithms: hs256Key.algorithms,
+					issuer: ISSUER,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				},
+				resourceParser: new DotNotationResourceParser(),
+				// Bounds low enough that the stall is answered well inside the
+				// test's own timeout.
+				attributePipeline: new AttributePipeline([stallingOn("stall")], {
+					collectorTimeoutMs: 20,
+					deadlineMs: 50,
+				}),
+				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
+			}),
+		);
+		return app;
+	};
+
+	it("answers 403 with a collector_timeout deny", async () => {
+		const token = await signHS256Token({ scope: "read:project" });
+		const res = await request(stalledApp())
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "stall" });
+
+		expect(res.status).toBe(403);
+		expect(res.body.decision).toBe("deny");
+		expect(res.body.code).toBe("collector_timeout");
+		// No group was evaluated, and the reason says so rather than inventing one.
+		expect(res.body.reason).toEqual({ groups: [] });
+		// The message reaches the caller, so it names no collector and no bound.
+		expect(res.body.message).not.toMatch(/collector|ms/i);
+	});
+
+	it.each([
+		[
+			"a malformed body, unauthenticated",
+			(app: express.Express) => request(app).post("/verify").send({ resource: "project:1" }),
+			400,
+			"invalid_request",
+		],
+		[
+			"a well-formed body with no token",
+			(app: express.Express) =>
+				request(app).post("/verify").send({ resource: "project:1", action: "stall" }),
+			401,
+			"missing_token",
+		],
+	])(
+		"answers %s before any collector runs, rather than spending the budget on it",
+		async (_label, send, status, code) => {
+			// Ordering, pinned rather than read. #118 put body validation ahead of
+			// the token, and both sit ahead of `decide` — so an unauthenticated
+			// caller cannot make the verifier hold a collector budget open. If a
+			// later change moved collection ahead of either gate, this case would
+			// come back `403 collector_timeout` (and take the full budget doing
+			// it) instead of the refusal it asserts.
+			const res = await send(stalledApp());
+
+			expect(res.status).toBe(status);
+			expect(res.body.code).toBe(code);
+			expect(res.body.code).not.toBe("collector_timeout");
+		},
+	);
+
+	it("denies only the batch entry that stalled, and decides the rest", async () => {
+		// The stall is per decision, not per request: a batch is many decisions,
+		// and one of them running out of time must not refuse the others or turn
+		// the whole batch into a 500.
+		const token = await signHS256Token({ scope: "read:project" });
+		const res = await request(stalledApp())
+			.post("/verify/batch")
+			.set("Authorization", `Bearer ${token}`)
+			.send({
+				decisions: [
+					{ resource: "project:1", action: "read" },
+					{ resource: "project:2", action: "stall" },
+					{ resource: "project:3", action: "read" },
+				],
+			});
+
+		expect(res.status).toBe(200);
+		expect(res.body.decisions.map((d: { decision: string }) => d.decision)).toEqual([
+			"allow",
+			"deny",
+			"allow",
+		]);
+		expect(res.body.decisions[1].code).toBe("collector_timeout");
+	});
+});

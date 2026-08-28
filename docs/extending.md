@@ -95,6 +95,8 @@ Notes:
 | `headers` | set by the transport (currently `x-request-id`) | transport |
 | `requestContext` | the request body's `context`, forwarded verbatim | **untrusted** |
 
+(`signal` is the fifth field and the only one that is not input at all — it is the pipeline's cancellation handle. See [Deadlines and cancellation](#deadlines-and-cancellation).)
+
 Anyone holding a valid token can put anything in `context`. A collector that promotes `requestContext.role` into `ATTR_ROLES` has handed that caller its own authorization input: the token says who you are, and then the body says what you may do. It is one line, and it looks exactly like the line next to it that promotes `payload.sub`.
 
 Nothing about the data itself tells the two apart, so the type does. `requestContext` is an `UntrustedRequestContext` — an opaque brand whose contents are not reachable by property access:
@@ -117,6 +119,27 @@ Once unwrapped:
 
 A transport that builds a `CollectorContext` by hand — your own interceptor, or a test — marks the record on the way in with `markUntrustedRequestContext`. This repo's verify route does exactly that with the body's `context`, and it is the only thing that mints the brand, so a raw body object cannot reach a collector by mistake.
 
+## Deadlines and cancellation
+
+Every collector is handed an `AbortSignal` on `CollectorContext.signal`, and the fan-out it runs in is bounded three ways: a per-collector timeout (2s by default), an end-to-end deadline for the whole wave (5s), and a cap on how many collectors run at once (8). Operators tune all three through `verify.collectorTimeoutMs`, `verify.collectorDeadlineMs` and `verify.collectorConcurrency`.
+
+**Pass the signal to whatever you wait on.** That is what makes cancellation real rather than nominal:
+
+```ts
+async collect(context: CollectorContext): Promise<Attributes> {
+  const res = await fetch(this.endpoint, { signal: context.signal });
+  // …
+}
+```
+
+The pipeline stops waiting on a collector that ignores its signal — the bound does not depend on your cooperation — but the outbound call that collector started keeps running against a dependency that has already lost the request it belonged to. That is the pile-up the concurrency cap exists to prevent, and honouring the signal is how a collector stops contributing to it.
+
+The signal aborts for four reasons, and `signal.reason` says which: this collector overran its own budget, the pipeline overran its deadline, a sibling collector already failed the decision, or the caller went away.
+
+**Exceeding a bound denies the request** — `403` with `code: "collector_timeout"`. The pipeline throws `CollectorTimeoutError` and returns nothing at all, deliberately: attributes that arrived in time are a weaker input to a rule, and rules that arrived in time are a weaker *policy*, with the empty case reading as an allow wherever `rule.onEmptyRuleSet = "allow"` is set. So there is no partial answer to be tempted by. A collector that legitimately has nothing to say should return an empty `Map` promptly; timing out is never how you say that.
+
+**A rule must not carry the signal into `verify`.** It is a live handle on the request — `aborted` moves on its own — so holding one and reading it inside `verify` is the same violation as holding `ctx.resource`, and the [rule purity conformance suite](#a-rule-decides-from-attrs-and-only-from-attrs) catches it as one.
+
 ## Writing a custom AttributeCollector
 
 `AttributeCollector` is defined in `@o3co/auth.policy-verifier.core`:
@@ -129,7 +152,7 @@ interface AttributeCollector {
 
 - One collector should produce a **focused set of attribute keys**. Do not bundle unrelated extractions. If you are extracting IP address and user agent, write two collectors.
 - Prefer string constants for attribute keys. See `ATTR_SCOPES`, `ATTR_PERMISSIONS`, `ATTR_ROLES`, `ATTR_USER_ID`, `ATTR_CLIENT_ID` in `@o3co/auth.policy-verifier.core`. For project-specific keys, define your own constants and **do not reuse core keys with different semantics**.
-- The `AttributePipeline` runs all collectors in parallel and merges their results: array values are concatenated, scalar/object values follow last-writer-wins. Design accordingly — do not rely on collector ordering.
+- The `AttributePipeline` runs all collectors in parallel and merges their results: array values are concatenated, scalar/object values follow last-writer-wins. Design accordingly — do not rely on collector ordering. Only so many run at once, and each is on a clock — see [Deadlines and cancellation](#deadlines-and-cancellation).
 - `CollectorContext.requestContext` is intentionally unshaped. The engine does not ship a generic `requestContext` collector because its shape is defined by each consuming project's transport or interceptor. Write a focused collector per field you need to promote; validate shapes inside that collector. It is also the one untrusted input — see [The trust boundary](#the-trust-boundary-requestcontext-is-the-callers) before you read anything out of it.
 
 ### Worked example: `ClientIpCollector`

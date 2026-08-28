@@ -6,10 +6,18 @@ import { markUntrustedRequestContext } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 import { RequestContextAttributeCollector } from "#/collectors/RequestContextAttributeCollector.mjs";
 
+/**
+ * `CollectorContext.signal` is required (#115): a pipeline supplies one per
+ * collector, so a hand-built context carries one too. These fixtures are not
+ * about cancellation, so it is a signal that never aborts.
+ */
+const NEVER_CANCELLED = new AbortController().signal;
+
 const makeContext = (requestContext?: Record<string, unknown>): CollectorContext => ({
 	payload: {},
 	resource: { raw: "document:1", resourceType: "document", resourceId: "1" },
 	action: "read",
+	signal: NEVER_CANCELLED,
 	...(requestContext !== undefined
 		? { requestContext: markUntrustedRequestContext(requestContext) }
 		: {}),

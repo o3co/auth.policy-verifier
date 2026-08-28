@@ -4,6 +4,7 @@
 import {
 	type AttributeCollectorFactory,
 	AttributePipeline,
+	type CollectorLimits,
 	createConsoleLogger,
 	type KeyResolverFactory,
 	type Logger,
@@ -21,6 +22,7 @@ import {
 	JWT_MODE_MIGRATION_MESSAGE,
 	JWT_MODE_REMOVED_KEYS,
 } from "./config/application.schema.mjs";
+import { NUMERIC_BOUNDS, resolveBound } from "./config/bounds.mjs";
 import { CALLER_AUTH_REQUIRED } from "./config/defaults.mjs";
 import { createCallerAuthMiddleware, resolveCallerAuth } from "./http/callerAuth.mjs";
 import {
@@ -110,6 +112,31 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	}
 
 	// 3. Resolve attribute collectors from config — call factory with config entry
+	//
+	// The bounds both pipelines run their collectors under (#115) are resolved
+	// here because this is where the pipelines are built, which makes `createApp`
+	// their runtime guard: a hand-built config reaches it with `AppConfigSchema`
+	// never having run. Read through `resolveBound` with the same specs the
+	// schema uses, so the two boundaries cannot disagree about what a value means
+	// — see AGENTS.md, "Two-Boundary Config Validation".
+	const collectorLimits: CollectorLimits = {
+		collectorTimeoutMs: resolveBound(
+			config.verify.collectorTimeoutMs,
+			NUMERIC_BOUNDS.collectorTimeoutMs,
+			"verify",
+		),
+		deadlineMs: resolveBound(
+			config.verify.collectorDeadlineMs,
+			NUMERIC_BOUNDS.collectorDeadlineMs,
+			"verify",
+		),
+		concurrency: resolveBound(
+			config.verify.collectorConcurrency,
+			NUMERIC_BOUNDS.collectorConcurrency,
+			"verify",
+		),
+	};
+
 	const attributeCollectors = config.attribute.collectors.map((entry) => {
 		const factory = attributeCollectorRegistry.get(entry.collector);
 		return factory(entry);
@@ -256,8 +283,8 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 			logger,
 			metrics: metrics.decisions,
 			resourceParser,
-			attributePipeline: new AttributePipeline(attributeCollectors),
-			rulePipeline: new RulePipeline(ruleCollectors),
+			attributePipeline: new AttributePipeline(attributeCollectors, collectorLimits),
+			rulePipeline: new RulePipeline(ruleCollectors, collectorLimits),
 			evaluateOptions: { onEmptyRuleSet: config.rule.onEmptyRuleSet },
 			maxBatchSize: config.verify.maxBatchSize,
 			// Forwarded rather than defaulted here (#118): the router resolves each

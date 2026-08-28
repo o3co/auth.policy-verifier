@@ -7,10 +7,13 @@ import type {
 	AttributeCollector,
 	Attributes,
 	CollectorContext,
+	CollectorRequest,
 	VerifierPayload,
 } from "../types.mjs";
 
-const stubContext: CollectorContext = {
+// A `CollectorRequest`, not a `CollectorContext`: the per-collector `signal` is
+// the pipeline's to supply, and this is the shape a transport hands it (#115).
+const stubContext: CollectorRequest = {
 	payload: {} satisfies VerifierPayload,
 	resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 	action: "read",

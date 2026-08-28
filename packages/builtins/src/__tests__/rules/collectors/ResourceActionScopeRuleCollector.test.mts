@@ -5,10 +5,18 @@ import type { CollectorContext, VerifierPayload } from "@o3co/auth.policy-verifi
 import { describe, expect, it } from "vitest";
 import { ResourceActionScopeRuleCollector } from "#/rules/collectors/ResourceActionScopeRuleCollector.mjs";
 
+/**
+ * `CollectorContext.signal` is required (#115): a pipeline supplies one per
+ * collector, so a hand-built context carries one too. These fixtures are not
+ * about cancellation, so it is a signal that never aborts.
+ */
+const NEVER_CANCELLED = new AbortController().signal;
+
 const makeContext = (resourceType: string, action: string, scope?: string): CollectorContext => ({
 	payload: { ...(scope !== undefined ? { scope } : {}) } satisfies VerifierPayload,
 	resource: { raw: `${resourceType}:1`, resourceType, resourceId: "1" },
 	action,
+	signal: NEVER_CANCELLED,
 });
 
 describe("ResourceActionScopeRuleCollector", () => {
@@ -28,6 +36,7 @@ describe("ResourceActionScopeRuleCollector", () => {
 			payload: { scope: "update:project_member" } satisfies VerifierPayload,
 			resource: { raw: "project:1.member:2", resourceType: "project_member", resourceId: "2" },
 			action: "update",
+			signal: NEVER_CANCELLED,
 		};
 		const rules = await collector.collect(ctx);
 		expect(rules).toHaveLength(1);
@@ -71,6 +80,7 @@ describe("ResourceActionScopeRuleCollector", () => {
 			payload: { scope: "read:document" } satisfies VerifierPayload,
 			resource: { raw: "document:1", resourceType: "document", resourceId: "1" },
 			action: "read",
+			signal: NEVER_CANCELLED,
 		};
 		const rules = await collector.collect(ctx);
 		expect(rules).toHaveLength(1);

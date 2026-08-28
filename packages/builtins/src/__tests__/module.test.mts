@@ -96,6 +96,7 @@ describe("builtinCollectorsModule", () => {
 			payload: {},
 			resource: { raw: "test", resourceType: "test" },
 			action: "read",
+			signal: new AbortController().signal,
 		});
 
 		expect(attrs.get("permissions")).toEqual(["admin", "read"]);

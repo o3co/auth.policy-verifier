@@ -275,6 +275,16 @@ verify {
   maxContextEntries = ${?VERIFY_MAX_CONTEXT_ENTRIES}
   maxContextValueLength = 1024  # characters in any `context` string, keys included
   maxContextValueLength = ${?VERIFY_MAX_CONTEXT_VALUE_LENGTH}
+
+  # Bounds on the collector fan-out both pipelines run per decision (#115).
+  # Exceeding any of them DENIES the decision — a partial answer is never
+  # returned. See "Collector deadlines" below.
+  collectorTimeoutMs   = 2000   # one collector's own budget
+  collectorTimeoutMs   = ${?VERIFY_COLLECTOR_TIMEOUT_MS}
+  collectorDeadlineMs  = 5000   # the whole fan-out, per pipeline
+  collectorDeadlineMs  = ${?VERIFY_COLLECTOR_DEADLINE_MS}
+  collectorConcurrency = 8      # collectors in flight at once
+  collectorConcurrency = ${?VERIFY_COLLECTOR_CONCURRENCY}
 }
 ```
 
@@ -314,6 +324,20 @@ That is `400` for malformed JSON, `413 payload_too_large` over `maxBodyBytes`, a
 response body verbatim; `verifyInputValidation.test.mts` asserts that this exact line appears in
 `README.md`, `README.ja.md` and `CHANGELOG.md` and parses to what the endpoint emits, so the three
 copies cannot drift from the code or from each other.
+
+### Collector deadlines
+
+Attribute and rule collectors are the layer that talks to databases and HTTP APIs, so they are the layer that can stall. Every fan-out is bounded three ways, and the bounds are on by default — a deployment that configures nothing still gets them:
+
+| Knob | Default | What it bounds |
+| --- | --- | --- |
+| `verify.collectorTimeoutMs` | `2000` | how long one collector may take. The budget starts when that collector starts, so queueing behind the concurrency cap does not spend it |
+| `verify.collectorDeadlineMs` | `5000` | how long a whole fan-out may take, per pipeline. Catches the case where nothing overran its own budget but the total still did |
+| `verify.collectorConcurrency` | `8` | how many collectors run at once, per pipeline, per decision. More than any realistic collector set, so it changes nothing until a dependency slows down and work starts piling up |
+
+Every collector is handed an `AbortSignal` on `CollectorContext.signal`; it aborts when that collector's budget runs out, when the pipeline's deadline does, when a sibling collector has already failed the decision, or when the caller went away. Pass it to whatever the collector waits on — `fetch(url, { signal: context.signal })` — so the outbound work is actually cancelled and not merely stopped being waited for.
+
+**Exceeding a bound denies.** The decision is answered `403` with `code: "collector_timeout"` and an empty `reason.groups`; the details go to the `collector_timeout` log line rather than to the caller. It is deliberately not a `5xx` and deliberately not "decide with what we collected in time": a short rule list is a *weaker policy*, and an empty one is an **allow** wherever `rule.onEmptyRuleSet = "allow"` is set — so the evaluator is never reached at all. In a batch the bound is per decision, so one entry timing out denies that entry and leaves the rest decided.
 
 ### Resource String Format (DotNotation)
 
