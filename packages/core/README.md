@@ -99,7 +99,7 @@ interface ModuleContext {
 }
 ```
 
-A module registers collector and parser factories into the provided registries during `init`. Configuration is passed through `config`. A host may initialize modules with a wider context: the default server's `ServerModuleContext` (in `@o3co/auth.policy-verifier.server`) extends this with a JWT key-resolver registry, and a module that needs it declares `Module<ServerModuleContext>`.
+A module registers attribute-collector, rule-collector, and resource-parser factories into the provided registries during `init`. Configuration is passed through `config`. A host may initialize modules with a wider context: the default server's `ServerModuleContext` (in `@o3co/auth.policy-verifier.server`) extends this with a JWT key-resolver registry, and a module that needs it declares `Module<ServerModuleContext>`.
 
 ### Types
 

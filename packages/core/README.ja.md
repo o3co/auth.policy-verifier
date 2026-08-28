@@ -105,7 +105,7 @@ interface ModuleContext {
 }
 ```
 
-モジュールは `init` 内でコレクター・パーサーのファクトリーをレジストリに登録します。設定値は `config` を通じて渡されます。ホスト側はこれより広いコンテキストでモジュールを初期化できます: デフォルト server の `ServerModuleContext`（`@o3co/auth.policy-verifier.server`）はここに JWT 鍵リゾルバーのレジストリを足しており、それを必要とするモジュールは `Module<ServerModuleContext>` を宣言します。
+モジュールは `init` 内で attribute collector・rule collector・resource parser のファクトリーをレジストリに登録します。設定値は `config` を通じて渡されます。ホスト側はこれより広いコンテキストでモジュールを初期化できます: デフォルト server の `ServerModuleContext`（`@o3co/auth.policy-verifier.server`）はここに JWT 鍵リゾルバーのレジストリを足しており、それを必要とするモジュールは `Module<ServerModuleContext>` を宣言します。
 
 ### 型一覧
 
