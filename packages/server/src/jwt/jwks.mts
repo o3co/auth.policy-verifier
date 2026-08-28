@@ -22,12 +22,7 @@
  * of labor as `assertVerifyRouterJwtConfig`.
  */
 
-import { resolveBound } from "../config/bounds.mjs";
-import {
-	DEFAULT_JWKS_CACHE_MAX_AGE_MS,
-	DEFAULT_JWKS_COOLDOWN_MS,
-	DEFAULT_JWKS_TIMEOUT_MS,
-} from "../config/defaults.mjs";
+import { NUMERIC_BOUNDS, resolveBound } from "../config/bounds.mjs";
 import { isLoopbackHost } from "../net/loopback.mjs";
 
 /**
@@ -126,6 +121,10 @@ export interface JwksFetchBounds {
  * absent bound defaults; a present one that is not a whole number of
  * milliseconds in range throws, naming the config key the operator wrote.
  *
+ * The bounds themselves live in `config/bounds.mts` and are the very specs
+ * `AppConfigSchema` reads a config file through (#157), so the two boundaries
+ * cannot diverge on what a knob admits or on how it says so.
+ *
  * @param path Config path of the JWT block at the calling boundary. `createApp`
  * hands the `oauth.jwt` block to the `KeyResolverFactory`, so that is the
  * default; a custom factory reached by another path passes its own.
@@ -134,27 +133,9 @@ export function resolveJwksFetchBounds(
 	config: JwksFetchConfig,
 	path = "oauth.jwt",
 ): JwksFetchBounds {
-	const ms = { path, unit: "milliseconds" } as const;
 	return {
-		timeoutDuration: resolveBound(config.jwksTimeoutMs, {
-			...ms,
-			field: "jwksTimeoutMs",
-			fallback: DEFAULT_JWKS_TIMEOUT_MS,
-			minimum: 1,
-		}),
-		// Zero is a valid cooldown ("refetch on every miss"), so the floor is 0 and
-		// the absent case is told apart by `undefined`, never by falsiness.
-		cooldownDuration: resolveBound(config.jwksCooldownMs, {
-			...ms,
-			field: "jwksCooldownMs",
-			fallback: DEFAULT_JWKS_COOLDOWN_MS,
-			minimum: 0,
-		}),
-		cacheMaxAge: resolveBound(config.jwksCacheMaxAgeMs, {
-			...ms,
-			field: "jwksCacheMaxAgeMs",
-			fallback: DEFAULT_JWKS_CACHE_MAX_AGE_MS,
-			minimum: 1,
-		}),
+		timeoutDuration: resolveBound(config.jwksTimeoutMs, NUMERIC_BOUNDS.jwksTimeoutMs, path),
+		cooldownDuration: resolveBound(config.jwksCooldownMs, NUMERIC_BOUNDS.jwksCooldownMs, path),
+		cacheMaxAge: resolveBound(config.jwksCacheMaxAgeMs, NUMERIC_BOUNDS.jwksCacheMaxAgeMs, path),
 	};
 }

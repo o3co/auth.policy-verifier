@@ -4,16 +4,12 @@
 import { z } from "zod";
 import { checkHs256Rotation } from "../jwt/hs256Rotation.mjs";
 import { checkJwksUri } from "../jwt/jwks.mjs";
+import { type BoundSpec, NUMERIC_BOUNDS, resolveBound } from "./bounds.mjs";
 import {
 	DEFAULT_CALLER_AUTH_HEADER,
-	DEFAULT_CLOCK_TOLERANCE_SECONDS,
 	DEFAULT_HOSTNAME,
-	DEFAULT_JWKS_CACHE_MAX_AGE_MS,
-	DEFAULT_JWKS_COOLDOWN_MS,
-	DEFAULT_JWKS_TIMEOUT_MS,
+	DEFAULT_HTTP_PORT,
 	DEFAULT_MAX_BATCH_SIZE,
-	DEFAULT_MAX_TOKEN_AGE_SECONDS,
-	MAX_CLOCK_TOLERANCE_SECONDS,
 } from "./defaults.mjs";
 
 /**
@@ -24,6 +20,53 @@ import {
  */
 export const JWT_MODE_MIGRATION_MESSAGE =
 	'oauth.jwt.validate/allowInsecureDecode were replaced by oauth.jwt.mode; set mode = "verify" or the explicit "insecure-decode"';
+
+/**
+ * One numeric knob, read at this boundary by the function that reads it at the
+ * other one (#157).
+ *
+ * `resolveBound` decides everything about the knob: the default when the key is
+ * absent, the coercion of the string a HOCON env substitution delivers, the
+ * range, and the wording of the refusal. This wrapper only carries the verdict
+ * into zod's issue list at the path the operator wrote — the same division of
+ * labour `jwksUri` has with `checkJwksUri` and `previousSecrets` with
+ * `checkHs256Rotation`. What it replaced was a `z.coerce.number().int()…` chain
+ * per knob that shared only the *constants* with `resolveBound`, which is how
+ * `jwksCooldownMs = false` came to mean 0 here and a boot failure there.
+ *
+ * `z.unknown().optional()` and not `z.coerce.number()`: the check must see the
+ * value exactly as the operator wrote it. Anything narrower would have zod
+ * reject a boolean in zod's words rather than in the shared one, and
+ * `z.coerce` would have already turned it into a number before the check ran.
+ *
+ * The issue is deliberately non-fatal (`z.NEVER` marks the value unusable
+ * without aborting the parse), so two bad knobs in one block are both reported
+ * rather than only the first. It buys no more than that: zod skips a block's
+ * `superRefine` once any field in that block has failed, so a refused knob and a
+ * missing `issuer` in the same `oauth.jwt` are still two round trips. A refused
+ * knob in a *different* block — `http.port` — leaves `oauth.jwt`'s `superRefine`
+ * running as usual. Both are pinned by tests.
+ *
+ * @param path Config path of the block this knob sits in, as the operator wrote
+ * it — `"oauth.jwt"`, `"http"`, `"verify"`. It is what makes the message here
+ * identical to the runtime guard's.
+ */
+function boundedNumber(spec: BoundSpec, path: string) {
+	return z
+		.unknown()
+		.optional()
+		.transform((value, ctx) => {
+			try {
+				return resolveBound(value, spec, path);
+			} catch (cause) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: cause instanceof Error ? cause.message : String(cause),
+				});
+				return z.NEVER;
+			}
+		});
+}
 
 const collectorSchema = z
 	.object({
@@ -51,7 +94,14 @@ export const AppConfigSchema = z.object({
 			 * A container deployment sets `0.0.0.0` explicitly; that is the opt-in.
 			 */
 			hostname: z.string().default(DEFAULT_HOSTNAME),
-			port: z.coerce.number().default(3000),
+			/**
+			 * Port to bind. A positive integer up to 65535 — the one numeric knob
+			 * that predated the two-boundary doctrine and carried no bound at all,
+			 * so `port = "abc"` reached `listen()` as NaN and `port = false` as 0,
+			 * both of which bind an arbitrary free port (#157, and the straggler
+			 * noted in #158).
+			 */
+			port: boundedNumber(NUMERIC_BOUNDS.port, "http"),
 			pathPrefix: z.string().default(""),
 			/**
 			 * Optional shared credential the calling service must present (#108).
@@ -72,7 +122,9 @@ export const AppConfigSchema = z.object({
 				})
 				.optional(),
 		})
-		.default(() => ({ hostname: DEFAULT_HOSTNAME, port: 3000, pathPrefix: "" })),
+		// The default object is taken verbatim — zod does not parse it back through
+		// the shape — so it has to state every key that has no other source.
+		.default(() => ({ hostname: DEFAULT_HOSTNAME, port: DEFAULT_HTTP_PORT, pathPrefix: "" })),
 	oauth: z.object({
 		// Algorithm names are free-form strings so user-registered algorithms can be selected
 		// from config without editing the schema enum. Built-in algorithms keep schema-level
@@ -151,17 +203,14 @@ export const AppConfigSchema = z.object({
 				 */
 				jwksUri: z.string().optional(),
 				// Bounds on the JWKS fetch, which happens inside a verify request
-				// whenever key resolution misses the cache (#109). Coerced because a
-				// HOCON env substitution delivers strings.
-				jwksTimeoutMs: z.coerce.number().int().positive().default(DEFAULT_JWKS_TIMEOUT_MS),
-				// Zero is a valid cooldown — "refetch on every miss", at the cost of
-				// letting an attacker-chosen `kid` drive fetches at the provider.
-				jwksCooldownMs: z.coerce.number().int().nonnegative().default(DEFAULT_JWKS_COOLDOWN_MS),
-				jwksCacheMaxAgeMs: z.coerce
-					.number()
-					.int()
-					.positive()
-					.default(DEFAULT_JWKS_CACHE_MAX_AGE_MS),
+				// whenever key resolution misses the cache (#109). Read through
+				// `resolveBound` — which also coerces the string a HOCON env
+				// substitution delivers — so this boundary and `resolveJwksFetchBounds`
+				// cannot disagree about what a value means (#157). What each admits is
+				// stated once, in `config/bounds.mts`.
+				jwksTimeoutMs: boundedNumber(NUMERIC_BOUNDS.jwksTimeoutMs, "oauth.jwt"),
+				jwksCooldownMs: boundedNumber(NUMERIC_BOUNDS.jwksCooldownMs, "oauth.jwt"),
+				jwksCacheMaxAgeMs: boundedNumber(NUMERIC_BOUNDS.jwksCacheMaxAgeMs, "oauth.jwt"),
 				publicKey: z.string().optional(),
 				publicKeyPath: z.string().optional(),
 				/**
@@ -188,7 +237,10 @@ export const AppConfigSchema = z.object({
 				 * Bounds on a presented token's own lifetime (#110). Both apply in
 				 * every mode: `insecure-decode` restates them by hand, so a
 				 * deployment cannot end up with the two modes disagreeing about the
-				 * same token. Coerced because a HOCON env substitution delivers strings.
+				 * same token. Read through `resolveBound` — which also coerces the
+				 * string a HOCON env substitution delivers — so this boundary and
+				 * `resolveJwtTimeClaimBounds` cannot disagree about what a value
+				 * means (#157).
 				 *
 				 * `maxTokenAgeSeconds` is the ceiling on `now - iat` — what refuses a
 				 * token whose issuer set `exp` years out — and setting it makes `iat`
@@ -196,11 +248,7 @@ export const AppConfigSchema = z.object({
 				 * required unconditionally and has no knob: a knob to accept tokens
 				 * that never expire is the bug, not the setting.
 				 */
-				maxTokenAgeSeconds: z.coerce
-					.number()
-					.int()
-					.positive()
-					.default(DEFAULT_MAX_TOKEN_AGE_SECONDS),
+				maxTokenAgeSeconds: boundedNumber(NUMERIC_BOUNDS.maxTokenAgeSeconds, "oauth.jwt"),
 				/**
 				 * Skew allowance on every time-claim comparison. Bounded above
 				 * because tolerance lengthens the accepted life of every token the
@@ -209,12 +257,7 @@ export const AppConfigSchema = z.object({
 				 * provider allows and is the value to reach for when the issuer and
 				 * the verifier keep separate clocks.
 				 */
-				clockToleranceSeconds: z.coerce
-					.number()
-					.int()
-					.min(0)
-					.max(MAX_CLOCK_TOLERANCE_SECONDS)
-					.default(DEFAULT_CLOCK_TOLERANCE_SECONDS),
+				clockToleranceSeconds: boundedNumber(NUMERIC_BOUNDS.clockToleranceSeconds, "oauth.jwt"),
 			})
 			.passthrough()
 			.superRefine((data, ctx) => {
@@ -352,8 +395,11 @@ export const AppConfigSchema = z.object({
 			// Cap on `POST /verify/batch` entries. The batch endpoint exists so
 			// filtering a list of N resources is one round trip; the cap keeps one
 			// request from turning into an unbounded amount of pipeline work.
-			maxBatchSize: z.coerce.number().int().positive().default(DEFAULT_MAX_BATCH_SIZE),
+			// `createVerifyRouter` holds a hand-built config to the same bound (#157).
+			maxBatchSize: boundedNumber(NUMERIC_BOUNDS.maxBatchSize, "verify"),
 		})
+		// Taken verbatim, like `http` above — zod does not parse a default back
+		// through the shape, so the key has to be stated here as well.
 		.default(() => ({ maxBatchSize: DEFAULT_MAX_BATCH_SIZE })),
 	// Defaulted (not shape-only): deployments mount an overlay config OVER the
 	// template's application.conf, so a section the overlay does not repeat is

@@ -17,7 +17,7 @@ import {
 	type VerifierPayload,
 } from "@o3co/auth.policy-verifier.core";
 import express from "express";
-import { DEFAULT_MAX_BATCH_SIZE } from "../config/defaults.mjs";
+import { NUMERIC_BOUNDS, resolveBound } from "../config/bounds.mjs";
 import {
 	createTokenAuthenticator,
 	type VerifyRouterJwtConfig,
@@ -33,8 +33,16 @@ export interface VerifyRouterConfig {
 	rulePipeline: RulePipeline;
 	/** Evaluator semantics overrides; omitted means engine defaults (deny on an empty rule set). */
 	evaluateOptions?: EvaluateOptions;
-	/** Most entries `POST /verify/batch` will decide in one request. Defaults to 50. */
-	maxBatchSize?: number;
+	/**
+	 * Most entries `POST /verify/batch` will decide in one request. Defaults to
+	 * 50, and is held to the same bound `AppConfigSchema` holds
+	 * `verify.maxBatchSize` to (#157) — a positive integer.
+	 *
+	 * The string form is admitted for the reason `JwksFetchConfig` admits it:
+	 * this is also the boundary a hand-built config reaches, and a caller
+	 * assembling one from `process.env` supplies strings.
+	 */
+	maxBatchSize?: number | string;
 	/**
 	 * Sink for the router's failure events (`jwt_token_rejected`,
 	 * `jwt_verification_unavailable`, `verify_internal_error`) and for the
@@ -191,7 +199,12 @@ function parseDecisionRequest(
  * carry.
  */
 export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
-	const maxBatchSize = config.maxBatchSize ?? DEFAULT_MAX_BATCH_SIZE;
+	// Resolved rather than defaulted with `??` (#157): this is the boundary a
+	// hand-built config reaches, so it must refuse what `AppConfigSchema` refuses
+	// and in the same words. `??` read `null` as "unset" — a 50-entry cap where
+	// the schema refused to boot — and let a `0` through as a cap that rejects
+	// every batch there is.
+	const maxBatchSize = resolveBound(config.maxBatchSize, NUMERIC_BOUNDS.maxBatchSize, "verify");
 	const logger = config.logger ?? consoleLogger;
 	// Constructing the authenticator runs assertVerifyRouterJwtConfig, so an
 	// invalid hand-built jwt config still fails here, at router construction.

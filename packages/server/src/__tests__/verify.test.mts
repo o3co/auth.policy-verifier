@@ -24,8 +24,9 @@ import express from "express";
 import { exportSPKI, SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
+import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { HS256KeyResolverFactory, RS256KeyResolverFactory } from "#/jwt/index.mjs";
-import { createVerifyRouter } from "#/routes/verify.mjs";
+import { createVerifyRouter, type VerifyRouterConfig } from "#/routes/verify.mjs";
 
 const generateKeyPairAsync = promisify(generateKeyPair);
 
@@ -1135,5 +1136,82 @@ describe("POST /verify/batch (#124)", () => {
 		// The whole batch is refused before any of it is decided, exactly as for
 		// a structurally malformed entry — not a partial answer.
 		expect(res.body.decisions).toBeUndefined();
+	});
+});
+
+describe("createVerifyRouter — maxBatchSize, one reader at both boundaries (#157)", () => {
+	// The router is the hand-built boundary for `verify.maxBatchSize`: `createApp`
+	// forwards whatever a config object carries there, so it must refuse the same
+	// values `AppConfigSchema` refuses, in the same words. It used to refuse
+	// nothing — `config.maxBatchSize ?? DEFAULT_MAX_BATCH_SIZE` read `null` as
+	// "unset" (a 50-entry cap where the schema refused to boot) and let a `0`
+	// through as a cap that rejects every batch there is.
+	const buildRouter = (maxBatchSize: unknown) => () =>
+		createVerifyRouter({
+			jwt: {
+				validate: true,
+				key: hs256Key.key,
+				algorithms: hs256Key.algorithms,
+				issuer: ISSUER,
+				audience: AUDIENCE,
+				tokenType: "at+jwt",
+			},
+			resourceParser: new DotNotationResourceParser(),
+			attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
+			rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
+			maxBatchSize,
+		} as VerifyRouterConfig);
+
+	/** The message one boundary refused with, or `undefined` when it accepted the value. */
+	const refusal = (act: () => unknown): string | undefined => {
+		try {
+			act();
+			return undefined;
+		} catch (cause) {
+			return (cause as Error).message;
+		}
+	};
+
+	const schemaRefusal = (maxBatchSize: unknown): string | undefined => {
+		const result = AppConfigSchema.safeParse({
+			oauth: {
+				jwt: {
+					algorithm: "HS256",
+					secret: JWT_SECRET,
+					mode: "verify",
+					issuer: ISSUER,
+					audience: AUDIENCE,
+				},
+			},
+			attribute: { collectors: [] },
+			rule: { collectors: [] },
+			verify: { maxBatchSize },
+		});
+		return result.success
+			? undefined
+			: result.error.issues.find((issue) => issue.path.at(-1) === "maxBatchSize")?.message;
+	};
+
+	it.each([
+		["zero — a cap that rejects every batch", 0],
+		["a negative cap", -1],
+		["a fractional cap", 1.5],
+		["true", true],
+		["false", false],
+		["null", null],
+		["an empty string", ""],
+		["a non-numeric string", "abc"],
+	])("refuses %s at router construction, in the schema's wording", (_label, maxBatchSize) => {
+		const fromRouter = refusal(buildRouter(maxBatchSize));
+		expect(fromRouter).toBeDefined();
+		expect(schemaRefusal(maxBatchSize)).toBe(fromRouter);
+	});
+
+	it("takes the string a hand-built env config carries", () => {
+		expect(refusal(buildRouter("25"))).toBeUndefined();
+	});
+
+	it("defaults when the cap is absent", () => {
+		expect(refusal(buildRouter(undefined))).toBeUndefined();
 	});
 });
