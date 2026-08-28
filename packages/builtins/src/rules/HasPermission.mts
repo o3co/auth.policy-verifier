@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Attributes, Role, Rule } from "@o3co/auth.policy-verifier.core";
+import type { ReadonlyAttributes, Role, Rule } from "@o3co/auth.policy-verifier.core";
 import { ATTR_PERMISSIONS, ATTR_ROLES } from "@o3co/auth.policy-verifier.core";
 
 /**
@@ -24,7 +24,7 @@ export class HasPermission implements Rule {
 		this.message = `User does not have required permission: ${permission}`;
 	}
 
-	verify(attrs: Attributes): boolean {
+	verify(attrs: ReadonlyAttributes): boolean {
 		const direct = (attrs.get(ATTR_PERMISSIONS) as string[] | undefined) ?? [];
 		const fromRoles = ((attrs.get(ATTR_ROLES) as Role[] | undefined) ?? []).flatMap(
 			(role) => role.permissions,

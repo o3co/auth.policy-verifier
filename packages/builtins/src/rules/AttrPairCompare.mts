@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Attributes, Rule } from "@o3co/auth.policy-verifier.core";
+import type { ReadonlyAttributes, Rule } from "@o3co/auth.policy-verifier.core";
 import {
 	applyCompare,
 	type CompareOp,
@@ -50,7 +50,7 @@ export class AttrPairCompare implements Rule {
 		this.message = `Attribute constraint not satisfied: ${config.a} must be ${config.op} ${config.b}.`;
 	}
 
-	verify(attrs: Attributes): boolean {
+	verify(attrs: ReadonlyAttributes): boolean {
 		const a = attrs.get(this.config.a);
 		const b = attrs.get(this.config.b);
 		if (typeof a !== "number") return false;

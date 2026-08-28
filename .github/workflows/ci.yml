@@ -41,6 +41,81 @@ jobs:
       - run: pnpm run audit
 
       - run: pnpm run lint
+
+      - name: Assert no verify() body reads a collector context
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Per AGENTS.md "Collector / Rule / Attribute Contract": a rule's
+          # `verify` must be a deterministic function of `attrs`. Fixing what the
+          # rule *looks for* at collect time is fine — that is how
+          # `ResourceActionScopeRuleCollector` builds its `HasScope`. Keeping the
+          # `CollectorContext` and reading it *inside* `verify` is not.
+          #
+          # This is a TEXTUAL BACKSTOP for the obvious shape only: a `verify(…) {…}`
+          # body that mentions `ctx.` or `context.`. It brace-matches the body
+          # rather than reading a line, because the violation is rarely on the
+          # signature's line — but it is still a string search, and it does not
+          # see a context reached through a differently-named binding, a helper
+          # call, or a closure defined elsewhere.
+          #
+          # The real check is behavioural and lives in
+          # `tests/integration/src/conformance/rulePurity.mts`, which collects the
+          # rules through a revocable view of the context, revokes it, and asks
+          # them again. That one cannot be dodged by renaming a variable, and it
+          # runs in the `pnpm run test` step below. This gate exists because the
+          # violation has now been written twice by copy-paste (#150, #152), and
+          # a named CI failure is what stops the third copy at review time.
+          #
+          # One file is exempt, and the exemption is the gate admitting its own
+          # limits: `rule-purity-conformance.test.mts` contains violating rules on
+          # purpose — they are the fixtures proving the conformance suite rejects
+          # them, and the suite asserts each one is refused. A text search cannot
+          # tell a violation from a test that a violation is caught. The exemption
+          # is one exact path rather than a marker comment, so it cannot be spread
+          # to a file that wants to opt out; a rule that actually decided anything
+          # would not live in the integration suite's negative cases in the first
+          # place.
+          node -e '
+            const fs = require("fs");
+            const { execSync } = require("child_process");
+            const FIXTURES = "tests/integration/src/rule-purity-conformance.test.mts";
+            const files = execSync("git ls-files \"*.mts\" \"*.ts\"", { encoding: "utf8" })
+              .split("\n")
+              .filter((f) => f && !f.includes("/dist/") && f !== FIXTURES);
+            const header = /(^|[^A-Za-z0-9_.$])verify\s*\([^)]*\)\s*(:[^{;]*)?\{/g;
+            const reads = /\b(ctx|context)\s*[.[]/;
+            let failed = false;
+            for (const file of files) {
+              const src = fs.readFileSync(file, "utf8");
+              header.lastIndex = 0;
+              let match;
+              while ((match = header.exec(src)) !== null) {
+                const open = match.index + match[0].length - 1;
+                let depth = 0;
+                let end = src.length;
+                for (let i = open; i < src.length; i++) {
+                  if (src[i] === "{") depth++;
+                  else if (src[i] === "}" && --depth === 0) { end = i; break; }
+                }
+                const body = src.slice(open, end + 1);
+                const hit = reads.exec(body);
+                if (!hit) continue;
+                const line = src.slice(0, open + hit.index).split("\n").length;
+                console.error(`::error file=${file},line=${line}::verify() reads the collector context here`);
+                console.error(`  ${body.slice(hit.index, hit.index + 100).split("\n")[0].trim()}`);
+                failed = true;
+              }
+            }
+            if (failed) {
+              console.error("A rule decides from `attrs` alone. Read the request in `collect`, copy out the");
+              console.error("value the rule compares against, and let `verify` take everything else from `attrs`.");
+              console.error("See AGENTS.md \"Collector / Rule / Attribute Contract\".");
+              process.exit(1);
+            }
+            console.log(`OK: no verify() body reads a collector context (${files.length} files scanned)`);
+          '
+
       - run: pnpm run build
 
       # Real work, not a no-op: every workspace package defines `typecheck`

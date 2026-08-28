@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Attributes, Rule } from "@o3co/auth.policy-verifier.core";
+import type { ReadonlyAttributes, Rule } from "@o3co/auth.policy-verifier.core";
 import {
 	computeValuesKey,
 	type LiteralValue,
@@ -52,7 +52,7 @@ export class AttrLiteralNotIn implements Rule {
 		this.message = `Attribute constraint not satisfied: ${config.a} must not be one of [${values.map(String).join(", ")}].`;
 	}
 
-	verify(attrs: Attributes): boolean {
+	verify(attrs: ReadonlyAttributes): boolean {
 		const x = attrs.get(this.config.a);
 		if (typeof x !== this.elementType) return false;
 		return !this.valuesSet.has(x as LiteralValue);

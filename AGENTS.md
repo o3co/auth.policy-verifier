@@ -19,11 +19,17 @@ The engine enforces a strict separation between the context-reading layer and th
 
 - **Collectors** (`AttributeCollector`, `RuleCollector`) are the only layer that reads `CollectorContext`. They transform the raw request into static outputs: attributes or rules.
 - **Attributes** are plain values (`Map<string, unknown>`). Once produced by collectors, they carry no reference to the originating request.
-- **Rules** are predicates over attributes (`verify(attrs): boolean`). A rule's decision must be derivable from `attrs` alone. Rules must not reference `CollectorContext`, close over request state, or perform side effects.
+- **Rules** are predicates over attributes (`verify(attrs): boolean`). `verify` must be a **deterministic, side-effect-free function of `attrs`**: equal attributes give equal answers, and it must not mutate its input, perform I/O, or observe anything the engine cannot see. `verify` is handed a `ReadonlyAttributes` (`ReadonlyMap<string, unknown>`), so the "must not mutate" half is a compile error rather than a request.
 
-This contract guarantees that rules are pure functions of attributes: testable in isolation, cacheable, and free from hidden coupling to request shape.
+This contract guarantees that rules are pure functions of attributes: testable in isolation, cacheable, and free from hidden coupling to request shape. It is also what `evaluate()` spends when it runs every rule group instead of stopping at the first failure.
 
-**Violation pattern to avoid:** a rule constructor that captures values from `CollectorContext` (e.g. `context.payload.sub` and `context.requestContext.someField`), then returns the captured comparison from `verify(attrs)` while ignoring `attrs`. This "bakes the decision at collect time" and defeats the contract. The correct shape is: a collector writes both values into attributes under well-known keys, and the rule compares them via `attrs.get(...)`.
+**What a rule may do.** A rule **may** hold values fixed at collect time — *what it looks for*. `ResourceActionScopeRuleCollector` computes `` `${context.action}:${context.resource.resourceType}` `` while the request is in hand and passes the resulting string to `new HasScope(...)`. The comparand is request-derived and that is fine: it is fixed once, and `HasScope.verify` remains a function of `attrs`.
+
+**What a rule must not do.** A rule **must not** retain `CollectorContext`, or any live reference into it, and read it inside `verify`. The answer would then depend on request state the engine cannot observe, which breaks isolation testing, caching, and the guarantee `evaluate()` relies on. The two shapes look alike — both mention `context.action` in the collector — which is precisely why the difference is spelled out rather than left to taste.
+
+**The deciding test:** collect the rule, discard the context, then call `verify(attrs)`. The answer must be unchanged. A rule that copied a string out at collect time answers identically; a rule that kept the request cannot answer at all.
+
+That test is executable, not rhetorical. `describeRulePurityConformance` in [`tests/integration/src/conformance/rulePurity.mts`](tests/integration/src/conformance/rulePurity.mts) collects the rules through a revocable view of the context, revokes it, and re-runs `verify` — so a rule holding the request throws on the access, and one holding a copied value does not. Apply it to every rule collector you add. `.github/workflows/ci.yml` also greps `verify` bodies for context reads, but that is a backstop for the obvious shape; the conformance suite is the check.
 
 ## Core Vocabulary Scope
 

@@ -95,9 +95,10 @@ A module registers collector, parser, and key resolver factories into the provid
 | `ResourceParseError` | `Error` subclass carrying `raw` (the refused string) and `detail` (why). A **request** error, not a server error — the transport layer answers it 400-class. Exported as a class, so `instanceof` narrows it |
 | `CollectorContext` | Input passed to every collector: `payload`, `resource`, `action`, optional `headers` and `requestContext` |
 | `UntrustedRequestContext` | The type of `requestContext` — the caller's own data, sealed so it takes an explicit `readUntrustedRequestContext(...)` to read. `markUntrustedRequestContext(...)` mints one at the transport boundary. See [docs/extending.md — The trust boundary](../../docs/extending.md#the-trust-boundary-requestcontext-is-the-callers) |
-| `Attributes` | `Map<string, unknown>` — subject attribute bag |
+| `Attributes` | `Map<string, unknown>` — subject attribute bag. Mutable: collectors build one, and `AttributePipeline` merges them |
+| `ReadonlyAttributes` | `ReadonlyMap<string, unknown>` — the view a rule is judged against. The evaluator hands the same live map to every rule, so a rule that wrote into it would change the inputs of every group after it |
 | `AttributeCollector` | `collect(context: CollectorContext): Promise<Attributes>` |
-| `Rule` | `{ ruleType: string; code: string; message: string; verify(attrs: Attributes): boolean }` |
+| `Rule` | `{ ruleType: string; code: string; message: string; verify(attrs: ReadonlyAttributes): boolean }` — `verify` must be a deterministic, side-effect-free function of `attrs`. See [AGENTS.md — Collector / Rule / Attribute Contract](../../AGENTS.md#collector--rule--attribute-contract) |
 | `RuleCollector` | `collect(context: CollectorContext): Promise<Rule[]>` |
 | `Decision` | `{ decision: "allow"; reason: DecisionReason } \| { decision: "deny"; code: string; message: string; reason: DecisionReason }` |
 | `DecisionReason` | `{ groups: RuleGroupOutcome[] }` |

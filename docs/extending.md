@@ -32,11 +32,12 @@ interface Rule {
   ruleType: string;
   code: string;
   message: string;
-  verify(attrs: Attributes): boolean;
+  verify(attrs: ReadonlyAttributes): boolean;
 }
 ```
 
 - `verify(attrs)` is the predicate. Return `true` to pass, `false` to fail. **Safe-deny convention:** missing, wrong-type, or malformed attributes must return `false`, not throw. Throwing turns a policy failure into an error response and leaks evaluation state.
+- `attrs` is a `ReadonlyAttributes` (`ReadonlyMap<string, unknown>`), not the `Attributes` a collector returns. The evaluator hands the same live map to every rule in every group, so a rule that wrote into it would change what every later group is judged against — the read-only view makes that a compile error instead of a debugging session. Collectors still build and return a mutable `Map`.
 - `ruleType` is used by the evaluator to group rules. Rules sharing a `ruleType` are OR-combined (any one passing satisfies the group). Rules with different `ruleType`s are AND-combined across groups (all groups must be satisfied). **Default `ruleType`s must encode enough of the rule's configuration to avoid silent collisions.** For example, `AttrLiteralEqual` uses `attr_literal_equal:${a}:${typeof v}:${String(v)}` — the `typeof v` segment prevents `v=true` and `v="true"` from collapsing into the same `ruleType` and being OR-combined against intent.
 - `code` is a short, stable identifier (e.g. `"no_permission"`, `"attr_not_equal"`) suitable for downstream programmatic handling. **Keep the set of codes a rule can produce small and fixed.** `code` becomes the `code` label on the `auth_denials_total` metric and the `deniedBy` field of the decision log line, so a code derived per request — folding in the resource id, say — is an unbounded metric label, which is how a metrics endpoint takes down the monitoring meant to watch it. The server caps the label at 32 distinct values and collapses the rest into `code="other"`, so the failure mode is a useless metric rather than a dead Prometheus; put the varying part in `message`, which is never a label.
 - `message` is a human-readable denial message. Keep it informative but do not leak sensitive attribute values.
@@ -46,7 +47,7 @@ interface Rule {
 A rule that passes when `userLevel` is a number greater than or equal to a configured threshold:
 
 ```ts
-import type { Attributes, Rule } from "@o3co/auth.policy-verifier.core";
+import type { ReadonlyAttributes, Rule } from "@o3co/auth.policy-verifier.core";
 
 export interface UserLevelAtLeastConfig {
   threshold: number;
@@ -68,7 +69,7 @@ export class UserLevelAtLeast implements Rule {
     this.message = `User level must be at least ${String(config.threshold)}.`;
   }
 
-  verify(attrs: Attributes): boolean {
+  verify(attrs: ReadonlyAttributes): boolean {
     const level = attrs.get("userLevel");
     if (typeof level !== "number") return false;
     return level >= this.config.threshold;
@@ -179,7 +180,9 @@ The builtins show the line. `ResourceActionScopeRuleCollector` builds `new HasSc
 
 The property that has to hold is that `verify(attrs)` is a deterministic, side-effect-free function of `attrs` — which is what lets the evaluator run every group rather than stopping at the first failure. Fixing what a rule *looks for* at collect time does not break that; retaining the context and reading it *at verify time* does.
 
-**And it is a convention, not a check.** `verify(attrs)` takes only attributes, but nothing stops a rule from holding on to its collector's context and consulting it there, and neither the compiler nor the test suite will tell you. The fix for a rule that has baked its answer in: the value being tested comes from `attrs.get(...)`, while the value it is tested against may still be captured from the request.
+**And it is a check now, not only a convention.** The deciding test is: collect the rule, discard the context, call `verify(attrs)` — the answer must be unchanged. `describeRulePurityConformance` in [`tests/integration/src/conformance/rulePurity.mts`](../tests/integration/src/conformance/rulePurity.mts) runs exactly that, collecting the rules through a revocable view of the context and revoking it before asking again, so a rule holding the request throws on the access and one holding a copied value does not. Run your own rule collector through it. (CI also greps `verify` bodies for `ctx.` / `context.`, but that is a backstop for the obvious shape; the conformance suite is what actually decides.)
+
+The fix for a rule that has baked its answer in: the value being tested comes from `attrs.get(...)`, while the value it is tested against may still be captured from the request — as a copied value, not as a live reference into the context.
 
 ## Further reading
 

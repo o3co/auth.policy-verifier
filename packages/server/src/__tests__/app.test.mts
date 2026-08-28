@@ -43,14 +43,30 @@ const testModule: Module = {
 		}));
 		context.ruleCollectorRegistry.register("TestScopeRuleCollector", () => ({
 			async collect(ctx) {
+				// The required scope is fixed HERE, at collect time, and copied into
+				// the rule as a plain string — the same shape the real
+				// `ResourceActionScopeRuleCollector` uses to build its `HasScope`.
+				//
+				// The contract (AGENTS.md, Collector / Rule / Attribute) draws its line
+				// between the two things that look alike: fixing *what the rule looks
+				// for* while the request is in hand is fine, because `verify` stays a
+				// function of `attrs` alone. Keeping `ctx` and reading it inside
+				// `verify` is not — the answer would then depend on request state the
+				// evaluator cannot see, which is what breaks isolation testing,
+				// caching, and `evaluate()`'s licence to run every rule group.
+				//
+				// This file is where the violating copy in `metrics.test.mts` was
+				// copied from (#150, #152), so it is written to be copied again.
+				const requiredScope = `${ctx.action}:${ctx.resource.resourceType}`;
 				return [
 					{
 						ruleType: "scope",
 						code: "invalid_scope",
-						message: "Insufficient scope",
+						message: `Insufficient scope: ${requiredScope} is required`,
 						verify(attributes) {
-							const scopes = (attributes.get("scopes") as string[]) ?? [];
-							return scopes.includes(`${ctx.action}:${ctx.resource.resourceType}`);
+							// Safe-deny: a missing or malformed attribute denies, never throws.
+							const scopes = attributes.get("scopes");
+							return Array.isArray(scopes) && scopes.includes(requiredScope);
 						},
 					},
 				];
