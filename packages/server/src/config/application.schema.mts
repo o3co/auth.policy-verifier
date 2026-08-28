@@ -22,6 +22,22 @@ export const JWT_MODE_MIGRATION_MESSAGE =
 	'oauth.jwt.validate/allowInsecureDecode were replaced by oauth.jwt.mode; set mode = "verify" or the explicit "insecure-decode"';
 
 /**
+ * The `oauth.jwt` keys removed in #134, refused by both boundaries with
+ * {@link JWT_MODE_MIGRATION_MESSAGE}.
+ *
+ * Shared for the same reason the message is (#158): the schema refuses these
+ * for parsed configs and `createApp` refuses them for hand-built ones, and a
+ * key added to one list only would be rejected on one path and silently
+ * accepted on the other — which is exactly the "reinterpreted as a defaulted
+ * verify mode" failure #134 removed them to prevent. Two copies of a list
+ * behind one shared message is a list that will drift.
+ *
+ * Not re-exported from the package index: this is how the two boundaries agree
+ * with each other, whereas the message is what an operator reads.
+ */
+export const JWT_MODE_REMOVED_KEYS = ["validate", "allowInsecureDecode"] as const;
+
+/**
  * One numeric knob, read at this boundary by the function that reads it at the
  * other one (#157).
  *
@@ -265,7 +281,7 @@ export const AppConfigSchema = z.object({
 				// be reinterpreted as the defaulted verify mode, failing with an
 				// unrelated "issuer is required" instead of migration guidance.
 				let hasStaleKey = false;
-				for (const staleKey of ["validate", "allowInsecureDecode"] as const) {
+				for (const staleKey of JWT_MODE_REMOVED_KEYS) {
 					if (staleKey in data) {
 						hasStaleKey = true;
 						ctx.addIssue({

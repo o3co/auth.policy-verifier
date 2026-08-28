@@ -588,6 +588,62 @@ and version sections follow the release labeling policy in
 
 ### Changed
 
+- **BREAKING**: `VerifierPayload.tokenType` is renamed to `authScheme`
+  ([#158](https://github.com/o3co/auth.policy-verifier/issues/158)).
+
+  One name meant two unrelated things, and both of them appear in
+  `jwt/tokenAuthenticator.mts`. In config, `tokenType` is the `typ` header the
+  deployment accepts — `"at+jwt"`, RFC 9068 §2.1's access-token type, pinned so
+  an `id_token` signed with the same key cannot pass. On the payload it was the
+  `Authorization` scheme the token arrived under — `"Bearer"`, RFC 6750. Both
+  readings have a standard behind them, which is how the collision survived; a
+  reader who knows only the config key and then meets `payload.tokenType` in a
+  collector has no way to notice they are looking at something else.
+
+  The payload field is the one that gave the name up, for three reasons: it is
+  not a token type at all but a fact about a request header; the config key is
+  what every deployment's HOCON, the `OAUTH_JWT_TOKEN_TYPE` variable and both
+  READMEs already say, so renaming *that* would break every config file to fix a
+  name that is accurate; and the payload field is written on exactly one line
+  and read by nothing in this repo.
+
+  ```diff
+  -const scheme = payload.tokenType;
+  +const scheme = payload.authScheme;
+  ```
+
+  **This one does not fail to compile, and what is left behind is not empty.**
+  `VerifierPayload` carries an open index signature so custom claims can ride
+  along, so `payload.tokenType` is still a legal read — `unknown`, and the type
+  checker will not point at a single call site. Grep for it rather than trusting
+  `tsc`.
+
+  What that read now returns has changed in kind, not just in value. The
+  verifier built the payload as `{ ...decoded, token, tokenType: scheme }` —
+  the claims spread **first**, then its own value written over the top — so a
+  token carrying a `tokenType` claim had that claim silently overwritten with
+  `"Bearer"` and could not be observed at all. The verifier no longer writes
+  that slot. `payload.tokenType` is therefore whatever the token's claims
+  contained, and `undefined` when the token carries no such claim.
+
+  So this is a **new exposure**, not a claim that was always visible under
+  another name: a field that used to hold the verifier's own near-constant
+  string now holds token-supplied data, in the same shape as the trust boundary
+  #123 drew around `requestContext`. The trust level is not identical and should
+  not be overstated — in `mode = "verify"` these claims arrived under a verified
+  signature from a pinned issuer, so this is issuer-attested data, not the
+  caller-typed body that `UntrustedRequestContext` brands. In
+  `mode = "insecure-decode"` no signature was checked at all. Either way it is
+  no longer *the verifier's* value, and nothing validates a custom claim of that
+  name.
+
+  **What to do:** a collector that read `payload.tokenType` for the
+  authorization scheme must move to `payload.authScheme`; it must not be left in
+  place on the assumption that the field is now absent, because a token can put
+  something there. If a deployment's issuer mints a `tokenType` claim, that claim
+  becomes visible to collectors for the first time — which is a change worth
+  knowing about even for a consumer that never read the field.
+
 - **BREAKING (types only)**: `Rule.verify` now takes a `ReadonlyAttributes`
   (`ReadonlyMap<string, unknown>`) instead of `Attributes`
   ([#152](https://github.com/o3co/auth.policy-verifier/issues/152)).
@@ -1015,6 +1071,25 @@ and version sections follow the release labeling policy in
     signal honest for everyone else.
 
 ### Fixed
+
+- A decision response carried `subject: ""` for a token whose `sub` claim is
+  present but empty, while the field's own documentation said it is absent when
+  the token carries none — and while the audit line for the same decision had
+  already dropped it
+  ([#158](https://github.com/o3co/auth.policy-verifier/issues/158)).
+
+  One value, two dispositions: a consumer joining a response to its `decision`
+  log line found the subject in one and not the other. The response now omits
+  the key, which is what `DecisionResponse.subject` (optional since it was
+  written) already promised, and what an empty subject deserves — `subject: ""`
+  names a subject that does not exist, and names the *same* non-existent one for
+  every token without a `sub`. The route derives the subject once now and hands
+  it to both the log line and the response, so the two cannot drift apart again.
+
+  **Operator- and consumer-visible**: a client that read `subject` as a `string`
+  for such a token now sees `undefined`. Client-credentials tokens with no `sub`
+  at all were already answered this way, so a consumer handling that case
+  correctly needs no change.
 
 - `@o3co/create-auth-policy-verifier` scaffolded an **empty directory** whenever
   it was run the documented way. Its template-copy filter excluded any path

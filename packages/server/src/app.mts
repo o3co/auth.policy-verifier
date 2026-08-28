@@ -16,7 +16,11 @@ import {
 } from "@o3co/auth.policy-verifier.core";
 import { createHealthcheckRouter } from "@o3co/auth.utils/express";
 import express from "express";
-import { type AppConfig, JWT_MODE_MIGRATION_MESSAGE } from "./config/application.schema.mjs";
+import {
+	type AppConfig,
+	JWT_MODE_MIGRATION_MESSAGE,
+	JWT_MODE_REMOVED_KEYS,
+} from "./config/application.schema.mjs";
 import { CALLER_AUTH_REQUIRED } from "./config/defaults.mjs";
 import { createCallerAuthMiddleware, resolveCallerAuth } from "./http/callerAuth.mjs";
 import {
@@ -142,7 +146,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	assertConfigObject(config.oauth, "oauth");
 	assertConfigObject(config.oauth.jwt, "oauth.jwt");
 	const jwtWire = config.oauth.jwt;
-	for (const staleKey of ["validate", "allowInsecureDecode"] as const) {
+	for (const staleKey of JWT_MODE_REMOVED_KEYS) {
 		if (staleKey in jwtWire) {
 			// A pre-#134 config must not be silently reinterpreted: a defaulted
 			// mode would mean verify even where the operator had opted into

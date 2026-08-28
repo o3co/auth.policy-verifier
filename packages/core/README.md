@@ -105,7 +105,7 @@ A module registers collector, parser, and key resolver factories into the provid
 | `RuleGroupOutcome` | `{ ruleType: string; passed: true; evaluated: RuleOutcome[]; satisfiedBy: RuleOutcome } \| { ruleType: string; passed: false; evaluated: RuleOutcome[] }` — `evaluated` is every rule that ran, in order; `satisfiedBy` names the rule that satisfied a passing group |
 | `RuleOutcome` | `{ code: string; message: string; passed: boolean }` |
 | `Role` | `{ name: string; permissions: string[] }` |
-| `VerifierPayload` | Decoded JWT claims: `sub`, `azp`, `scope`, `iss`, `aud`, `exp`, `iat`, `token`, `tokenType`, plus arbitrary extra claims |
+| `VerifierPayload` | Decoded JWT claims: `sub`, `azp`, `scope`, `iss`, `aud`, `exp`, `iat`, `token`, `authScheme` (the `Authorization` scheme the token arrived under, not a claim), plus arbitrary extra claims |
 | `PathResolver` | `(specifier: string) => string` — resolves module-relative paths |
 | `AttributeCollectorFactory` | Factory function that produces an `AttributeCollector` from config |
 | `RuleCollectorFactory` | Factory function that produces a `RuleCollector` from config |

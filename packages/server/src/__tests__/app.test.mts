@@ -5,6 +5,11 @@ import type { Logger, Module } from "@o3co/auth.policy-verifier.core";
 import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+// `JWT_MODE_REMOVED_KEYS` is deliberately not re-exported from the package
+// index: the removed-key list is how the two boundaries agree with each other,
+// not something a consumer configures against (the migration *message* is the
+// consumer-facing half, and that one is public).
+import { JWT_MODE_REMOVED_KEYS } from "#/config/application.schema.mjs";
 import {
 	AppConfigSchema,
 	builtinKeyResolversModule,
@@ -525,6 +530,27 @@ describe("createApp insecure decode mode (#106, #134)", () => {
 			}),
 		).rejects.toThrow(JWT_MODE_MIGRATION_MESSAGE);
 	});
+
+	// Driven off the same exported list the schema is checked against (#158), so
+	// the two boundaries cannot end up refusing different sets of removed keys:
+	// a key added to the constant is asserted here and in the schema suite alike.
+	it.each([...JWT_MODE_REMOVED_KEYS])(
+		"refuses to boot a hand-built config carrying the removed key %s on its own",
+		async (staleKey) => {
+			const handBuilt = {
+				...ackConfig,
+				oauth: { jwt: { [staleKey]: true } },
+			} as unknown as typeof ackConfig;
+
+			await expect(
+				createApp({
+					pathResolver: (s: string) => s,
+					config: handBuilt,
+					modules: [testModule, builtinKeyResolversModule],
+				}),
+			).rejects.toThrow(JWT_MODE_MIGRATION_MESSAGE);
+		},
+	);
 
 	// A JS consumer can hand createApp anything. The stale-key and mode checks
 	// below reach into the block with `in` and object spread, both of which
