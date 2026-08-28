@@ -19,7 +19,7 @@ import type {
 } from "../types.mjs";
 
 const request: CollectorRequest = {
-	payload: {},
+	subject: {},
 	resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 	action: "read",
 };

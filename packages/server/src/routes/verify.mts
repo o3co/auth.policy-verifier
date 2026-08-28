@@ -16,7 +16,7 @@ import {
 	ResourceParseError,
 	type ResourceParser,
 	type RulePipeline,
-	type VerifierPayload,
+	type SubjectAttributes,
 } from "@o3co/auth.policy-verifier.core";
 import express from "express";
 import { NUMERIC_BOUNDS, resolveBound } from "../config/bounds.mjs";
@@ -486,19 +486,19 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	/** Runs the pipelines and the evaluator for one already-validated entry. */
 	async function decide(
 		req: express.Request,
-		auth: { payload: VerifierPayload; credential: string },
+		auth: { subject: SubjectAttributes; credential: string },
 		{ request: entry, resource }: ValidatedDecisionRequest,
 	): Promise<DecisionResponse> {
-		const payload = auth.payload;
+		const subject = auth.subject;
 		const requestId = req.get("x-request-id");
 		const headers = requestId ? { "x-request-id": requestId } : undefined;
-		// `payload` survived signature verification and `headers` were read off the
-		// transport; `entry.context` is whatever the caller put in the body, so it
-		// crosses into the collector layer marked as such. A collector has to
-		// unwrap it, which is where its author decides what a caller may choose —
-		// see `UntrustedRequestContext` in core.
+		// `subject` was populated from a credential the authenticator verified and
+		// `headers` were read off the transport; `entry.context` is whatever the
+		// caller put in the body, so it crosses into the collector layer marked as
+		// such. A collector has to unwrap it, which is where its author decides
+		// what a caller may choose — see `UntrustedRequestContext` in core.
 		const context = {
-			payload,
+			subject,
 			resource,
 			action: entry.action,
 			headers,
@@ -556,7 +556,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 		// response returned at the end (#158). An empty `sub` is absent from both,
 		// and the only way the two dispositions of one value cannot drift apart
 		// again is for there to be one value.
-		const subject = typeof payload.sub === "string" ? present(payload.sub) : undefined;
+		const subjectId = typeof subject.sub === "string" ? present(subject.sub) : undefined;
 
 		// #111: one structured line per decision, and the counters beside it. Both
 		// are emitted here rather than at each route so a decision is reported
@@ -564,7 +564,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 		logger.info(
 			decisionEvent({
 				decision,
-				subject,
+				subject: subjectId,
 				resource: entry.resource,
 				action: entry.action,
 				requestId,
@@ -581,7 +581,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			durationSeconds: durationMs / 1000,
 		});
 
-		return toResponse(subject, entry, decision);
+		return toResponse(subjectId, entry, decision);
 	}
 
 	const router = express.Router();
@@ -765,9 +765,9 @@ function bodyParserFailure(
 /**
  * Projects an engine `Decision` onto the wire contract, naming what it was about.
  *
- * Takes the already-derived `subject` rather than the payload: the audit line
- * and this response must agree about whether the decision had one, and reading
- * `payload.sub` a second time here is what let them disagree (#158).
+ * Takes the already-derived `subject` id rather than the subject bag: the audit
+ * line and this response must agree about whether the decision had one, and
+ * reading `subject.sub` a second time here is what let them disagree (#158).
  */
 function toResponse(
 	subject: string | undefined,

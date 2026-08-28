@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { AttributeCollector, KeyResolver, ResourceParser, RuleCollector } from "../types.mjs";
+import type { AttributeCollector, ResourceParser, RuleCollector } from "../types.mjs";
 import type { Registry } from "./Registry.mjs";
 
 /**
@@ -23,15 +23,16 @@ export type RuleCollectorFactory = (config: any) => RuleCollector;
 /** Produces a `ResourceParser` from its HOCON config entry. */
 // biome-ignore lint/suspicious/noExplicitAny: resource parser constructors accept varied config shapes
 export type ResourceParserFactory = (config: any) => ResourceParser;
-/**
- * Factory that produces a KeyResolver for a given JWT algorithm.
- * Async because some resolvers import PEM files or fetch JWKS metadata.
- */
-// biome-ignore lint/suspicious/noExplicitAny: key resolver factories accept algorithm-specific config shapes
-export type KeyResolverFactory = (config: any) => Promise<KeyResolver>;
 
 /**
- * Context provided to each Module during initialization.
+ * Context provided to each Module during initialization. Carries the registries
+ * for the concepts core itself defines — collectors, rules, resource parsers.
+ *
+ * A host may carry more: the server extends this with its own registries (its
+ * `ServerModuleContext` adds the JWT key-resolver registry) and initializes its
+ * modules with the extended shape. A module written against the wider context
+ * declares it via {@link Module}'s type parameter; one written against this
+ * base shape runs under any host.
  */
 export interface ModuleContext {
 	pathResolver: PathResolver;
@@ -39,14 +40,20 @@ export interface ModuleContext {
 	attributeCollectorRegistry: Registry<AttributeCollectorFactory>;
 	ruleCollectorRegistry: Registry<RuleCollectorFactory>;
 	resourceParserRegistry: Registry<ResourceParserFactory>;
-	keyResolverRegistry: Registry<KeyResolverFactory>;
 }
 
 /**
  * A composable unit that registers collectors, rules, and parsers.
  * Modules are initialized asynchronously to allow dynamic imports via pathResolver.
+ *
+ * `C` is the context the module needs at `init`. The default is the base
+ * {@link ModuleContext}; a module that registers into a host-specific registry
+ * names that host's context instead (e.g. the server's
+ * `builtinKeyResolversModule` is a `Module<ServerModuleContext>`), and can then
+ * only be initialized by a host that supplies it. A `Module<ModuleContext>`
+ * remains assignable wherever a wider context is provided.
  */
-export interface Module {
+export interface Module<C extends ModuleContext = ModuleContext> {
 	name: string;
-	init(context: ModuleContext): Promise<void>;
+	init(context: C): Promise<void>;
 }

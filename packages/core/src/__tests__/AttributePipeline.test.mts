@@ -9,13 +9,13 @@ import type {
 	Attributes,
 	CollectorContext,
 	CollectorRequest,
-	VerifierPayload,
+	SubjectAttributes,
 } from "../types.mjs";
 
 // A `CollectorRequest`, not a `CollectorContext`: the per-collector `signal` is
 // the pipeline's to supply, and this is the shape a transport hands it (#115).
 const stubContext: CollectorRequest = {
-	payload: {} satisfies VerifierPayload,
+	subject: {} satisfies SubjectAttributes,
 	resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
 	action: "read",
 };

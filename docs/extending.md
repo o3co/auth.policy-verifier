@@ -90,14 +90,14 @@ Notes:
 
 | Field | Where it comes from | Trust |
 |---|---|---|
-| `payload` | the bearer token, after signature, issuer, audience and expiry verification | verified |
+| `subject` | populated by the transport from a credential it verified — the default server spreads in the bearer token's claims after signature, issuer, audience and expiry verification | verified |
 | `resource` / `action` | the request body; shape validated by the route, `resource` parsed by the configured `ResourceParser` | caller-chosen value, validated shape |
 | `headers` | set by the transport (currently `x-request-id`) | transport |
 | `requestContext` | the request body's `context`, forwarded verbatim | **untrusted** |
 
 (`signal` is the fifth field and the only one that is not input at all — it is the pipeline's cancellation handle. See [Deadlines and cancellation](#deadlines-and-cancellation).)
 
-Anyone holding a valid token can put anything in `context`. A collector that promotes `requestContext.role` into `ATTR_ROLES` has handed that caller its own authorization input: the token says who you are, and then the body says what you may do. It is one line, and it looks exactly like the line next to it that promotes `payload.sub`.
+Anyone holding a valid token can put anything in `context`. A collector that promotes `requestContext.role` into `ATTR_ROLES` has handed that caller its own authorization input: the token says who you are, and then the body says what you may do. It is one line, and it looks exactly like the line next to it that promotes `subject.sub`.
 
 Nothing about the data itself tells the two apart, so the type does. `requestContext` is an `UntrustedRequestContext` — an opaque brand whose contents are not reachable by property access:
 
@@ -113,7 +113,7 @@ The unwrap is the point. It cannot be reached for absent-mindedly, it names the 
 Once unwrapped:
 
 - **Validate every field you read.** Check the type and the shape. `readUntrustedRequestContext` returns `Record<string, unknown> | undefined`, so the narrowing is yours.
-- **Never promote an identity or an entitlement out of it.** Roles, permissions, scopes, subject ids, tenant membership: those come from the verified `payload`, or from a store your collector queries with a verified id. Not from the body.
+- **Never promote an identity or an entitlement out of it.** Roles, permissions, scopes, subject ids, tenant membership: those come from the verified `subject`, or from a store your collector queries with a verified id. Not from the body.
 - **Do promote request facts the caller gains nothing by lying about** — a locale, a UI hint, the shape of the operation. The test is: if an attacker sets this field to anything it likes, what do they get? If the answer is "a permission", it is the wrong source.
 - **Prefer a declared allowlist over ad-hoc reads.** `RequestContextAttributeCollector` in `builtins` promotes only fields an operator names in config, each with a declared type; a field nobody declared cannot reach a rule at all.
 

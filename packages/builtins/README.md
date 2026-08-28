@@ -16,8 +16,8 @@ All collectors implement `AttributeCollector`.
 
 | Name | Reads from | Emits | Constructor args |
 | --- | --- | --- | --- |
-| `PayloadScopeCollector` | `payload.scope` (space-separated string) | `ATTR_SCOPES: string[]` | none |
-| `PayloadSubjectIdCollector` | `payload.sub`, `payload.azp` | `ATTR_USER_ID`, `ATTR_CLIENT_ID` | none |
+| `PayloadScopeCollector` | `subject.scope` (space-separated string) | `ATTR_SCOPES: string[]` | none |
+| `PayloadSubjectIdCollector` | `subject.sub`, `subject.azp` | `ATTR_USER_ID`, `ATTR_CLIENT_ID` | none |
 | `StaticPermissionCollector` | — | `ATTR_PERMISSIONS: string[]` | `{ permissions: string[] }` |
 | `StaticRoleCollector` | — | `ATTR_ROLES: Role[]` | `{ roles: Role[] }` |
 | `RequestContextAttributeCollector` | declared fields of `requestContext` | the operator's own keys | `{ attributes: Mapping[] }` |

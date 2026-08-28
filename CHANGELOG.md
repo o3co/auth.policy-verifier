@@ -864,6 +864,49 @@ and version sections follow the release labeling policy in
 
 ### Changed
 
+- **BREAKING**: core's input vocabulary is neutral — `CollectorContext.payload:
+  VerifierPayload` becomes `subject: SubjectAttributes`, and
+  `KeyResolver` / `KeyResolverFactory` move to the server package
+  ([#170](https://github.com/o3co/auth.policy-verifier/issues/170), the one
+  purpose-distortion of the o3co/auth#11 audit). Core sold itself as the
+  neutral engine ("drop-in replaceable with OPA or Cedar"), but its context
+  required a JWT claim set by type: a subject could not reach the engine except
+  as claims. The pin was type-only — the engine never read a claim field — so
+  the fix is a rename, not a redesign:
+
+  - **core**: `VerifierPayload` is replaced by `SubjectAttributes`
+    (`{ readonly [key: string]: unknown }` — a verified-attributes bag with no
+    named JWT fields), and the context field is `subject`. The `KeyResolver` /
+    `KeyResolverFactory` types and the `keyResolverRegistry` slot of
+    `ModuleContext` leave core; `Module<C extends ModuleContext =
+    ModuleContext>` is now generic so a host can initialize modules with a
+    wider context. `Registry` stays in core.
+  - **server**: `KeyResolver` / `KeyResolverFactory` now live in
+    `@o3co/auth.policy-verifier.server`, alongside the new
+    `ServerModuleContext` (the base context plus `keyResolverRegistry`) that
+    `createApp` initializes modules with; `builtinKeyResolversModule` is a
+    `Module<ServerModuleContext>`. The JWT→bag mapping now visibly lives at
+    one edge: the token authenticator spreads the verified claims (plus
+    `authScheme`) into the bag, and `AuthenticationResult` carries `subject`
+    instead of `payload`.
+  - **builtins**: `PayloadSubjectIdCollector`, `PayloadScopeCollector` and
+    `ResourceActionScopeRuleCollector` read `subject.sub` / `subject.azp` /
+    `subject.scope` with local narrowing — claim vocabulary is builtins'
+    vocabulary. A claim that is not a non-empty string is no longer promoted
+    (previously a non-string `sub` would have been). **Registered collector
+    names are unchanged.**
+
+  **The runtime wire contract, HOCON keys, env vars and collector registration
+  names are all unchanged** — only TypeScript types and field names moved.
+  **Migration:** a custom collector reads `context.subject` where it read
+  `context.payload` (narrowing values itself — the bag is `unknown`-valued); a
+  consumer importing `VerifierPayload` uses `SubjectAttributes`; one importing
+  `KeyResolver` / `KeyResolverFactory` imports them from the server package; a
+  module registering key resolvers types itself `Module<ServerModuleContext>`.
+  Note the removed/renamed fields compile silently for consumers that only
+  index into the bag — the open index signature admits any key — so treat this
+  entry, not the compiler, as the migration signal.
+
 - **BREAKING**: collectors no longer receive the raw credential unless the
   deployment states it —
   `VerifierPayload.token` is removed

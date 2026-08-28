@@ -25,6 +25,7 @@ export {
 	parseJwksUri,
 	resolveJwksFetchBounds,
 } from "./jwks.mjs";
+export type { KeyResolver, KeyResolverFactory, ServerModuleContext } from "./keyResolver.mjs";
 export {
 	type AssertedJwtConfig,
 	type AuthenticationResult,

@@ -42,7 +42,7 @@ const testModule: Module = {
 	async init(context) {
 		context.attributeCollectorRegistry.register("TestScopeCollector", () => ({
 			async collect(ctx) {
-				const scopes = ((ctx.payload.scope as string) ?? "").split(" ");
+				const scopes = ((ctx.subject.scope as string) ?? "").split(" ");
 				return new Map([["scopes", scopes]]);
 			},
 		}));

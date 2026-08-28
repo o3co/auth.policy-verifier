@@ -88,7 +88,7 @@ export class ResourceActionScopeRuleCollector implements RuleCollector {
 	}
 
 	async collect(context: CollectorContext): Promise<Rule[]> {
-		if (this.scopeless === "skip" && context.payload.scope === undefined) {
+		if (this.scopeless === "skip" && context.subject.scope === undefined) {
 			return [];
 		}
 		const scope = `${context.action}:${context.resource.resourceType}`;

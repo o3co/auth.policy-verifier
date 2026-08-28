@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { CollectorContext, VerifierPayload } from "@o3co/auth.policy-verifier.core";
+import type { CollectorContext, SubjectAttributes } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 import { ResourceActionPermissionRuleCollector } from "#/rules/collectors/ResourceActionPermissionRuleCollector.mjs";
 
@@ -17,7 +17,7 @@ describe("ResourceActionPermissionRuleCollector", () => {
 
 	it("creates a HasPermission rule with resource.perm:action", async () => {
 		const ctx: CollectorContext = {
-			payload: {} satisfies VerifierPayload,
+			subject: {} satisfies SubjectAttributes,
 			resource: { raw: "document:12345", resourceType: "document", resourceId: "12345" },
 			action: "read",
 			signal: NEVER_CANCELLED,
@@ -32,7 +32,7 @@ describe("ResourceActionPermissionRuleCollector", () => {
 
 	it("creates correct permission for nested resources", async () => {
 		const ctx: CollectorContext = {
-			payload: {} satisfies VerifierPayload,
+			subject: {} satisfies SubjectAttributes,
 			resource: { raw: "project:1.member", resourceType: "project_member" },
 			action: "update",
 			signal: NEVER_CANCELLED,

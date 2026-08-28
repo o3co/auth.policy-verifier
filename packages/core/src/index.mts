@@ -29,7 +29,6 @@ export { consoleLogger, createConsoleLogger } from "./logging/consoleLogger.mjs"
 export type { EventLogger, Logger, LogLevel } from "./logging/Logger.mjs";
 export type {
 	AttributeCollectorFactory,
-	KeyResolverFactory,
 	Module,
 	ModuleContext,
 	PathResolver,
@@ -45,7 +44,6 @@ export type {
 	CollectorRequest,
 	Decision,
 	DecisionReason,
-	KeyResolver,
 	ReadonlyAttributes,
 	Resource,
 	ResourceParser,
@@ -54,7 +52,7 @@ export type {
 	RuleCollector,
 	RuleGroupOutcome,
 	RuleOutcome,
-	VerifierPayload,
+	SubjectAttributes,
 } from "./types.mjs";
 export type { UntrustedRequestContext } from "./untrusted.mjs";
 export { markUntrustedRequestContext, readUntrustedRequestContext } from "./untrusted.mjs";

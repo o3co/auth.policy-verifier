@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { CollectorContext, VerifierPayload } from "@o3co/auth.policy-verifier.core";
+import type { CollectorContext, SubjectAttributes } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 import { ResourceActionScopeRuleCollector } from "#/rules/collectors/ResourceActionScopeRuleCollector.mjs";
 
@@ -13,7 +13,7 @@ import { ResourceActionScopeRuleCollector } from "#/rules/collectors/ResourceAct
 const NEVER_CANCELLED = new AbortController().signal;
 
 const makeContext = (resourceType: string, action: string, scope?: string): CollectorContext => ({
-	payload: { ...(scope !== undefined ? { scope } : {}) } satisfies VerifierPayload,
+	subject: { ...(scope !== undefined ? { scope } : {}) } satisfies SubjectAttributes,
 	resource: { raw: `${resourceType}:1`, resourceType, resourceId: "1" },
 	action,
 	signal: NEVER_CANCELLED,
@@ -33,7 +33,7 @@ describe("ResourceActionScopeRuleCollector", () => {
 
 	it("creates correct scope for nested resource types", async () => {
 		const ctx: CollectorContext = {
-			payload: { scope: "update:project_member" } satisfies VerifierPayload,
+			subject: { scope: "update:project_member" } satisfies SubjectAttributes,
 			resource: { raw: "project:1.member:2", resourceType: "project_member", resourceId: "2" },
 			action: "update",
 			signal: NEVER_CANCELLED,
@@ -44,9 +44,9 @@ describe("ResourceActionScopeRuleCollector", () => {
 		expect(rules[0].verify(attrs)).toBe(true);
 	});
 
-	it("emits a failing scope rule when payload has no scope claim (default-deny)", async () => {
+	it("emits a failing scope rule when subject has no scope claim (default-deny)", async () => {
 		const ctx = makeContext("document", "read");
-		// payload has no scope — a scopeless token must not silently drop the
+		// subject has no scope — a scopeless token must not silently drop the
 		// scope group from AND-evaluation, which would authorize by omission.
 		const rules = await collector.collect(ctx);
 		expect(rules).toHaveLength(1);
@@ -75,9 +75,9 @@ describe("ResourceActionScopeRuleCollector", () => {
 		).toThrow(/scopeless/);
 	});
 
-	it("returns HasScope rule when payload has scope claim", async () => {
+	it("returns HasScope rule when subject has scope claim", async () => {
 		const ctx: CollectorContext = {
-			payload: { scope: "read:document" } satisfies VerifierPayload,
+			subject: { scope: "read:document" } satisfies SubjectAttributes,
 			resource: { raw: "document:1", resourceType: "document", resourceId: "1" },
 			action: "read",
 			signal: NEVER_CANCELLED,

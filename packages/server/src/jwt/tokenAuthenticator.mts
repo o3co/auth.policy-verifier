@@ -23,7 +23,7 @@
  * disagreeing about the same token.
  */
 
-import type { EventLogger, VerifierPayload } from "@o3co/auth.policy-verifier.core";
+import type { EventLogger, SubjectAttributes } from "@o3co/auth.policy-verifier.core";
 import { decodeJwt, errors, type JWTPayload, jwtVerify } from "jose";
 import { NUMERIC_BOUNDS, resolveBound } from "../config/bounds.mjs";
 
@@ -407,12 +407,18 @@ export function assertTimeClaims(payload: JWTPayload, bounds: JwtTimeClaimBounds
  * machine-readable code and the caller-safe message; what HTTP status that
  * maps to (401 for all of them today) is the route's concern, not this
  * module's.
+ *
+ * `subject` is core's neutral `SubjectAttributes` bag, and this module is the
+ * one edge that populates it (#170): the verified JWT's claims are spread in,
+ * so under this server the bag's keys are the token's claims. Core never
+ * learns that — the claim vocabulary ends here and in the collectors that
+ * narrow it back out.
  */
 export type AuthenticationResult =
-	| { ok: true; payload: VerifierPayload; credential: string }
+	| { ok: true; subject: SubjectAttributes; credential: string }
 	| { ok: false; code: "missing_token" | "unsupported_scheme" | "invalid_token"; message: string };
 
-/** Authenticates one `Authorization` header value into a verified payload. */
+/** Authenticates one `Authorization` header value into verified subject attributes. */
 export interface TokenAuthenticator {
 	authenticate(authorizationHeader: string | undefined): Promise<AuthenticationResult>;
 }
@@ -505,16 +511,20 @@ export function createTokenAuthenticator(
 				};
 			}
 
-			// `authScheme`, not `tokenType` (#158): `jwt.tokenType` a few lines up
-			// is the accepted `typ` header, an entirely different thing, and the
-			// two shared a name in the one module that mentions both.
+			// The JWT→subject mapping edge (#170): the verified claims are spread
+			// into the neutral bag here, plus `authScheme` — the `Authorization`
+			// scheme the token arrived under, as the caller wrote it (reported,
+			// not compared, so its casing is not normalized). `authScheme`, not
+			// `tokenType` (#158): `jwt.tokenType` a few lines up is the accepted
+			// `typ` header, an entirely different thing, and the two shared a name
+			// in the one module that mentions both.
 			//
-			// #175: the raw credential rides the RESULT, not the payload. The
-			// payload reaches every collector; the credential reaches a collector
+			// #175: the raw credential rides the RESULT, not the subject bag. The
+			// bag reaches every collector; the credential reaches a collector
 			// only when the route was composed with `credentialToCollectors:
 			// "expose"` — that gate is the route's, so this module hands the
 			// credential back separately and attaches nothing to the claims.
-			return { ok: true, payload: { ...decoded, authScheme: scheme }, credential: token };
+			return { ok: true, subject: { ...decoded, authScheme: scheme }, credential: token };
 		},
 	};
 }

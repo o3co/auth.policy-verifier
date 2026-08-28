@@ -91,7 +91,7 @@ const testModule: Module = {
 		context.attributeCollectorRegistry.register("TestRequestCollector", () => ({
 			async collect(ctx) {
 				return new Map<string, unknown>([
-					[ATTR_SCOPES, ((ctx.payload.scope as string) ?? "").split(" ")],
+					[ATTR_SCOPES, ((ctx.subject.scope as string) ?? "").split(" ")],
 					[ATTR_REQUIRED_SCOPE, `${ctx.action}:${ctx.resource.resourceType}`],
 				]);
 			},

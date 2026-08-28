@@ -3,7 +3,7 @@
 
 import { createSecretKey, type KeyObject } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import type { KeyResolver, KeyResolverFactory, Module } from "@o3co/auth.policy-verifier.core";
+import type { Module } from "@o3co/auth.policy-verifier.core";
 import {
 	createRemoteJWKSet,
 	errors,
@@ -15,6 +15,7 @@ import {
 } from "jose";
 import { type Hs256RotationConfig, parseHs256Rotation } from "./hs256Rotation.mjs";
 import { type JwksFetchConfig, parseJwksUri, resolveJwksFetchBounds } from "./jwks.mjs";
+import type { KeyResolver, KeyResolverFactory, ServerModuleContext } from "./keyResolver.mjs";
 
 interface JwtFactoryInput extends JwksFetchConfig, Hs256RotationConfig {
 	secret?: string;
@@ -199,8 +200,12 @@ export const EdDSAKeyResolverFactory: KeyResolverFactory = (config: JwtFactoryIn
  * `Module` that registers the four built-in JWT key resolver factories
  * (HS256 / RS256 / ES256 / EdDSA) on the `keyResolverRegistry`. Include in
  * `createApp({ modules })` to enable the default algorithms.
+ *
+ * Typed against {@link ServerModuleContext} rather than the base
+ * `ModuleContext` (#170): the key-resolver registry is this server's, not
+ * core's, so only a host that supplies it can initialize this module.
  */
-export const builtinKeyResolversModule: Module = {
+export const builtinKeyResolversModule: Module<ServerModuleContext> = {
 	name: "builtin-key-resolvers",
 	async init(context) {
 		context.keyResolverRegistry.register("HS256", HS256KeyResolverFactory);

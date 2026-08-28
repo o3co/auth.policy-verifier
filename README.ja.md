@@ -138,7 +138,7 @@ standalone → server   → core
           → builtins  → core
 ```
 
-- **core** — 型定義、`evaluate()`、`AttributePipeline`、`RulePipeline`、Module 基盤。ランタイム依存なし。
+- **core** — 型定義、`evaluate()`、`AttributePipeline`、`RulePipeline`、Module 基盤。ランタイム依存なし。エンジン中立な入力: core が受け取るのは `(subject, resource, action, requestContext)` で、`subject` は属性バッグ — core は JWT を一切知らない。デフォルト server が検証済み JWT クレームからバッグを組み立てる。このマッピングが server の境界に置かれていることが、エンジン差し替え可能性の担保。
 - **builtins** — 組み込み Collector (scope, permission, role, subject ID)、ルール (HasScope, HasPermission, 属性比較ルール)、DotNotation リソースパーサー。server に依存しない。カスタム Rule / Collector の書き方は [`docs/extending.ja.md`](docs/extending.ja.md) を参照。
 - **server** — Express HTTP サーバー、`createApp()`、`POST /verify` ルート、JWT 鍵解決、設定スキーマ。builtins に依存しない。
 - **standalone** — コンポジションルート: HOCON 設定読み込み、モジュール選択、サーバー起動。
