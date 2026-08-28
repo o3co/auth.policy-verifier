@@ -864,6 +864,13 @@ and version sections follow the release labeling policy in
 
 ### Changed
 
+- A scaffolded project keeps `"private": true`
+  ([#126](https://github.com/o3co/auth.policy-verifier/issues/126) item 4).
+  `create-auth-policy-verifier` used to delete the field, so the project it
+  generated — an authorization service carrying policy code and config — was
+  publishable by default, and an accidental `npm publish` succeeded. Publishing
+  a scaffolded service is the rare intent; state it by removing the field.
+
 - **BREAKING**: `HasPermission` matches exactly and case-sensitively
   ([#155](https://github.com/o3co/auth.policy-verifier/issues/155)).
 

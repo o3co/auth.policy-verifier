@@ -43,19 +43,32 @@ export class AttributePipeline {
 
 /**
  * Merges attribute maps into a single map. Array-valued entries concatenate
- * in input order; non-array values are overwritten by later maps.
+ * in input order; non-array values are overwritten by later maps — and a
+ * non-array value also resets any accumulation, so a later array starts fresh
+ * rather than concatenating onto something that was already overwritten.
+ *
+ * Array fragments are collected per key and concatenated once at the end
+ * (#126 item 3): the previous shape re-copied the whole accumulated array for
+ * every contributing map (`[...existing, ...value]`), which is quadratic in
+ * collector count for a repeatedly-contributed key like roles or permissions.
  */
 function merge(maps: Attributes[]): Attributes {
 	const merged: Attributes = new Map();
+	const fragments = new Map<string, unknown[][]>();
 	for (const map of maps) {
 		for (const [key, value] of map) {
-			const existing = merged.get(key);
-			if (Array.isArray(existing) && Array.isArray(value)) {
-				merged.set(key, [...existing, ...value]);
+			if (Array.isArray(value)) {
+				const parts = fragments.get(key);
+				if (parts === undefined) fragments.set(key, [value]);
+				else parts.push(value);
 			} else {
+				fragments.delete(key);
 				merged.set(key, value);
 			}
 		}
+	}
+	for (const [key, parts] of fragments) {
+		merged.set(key, parts.flat());
 	}
 	return merged;
 }

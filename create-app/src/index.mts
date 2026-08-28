@@ -82,7 +82,11 @@ export const scaffold = (targetDir: string, projectName: string): void => {
 	const pkgPath = resolve(targetDir, "package.json");
 	const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
 	pkg.name = projectName;
-	delete pkg.private;
+	// `"private": true` is deliberately KEPT (#126 item 4). The scaffold is an
+	// authorization service — policy code and config — and deleting the field
+	// made an accidental `npm publish` succeed by default. Publishing a
+	// scaffolded service is the rare intent; the operator who has it states it
+	// by removing the field.
 
 	// Replace all workspace:* references with per-package published versions
 	const versions = getPackageVersions();

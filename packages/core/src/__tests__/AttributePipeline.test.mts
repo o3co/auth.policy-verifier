@@ -53,6 +53,27 @@ describe("AttributePipeline", () => {
 		expect(result.get("userId")).toBe("2");
 	});
 
+	// #126 item 3 pinned the merge to one concatenation per key; these two pin
+	// the mixed-type semantics the old per-map shape had, so the rewrite could
+	// not drift them: a scalar overwrite RESETS accumulation (a later array
+	// starts fresh), and an array replaces an earlier scalar outright.
+	it("a scalar write resets array accumulation for that key", async () => {
+		const a: Attributes = new Map([["scopes", ["read:user"]]]);
+		const b: Attributes = new Map([["scopes", "corrupted"]]);
+		const c: Attributes = new Map([["scopes", ["write:user"]]]);
+		const pipeline = new AttributePipeline([makeCollector(a), makeCollector(b), makeCollector(c)]);
+		const result = await pipeline.collect(stubContext);
+		expect(result.get("scopes")).toEqual(["write:user"]);
+	});
+
+	it("a later array replaces an earlier scalar", async () => {
+		const a: Attributes = new Map([["scopes", "corrupted"]]);
+		const b: Attributes = new Map([["scopes", ["read:user"]]]);
+		const pipeline = new AttributePipeline([makeCollector(a), makeCollector(b)]);
+		const result = await pipeline.collect(stubContext);
+		expect(result.get("scopes")).toEqual(["read:user"]);
+	});
+
 	it("merges different keys from multiple collectors", async () => {
 		const a: Attributes = new Map([["userId", "1"]]);
 		const b: Attributes = new Map([["scopes", ["read:user"]]]);
