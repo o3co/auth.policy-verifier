@@ -73,12 +73,12 @@ describe("scaffold", () => {
 		}
 	});
 
-	it("removes private field from package.json", () => {
+	it('keeps "private": true so a scaffolded service is not publishable by accident (#126 item 4)', () => {
 		const targetDir = join(tempDir, "verifier");
 		scaffold(targetDir, "verifier");
 
 		const pkg = JSON.parse(readFileSync(join(targetDir, "package.json"), "utf-8"));
-		expect(pkg.private).toBeUndefined();
+		expect(pkg.private).toBe(true);
 	});
 
 	it("writes scoped project name verbatim into package.json", () => {
