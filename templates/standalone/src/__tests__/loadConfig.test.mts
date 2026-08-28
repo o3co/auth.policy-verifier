@@ -17,6 +17,12 @@ import { loadAppConfig } from "../loadConfig.js";
 
 const configDirPath = fileURLToPath(new URL("../../config/", import.meta.url));
 
+/**
+ * 64 hex characters — 32 decoded bytes, the entropy floor the schema enforces
+ * on every HS256 secret (#114). A short value now fails to load at all.
+ */
+const TEST_SECRET = "11".repeat(32);
+
 const envKeys = [
 	"OAUTH_JWT_SECRET",
 	"OAUTH_JWT_ISSUER",
@@ -31,7 +37,7 @@ const envKeys = [
 
 /** application.conf leaves issuer/audience unset, so every load must supply them. */
 function setRequiredEnv(): void {
-	process.env.OAUTH_JWT_SECRET = "test-secret";
+	process.env.OAUTH_JWT_SECRET = TEST_SECRET;
 	process.env.OAUTH_JWT_ISSUER = "https://issuer.test";
 	process.env.OAUTH_JWT_AUDIENCE = "https://api.test";
 }
@@ -62,7 +68,7 @@ describe("loadAppConfig", () => {
 				callerAuth: { header: "x-caller-token" },
 			});
 			expect(config.oauth.jwt.algorithm).toBe("HS256");
-			expect(config.oauth.jwt.secret).toBe("test-secret");
+			expect(config.oauth.jwt.secret).toBe(TEST_SECRET);
 			expect(config.oauth.jwt.mode).toBe("verify");
 			expect(config.oauth.jwt.issuer).toBe("https://issuer.test");
 			expect(config.oauth.jwt.audience).toBe("https://api.test");
@@ -155,6 +161,22 @@ describe("loadAppConfig", () => {
 		);
 	});
 
+	it.each([
+		["a one-character OAUTH_JWT_SECRET", "s"],
+		["the README's old example value", "your-secret"],
+		["32 hex characters — 16 decoded bytes", "ab".repeat(16)],
+	])("refuses to load %s (#114)", (_label, secret) => {
+		// The floor applies to the shipped config as loaded, not only to
+		// hand-built objects: `secret = ${?OAUTH_JWT_SECRET}` is where a weak
+		// value actually enters a deployment.
+		setRequiredEnv();
+		process.env.OAUTH_JWT_SECRET = secret;
+
+		expect(() => loadAppConfig(configDirPath, "development")).toThrow(
+			/must carry at least 32 bytes/,
+		);
+	});
+
 	it("rejects an env name that escapes the config directory", () => {
 		expect(() => loadAppConfig(configDirPath, "../secrets")).toThrow(/resolves outside/);
 	});
@@ -162,14 +184,14 @@ describe("loadAppConfig", () => {
 
 describe("loadAppConfig — RFC 9068 requirements (#105)", () => {
 	it("fails to load when the issuer is not supplied", () => {
-		process.env.OAUTH_JWT_SECRET = "test-secret";
+		process.env.OAUTH_JWT_SECRET = TEST_SECRET;
 		process.env.OAUTH_JWT_AUDIENCE = "https://api.test";
 
 		expect(() => loadAppConfig(configDirPath, "development")).toThrow();
 	});
 
 	it("fails to load when the audience is not supplied", () => {
-		process.env.OAUTH_JWT_SECRET = "test-secret";
+		process.env.OAUTH_JWT_SECRET = TEST_SECRET;
 		process.env.OAUTH_JWT_ISSUER = "https://issuer.test";
 
 		expect(() => loadAppConfig(configDirPath, "development")).toThrow();

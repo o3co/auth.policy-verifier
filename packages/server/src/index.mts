@@ -16,7 +16,13 @@ export {
 	DEFAULT_MAX_TOKEN_AGE_SECONDS,
 	MAX_CLOCK_TOLERANCE_SECONDS,
 	MAX_PREVIOUS_SECRETS,
+	MIN_SECRET_ENTROPY_BYTES,
 } from "./config/defaults.mjs";
+// The HS256 entropy floor's measurement (#114), exported so a consumer that
+// accepts its own operator secrets — a custom key resolver, a composition root
+// building a JWT config by hand — applies the identical reading rather than a
+// second opinion about what a 32-character hex string is worth.
+export { describeWeakSecret, measureSecretEntropyBytes } from "./config/secretEntropy.mjs";
 export {
 	type CallerAuthConfig,
 	type CallerAuthErrorContext,

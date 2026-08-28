@@ -61,6 +61,93 @@ and version sections follow the release labeling policy in
   framework can know, and `RequestContextAttributeCollector` already offers the
   declared-allowlist shape for operators who want one.
 
+- **BREAKING**: an HS256 secret must now carry at least **32 bytes (256 bits)**
+  of key material
+  ([#114](https://github.com/o3co/auth.policy-verifier/issues/114)). The only
+  check before this was non-emptiness, so `OAUTH_JWT_SECRET=s` booted a
+  verifier, and the shipped examples used values like `secret` and
+  `your-secret`. HS256 is this project's default algorithm and it is symmetric:
+  the value that verifies a token is the value that signs one, so guessing it
+  is not read access to tokens, it is the ability to **mint** them for any
+  subject. RFC 7518 §3.2 requires a key at least as wide as the hash output,
+  and auth.provider holds the same shared value to the same floor
+  ([auth.provider#282](https://github.com/o3co/auth.provider/issues/282)) — a
+  floor that either side applies alone is a floor neither side has.
+
+  **How it is measured.** On the **decoded** material, at the smallest
+  plausible reading — the one an attacker gets to use. `openssl rand -hex 16`
+  produces a 32-*character* value carrying 16 *bytes*, and counting characters
+  would wave through a key of half the intended strength:
+
+  | Value | Reads as | Verdict |
+  | --- | --- | --- |
+  | 64 hex characters (`openssl rand -hex 32`) | 32 bytes | passes |
+  | 32 hex characters (`openssl rand -hex 16`) | 16 bytes | refused |
+  | 43 base64 characters + `=` (`openssl rand -base64 32`) | 32 bytes | passes |
+  | 32 random alphanumerics | 24 bytes — a base64 body | refused |
+  | 32-character passphrase containing punctuation | 32 bytes | passes |
+
+  Rejecting 32 alphanumerics is deliberate, not an artefact: 62 possibilities
+  per character is ~5.95 bits, not 8, so such a value really does carry only
+  ~190 bits. A value that is not a valid encoding — including a passphrase that
+  merely ends in `=` — is measured on its raw UTF-8 length rather than being
+  trimmed into a "base64 body" and scored short. What the check cannot see is
+  structure: a 40-character English sentence measures 40 bytes and carries far
+  less, so generate the secret randomly. This is a floor on key length, not a
+  review.
+
+  **One rule over every secret.** The floor applies to `oauth.jwt.secret` and
+  to every entry of `oauth.jwt.previousSecrets` (the HS256 rotation added in
+  [#112](https://github.com/o3co/auth.policy-verifier/issues/112)) in a single
+  check, because they are the same kind of value: a retired secret is a live
+  verification key for its whole overlap window, so it can mint tokens exactly
+  as the current one can. Splitting the check would have left one of them the
+  laxer half.
+
+  Both boundaries enforce it, as with the JWKS transport check: `AppConfigSchema`
+  rejects a short secret at config-parse time — so the deployment fails at boot,
+  where an operator sees it — and the HS256 `KeyResolverFactory` repeats the
+  check for hand-built configs that never met the schema. `insecure-decode`
+  mode is unaffected: it uses no key material at all. `createVerifyRouter`
+  takes key material directly rather than a config, and does not apply the
+  floor; a consumer wiring a `KeyObject` by hand owns that check.
+
+  The failure names the key the operator wrote and never echoes the value —
+  these messages reach stdout, container logs and pasted bug reports:
+
+  ```
+  oauth.jwt.secret must carry at least 32 bytes (256 bits) of key material,
+  but carries 11 — generate one with `openssl rand -hex 32`. Hex and base64
+  values are measured on their DECODED length, so a 32-character hex string
+  counts as only 16 bytes.
+  ```
+
+  **Operator migration** — every HS256 deployment whose secret is under the
+  floor stops booting, which is the point:
+
+  1. **Generate a conforming secret** and give the *same* value to
+     auth.provider, which signs with it:
+
+     ```bash
+     OAUTH_JWT_SECRET=$(openssl rand -hex 32)     # or: openssl rand -base64 32
+     ```
+
+     Do not shorten it to fit an existing secret store field, and do not reuse
+     a password. `openssl rand -hex 16` is **not** enough — that is 16 bytes.
+  2. **Rotate rather than cut over**, if tokens are in flight. Changing the
+     secret invalidates every token signed with the old one, so use the
+     `previousSecrets` overlap window documented in the README's *Rotating the
+     HS256 secret*: stage the new secret on the verifier first, move the
+     provider, then demote the old secret with an `expiresAt` of your
+     access-token TTL plus a buffer. Note the retired secret must itself clear
+     the floor — a rotation *away from* a weak secret needs the old value
+     dropped outright, and the outage that implies is bounded by the token TTL.
+  3. **Or move off HS256.** With a symmetric algorithm every relying party
+     holds a token-forging key. `algorithm = "RS256" | "ES256" | "EdDSA"` with
+     `jwksUri` lets this verifier hold only a public key; auth.provider
+     publishes the JWKS.
+  4. **Update fixtures and scripts** that mint tokens with a short shared
+     secret — they now fail at boot rather than at verification.
 - **BREAKING**: a bearer token must now carry `exp` **and** `iat`, and is
   refused if it does not
   ([#110](https://github.com/o3co/auth.policy-verifier/issues/110)). jose
@@ -384,7 +471,19 @@ and version sections follow the release labeling policy in
   ([#112](https://github.com/o3co/auth.policy-verifier/issues/112)), for
   consumers building a JWT config by hand or registering their own HS256 key
   resolver. They apply the identical contract the schema does, so a hand-built
-  config gets the same answer as a parsed one.
+  config gets the same answer as a parsed one. Both now also apply the entropy
+  floor over `secret` and every `previousSecrets[].secret`
+  ([#114](https://github.com/o3co/auth.policy-verifier/issues/114)) — a config
+  with no rotation at all is still checked, since the floor is one rule over
+  every HS256 secret rather than a rotation-only concern.
+- `@o3co/auth.policy-verifier.server` exports `measureSecretEntropyBytes` and
+  `describeWeakSecret` with the constant `MIN_SECRET_ENTROPY_BYTES`
+  ([#114](https://github.com/o3co/auth.policy-verifier/issues/114)), so a
+  consumer that accepts its own operator secrets — a custom key resolver, a
+  composition root assembling a JWT config — applies the identical reading
+  rather than a second opinion about what a 32-character hex string is worth.
+  `describeWeakSecret` takes the measurement and not the secret, which is the
+  guarantee that a rejection cannot echo the value into a log.
 - `@o3co/auth.policy-verifier.server` exports `resolveJwtTimeClaimBounds`
   (with `JwtTimeClaimConfig` / `JwtTimeClaimBounds`) and the constants
   `DEFAULT_MAX_TOKEN_AGE_SECONDS`, `DEFAULT_CLOCK_TOLERANCE_SECONDS` and

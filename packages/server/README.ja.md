@@ -99,7 +99,7 @@ const AppConfigSchema = z.object({
   }),
   oauth: z.object({
     jwt: z.object({
-      secret: z.string(),
+      secret: z.string().optional(),                                   // HS256: デコード後 32 バイト以上
       mode: z.enum(["verify", "insecure-decode"]).default("verify"),
       issuer: z.union([z.string(), z.array(z.string())]).optional(),   // mode = "verify" のとき必須
       audience: z.union([z.string(), z.array(z.string())]).optional(), // mode = "verify" のとき必須
@@ -126,6 +126,8 @@ type AppConfig = z.infer<typeof AppConfigSchema>;
 ```
 
 `attribute.collectors` と `rule.collectors` の各エントリには `collector` フィールド（登録済みファクトリ名）が必須です。追加フィールドはファクトリへの設定としてそのまま渡されます。
+
+**HS256 のシークレットは鍵素材として 32 バイト（256 ビット）以上を持つこと。** この下限は `oauth.jwt.secret` と `oauth.jwt.previousSecrets[].secret` の全件に 1 つのルールとして適用されます — 退役したシークレットも重複期間中は検証鍵であり、現行と同じようにトークンを発行できるからです。判定はデコード後の素材に対してもっとも小さく読める解釈で行うため、16 進 64 文字は通り（32 バイト）、16 進 32 文字は通りません（16 バイト）。生成は `openssl rand -hex 32`。`AppConfigSchema` が config パース時に拒否し、HS256 の `KeyResolverFactory` が hand-built config のために同じ検査を繰り返します。独自の HS256 key resolver を登録する利用者向けに `measureSecretEntropyBytes` / `describeWeakSecret` / `MIN_SECRET_ENTROPY_BYTES` を公開しています。`createVerifyRouter` は鍵素材を直接受け取るため下限を適用しません — `KeyObject` を自分で組み立てる呼び出し側がその検査を負います。
 
 ### 信頼境界
 

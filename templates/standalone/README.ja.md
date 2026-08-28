@@ -6,11 +6,13 @@ auth.policy-verifier のデプロイ可能なサーバーテンプレートで�
 
 ```sh
 pnpm install
-OAUTH_JWT_SECRET=your-secret \
+OAUTH_JWT_SECRET=$(openssl rand -hex 32) \
   OAUTH_JWT_ISSUER=https://issuer.example.com \
   OAUTH_JWT_AUDIENCE=https://api.example.com \
   pnpm run start
 ```
+
+`OAUTH_JWT_SECRET` はデコード後の長さで 32 バイト（256 ビット）以上を要求し、下回る値は起動時に拒否されます。[HS256 シークレットの強度](#hs256-シークレットの強度)を参照。
 
 ## 設定
 
@@ -34,7 +36,7 @@ OAUTH_JWT_SECRET=your-secret \
 | `HTTP_PATH_PREFIX` | `""` | URL パスプレフィックス |
 | `HTTP_CALLER_AUTH_TOKEN` | （未設定） | 呼び出し元サービスが提示する共有資格情報。未設定の場合、ポートに到達できる任意の相手が判定を要求できる |
 | `HTTP_CALLER_AUTH_HEADER` | `x-caller-token` | その資格情報を載せるヘッダ |
-| `OAUTH_JWT_SECRET` | （必須） | HMAC-HS256 JWT 署名シークレット |
+| `OAUTH_JWT_SECRET` | （必須） | HMAC-HS256 JWT 署名シークレット。デコード後 32 バイト以上 — [HS256 シークレットの強度](#hs256-シークレットの強度)を参照 |
 | `OAUTH_JWT_ISSUER` | （必須） | この deployment が受け入れる issuer — RFC 9068 §4 `iss` |
 | `OAUTH_JWT_AUDIENCE` | （必須） | この resource server を指す audience — RFC 9068 §4 `aud` |
 | `OAUTH_JWT_JWKS_URI` | — | RS256/ES256/EdDSA の JWKS エンドポイント。`https://` 必須。平文 `http://` はループバックホスト（`localhost`, `127.0.0.0/8`, `[::1]`）のみ許可 |
@@ -46,6 +48,27 @@ OAUTH_JWT_SECRET=your-secret \
 | `RULE_ON_EMPTY_RULE_SET` | `deny` | ルールが 1 つも集まらなかったときの決定（`deny` \| `allow`） |
 | `VERIFY_MAX_BATCH_SIZE` | `50` | `POST /verify/batch` の件数上限 |
 | `LOG_LEVEL` | `info` | 出力する最低レベル: `trace`\|`debug`\|`info`\|`warn`\|`error`\|`fatal`\|`silent`。decision ログのスイッチも兼ねる — [可観測性](#可観測性)を参照 |
+
+## HS256 シークレットの強度
+
+`OAUTH_JWT_SECRET` は鍵素材として **32 バイト（256 ビット）以上**を持つ必要があります。足りない値は config パース時に拒否されるため、推測可能な鍵で稼働し続けるのではなく起動時に失敗します。
+
+HS256 は対称鍵です。トークンを検証する値がそのままトークンを署名する値なので、推測された場合の被害は「発行済みトークンを読める」ことではなく「任意の subject のトークンを発行できる」ことです。RFC 7518 §3.2 はハッシュ出力幅以上の鍵を要求しており、auth.provider も同じ共有値に同じ下限を課しています。
+
+```sh
+OAUTH_JWT_SECRET=$(openssl rand -hex 32)      # 64 文字 / 32 バイト
+OAUTH_JWT_SECRET=$(openssl rand -base64 32)   # 44 文字 / 32 バイト
+```
+
+判定は**デコード後**の素材に対して、もっとも小さく読める解釈で行います。攻撃者が実際に使えるのがその解釈だからです。
+
+- `openssl rand -hex 16` は 32 *文字* だが 16 *バイト* しかない — 拒否。
+- ランダムな英数字 32 文字は base64 本体として読めるため 24 バイト — 拒否。1 文字あたり 62 通りは約 5.95 ビットであり、8 ビットではない。
+- 記号を含むパスフレーズは UTF-8 長で測られるため、32 文字なら通る。
+
+同じ下限がローテーションブロックの `previousSecrets[].secret` 全件にも適用されます — 退役したシークレットも重複期間中は検証鍵であり、現行と同じようにトークンを発行できるからです。
+
+この検査で見えるのは長さだけです。40 文字の英文は 40 バイトと数えられますが実際の強度ははるかに低いので、値は必ずランダムに生成してください。
 
 ## 信頼境界
 
@@ -213,7 +236,7 @@ docker run \
   -p 3000:3000 \
   -e HTTP_HOSTNAME=0.0.0.0 \
   -e HTTP_CALLER_AUTH_TOKEN=<secret> \
-  -e OAUTH_JWT_SECRET=secret \
+  -e OAUTH_JWT_SECRET=$(openssl rand -hex 32) \
   -e OAUTH_JWT_ISSUER=https://issuer.example.com \
   -e OAUTH_JWT_AUDIENCE=https://api.example.com \
   auth-policy-verifier

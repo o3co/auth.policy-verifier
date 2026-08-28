@@ -81,6 +81,14 @@ export const AppConfigSchema = z.object({
 		jwt: z
 			.object({
 				algorithm: z.string().default("HS256"),
+				/**
+				 * The HS256 shared secret. Required whenever the algorithm is
+				 * HS256 and the mode is `"verify"`, and held to the entropy floor
+				 * in `superRefine` below (#114): the same value verifies and
+				 * signs, so a guessable one is not a read of tokens but the
+				 * ability to mint them. `.optional()` here because the asymmetric
+				 * algorithms have no use for it.
+				 */
 				secret: z.string().optional(),
 				/**
 				 * Names the HS256 secret the issuer signs with today (#112), the
@@ -111,7 +119,10 @@ export const AppConfigSchema = z.object({
 				 * Capped at `MAX_PREVIOUS_SECRETS` and checked again in
 				 * `jwt/hs256Rotation.mts`: a token carrying no `kid` is tried
 				 * against every configured secret, so the list length is the work
-				 * one unauthenticated request can force.
+				 * one unauthenticated request can force. Each entry's `secret`
+				 * clears the same entropy floor the current one does (#114) — a
+				 * retired secret verifies for its whole overlap window, so it can
+				 * mint tokens exactly as the current one can.
 				 *
 				 * `.optional()` and not `.nullish()`: the only ways to say
 				 * "nothing is being rotated" are omitting the key and `[]`.
@@ -262,7 +273,9 @@ export const AppConfigSchema = z.object({
 					});
 				}
 				if (data.algorithm === "HS256") {
-					// #112. The rotation contract is stated once, in
+					// #112 / #114. The HS256 secret contract — the rotation shape,
+					// and the entropy floor over `secret` and every
+					// `previousSecrets[].secret` — is stated once, in
 					// `jwt/hs256Rotation.mts`, and spent twice: here for config
 					// files, and in the HS256 KeyResolverFactory for hand-built
 					// configs that never met this schema. Every issue is reported

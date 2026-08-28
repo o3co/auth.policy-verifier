@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * HS256 signing-secret rotation (#112): the config shape a deployment writes to
- * hold a retired secret alongside the current one, and the checks that shape
- * must pass before any of it becomes key material.
+ * The HS256 signing-secret contract: the config shape a deployment writes to
+ * hold a retired secret alongside the current one (#112), and the checks that
+ * shape must pass before any of it becomes key material — the entropy floor
+ * every one of those secrets clears (#114) included.
  *
  * Why this exists at all: with exactly one secret, rotating means the provider
  * starts signing with a new value and every token minted under the old one is
@@ -16,7 +17,15 @@
  * `previousSecrets` — `kid` + `secret` + `expiresAt` per entry, current secret
  * named by its own `kid` — in `packages/core/src/keys/factory.mts`. The wire
  * shape here is the same, so an operator rotating the pair writes the same
- * three fields on both sides and moves the same pair of values.
+ * three fields on both sides and moves the same pair of values. The entropy
+ * floor is ported from the same place (auth.provider#282) for the same reason —
+ * see `MIN_SECRET_ENTROPY_BYTES` in `config/defaults.mts`, which states it.
+ *
+ * Why the floor lives here rather than in either boundary: `oauth.jwt.secret`
+ * and every entry of `previousSecrets` are the same kind of value — a retired
+ * secret verifies for its whole overlap window, so it can mint tokens exactly as
+ * the current one can. One rule over both is what keeps either of them from
+ * quietly becoming the laxer half.
  *
  * Deliberately dependency-free, like `jwt/jwks.mts` next to it: `AppConfigSchema`
  * imports it so a malformed rotation block fails at config-parse time (at boot,
@@ -27,7 +36,8 @@
  * `checkJwksUri` / `parseJwksUri`.
  */
 
-import { MAX_PREVIOUS_SECRETS } from "../config/defaults.mjs";
+import { MAX_PREVIOUS_SECRETS, MIN_SECRET_ENTROPY_BYTES } from "../config/defaults.mjs";
+import { describeWeakSecret, measureSecretEntropyBytes } from "../config/secretEntropy.mjs";
 
 /**
  * One retired secret and the window it stays a verification key for.
@@ -63,6 +73,11 @@ export interface Hs256PreviousSecret {
  * caller can put anything at `previousSecrets`.
  */
 export interface Hs256RotationConfig {
+	/**
+	 * The secret the deployment verifies with today. Read here only to hold it to
+	 * the entropy floor (#114) — an absent one is reported by each boundary's own
+	 * "secret is required for HS256", which is where that check already lives.
+	 */
 	secret?: string;
 	/**
 	 * Names the secret the issuer currently signs with. Optional, and the
@@ -104,15 +119,32 @@ function isNonEmptyString(value: unknown): value is string {
 }
 
 /**
+ * Holds one secret to the entropy floor (#114), collecting an issue at the path
+ * the operator wrote when it falls short. True when the secret may go on to
+ * become key material.
+ *
+ * Applied identically to `oauth.jwt.secret` and to every `previousSecrets[].secret`
+ * — see the note at the top of this file on why that is one rule and not two.
+ */
+function clearsEntropyFloor(
+	secret: string,
+	field: string,
+	path: (string | number)[],
+	issues: Hs256RotationIssue[],
+): boolean {
+	const actualBytes = measureSecretEntropyBytes(secret);
+	if (actualBytes >= MIN_SECRET_ENTROPY_BYTES) {
+		return true;
+	}
+	// The message carries the measurement, never the value: unlike `expiresAt`
+	// below, echoing this back would put the secret in a log line.
+	issues.push({ path, message: describeWeakSecret(field, actualBytes) });
+	return false;
+}
+
+/**
  * Validates one `previousSecrets` entry into the collector, returning the
  * narrowed entry or `undefined` when it contributed an issue instead.
- *
- * Note what is deliberately NOT checked here: the entropy of `secret`. A retired
- * secret is a live verification key for the whole overlap window, so it carries
- * exactly the forgery risk the current one does and belongs behind exactly the
- * same floor — which is why that floor is one check over `oauth.jwt.secret` and
- * every entry of this list together (tracked as #114), and not a check that
- * lands here alone and leaves the current secret the laxer of the two.
  */
 function checkEntry(
 	entry: unknown,
@@ -137,6 +169,15 @@ function checkEntry(
 			issues.push({ path: at(field), message: `${label}.${field} must be a non-empty string` });
 			ok = false;
 		}
+	}
+	// Only once the secret is known to be a string, and reported alone: a value
+	// that is not a string has nothing to measure, and saying so twice would make
+	// one mistake look like two.
+	if (
+		isNonEmptyString(raw.secret) &&
+		!clearsEntropyFloor(raw.secret, `${label}.secret`, at("secret"), issues)
+	) {
+		ok = false;
 	}
 	if (!isNonEmptyString(raw.expiresAt)) {
 		issues.push({
@@ -164,7 +205,10 @@ function checkEntry(
 }
 
 /**
- * Applies the rotation contract to an `oauth.jwt` block.
+ * Applies the HS256 secret contract to an `oauth.jwt` block: the rotation shape,
+ * and the entropy floor over `secret` and every `previousSecrets[].secret`
+ * (#114). A config with no rotation at all still passes through the floor —
+ * that is the whole point of the check living in one place.
  *
  * An *absent* `previousSecrets` means "no rotation configured": a deployment
  * that has never rotated writes nothing, and an operator closing a window
@@ -196,10 +240,18 @@ function checkEntry(
  */
 export function checkHs256Rotation(config: Hs256RotationConfig): Hs256RotationCheck {
 	const issues: Hs256RotationIssue[] = [];
-	const { kid } = config;
+	const { kid, secret } = config;
 
 	if (kid !== undefined && !isNonEmptyString(kid)) {
 		issues.push({ path: ["kid"], message: "kid must be a non-empty string" });
+	}
+
+	// The current secret clears the same floor as the retired ones (#114).
+	// Absent or empty is somebody else's issue — `AppConfigSchema` and the HS256
+	// `KeyResolverFactory` each say `secret is required for HS256` — so this adds
+	// nothing there rather than reporting one missing key twice.
+	if (isNonEmptyString(secret)) {
+		clearsEntropyFloor(secret, "secret", ["secret"], issues);
 	}
 
 	const raw = config.previousSecrets;

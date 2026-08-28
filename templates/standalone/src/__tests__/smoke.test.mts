@@ -27,7 +27,8 @@ import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 
-const JWT_SECRET = "standalone-smoke-secret";
+/** 64 hex characters — 32 decoded bytes, the entropy floor #114 enforces. */
+const JWT_SECRET = "11".repeat(32);
 const secretKey = new TextEncoder().encode(JWT_SECRET);
 const ISSUER = "https://issuer.test";
 const AUDIENCE = "https://api.test";

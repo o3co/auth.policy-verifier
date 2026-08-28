@@ -28,7 +28,8 @@ import { describe, expect, it } from "vitest";
 import { AppConfigSchema, builtinKeyResolversModule, createApp } from "#/index.mjs";
 import { createMetrics, MAX_DENY_CODE_LABELS } from "#/observability/metrics.mjs";
 
-const JWT_SECRET = "metrics-test-secret";
+/** 64 hex characters — 32 decoded bytes, the entropy floor #114 enforces. */
+const JWT_SECRET = "11".repeat(32);
 const secretKey = new TextEncoder().encode(JWT_SECRET);
 const ISSUER = "https://issuer.test";
 const AUDIENCE = "https://api.test";

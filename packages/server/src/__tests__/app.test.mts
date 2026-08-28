@@ -12,7 +12,8 @@ import {
 	JWT_MODE_MIGRATION_MESSAGE,
 } from "#/index.mjs";
 
-const JWT_SECRET = "test-secret";
+/** 64 hex characters — 32 decoded bytes, the entropy floor #114 enforces. */
+const JWT_SECRET = "11".repeat(32);
 const secretKey = new TextEncoder().encode(JWT_SECRET);
 const ISSUER = "https://issuer.test";
 const AUDIENCE = "https://api.test";
@@ -969,4 +970,31 @@ describe("createApp — HS256 secret rotation (#112)", () => {
 			}),
 		).rejects.toThrow(/^oauth\.jwt\.kid is required/);
 	});
+
+	it.each([
+		["the current secret", { secret: "your-secret" }, /^oauth\.jwt\.secret must carry at least/],
+		[
+			"a retired secret",
+			{
+				previousSecrets: [{ kid: "v0", secret: "your-secret", expiresAt: "2999-01-01T00:00:00Z" }],
+			},
+			/^oauth\.jwt\.previousSecrets\[0\]\.secret must carry at least/,
+		],
+	])(
+		"refuses to boot on a hand-built config whose %s is under the entropy floor (#114)",
+		async (_label, override, message) => {
+			const handBuilt = {
+				...rotatedConfig,
+				oauth: { jwt: { ...rotatedConfig.oauth.jwt, ...override } },
+			} as unknown as typeof rotatedConfig;
+
+			await expect(
+				createApp({
+					pathResolver: (s: string) => s,
+					config: handBuilt,
+					modules: [testModule, builtinKeyResolversModule],
+				}),
+			).rejects.toThrow(message);
+		},
+	);
 });
