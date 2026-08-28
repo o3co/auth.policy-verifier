@@ -87,6 +87,20 @@ export interface VerifyRouterConfig {
 	 * logged but not counted; `createApp` wires the Prometheus implementation.
 	 */
 	metrics?: DecisionMetrics;
+	/**
+	 * Whether the raw credential reaches collectors as
+	 * `CollectorContext.credential` (#175). Defaults to `"never"`: collectors
+	 * get verified claims only, because the credential is replayable and a
+	 * collector that logs its context would leak a live token. `"expose"` is
+	 * for the deployment whose project-side collector calls a downstream API
+	 * *as the subject* (token forwarding/exchange) — a decision that belongs
+	 * in config, where it is greppable, not in ambient behavior.
+	 *
+	 * An enum rather than a boolean on purpose: `${?ENV}` substitution hands
+	 * schemas strings, and a string survives an enum unharmed where a bare
+	 * boolean invites the coercion-path drift o3co/auth.provider#288 documents.
+	 */
+	credentialToCollectors?: "never" | "expose";
 }
 
 /**
@@ -466,13 +480,16 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	// Constructing the authenticator runs assertVerifyRouterJwtConfig, so an
 	// invalid hand-built jwt config still fails here, at router construction.
 	const authenticator = createTokenAuthenticator(config.jwt, logger);
+	// #175: resolved once — the per-request cost is a spread, not a branch tree.
+	const exposeCredential = config.credentialToCollectors === "expose";
 
 	/** Runs the pipelines and the evaluator for one already-validated entry. */
 	async function decide(
 		req: express.Request,
-		payload: VerifierPayload,
+		auth: { payload: VerifierPayload; credential: string },
 		{ request: entry, resource }: ValidatedDecisionRequest,
 	): Promise<DecisionResponse> {
+		const payload = auth.payload;
 		const requestId = req.get("x-request-id");
 		const headers = requestId ? { "x-request-id": requestId } : undefined;
 		// `payload` survived signature verification and `headers` were read off the
@@ -486,6 +503,10 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			action: entry.action,
 			headers,
 			requestContext: entry.context ? markUntrustedRequestContext(entry.context) : undefined,
+			// #175: absent unless the composition said "expose" — see the
+			// config field's doc. Spread-conditional so the default context
+			// carries no `credential` key at all, not an undefined one.
+			...(exposeCredential ? { credential: auth.credential } : {}),
 		};
 
 		// Timed from here so the measurement is the decision itself — the two
@@ -586,7 +607,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				return;
 			}
 
-			const decision = await decide(req, auth.payload, parsed.entry);
+			const decision = await decide(req, auth, parsed.entry);
 			res.status(decision.decision === "deny" ? 403 : 200).json(decision);
 		} catch (cause) {
 			logger.error({ err: cause, endpoint: "/verify" }, "verify_internal_error");
@@ -656,7 +677,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				return;
 			}
 
-			const decisions = await Promise.all(entries.map((entry) => decide(req, auth.payload, entry)));
+			const decisions = await Promise.all(entries.map((entry) => decide(req, auth, entry)));
 			res.status(200).json({ decisions });
 		} catch (cause) {
 			logger.error({ err: cause, endpoint: "/verify/batch" }, "verify_internal_error");

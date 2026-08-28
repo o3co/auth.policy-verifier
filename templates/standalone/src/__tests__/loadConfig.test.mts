@@ -381,7 +381,7 @@ rule { collectors = [ { collector = ResourceActionScopeRuleCollector } ] }
 
 		const config = loadAppConfig(withoutVerify(), "development");
 
-		// All nine, spelled out. A knob that reached the shape but not the
+		// All ten, spelled out. A knob that reached the shape but not the
 		// block's `.default()` literal is `undefined` here, and `toEqual` says
 		// which one.
 		expect(config.verify).toEqual({
@@ -394,6 +394,7 @@ rule { collectors = [ { collector = ResourceActionScopeRuleCollector } ] }
 			collectorTimeoutMs: 2_000,
 			collectorDeadlineMs: 5_000,
 			collectorConcurrency: 8,
+			credentialToCollectors: "never",
 		});
 	});
 

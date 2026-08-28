@@ -1252,6 +1252,68 @@ describe("createVerifyRouter — maxBatchSize, one reader at both boundaries (#1
 	});
 });
 
+describe("createVerifyRouter — the credential reaches collectors only by stated opt-in (#175)", () => {
+	const seen: Array<{ credential: string | undefined; payloadToken: unknown }> = [];
+	const capturing = (): AttributeCollector => ({
+		collect: async (context: CollectorContext) => {
+			seen.push({
+				credential: context.credential,
+				payloadToken: (context.payload as Record<string, unknown>).token,
+			});
+			return new Map<string, unknown>([["scopes", ["read:project"]]]);
+		},
+	});
+
+	const appWith = (credentialToCollectors?: "never" | "expose") => {
+		const app = express();
+		app.use(
+			createVerifyRouter({
+				jwt: {
+					validate: true,
+					key: hs256Key.key,
+					algorithms: hs256Key.algorithms,
+					issuer: ISSUER,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				},
+				resourceParser: new DotNotationResourceParser(),
+				attributePipeline: new AttributePipeline([capturing()]),
+				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
+				...(credentialToCollectors ? { credentialToCollectors } : {}),
+			}),
+		);
+		return app;
+	};
+
+	it("default: the collector sees neither context.credential nor a payload token", async () => {
+		seen.length = 0;
+		const token = await signHS256Token({ scope: "read:project" });
+		await request(appWith())
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(seen).toHaveLength(1);
+		expect(seen[0]?.credential).toBeUndefined();
+		// #175 removed VerifierPayload.token — the claims object carries no
+		// replayable credential for a context-logging collector to leak.
+		expect(seen[0]?.payloadToken).toBeUndefined();
+	});
+
+	it('"expose": context.credential is the raw bearer token, and the payload still carries none', async () => {
+		seen.length = 0;
+		const token = await signHS256Token({ scope: "read:project" });
+		await request(appWith("expose"))
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+
+		expect(seen).toHaveLength(1);
+		expect(seen[0]?.credential).toBe(token);
+		expect(seen[0]?.payloadToken).toBeUndefined();
+	});
+});
+
 describe("createVerifyRouter — collectors disagreeing on a scalar attribute deny (#174)", () => {
 	const writesDepartment = (value: string): AttributeCollector => ({
 		collect: async () =>

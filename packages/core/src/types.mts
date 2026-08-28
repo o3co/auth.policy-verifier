@@ -45,6 +45,17 @@ export interface CollectorContext {
 	/** Caller-supplied; read it with `readUntrustedRequestContext`. */
 	requestContext?: UntrustedRequestContext;
 	/**
+	 * The raw, replayable credential the request arrived under — present ONLY
+	 * when the composition opted in (`verify.credentialToCollectors =
+	 * "expose"`, #175). Absent by default: collectors get verified claims, not
+	 * the credential, because a collector that logs its context would otherwise
+	 * leak a live token. The one legitimate use is a project-side collector
+	 * calling a downstream API *as the subject* (token forwarding/exchange);
+	 * that deployment states the exposure in config, where it is greppable.
+	 * NEVER log this field.
+	 */
+	credential?: string;
+	/**
 	 * Cancellation for this collect, and the one field that is not a fact about
 	 * the request (#115).
 	 *
@@ -205,7 +216,6 @@ export interface VerifierPayload {
 	aud?: string | string[];
 	exp?: number;
 	iat?: number;
-	token?: string;
 	/**
 	 * The `Authorization` scheme the token arrived under, as the caller wrote it
 	 * — `"Bearer"` (RFC 6750), whose casing is not normalized because it is

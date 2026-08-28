@@ -409,7 +409,7 @@ export function assertTimeClaims(payload: JWTPayload, bounds: JwtTimeClaimBounds
  * module's.
  */
 export type AuthenticationResult =
-	| { ok: true; payload: VerifierPayload }
+	| { ok: true; payload: VerifierPayload; credential: string }
 	| { ok: false; code: "missing_token" | "unsupported_scheme" | "invalid_token"; message: string };
 
 /** Authenticates one `Authorization` header value into a verified payload. */
@@ -508,7 +508,13 @@ export function createTokenAuthenticator(
 			// `authScheme`, not `tokenType` (#158): `jwt.tokenType` a few lines up
 			// is the accepted `typ` header, an entirely different thing, and the
 			// two shared a name in the one module that mentions both.
-			return { ok: true, payload: { ...decoded, token, authScheme: scheme } };
+			//
+			// #175: the raw credential rides the RESULT, not the payload. The
+			// payload reaches every collector; the credential reaches a collector
+			// only when the route was composed with `credentialToCollectors:
+			// "expose"` — that gate is the route's, so this module hands the
+			// credential back separately and attaches nothing to the claims.
+			return { ok: true, payload: { ...decoded, authScheme: scheme }, credential: token };
 		},
 	};
 }

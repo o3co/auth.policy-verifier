@@ -1213,6 +1213,7 @@ describe("AppConfigSchema — the verify block's default names every knob", () =
 			collectorTimeoutMs: DEFAULT_COLLECTOR_TIMEOUT_MS,
 			collectorDeadlineMs: DEFAULT_COLLECT_DEADLINE_MS,
 			collectorConcurrency: DEFAULT_COLLECTOR_CONCURRENCY,
+			credentialToCollectors: "never",
 		});
 	});
 
@@ -1222,6 +1223,11 @@ describe("AppConfigSchema — the verify block's default names every knob", () =
 		// here as a missing key rather than as a present `undefined`. (Iterating
 		// the absent-block production instead would skip it silently, which is
 		// the shape of the bug and not a check for it.)
+		//
+		// `toBeDefined`, not `toBeTypeOf("number")`: the guard's job is catching
+		// a knob the literal omits, and since #175 the block carries a
+		// non-numeric knob (`credentialToCollectors`). The value-level agreement
+		// is the equality test above.
 		const fromShape = parseWith({}).verify as Record<string, unknown>;
 		const fromDefault = parseWith(undefined).verify as Record<string, unknown>;
 
@@ -1229,7 +1235,7 @@ describe("AppConfigSchema — the verify block's default names every knob", () =
 			expect(
 				fromDefault[key],
 				`verify.${key} is missing from the block's .default() literal`,
-			).toBeTypeOf("number");
+			).toBeDefined();
 		}
 	});
 });

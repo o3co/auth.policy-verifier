@@ -864,6 +864,23 @@ and version sections follow the release labeling policy in
 
 ### Changed
 
+- **BREAKING**: collectors no longer receive the raw credential unless the
+  deployment states it —
+  `VerifierPayload.token` is removed
+  ([#175](https://github.com/o3co/auth.policy-verifier/issues/175), from #126
+  item 1). Every collector received the raw, replayable bearer token via
+  `CollectorContext.payload`; a collector that logged its context leaked a live
+  credential. Collectors now get verified claims only. The one legitimate use —
+  a project-side collector calling a downstream API *as the subject* (token
+  forwarding/exchange) — opts in with `verify.credentialToCollectors =
+  "expose"` (`VERIFY_CREDENTIAL_TO_COLLECTORS`; an enum, not a boolean, so the
+  string an env substitution delivers needs no coercion path), which surfaces
+  the credential as **`CollectorContext.credential`** — a stated, greppable
+  config decision. **Migration:** a collector reading `payload.token` sets the
+  config key and reads `context.credential` instead. The authenticator's
+  `AuthenticationResult` now carries `credential` beside `payload`; the route,
+  not the authenticator, owns the exposure decision.
+
 - **BREAKING**: two collectors writing **different** values to the same scalar
   attribute key now deny the decision instead of silently last-writer-winning
   ([#174](https://github.com/o3co/auth.policy-verifier/issues/174), from #126
