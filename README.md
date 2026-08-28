@@ -23,19 +23,21 @@ Authorization: Bearer <jwt>
   ┌──────────────────────────────────────────────────┐
   │                  /verify handler                  │
   │                                                   │
-  │  1. Verify JWT (HS256 / RS256 / ES256 / EdDSA)   │
+  │  1. Validate body (bounds, grammar, keys)         │
   │                                                   │
-  │  2. AttributeCollectors (parallel)                │
+  │  2. Verify JWT (HS256 / RS256 / ES256 / EdDSA)   │
+  │                                                   │
+  │  3. AttributeCollectors (parallel)                │
   │     ├─ PayloadScopeCollector → scopes from JWT    │
   │     ├─ PayloadSubjectIdCollector → subject ID     │
   │     └─ (custom collectors...)                     │
   │                                                   │
-  │  3. RuleCollectors (parallel)                     │
+  │  4. RuleCollectors (parallel)                     │
   │     ├─ ResourceActionScopeRuleCollector           │
   │     │   → HasScope("read:project")                │
   │     └─ (custom rule collectors...)                │
   │                                                   │
-  │  4. Evaluate                                      │
+  │  5. Evaluate                                      │
   │     OR within rule group, AND across groups        │
   │     every group runs → structured reason           │
   │                                                   │
@@ -47,6 +49,13 @@ POST /verify/batch — the same contract, N decisions per round trip
 {"decisions": [{"resource": "project:1", "action": "read"}, …]}
   → 200 {"decisions": [{…}, …]}   (order preserved; 200 even if all deny)
 ```
+
+Step 1 runs **before** step 2: a malformed body is `400 invalid_request` whether or not a credential
+was presented, and no collector runs for a request that was refused on its body. See
+[Request Limits](#request-limits) for why that order, and what an anonymous caller learns from it.
+The whole wire contract — every status, code and response key above — is pinned by
+[`tests/integration/src/conformance/`](tests/integration/src/conformance/), whose fixtures are JSON
+so the enforcement layer can implement against the same table.
 
 ## Features
 

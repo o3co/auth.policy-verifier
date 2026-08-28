@@ -516,6 +516,50 @@ and version sections follow the release labeling policy in
 
 ### Added
 
+- **A wire-contract conformance suite, so "drop-in replaceable behind
+  `VerifierEndpoint`" is a claim this repository can fail**
+  ([#125](https://github.com/o3co/auth.policy-verifier/issues/125)). The
+  interface an enforcement layer codes against lives in
+  [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors), so
+  nothing here checked that the wire shape this service publishes is the wire
+  shape that repository implements. A field rename or a status remap would have
+  been invisible until it broke every caller at once, at runtime.
+
+  `describeWireContractConformance` joins the other suites in
+  `tests/integration/src/conformance/`, and it is the odd one out on purpose:
+  the rest are engine-agnostic and pin the seam *underneath* the endpoint, while
+  this one pins the HTTP surface *above* it — statuses, the exact key set of
+  every response body, and which refusal wins when a request is wrong in two
+  ways at once. Its adapter is a transport rather than an engine, so an OPA or
+  Cedar deployment of this same service satisfies it by answering identically
+  over HTTP, which is precisely what the swap promise means.
+
+  **The fixtures are JSON files** (`conformance/fixtures/wireContract/`), not
+  literals in the runner. The enforcement layer is a different repository and
+  need not be TypeScript; a table it can read is the only version of this
+  contract that can be shared rather than re-typed, and re-typing it is the
+  drift #125 was filed about. `requestCases.json` is every refusal — status,
+  code, and what the message must and must not name — and
+  `responseEnvelopes.json` is the key set of each response body, exhaustive in
+  both directions: a response carrying a key the contract never promised fails
+  as readily as one missing a key it did.
+
+  It pins the contract **as #118 and #115 left it**, not as it was: a malformed
+  body is `400 invalid_request` whether or not a credential was presented (it
+  was `401` before #118), an oversized body is a `413 payload_too_large` deny
+  envelope rather than Express's HTML page, whitespace in `resource` or `action`
+  is refused rather than trimmed, an unknown property is refused and named,
+  `subject` is omitted when the token carries no `sub` (#158), `satisfiedBy`
+  appears on a passing rule group only (#135), and a collector fan-out that runs
+  out of time is `403 collector_timeout` with an empty `reason.groups` (#115).
+  `POST /verify/batch` is pinned alongside it — the envelope, the preserved
+  order, `200` even when every entry denies, and the refusal that names the
+  offending index and rejects the whole batch before any entry is decided.
+
+  The deny envelope the READMEs print verbatim is now read from
+  `responseEnvelopes.json` by `verifyInputValidation.test.mts` instead of being
+  restated there, so the shape has one definition rather than a fourth copy.
+
 - **A rule-purity conformance suite, so the contract `evaluate()` spends is one
   something can fail** ([#152](https://github.com/o3co/auth.policy-verifier/issues/152)).
   `evaluate()` runs every rule group rather than stopping at the first failure
@@ -1337,6 +1381,17 @@ and version sections follow the release labeling policy in
   departure from its shared-check-function mechanism — and which had never been
   written for the one departure the section documents. Two implementations held
   in step by hand had drifted, as #157's numeric knobs had before them.
+
+- The "How It Works" diagram in `README.md` and `README.ja.md` still put JWT
+  verification first, contradicting the same file's own "Request Limits" section
+  and the behaviour #118 shipped
+  ([#125](https://github.com/o3co/auth.policy-verifier/issues/125)). The diagram
+  is the first thing a client author reads, and it described the pre-#118
+  ordering: a reader who took it at face value would have expected `401` for a
+  malformed unauthenticated request, which is exactly the answer that changed.
+  Body validation is now step 1, the remaining steps are renumbered, and the
+  order is stated under the diagram rather than left to be inferred from it.
+  Found while writing the #125 conformance suite.
 
 - A decision response carried `subject: ""` for a token whose `sub` claim is
   present but empty, while the field's own documentation said it is absent when
