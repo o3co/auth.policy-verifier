@@ -83,6 +83,39 @@ export class UserLevelAtLeast implements Rule {
 - 既定の `ruleType` に threshold を含めているので、`new UserLevelAtLeast({ threshold: 3 })` と `new UserLevelAtLeast({ threshold: 5 })` は異なるグループを生成し、AND 結合されます。OR 結合させたい場合（例「レベル ≥ 3 または別の基準」）は、両方に同じ `group` 文字列を渡してください。
 - `Infinity` は `Number.isNaN` チェックを通過します（組み込みの `requireNumber` 規約と一致）。しかし `level >= Infinity` は有限の `level` に対して常に `false` になるため、`threshold: Infinity` は静かに常時拒否する Rule を生成します。この挙動が問題になる場合は、設定層でドメイン境界を検証してください。
 
+## 信頼境界: `requestContext` は呼び出し側のもの
+
+`CollectorContext` は 4 種類の入力を運びますが、呼び出し側が自由に埋められるのはそのうち 1 つだけです:
+
+| フィールド | 出どころ | 信頼度 |
+|---|---|---|
+| `payload` | bearer token。署名・issuer・audience・有効期限の検証を通過済み | 検証済み |
+| `resource` / `action` | リクエストボディ。形は route が検証し、`resource` は設定された `ResourceParser` が parse する | 値は呼び出し側が選ぶ／形は検証済み |
+| `headers` | トランスポートが設定（現状は `x-request-id`） | トランスポート由来 |
+| `requestContext` | リクエストボディの `context` をそのまま転送 | **未検証（untrusted）** |
+
+有効なトークンを持つ者は `context` に何でも書けます。`requestContext.role` を `ATTR_ROLES` に昇格させる Collector は、呼び出し側に「自分の認可入力を自分で書く」権限を渡したことになります — トークンが「誰であるか」を述べ、そのすぐ後にボディが「何をしてよいか」を述べる形です。しかもそれはたった 1 行で、隣にある `payload.sub` を昇格させる行と見分けがつきません。
+
+データ自体には両者を区別する手がかりがないため、型に区別させます。`requestContext` の型は `UntrustedRequestContext` — プロパティアクセスでは中身に到達できない不透明な brand です:
+
+```ts
+context.requestContext?.clientIp;
+//                      ^^^^^^^^ Property 'clientIp' does not exist on type 'UntrustedRequestContext'.
+
+readUntrustedRequestContext(context.requestContext)?.clientIp; // OK
+```
+
+この unwrap こそが要点です。無意識に手が伸びることがなく、値を読むまさにその行で信頼度を明示し、呼び出し側のデータがポリシーに入る箇所すべてに（自分にとってもレビュアーにとっても）目印を付けます。unwrap した後にどうするかは実装者の判断です — どのフィールドを信頼してよいかはフレームワークには分かりません。分かるのは「明示せずに消費させてはならない」ということだけです。
+
+unwrap した後の指針:
+
+- **読むフィールドは毎回検証する。** 型と形を確認すること。`readUntrustedRequestContext` が返すのは `Record<string, unknown> | undefined` なので、narrowing は実装者の責任です。
+- **identity や entitlement をここから昇格させない。** role、permission、scope、subject id、テナント所属は、検証済みの `payload` か、検証済み ID で問い合わせたストアから取得すること。ボディからではありません。
+- **呼び出し側が嘘をついても得をしないリクエスト事実は昇格させてよい** — locale、UI ヒント、操作の形など。判断基準は「攻撃者がこのフィールドを好きな値にしたとき、何が手に入るか」です。答えが「permission」なら、それは誤った出どころです。
+- **場当たり的な読み取りより宣言的な allowlist を優先する。** `builtins` の `RequestContextAttributeCollector` は、運用者が設定で名前と型を宣言したフィールドだけを昇格させます。誰も宣言していないフィールドは Rule に到達できません。
+
+`CollectorContext` を自前で組み立てるトランスポート（自作の interceptor やテスト）は、`markUntrustedRequestContext` で受け取った時点の record をマークします。本リポジトリの verify route はボディの `context` に対してまさにこれを行っており、brand を生成できるのはこの関数だけなので、生のボディオブジェクトが誤って Collector に届くことはありません。
+
 ## カスタム AttributeCollector の書き方
 
 `AttributeCollector` は `@o3co/auth.policy-verifier.core` で定義されます:
@@ -96,7 +129,7 @@ interface AttributeCollector {
 - 1 つの Collector は **焦点を絞った属性キー群**を生成してください。関係のない抽出をまとめないこと。IP アドレスと User-Agent を抽出するなら Collector を 2 つに分けてください。
 - 属性キーは文字列定数を使うこと。`@o3co/auth.policy-verifier.core` の `ATTR_SCOPES`、`ATTR_PERMISSIONS`、`ATTR_ROLES`、`ATTR_USER_ID`、`ATTR_CLIENT_ID` を参照。プロジェクト固有のキーは独自の定数を定義し、**core のキーを異なるセマンティクスで再利用しないこと**。
 - `AttributePipeline` は全 Collector を並列実行し、結果をマージします: 配列値は連結、スカラ／オブジェクトは後勝ち。この挙動に合わせて設計し、Collector の実行順序には依存しないこと。
-- `CollectorContext.requestContext` は意図的に型付けされていません。エンジンは汎用 `requestContext` Collector を提供しません。`requestContext` の形は consuming project のトランスポート層 / interceptor が定義するものであり、解釈はプロジェクトの責務だからです。必要なフィールドごとに焦点を絞った Collector を書き、形の検証はその Collector 内で行ってください。
+- `CollectorContext.requestContext` は意図的に型付けされていません。エンジンは汎用 `requestContext` Collector を提供しません。`requestContext` の形は consuming project のトランスポート層 / interceptor が定義するものであり、解釈はプロジェクトの責務だからです。必要なフィールドごとに焦点を絞った Collector を書き、形の検証はその Collector 内で行ってください。同時に唯一の未検証入力でもあります — 中身を読む前に [信頼境界](#信頼境界-requestcontext-は呼び出し側のもの) を参照してください。
 
 ### 実例: `ClientIpCollector`
 
@@ -108,13 +141,16 @@ import type {
   Attributes,
   CollectorContext,
 } from "@o3co/auth.policy-verifier.core";
+import { readUntrustedRequestContext } from "@o3co/auth.policy-verifier.core";
 
 // プロジェクト固有の属性キー定数 — プロジェクトローカルで定義する。
 export const ATTR_CLIENT_IP = "clientIp" as const;
 
 export class ClientIpCollector implements AttributeCollector {
   async collect(context: CollectorContext): Promise<Attributes> {
-    const ip = context.requestContext?.clientIp;
+    // 呼び出し側が入れた値であり、何を書くこともできた。ATTR_CLIENT_IP を読む
+    // Rule は「値を選ばれてもよい」ものでなければならない。
+    const ip = readUntrustedRequestContext(context.requestContext)?.clientIp;
     if (typeof ip !== "string" || ip.length === 0) {
       return new Map(); // 何も出力しない — 下流 Rule では属性欠落として safe-deny される
     }
@@ -126,13 +162,22 @@ export class ClientIpCollector implements AttributeCollector {
 要点:
 
 - 形が不正または値が欠落している場合は空 `Map` を返すこと。キーを `null` / `undefined` に設定しない — 「欠落」と「存在するが falsy」を区別する下流 Rule が壊れやすくなるため。
-- 形の検証は Collector 内で行う。`requestContext` は `Record<string, unknown>` 型なので、それを消費する Collector が narrowing の適切な場所です。
+- 形の検証は Collector 内で行う。`readUntrustedRequestContext` が返すのは `Record<string, unknown> | undefined` であり、それを消費する Collector が narrowing の適切な場所です。そのフィールドが取りうる値を知っているのもそこだけです。
+- なお、この例は推奨実装ではなく信頼境界の問いを示すためのものです。*呼び出し側が申告した* client IP は監査注記の材料であってアクセス判断の材料ではありません。ポリシーが依拠する IP は、ボディではなくトランスポート（デプロイが信頼するプロキシヘッダを `context.headers` から読む Collector）から取得してください。
 
 ## RuleCollector を書くタイミング
 
 `RuleCollector` は `CollectorContext` を `Rule[]` に変換するファクトリです。組み込み例として [`packages/builtins/src/rules/collectors/`](../packages/builtins/src/rules/collectors/) の `ResourceActionPermissionRuleCollector` / `ResourceActionScopeRuleCollector` があります。リクエストの resource と action から `HasPermission` / `HasScope` を構築しています。
 
 Rule の構築がリクエスト時のコンテキスト（resource、action、ヘッダ）に依存する場合に、カスタム `RuleCollector` を書いてください。Rule が全リクエストで一定なら、compose 時に `Rule` を直接インスタンス化すれば十分で、Collector は不要です。
+
+### Rule は `attrs` だけで判断する
+
+RuleCollector は `CollectorContext` 全体を見られるため、エンジンのレイヤ分離をうっかり壊せる唯一の場所です。契約（[AGENTS.md — Collector / Rule / Attribute Contract](../AGENTS.md#collector--rule--attribute-contract)）は「Rule の判断は attribute だけから導出できること」です。リクエストを読むのは Collector、`attrs` を読むのが Rule です。
+
+境界線は builtins が示しています。`ResourceActionScopeRuleCollector` は `new HasScope(\`${context.action}:${context.resource.resourceType}\`)` を組み立てます — リクエスト由来ではありますが、それは Rule が *探す値* にすぎず、判断の対象は `attrs.get(ATTR_SCOPES)` です。違反はもう一方の形です: Collector 内で context を unwrap し、そこで 2 つの値を比較し、`verify(attrs)` が `attrs` を無視して既に済ませた比較結果を返す Rule を生成する。この Rule は attribute からはテストできず、閉じ込めたリクエスト状態は Collector を一度も通っていません — その一部でも `readUntrustedRequestContext` 由来なら、呼び出し側のデータが attribute 層を経ずに判断へ到達したことになります。
+
+**これは規約であって検査ではありません。** `verify(attrs)` は attribute しか受け取りませんが、Collector が手にしていた値を Rule が closure に閉じ込めることは何も妨げておらず、コンパイラもテストスイートも教えてくれません。値は attribute に流し、Rule には `attrs.get(...)` で比較させてください。
 
 ## 関連資料
 

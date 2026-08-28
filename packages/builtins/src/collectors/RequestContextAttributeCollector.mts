@@ -6,6 +6,7 @@ import type {
 	Attributes,
 	CollectorContext,
 } from "@o3co/auth.policy-verifier.core";
+import { readUntrustedRequestContext } from "@o3co/auth.policy-verifier.core";
 
 /** Types a `requestContext` field may be promoted as. */
 export type RequestContextAttributeType = "string" | "number" | "boolean" | "string[]";
@@ -90,7 +91,10 @@ export class RequestContextAttributeCollector implements AttributeCollector {
 
 	async collect(context: CollectorContext): Promise<Attributes> {
 		const attrs: Attributes = new Map();
-		const requestContext = context.requestContext;
+		// The unwrap is the acknowledgement `UntrustedRequestContext` asks for:
+		// everything below this line is the caller's own data, which is why the
+		// mapping list — not the request — decides what becomes an attribute.
+		const requestContext = readUntrustedRequestContext(context.requestContext);
 		if (requestContext === undefined || requestContext === null) return attrs;
 
 		for (const mapping of this.mappings) {

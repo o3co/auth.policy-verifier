@@ -9,6 +9,7 @@ import {
 	type EvaluateOptions,
 	type EventLogger,
 	evaluate,
+	markUntrustedRequestContext,
 	type Resource,
 	ResourceParseError,
 	type ResourceParser,
@@ -204,12 +205,17 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	): Promise<DecisionResponse> {
 		const requestId = req.get("x-request-id");
 		const headers = requestId ? { "x-request-id": requestId } : undefined;
+		// `payload` survived signature verification and `headers` were read off the
+		// transport; `entry.context` is whatever the caller put in the body, so it
+		// crosses into the collector layer marked as such. A collector has to
+		// unwrap it, which is where its author decides what a caller may choose —
+		// see `UntrustedRequestContext` in core.
 		const context = {
 			payload,
 			resource,
 			action: entry.action,
 			headers,
-			requestContext: entry.context,
+			requestContext: entry.context ? markUntrustedRequestContext(entry.context) : undefined,
 		};
 
 		// Timed from here so the measurement is the decision itself — the two

@@ -42,3 +42,5 @@ export type {
 	RuleOutcome,
 	VerifierPayload,
 } from "./types.mjs";
+export type { UntrustedRequestContext } from "./untrusted.mjs";
+export { markUntrustedRequestContext, readUntrustedRequestContext } from "./untrusted.mjs";

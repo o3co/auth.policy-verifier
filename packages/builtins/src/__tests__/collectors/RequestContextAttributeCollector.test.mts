@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { CollectorContext } from "@o3co/auth.policy-verifier.core";
+import { markUntrustedRequestContext } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 import { RequestContextAttributeCollector } from "#/collectors/RequestContextAttributeCollector.mjs";
 
@@ -9,7 +10,9 @@ const makeContext = (requestContext?: Record<string, unknown>): CollectorContext
 	payload: {},
 	resource: { raw: "document:1", resourceType: "document", resourceId: "1" },
 	action: "read",
-	...(requestContext !== undefined ? { requestContext } : {}),
+	...(requestContext !== undefined
+		? { requestContext: markUntrustedRequestContext(requestContext) }
+		: {}),
 });
 
 describe("RequestContextAttributeCollector", () => {

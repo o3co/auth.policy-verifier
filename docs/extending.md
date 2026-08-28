@@ -83,6 +83,39 @@ Notes:
 - The default `ruleType` includes the threshold so `new UserLevelAtLeast({ threshold: 3 })` and `new UserLevelAtLeast({ threshold: 5 })` produce distinct groups and are AND-combined. If you want them OR-combined (e.g. "level ≥ 3 OR some other ladder rung"), pass a shared `group` string to both.
 - `Infinity` passes the `Number.isNaN` check (matching the builtin `requireNumber` convention), but `level >= Infinity` is `false` for every finite level — so `threshold: Infinity` produces a rule that silently always-denies. Validate domain bounds at your configuration layer if this matters.
 
+## The trust boundary: `requestContext` is the caller's
+
+`CollectorContext` carries four kinds of input, and only one of them is the caller's to fill:
+
+| Field | Where it comes from | Trust |
+|---|---|---|
+| `payload` | the bearer token, after signature, issuer, audience and expiry verification | verified |
+| `resource` / `action` | the request body; shape validated by the route, `resource` parsed by the configured `ResourceParser` | caller-chosen value, validated shape |
+| `headers` | set by the transport (currently `x-request-id`) | transport |
+| `requestContext` | the request body's `context`, forwarded verbatim | **untrusted** |
+
+Anyone holding a valid token can put anything in `context`. A collector that promotes `requestContext.role` into `ATTR_ROLES` has handed that caller its own authorization input: the token says who you are, and then the body says what you may do. It is one line, and it looks exactly like the line next to it that promotes `payload.sub`.
+
+Nothing about the data itself tells the two apart, so the type does. `requestContext` is an `UntrustedRequestContext` — an opaque brand whose contents are not reachable by property access:
+
+```ts
+context.requestContext?.clientIp;
+//                      ^^^^^^^^ Property 'clientIp' does not exist on type 'UntrustedRequestContext'.
+
+readUntrustedRequestContext(context.requestContext)?.clientIp; // ok
+```
+
+The unwrap is the point. It cannot be reached for absent-mindedly, it names the trust level on the line that reads the value, and it marks — for you and for a reviewer — every place caller-supplied data enters a policy. What you do after unwrapping is yours to decide; the framework cannot know which fields your deployment may trust, only that you should have to say so.
+
+Once unwrapped:
+
+- **Validate every field you read.** Check the type and the shape. `readUntrustedRequestContext` returns `Record<string, unknown> | undefined`, so the narrowing is yours.
+- **Never promote an identity or an entitlement out of it.** Roles, permissions, scopes, subject ids, tenant membership: those come from the verified `payload`, or from a store your collector queries with a verified id. Not from the body.
+- **Do promote request facts the caller gains nothing by lying about** — a locale, a UI hint, the shape of the operation. The test is: if an attacker sets this field to anything it likes, what do they get? If the answer is "a permission", it is the wrong source.
+- **Prefer a declared allowlist over ad-hoc reads.** `RequestContextAttributeCollector` in `builtins` promotes only fields an operator names in config, each with a declared type; a field nobody declared cannot reach a rule at all.
+
+A transport that builds a `CollectorContext` by hand — your own interceptor, or a test — marks the record on the way in with `markUntrustedRequestContext`. This repo's verify route does exactly that with the body's `context`, and it is the only thing that mints the brand, so a raw body object cannot reach a collector by mistake.
+
 ## Writing a custom AttributeCollector
 
 `AttributeCollector` is defined in `@o3co/auth.policy-verifier.core`:
@@ -96,7 +129,7 @@ interface AttributeCollector {
 - One collector should produce a **focused set of attribute keys**. Do not bundle unrelated extractions. If you are extracting IP address and user agent, write two collectors.
 - Prefer string constants for attribute keys. See `ATTR_SCOPES`, `ATTR_PERMISSIONS`, `ATTR_ROLES`, `ATTR_USER_ID`, `ATTR_CLIENT_ID` in `@o3co/auth.policy-verifier.core`. For project-specific keys, define your own constants and **do not reuse core keys with different semantics**.
 - The `AttributePipeline` runs all collectors in parallel and merges their results: array values are concatenated, scalar/object values follow last-writer-wins. Design accordingly — do not rely on collector ordering.
-- `CollectorContext.requestContext` is intentionally unshaped. The engine does not ship a generic `requestContext` collector because its shape is defined by each consuming project's transport or interceptor. Write a focused collector per field you need to promote; validate shapes inside that collector.
+- `CollectorContext.requestContext` is intentionally unshaped. The engine does not ship a generic `requestContext` collector because its shape is defined by each consuming project's transport or interceptor. Write a focused collector per field you need to promote; validate shapes inside that collector. It is also the one untrusted input — see [The trust boundary](#the-trust-boundary-requestcontext-is-the-callers) before you read anything out of it.
 
 ### Worked example: `ClientIpCollector`
 
@@ -108,13 +141,16 @@ import type {
   Attributes,
   CollectorContext,
 } from "@o3co/auth.policy-verifier.core";
+import { readUntrustedRequestContext } from "@o3co/auth.policy-verifier.core";
 
 // Project-specific attribute key constant — keep it local to your project.
 export const ATTR_CLIENT_IP = "clientIp" as const;
 
 export class ClientIpCollector implements AttributeCollector {
   async collect(context: CollectorContext): Promise<Attributes> {
-    const ip = context.requestContext?.clientIp;
+    // The caller supplied this and could have written anything in it; a rule
+    // reading ATTR_CLIENT_IP must be one that tolerates a chosen value.
+    const ip = readUntrustedRequestContext(context.requestContext)?.clientIp;
     if (typeof ip !== "string" || ip.length === 0) {
       return new Map(); // emit nothing — downstream rules see missing attribute and safe-deny
     }
@@ -126,13 +162,22 @@ export class ClientIpCollector implements AttributeCollector {
 Notes:
 
 - When the shape is wrong or the value is missing, emit an empty `Map`. Do not set the key to `null` or `undefined` — downstream rules distinguishing "missing" vs "present-and-falsy" would be brittle.
-- Validate the shape inside the collector. The type of `requestContext` is `Record<string, unknown>`; a collector that consumes it is the right place to narrow.
+- Validate the shape inside the collector. `readUntrustedRequestContext` hands back a `Record<string, unknown> | undefined`; the collector that consumes it is the right place to narrow, and the only place that knows what the field is allowed to be.
+- This particular example is a good illustration of the trust question rather than a recommendation: a client IP the *caller* declares is worth an audit annotation, not an access decision. An IP a policy relies on must come from the transport (a proxy header the deployment trusts, promoted by a collector reading `context.headers`), not from the body.
 
 ## RuleCollector: when to write one
 
 `RuleCollector` is the factory that turns a `CollectorContext` into a `Rule[]`. Built-in examples are `ResourceActionPermissionRuleCollector` and `ResourceActionScopeRuleCollector` under [`packages/builtins/src/rules/collectors/`](../packages/builtins/src/rules/collectors/). They construct a `HasPermission` / `HasScope` rule from the request's resource and action.
 
 Write a custom `RuleCollector` when your rule construction depends on request-time context (resource, action, headers). If your rule is constant across all requests, instantiate the `Rule` directly at composition time instead — no collector needed.
+
+### A rule decides from `attrs`, and only from `attrs`
+
+A rule collector sees the whole `CollectorContext`, which makes it the one place where the engine's separation of layers can be undone by accident. The contract ([AGENTS.md — Collector / Rule / Attribute Contract](../AGENTS.md#collector--rule--attribute-contract)) is that a rule's decision is derivable from the attributes alone: collectors read the request, rules read `attrs`.
+
+The builtins show the line. `ResourceActionScopeRuleCollector` builds `new HasScope(\`${context.action}:${context.resource.resourceType}\`)` — request-derived, but only as the value the rule *looks for*; what it decides against is `attrs.get(ATTR_SCOPES)`. The violation is the other shape: unwrapping the context in the collector, comparing two values there, and returning a rule whose `verify(attrs)` ignores `attrs` and reports the comparison already made. That rule is not testable from attributes, and the request state it closed over never passed through a collector — so if any of it came from `readUntrustedRequestContext`, caller-supplied data reached a decision without the attribute layer ever seeing it.
+
+**This is a convention, not a check.** `verify(attrs)` takes only attributes, but nothing stops a rule from closing over anything its collector had in hand, and neither the compiler nor the test suite will tell you. Route the values into attributes and have the rule compare them with `attrs.get(...)`.
 
 ## Further reading
 

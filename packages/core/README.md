@@ -94,6 +94,7 @@ A module registers collector, parser, and key resolver factories into the provid
 | `ResourceParser` | `parse(raw: string): Resource` — converts a raw resource string into a `Resource`; throws `ResourceParseError` when the string is not in the syntax it parses |
 | `ResourceParseError` | `Error` subclass carrying `raw` (the refused string) and `detail` (why). A **request** error, not a server error — the transport layer answers it 400-class. Exported as a class, so `instanceof` narrows it |
 | `CollectorContext` | Input passed to every collector: `payload`, `resource`, `action`, optional `headers` and `requestContext` |
+| `UntrustedRequestContext` | The type of `requestContext` — the caller's own data, sealed so it takes an explicit `readUntrustedRequestContext(...)` to read. `markUntrustedRequestContext(...)` mints one at the transport boundary. See [docs/extending.md — The trust boundary](../../docs/extending.md#the-trust-boundary-requestcontext-is-the-callers) |
 | `Attributes` | `Map<string, unknown>` — subject attribute bag |
 | `AttributeCollector` | `collect(context: CollectorContext): Promise<Attributes>` |
 | `Rule` | `{ ruleType: string; code: string; message: string; verify(attrs: Attributes): boolean }` |

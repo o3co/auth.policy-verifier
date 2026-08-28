@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { UntrustedRequestContext } from "./untrusted.mjs";
+
 /** Structured form of a resource string after parsing. */
 export interface Resource {
 	raw: string;
@@ -29,13 +31,19 @@ export interface KeyResolver {
 
 /**
  * Request-scoped input shared across every attribute and rule collector for a single verify call.
+ *
+ * Every field but one is input the deployment vouches for: `payload` survived
+ * signature verification, `resource` and `action` were validated by the
+ * transport, `headers` were set by it. `requestContext` is the caller's own —
+ * see {@link UntrustedRequestContext} for why it is sealed rather than plain.
  */
 export interface CollectorContext {
 	payload: VerifierPayload;
 	resource: Resource;
 	action: string;
 	headers?: Record<string, string>;
-	requestContext?: Record<string, unknown>;
+	/** Caller-supplied; read it with `readUntrustedRequestContext`. */
+	requestContext?: UntrustedRequestContext;
 }
 
 /**
