@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+	AttributeConflictError,
 	type AttributePipeline,
 	CollectorTimeoutError,
 	consoleLogger,
@@ -157,6 +158,8 @@ const errorBody = (code: string, message: string): ErrorBody => ({
  */
 const COLLECTOR_TIMEOUT_CODE = "collector_timeout";
 const COLLECTOR_TIMEOUT_MESSAGE = "Authorization could not be decided in time";
+const ATTRIBUTE_CONFLICT_CODE = "attribute_conflict";
+const ATTRIBUTE_CONFLICT_MESSAGE = "Authorization inputs conflicted";
 
 /** One validated entry: the request as sent, plus its resource already parsed. */
 interface ValidatedDecisionRequest {
@@ -498,21 +501,31 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			]);
 			decision = evaluate(attrs, rules, config.evaluateOptions);
 		} catch (cause) {
-			// Anything else is a genuine fault and keeps surfacing as a 500.
-			if (!(cause instanceof CollectorTimeoutError)) throw cause;
+			// Two collect failures are denies of their own (#115 timeouts, #174
+			// attribute conflicts); anything else is a genuine fault and keeps
+			// surfacing as a 500.
+			const denial =
+				cause instanceof CollectorTimeoutError
+					? { code: COLLECTOR_TIMEOUT_CODE, message: COLLECTOR_TIMEOUT_MESSAGE }
+					: cause instanceof AttributeConflictError
+						? { code: ATTRIBUTE_CONFLICT_CODE, message: ATTRIBUTE_CONFLICT_MESSAGE }
+						: null;
+			if (denial === null) throw cause;
 			// The evaluator is deliberately never reached: it is the one place a
 			// short rule list could still be read as a policy, and `onEmptyRuleSet:
-			// "allow"` would then turn a timed-out rule pipeline into a permit. A
-			// deny is built here instead, with an empty `reason` because no rule
-			// group was evaluated — which is the honest account of what happened.
+			// "allow"` would then turn a timed-out (or conflicted) pipeline into a
+			// permit. A deny is built here instead, with an empty `reason` because
+			// no rule group was evaluated — which is the honest account of what
+			// happened. The conflicted attribute KEY reaches the log line via the
+			// error's message; the caller's message names neither key nor values.
 			logger.error(
 				{ err: cause, resource: entry.resource, action: entry.action, requestId },
-				COLLECTOR_TIMEOUT_CODE,
+				denial.code,
 			);
 			decision = {
 				decision: "deny",
-				code: COLLECTOR_TIMEOUT_CODE,
-				message: COLLECTOR_TIMEOUT_MESSAGE,
+				code: denial.code,
+				message: denial.message,
 				reason: { groups: [] },
 			};
 		}
