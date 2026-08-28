@@ -9,10 +9,27 @@ import { ATTR_PERMISSIONS, ATTR_ROLES } from "@o3co/auth.policy-verifier.core";
  * directly via `ATTR_PERMISSIONS` or transitively through a role in
  * `ATTR_ROLES`.
  *
- * Matching is case-insensitive. A granted permission of `"*"` wildcards
- * everything. A granted permission may contain a single `*` used as prefix,
- * suffix, or middle separator (e.g. `"posts.*"`, `"*.read"`, `"posts.*.read"`);
- * multiple wildcards are explicitly rejected because the two-part split would
+ * ## Matching
+ *
+ * Comparison is **exact and case-sensitive**, the same philosophy `HasScope`
+ * applies to scope values and `DotNotationResourceParser` applies to resource
+ * identifiers (#116, #117): compare what was written, never a normalized guess
+ * at what was meant. This rule matched case-insensitively until #155, which
+ * put permissions on the wrong side of the line those two argued —
+ * `ResourceActionPermissionRuleCollector` builds `{resource.raw}.perm:{action}`
+ * from the case-preserving parser, so `Project:1` and `project:1` were two
+ * namespaces to a scope rule and one to a permission rule. One vocabulary, one
+ * matching discipline.
+ *
+ * ## Wildcards
+ *
+ * A granted permission of `"*"` matches everything, and a granted permission
+ * may contain a single `*` as prefix, suffix, or middle separator (e.g.
+ * `"posts.*"`, `"*.read"`, `"posts.*.read"`). This is not an exception to the
+ * no-normalization rule: a wildcard is match structure the policy author
+ * **wrote into the grant**, not a rewrite of both sides behind their back. The
+ * literal halves around the `*` still compare exactly and case-sensitively.
+ * Multiple wildcards are rejected outright because the two-part split would
  * silently drop segments and over-grant.
  */
 export class HasPermission implements Rule {
@@ -35,9 +52,6 @@ export class HasPermission implements Rule {
 	}
 
 	private match(permission: string, required: string): boolean {
-		permission = permission.toLowerCase();
-		required = required.toLowerCase();
-
 		if (permission === "*") return true;
 		if (permission === required) return true;
 

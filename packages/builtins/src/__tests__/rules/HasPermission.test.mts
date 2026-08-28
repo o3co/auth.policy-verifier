@@ -36,10 +36,29 @@ describe("HasPermission", () => {
 		expect(rule.verify(attrs)).toBe(true);
 	});
 
-	it("is case insensitive", () => {
+	// #155: matching is exact and case-sensitive, the discipline #116 (HasScope)
+	// and #117 (DotNotationResourceParser) argued for every identifier
+	// vocabulary. The parser preserves case, so `Project:1` and `project:1` are
+	// two resources — a permission rule collapsing them was the exact
+	// "one resource on one side, two on the other" split #117 closed.
+	it("does not match across case: required Project:1 vs granted project:1", () => {
 		const rule = new HasPermission("Project:1.Perm:Read");
 		const attrs: Attributes = new Map([["permissions", ["project:1.perm:read"]]]);
-		expect(rule.verify(attrs)).toBe(true);
+		expect(rule.verify(attrs)).toBe(false);
+	});
+
+	it("does not match across case in the other direction either", () => {
+		const rule = new HasPermission("project:1.perm:read");
+		const attrs: Attributes = new Map([["permissions", ["Project:1.perm:READ"]]]);
+		expect(rule.verify(attrs)).toBe(false);
+	});
+
+	it("compares the literal halves around a wildcard case-sensitively", () => {
+		const rule = new HasPermission("project:1.perm:read");
+		// The wildcard is written structure and still honoured; the cased
+		// prefix is not the prefix the requirement carries.
+		const attrs: Attributes = new Map([["permissions", ["Project:*"]]]);
+		expect(rule.verify(attrs)).toBe(false);
 	});
 
 	it("checks permissions from roles", () => {
