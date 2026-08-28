@@ -50,11 +50,13 @@ new HasPermission(permission: string)
 
 - `ruleType`: `"permission"`, `code`: `"no_permission"`
 - Checks `ATTR_PERMISSIONS` (direct) and `ATTR_ROLES[].permissions` (via roles).
-- Wildcard matching (case-insensitive):
+- Matching is **exact and case-sensitive** — the same discipline `HasScope` applies to scopes and `DotNotationResourceParser` applies to resources: compare what was written, never a normalized guess at what was meant. The parser preserves case, so `Project:1.perm:read` and `project:1.perm:read` are different permissions, exactly as `Project:1` and `project:1` are different resources to a scope rule.
+- Wildcards in a **granted** permission are honoured — written match structure, not normalization; the literal halves around the `*` still compare exactly:
   - `"*"` matches any permission.
   - `"foo*"` matches any permission with prefix `foo`.
   - `"*bar"` matches any permission with suffix `bar`.
   - `"foo*bar"` matches any permission starting with `foo` and ending with `bar`.
+  - More than one `*` in a granted permission never matches (rejecting beats silently over-granting).
 
 ### HasScope
 

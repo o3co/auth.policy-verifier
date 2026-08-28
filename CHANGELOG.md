@@ -864,6 +864,31 @@ and version sections follow the release labeling policy in
 
 ### Changed
 
+- **BREAKING**: `HasPermission` matches exactly and case-sensitively
+  ([#155](https://github.com/o3co/auth.policy-verifier/issues/155)).
+
+  #116 made `HasScope` compare scope values exactly (RFC 6749 §3.3 makes them
+  opaque), and #117 carried the same principle into
+  `DotNotationResourceParser`: compare what was written, never a normalized
+  guess at what was meant. The permission vocabulary was never visited —
+  `HasPermission` lowercased both sides — so the exact divergence #117 closed
+  had re-entered through the permission door: the parser preserves case, making
+  `Project:1` and `project:1` two namespaces to a scope rule, while
+  `ResourceActionPermissionRuleCollector` builds `{raw}.perm:{action}` from
+  those same resources and `HasPermission` collapsed them into one.
+
+  Wildcards in a **granted** permission are kept, deliberately: a `*` is match
+  structure the policy author wrote into the grant, not a rewrite of both sides
+  behind their back. The literal halves around it now also compare exactly and
+  case-sensitively, and multiple wildcards still never match.
+
+  **Migration:** a deployment relying on case-mixed permission grants (a role
+  granting `Posts.*` against permissions built from a `posts:…` resource) now
+  sees denials where it saw grants. The change only ever narrows — nothing
+  that was denied before is granted now. Align the case of granted permissions
+  with what the resource parser actually emits; `ATTR_PERMISSIONS` /
+  `Role.permissions` values are compared verbatim.
+
 - **BREAKING**: `VerifierPayload.tokenType` is renamed to `authScheme`
   ([#158](https://github.com/o3co/auth.policy-verifier/issues/158)).
 
