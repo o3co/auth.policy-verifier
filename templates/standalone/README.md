@@ -47,6 +47,7 @@ Individual values can also be overridden with environment variables.
 | `OAUTH_JWT_MODE` | `verify` | `verify` fully verifies tokens; the explicit `insecure-decode` (test-only) decodes without signature verification — `exp`/`nbf` are still enforced |
 | `RULE_ON_EMPTY_RULE_SET` | `deny` | Decision when no rule is collected (`deny` \| `allow`) |
 | `VERIFY_MAX_BATCH_SIZE` | `50` | Cap on `POST /verify/batch` entries |
+| `VERIFY_CREDENTIAL_TO_COLLECTORS` | `never` | `expose` hands collectors the raw credential as `context.credential` — only for a collector that calls a downstream API as the subject. The default keeps collectors on verified claims; the credential is replayable and a logged context would leak it |
 | `LOG_LEVEL` | `info` | Minimum level emitted: `trace`\|`debug`\|`info`\|`warn`\|`error`\|`fatal`\|`silent`. Also the switch for the decision log — see [Observability](#observability) |
 
 ## HS256 secret strength

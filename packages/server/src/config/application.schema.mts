@@ -453,6 +453,17 @@ export const AppConfigSchema = z.object({
 			collectorTimeoutMs: boundedNumber(NUMERIC_BOUNDS.collectorTimeoutMs, "verify"),
 			collectorDeadlineMs: boundedNumber(NUMERIC_BOUNDS.collectorDeadlineMs, "verify"),
 			collectorConcurrency: boundedNumber(NUMERIC_BOUNDS.collectorConcurrency, "verify"),
+			/**
+			 * Whether collectors receive the raw credential as
+			 * `CollectorContext.credential` (#175). `"never"` (default): verified
+			 * claims only — the credential is replayable and a collector that
+			 * logs its context would leak a live token. `"expose"`: for a
+			 * project-side collector that calls a downstream API as the subject
+			 * (token forwarding/exchange); the exposure is a stated, greppable
+			 * config decision. An enum, not a boolean: `${?ENV}` hands this
+			 * schema a string, and an enum takes it without a coercion path.
+			 */
+			credentialToCollectors: z.enum(["never", "expose"]).default("never"),
 		})
 		/*
 		 * Taken verbatim, like `http` above — zod does not parse a default back
@@ -482,6 +493,7 @@ export const AppConfigSchema = z.object({
 			collectorTimeoutMs: DEFAULT_COLLECTOR_TIMEOUT_MS,
 			collectorDeadlineMs: DEFAULT_COLLECT_DEADLINE_MS,
 			collectorConcurrency: DEFAULT_COLLECTOR_CONCURRENCY,
+			credentialToCollectors: "never" as const,
 		})),
 	// Defaulted (not shape-only): deployments mount an overlay config OVER the
 	// template's application.conf, so a section the overlay does not repeat is
