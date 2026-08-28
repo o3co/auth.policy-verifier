@@ -39,7 +39,12 @@ import {
 	DEFAULT_JWKS_CACHE_MAX_AGE_MS,
 	DEFAULT_JWKS_COOLDOWN_MS,
 	DEFAULT_JWKS_TIMEOUT_MS,
+	DEFAULT_MAX_ACTION_LENGTH,
 	DEFAULT_MAX_BATCH_SIZE,
+	DEFAULT_MAX_BODY_BYTES,
+	DEFAULT_MAX_CONTEXT_ENTRIES,
+	DEFAULT_MAX_CONTEXT_VALUE_LENGTH,
+	DEFAULT_MAX_RESOURCE_LENGTH,
 	DEFAULT_MAX_TOKEN_AGE_SECONDS,
 	MAX_CLOCK_TOLERANCE_SECONDS,
 	MAX_TCP_PORT,
@@ -137,6 +142,47 @@ export const NUMERIC_BOUNDS = {
 		fallback: DEFAULT_MAX_BATCH_SIZE,
 		minimum: 1,
 		unit: "entries",
+	},
+	/*
+	 * What one decision request may carry (#118). Each is a floor of 1 and no
+	 * ceiling: raising one is an operator's explicit statement about their own
+	 * callers, while `Infinity` and the non-integers are refused here as they
+	 * are for every other knob — an unstated size is exactly what these replace.
+	 */
+	/** Cap on the JSON body `express.json()` will read. */
+	maxBodyBytes: {
+		field: "maxBodyBytes",
+		fallback: DEFAULT_MAX_BODY_BYTES,
+		minimum: 1,
+		unit: "bytes",
+	},
+	/** Cap on the `resource` string. */
+	maxResourceLength: {
+		field: "maxResourceLength",
+		fallback: DEFAULT_MAX_RESOURCE_LENGTH,
+		minimum: 1,
+		unit: "characters",
+	},
+	/** Cap on the `action` string. */
+	maxActionLength: {
+		field: "maxActionLength",
+		fallback: DEFAULT_MAX_ACTION_LENGTH,
+		minimum: 1,
+		unit: "characters",
+	},
+	/** Cap on the properties and array elements in the whole `context` tree. */
+	maxContextEntries: {
+		field: "maxContextEntries",
+		fallback: DEFAULT_MAX_CONTEXT_ENTRIES,
+		minimum: 1,
+		unit: "entries",
+	},
+	/** Cap on every string in the `context` tree, keys included. */
+	maxContextValueLength: {
+		field: "maxContextValueLength",
+		fallback: DEFAULT_MAX_CONTEXT_VALUE_LENGTH,
+		minimum: 1,
+		unit: "characters",
 	},
 } satisfies Record<string, BoundSpec>;
 

@@ -227,6 +227,12 @@ describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#1
 		expect(config.oauth.jwt.maxTokenAgeSeconds).toBe(86_400);
 		expect(config.oauth.jwt.clockToleranceSeconds).toBe(0);
 		expect(config.verify.maxBatchSize).toBe(50);
+		// The request limits (#118) travel the same path.
+		expect(config.verify.maxBodyBytes).toBe(65_536);
+		expect(config.verify.maxResourceLength).toBe(512);
+		expect(config.verify.maxActionLength).toBe(64);
+		expect(config.verify.maxContextEntries).toBe(64);
+		expect(config.verify.maxContextValueLength).toBe(1024);
 	});
 
 	it("reads every numeric knob from the environment, where each arrives as a string", () => {
@@ -238,6 +244,11 @@ describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#1
 		process.env.OAUTH_JWT_MAX_TOKEN_AGE_SECONDS = "600";
 		process.env.OAUTH_JWT_CLOCK_TOLERANCE_SECONDS = "60";
 		process.env.VERIFY_MAX_BATCH_SIZE = "25";
+		process.env.VERIFY_MAX_BODY_BYTES = "16384";
+		process.env.VERIFY_MAX_RESOURCE_LENGTH = "128";
+		process.env.VERIFY_MAX_ACTION_LENGTH = "32";
+		process.env.VERIFY_MAX_CONTEXT_ENTRIES = "16";
+		process.env.VERIFY_MAX_CONTEXT_VALUE_LENGTH = "256";
 
 		const config = loadAppConfig(configDirPath, "development");
 
@@ -248,6 +259,11 @@ describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#1
 		expect(config.oauth.jwt.maxTokenAgeSeconds).toBe(600);
 		expect(config.oauth.jwt.clockToleranceSeconds).toBe(60);
 		expect(config.verify.maxBatchSize).toBe(25);
+		expect(config.verify.maxBodyBytes).toBe(16_384);
+		expect(config.verify.maxResourceLength).toBe(128);
+		expect(config.verify.maxActionLength).toBe(32);
+		expect(config.verify.maxContextEntries).toBe(16);
+		expect(config.verify.maxContextValueLength).toBe(256);
 	});
 
 	it.each([
@@ -258,6 +274,11 @@ describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#1
 		["OAUTH_JWT_MAX_TOKEN_AGE_SECONDS", "1.5"],
 		["OAUTH_JWT_CLOCK_TOLERANCE_SECONDS", "301"],
 		["VERIFY_MAX_BATCH_SIZE", "0"],
+		["VERIFY_MAX_BODY_BYTES", "0"],
+		["VERIFY_MAX_RESOURCE_LENGTH", "-1"],
+		["VERIFY_MAX_ACTION_LENGTH", "1.5"],
+		["VERIFY_MAX_CONTEXT_ENTRIES", "abc"],
+		["VERIFY_MAX_CONTEXT_VALUE_LENGTH", "0"],
 	])("refuses to boot on %s=%s", (key, value) => {
 		setRequiredEnv();
 		process.env[key] = value;
@@ -270,6 +291,8 @@ describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#1
 		"OAUTH_JWT_JWKS_COOLDOWN_MS",
 		"OAUTH_JWT_CLOCK_TOLERANCE_SECONDS",
 		"VERIFY_MAX_BATCH_SIZE",
+		"VERIFY_MAX_BODY_BYTES",
+		"VERIFY_MAX_CONTEXT_ENTRIES",
 	])("refuses %s exported empty rather than reading it as zero", (key) => {
 		// `VAR=` substitutes an empty string, and `Number("")` is 0 — which the
 		// knobs whose floor is 0 would otherwise accept as a deliberate setting.

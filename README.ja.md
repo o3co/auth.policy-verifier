@@ -261,8 +261,53 @@ resource {
 verify {
   maxBatchSize = 50             # POST /verify/batch の件数上限
   maxBatchSize = ${?VERIFY_MAX_BATCH_SIZE}
+  maxBodyBytes = 65536          # JSON ボディの上限。超過は 413 payload_too_large
+  maxBodyBytes = ${?VERIFY_MAX_BODY_BYTES}
+  maxResourceLength = 512       # `resource` の文字数
+  maxResourceLength = ${?VERIFY_MAX_RESOURCE_LENGTH}
+  maxActionLength = 64          # `action` の文字数
+  maxActionLength = ${?VERIFY_MAX_ACTION_LENGTH}
+  maxContextEntries = 64        # `context` 全体のプロパティ数 + 配列要素数（深さを問わず）
+  maxContextEntries = ${?VERIFY_MAX_CONTEXT_ENTRIES}
+  maxContextValueLength = 1024  # `context` 内の文字列の文字数（キー名を含む）
+  maxContextValueLength = ${?VERIFY_MAX_CONTEXT_VALUE_LENGTH}
 }
 ```
+
+### リクエストの上限
+
+呼び出し側が決める入力はすべて上限を持ち、その上限が上のノブです。`maxBodyBytes` は外枠 —
+`express.json()` の limit で、Express の暗黙の 100 KB デフォルトより小さい — であり、大きなバッチでは
+これが最初に効きます。フィールドごとの上限が縛るのは *1 件* であって N 件の合計ではないためです。
+`maxContextEntries` は `context` ツリー全体のプロパティと配列要素をすべて数えるので、ネストは禁止では
+なく上限が付きます (`RequestContextAttributeCollector` は `tenant.id` のようなドットパスを読みます)。
+ネスト 1 段につき最低 1 エントリを消費するため、これは深さの上限にもなります。
+
+明示しておくべき拒否が 3 つあります:
+
+- **`resource` / `action` の空白は trim せず拒否** — リソース文法がすでに適用している方針を、`action` と
+  独自パーサーを登録したデプロイにも広げたものです。どちらも発行者が grant した
+  `{action}:{resourceType}` scope に連結され、RFC 6749 §3.3 では空白が scope 値の区切り文字です。
+- **未知のプロパティは拒否** — `{"resource": "project:1", "action": "read", "subject": "admin"}` は、
+  `subject` を黙って無視した決定ではなく `400 invalid_request` になります。subject は検証済みトークン
+  由来であってボディ由来ではなく、拒否することが呼び出し側にそれを伝える唯一の手段です。
+- **トークン検証より先にボディを検証** するため、トークンの有無にかかわらず不正なボディは `400` です。
+  ボディの検査は上の上限で有界ですが、トークン検証はネットワークに到達しうる側です。したがって匿名の
+  呼び出し側もボディが正しい形かどうかは知ることになります。それすら開示できないデプロイのゲートが
+  `http.callerAuth` です。
+
+パーサー自身が拒否したボディも、他と同じ deny エンベロープで答えます。Express の HTML
+エラーページに落ちることはありません:
+
+```json
+{"decision": "deny", "code": "invalid_request", "message": "Request body is not valid JSON"}
+```
+
+不正な JSON は `400`、`maxBodyBytes` 超過は `413 payload_too_large`、読めない Content-Type /
+charset は `415 unsupported_media_type` です。上の例はレスポンスボディそのもので、この 1 行が
+`README.md` / `README.ja.md` / `CHANGELOG.md` に現れ、かつエンドポイントが実際に返す内容へ
+parse されることを `verifyInputValidation.test.mts` が検証しています。3 か所のコピーがコードから
+も互いからも drift しないのはそのためです。
 
 ### リソース文字列形式 (DotNotation)
 

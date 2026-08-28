@@ -260,6 +260,14 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 			rulePipeline: new RulePipeline(ruleCollectors),
 			evaluateOptions: { onEmptyRuleSet: config.rule.onEmptyRuleSet },
 			maxBatchSize: config.verify.maxBatchSize,
+			// Forwarded rather than defaulted here (#118): the router resolves each
+			// through the same `resolveBound` the schema used, so a hand-built config
+			// reaching `createApp` gets the schema's verdict either way.
+			maxBodyBytes: config.verify.maxBodyBytes,
+			maxResourceLength: config.verify.maxResourceLength,
+			maxActionLength: config.verify.maxActionLength,
+			maxContextEntries: config.verify.maxContextEntries,
+			maxContextValueLength: config.verify.maxContextValueLength,
 		}),
 	);
 

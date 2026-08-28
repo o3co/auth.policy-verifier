@@ -9,7 +9,12 @@ import {
 	DEFAULT_CALLER_AUTH_HEADER,
 	DEFAULT_HOSTNAME,
 	DEFAULT_HTTP_PORT,
+	DEFAULT_MAX_ACTION_LENGTH,
 	DEFAULT_MAX_BATCH_SIZE,
+	DEFAULT_MAX_BODY_BYTES,
+	DEFAULT_MAX_CONTEXT_ENTRIES,
+	DEFAULT_MAX_CONTEXT_VALUE_LENGTH,
+	DEFAULT_MAX_RESOURCE_LENGTH,
 } from "./defaults.mjs";
 
 /**
@@ -411,10 +416,30 @@ export const AppConfigSchema = z.object({
 			// request from turning into an unbounded amount of pipeline work.
 			// `createVerifyRouter` holds a hand-built config to the same bound (#157).
 			maxBatchSize: boundedNumber(NUMERIC_BOUNDS.maxBatchSize, "verify"),
+			/*
+			 * What one decision request may carry (#118). The endpoint used to
+			 * rely on Express's unstated 100 KB default and on "non-empty string",
+			 * so a whitespace-only resource, an arbitrarily wide `context` and
+			 * unknown properties all passed. Each limit is stated here, defaulted
+			 * in `config/defaults.mts`, and held by `createVerifyRouter` through
+			 * the same `resolveBound` for hand-built configs.
+			 */
+			maxBodyBytes: boundedNumber(NUMERIC_BOUNDS.maxBodyBytes, "verify"),
+			maxResourceLength: boundedNumber(NUMERIC_BOUNDS.maxResourceLength, "verify"),
+			maxActionLength: boundedNumber(NUMERIC_BOUNDS.maxActionLength, "verify"),
+			maxContextEntries: boundedNumber(NUMERIC_BOUNDS.maxContextEntries, "verify"),
+			maxContextValueLength: boundedNumber(NUMERIC_BOUNDS.maxContextValueLength, "verify"),
 		})
 		// Taken verbatim, like `http` above — zod does not parse a default back
-		// through the shape, so the key has to be stated here as well.
-		.default(() => ({ maxBatchSize: DEFAULT_MAX_BATCH_SIZE })),
+		// through the shape, so every key has to be stated here as well.
+		.default(() => ({
+			maxBatchSize: DEFAULT_MAX_BATCH_SIZE,
+			maxBodyBytes: DEFAULT_MAX_BODY_BYTES,
+			maxResourceLength: DEFAULT_MAX_RESOURCE_LENGTH,
+			maxActionLength: DEFAULT_MAX_ACTION_LENGTH,
+			maxContextEntries: DEFAULT_MAX_CONTEXT_ENTRIES,
+			maxContextValueLength: DEFAULT_MAX_CONTEXT_VALUE_LENGTH,
+		})),
 	// Defaulted (not shape-only): deployments mount an overlay config OVER the
 	// template's application.conf, so a section the overlay does not repeat is
 	// simply absent. `silent` is a threshold, not a level anything emits at.
