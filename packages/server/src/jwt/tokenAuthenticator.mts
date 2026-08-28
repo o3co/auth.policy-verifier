@@ -188,20 +188,42 @@ export interface JwtConfigErrorContext {
 	verifyCondition?: string;
 }
 
+/**
+ * True for a non-empty string, and nothing else. What `tokenType` is held to:
+ * the accepted `typ` header is a single value, `z.string()` at the schema and
+ * `tokenType: string` on {@link VerifyingJwtConfig}, where `issuer` and
+ * `audience` may be lists because jose accepts lists for them.
+ *
+ * The distinction is load-bearing (#164). While `tokenType` shared the
+ * list-tolerant {@link isPresent} with the other two, a hand-built
+ * `tokenType: ["at+jwt"]` passed a guard the schema refuses — and the
+ * deployment then booted and rejected *every* token, because jose lowercases
+ * the `typ` option to compare it and threw a bare `TypeError` off the array on
+ * each request. That escapes as a non-`JOSEError`, so
+ * {@link isVerificationUnavailable} judged a config typo to be an
+ * infrastructure outage and logged it as `jwt_verification_unavailable` — the
+ * line #107 added to mean the opposite of an operator mistake.
+ */
+function isPresentString(value: unknown): boolean {
+	return typeof value === "string" && value !== "";
+}
+
 /** True for a non-empty string or a non-empty array of non-empty strings. */
-function isPresent(value: string | string[] | undefined): boolean {
+function isPresent(value: unknown): boolean {
 	return Array.isArray(value)
-		? value.length > 0 && value.every((v) => typeof v === "string" && v !== "")
-		: typeof value === "string" && value !== "";
+		? value.length > 0 && value.every((v) => isPresentString(v))
+		: isPresentString(value);
 }
 
 /**
  * Construction-time guard for the two JWT config invariants. Fails fast rather
  * than letting a misbuilt config accept tokens:
  *
- * 1. `issuer`, `audience` and `tokenType` must be present — a non-empty string
- *    or a non-empty array of non-empty strings — whenever `validate` is true
- *    (RFC 9068 §4): a deployment must never verify the signature alone.
+ * 1. `issuer`, `audience` and `tokenType` must be present whenever `validate`
+ *    is true (RFC 9068 §4): a deployment must never verify the signature alone.
+ *    `issuer` and `audience` take a non-empty string or a non-empty array of
+ *    them; `tokenType` takes a non-empty string only — see
+ *    {@link isPresentString}.
  * 2. `validate: false` requires the explicit `allowInsecureDecode: true`
  *    acknowledgment (#106): one mistyped flag must never be enough to disable
  *    all signature verification.
@@ -213,8 +235,14 @@ function isPresent(value: string | string[] | undefined): boolean {
  * decode-only consent via the `mode` enum whose `"insecure-decode"` value is
  * itself the acknowledgment (#134), every issue reported at once with zod
  * paths. This guard reads the internal two-key interlock, because #134 split
- * the two spellings. There is no one shape to check from both sides, so the two
- * are kept in step by hand and their messages worded alike.
+ * the two spellings. There is no one shape to check from both sides.
+ *
+ * What holds the two implementations in step is the burden the departure owes:
+ * `__tests__/jwtConfigTwoBoundaryParity.test.mts` writes one configuration in
+ * both spellings and asserts the two boundaries reach the same verdict and name
+ * the same key. Add an invariant here and it is a row there, not a new test.
+ * The one row where they deliberately differ is `tokenType`'s absence, carved
+ * out and argued for in that AGENTS.md section.
  */
 export function assertVerifyRouterJwtConfig<T extends UncheckedJwtConfig>(
 	jwt: T,
@@ -223,8 +251,17 @@ export function assertVerifyRouterJwtConfig<T extends UncheckedJwtConfig>(
 	const { caller, path } = context;
 	if (jwt.validate) {
 		const verifyCondition = context.verifyCondition ?? `${path}.validate is true`;
-		for (const field of ["issuer", "audience", "tokenType"] as const) {
-			if (!isPresent(jwt[field])) {
+		// One check per field rather than one for all three: `typ` is a single
+		// value where `iss`/`aud` are lists (#164). Order matches the schema's
+		// `superRefine`, so a config with more than one missing key sends both
+		// boundaries to the same one first.
+		const presence = [
+			["issuer", isPresent(jwt.issuer)],
+			["audience", isPresent(jwt.audience)],
+			["tokenType", isPresentString(jwt.tokenType)],
+		] as const;
+		for (const [field, present] of presence) {
+			if (!present) {
 				throw new Error(
 					`${caller}: ${path}.${field} is required when ${verifyCondition} (RFC 9068 §4)`,
 				);

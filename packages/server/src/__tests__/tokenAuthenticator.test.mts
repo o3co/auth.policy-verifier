@@ -121,6 +121,28 @@ describe("assertVerifyRouterJwtConfig — verifying configs (RFC 9068 §4 presen
 			/jwt\.tokenType is required/,
 		);
 	});
+
+	// Drift case, found by the two-boundary parity table (#164): `tokenType` is
+	// the accepted `typ` header, a single value the schema types `z.string()`,
+	// where `issuer` and `audience` take lists because jose does. While all
+	// three shared one list-tolerant check, this passed the guard, and jose then
+	// threw a bare TypeError off the array on every request — a deployment that
+	// booted and rejected every token, blaming its own infrastructure in the log.
+	it.each([
+		["a one-element array", ["at+jwt"]],
+		["a multi-element array", ["at+jwt", "JWT"]],
+		["an empty array", []],
+	])(
+		"rejects a tokenType that is %s, which jose cannot compare a typ header to",
+		(_label, value) => {
+			expect(() =>
+				assertVerifyRouterJwtConfig({
+					...VALID_VERIFYING,
+					tokenType: value as unknown as string,
+				}),
+			).toThrow(/jwt\.tokenType is required/);
+		},
+	);
 });
 
 describe("assertVerifyRouterJwtConfig — decode-only configs (double opt-in, #106)", () => {

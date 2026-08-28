@@ -1304,6 +1304,40 @@ and version sections follow the release labeling policy in
 
 ### Fixed
 
+- A hand-built config with `oauth.jwt.tokenType` set to an **array** booted, and
+  then rejected every token it was shown
+  ([#164](https://github.com/o3co/auth.policy-verifier/issues/164)).
+
+  `AppConfigSchema` types the key `z.string()`, so a config file carrying
+  `tokenType = ["at+jwt"]` never started. `assertVerifyRouterJwtConfig` checked
+  all three RFC 9068 fields with one presence test that accepts a non-empty list
+  — correct for `issuer` and `audience`, which jose accepts as lists, and wrong
+  for `tokenType`, which is the accepted `typ` header and a single value. The
+  guard therefore let through a shape the schema refuses.
+
+  The consequence was not a weakened check but a silent outage: jose lowercases
+  the `typ` option to compare it against the token's header, which threw a bare
+  `TypeError` off the array on **every** request. A `TypeError` is not a
+  `JOSEError`, so the verifier judged it infrastructure-side and logged
+  `jwt_verification_unavailable` at error level — the line #107 introduced to
+  distinguish a JWKS outage from a bad token now pointing away from the config
+  typo that caused it. The deployment answered `invalid_token` to every caller
+  while reporting a provider problem.
+
+  `tokenType` is now checked as a non-empty string at the guard, matching the
+  schema. **Visible only to a JavaScript caller** building a config by hand:
+  a `tokenType` array is refused at construction with
+  `oauth.jwt.tokenType is required when …`, instead of booting into the failure
+  above. TypeScript callers were already held to `tokenType: string` by
+  `VerifyingJwtConfig`, and config files were already refused at parse.
+
+  Found by the two-boundary parity table this issue added
+  (`packages/server/src/__tests__/jwtConfigTwoBoundaryParity.test.mts`), which
+  is the test AGENTS.md's "Two-Boundary Config Validation" section requires of a
+  departure from its shared-check-function mechanism — and which had never been
+  written for the one departure the section documents. Two implementations held
+  in step by hand had drifted, as #157's numeric knobs had before them.
+
 - A decision response carried `subject: ""` for a token whose `sub` claim is
   present but empty, while the field's own documentation said it is absent when
   the token carries none — and while the audit line for the same decision had
