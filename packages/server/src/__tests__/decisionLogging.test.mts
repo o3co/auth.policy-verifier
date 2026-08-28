@@ -30,6 +30,7 @@ import {
 } from "@o3co/auth.policy-verifier.builtins";
 import {
 	AttributePipeline,
+	type Decision,
 	type EventLogger,
 	type Rule,
 	type RuleCollector,
@@ -40,6 +41,7 @@ import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { HS256KeyResolverFactory, type VerifyRouterJwtConfig } from "#/jwt/index.mjs";
+import { decisionEvent } from "#/observability/decisionEvent.mjs";
 import { createVerifyRouter } from "#/routes/verify.mjs";
 
 const JWT_SECRET = "test-secret";
@@ -208,10 +210,9 @@ describe("per-decision audit log", () => {
 		expect(decision.obj.durationMs as number).toBeGreaterThanOrEqual(0);
 	});
 
-	it("omits sub and requestId rather than emitting empty ones", async () => {
+	it("omits sub and requestId when there is none", async () => {
 		// A token with no `sub` is legitimate (client-credentials), and most
-		// callers send no `x-request-id`. `sub: ""` in an audit log is worse than
-		// no key: it reads as a subject that exists.
+		// callers send no `x-request-id`.
 		const { events, logger } = captureEvents();
 		const token = await signToken({ scope: "read:project" });
 
@@ -223,6 +224,21 @@ describe("per-decision audit log", () => {
 		const [decision] = decisionsOf(events);
 		expect(decision.obj).not.toHaveProperty("sub");
 		expect(decision.obj).not.toHaveProperty("requestId");
+	});
+
+	it("treats an empty sub claim as no subject at all", async () => {
+		// `sub: ""` in an audit record is worse than no key: it reads as a subject
+		// that exists. An issuer can mint one as easily as any other value.
+		const { events, logger } = captureEvents();
+		const token = await signToken({ sub: "", scope: "read:project" });
+
+		await request(createTestApp({ logger }))
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project", action: "read" });
+
+		const [decision] = decisionsOf(events);
+		expect(decision.obj).not.toHaveProperty("sub");
 	});
 
 	it("emits one line per entry of a batch, each naming its own resource", async () => {
@@ -265,6 +281,52 @@ describe("per-decision audit log", () => {
 		} finally {
 			spy.mockRestore();
 		}
+	});
+});
+
+/*
+ * The event builder in isolation. An empty `x-request-id` is what a proxy that
+ * stamps the header unconditionally sends when it has nothing to put in it, and
+ * it cannot be expressed through supertest — superagent drops a header set to
+ * "" before it reaches the wire — so the emptiness contract is pinned here,
+ * where the input can be stated exactly.
+ */
+describe("decisionEvent: empty values are absent values", () => {
+	const allowed: Decision = {
+		decision: "allow",
+		reason: {
+			groups: [
+				{
+					ruleType: "scope",
+					passed: true,
+					evaluated: [{ code: "invalid_scope", message: "m", passed: true }],
+					satisfiedBy: { code: "invalid_scope", message: "m", passed: true },
+				},
+			],
+		},
+	};
+	const base = { decision: allowed, resource: "project", action: "read", durationMs: 1 };
+
+	it.each([
+		["requestId", { ...base, requestId: "" }],
+		["sub", { ...base, subject: "" }],
+	])("omits %s when it is the empty string", (key, input) => {
+		expect(decisionEvent(input)).not.toHaveProperty(key);
+	});
+
+	it.each([
+		["requestId", { ...base, requestId: undefined }],
+		["sub", { ...base, subject: undefined }],
+	])("omits %s when it is undefined", (key, input) => {
+		expect(decisionEvent(input)).not.toHaveProperty(key);
+	});
+
+	it("still carries both when they are non-empty", () => {
+		// The guard must drop empties, not the field.
+		expect(decisionEvent({ ...base, requestId: "req-1", subject: "user-1" })).toMatchObject({
+			requestId: "req-1",
+			sub: "user-1",
+		});
 	});
 });
 

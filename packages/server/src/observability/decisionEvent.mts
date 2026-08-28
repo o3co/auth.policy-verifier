@@ -42,15 +42,38 @@ export interface DenyingGroup {
 /** Everything the router knows about one decision at the moment it emits the line. */
 export interface DecisionEventInput {
 	decision: Decision;
-	/** JWT `sub` of the presented token. Absent when the token carries none. */
+	/**
+	 * JWT `sub` of the presented token. Absent when the token carries none — and
+	 * an empty string counts as absent, see {@link present}.
+	 */
 	subject?: string;
 	/** The resource string exactly as the caller sent it. */
 	resource: string;
 	action: string;
-	/** `x-request-id` as sent, when the caller sent one. */
+	/**
+	 * `x-request-id` as sent, when the caller sent a non-empty one. See
+	 * {@link present} for why an empty value is dropped rather than carried.
+	 */
 	requestId?: string;
 	/** Wall-clock time spent collecting attributes and rules and evaluating them. */
 	durationMs: number;
+}
+
+/**
+ * A value fit to appear on the line, or `undefined` when the key should be
+ * omitted entirely.
+ *
+ * Empty counts as absent, and neither empty value is hypothetical. A proxy that
+ * stamps `x-request-id` unconditionally sends the header with nothing in it
+ * whenever it has nothing to put there, and Express hands that through as `""`;
+ * an issuer can mint `"sub": ""` just as easily. Carrying either would be worse
+ * than dropping it: `sub: ""` in an audit record reads as a subject that
+ * exists, and `requestId: ""` is a correlation key that every such record
+ * shares — so grouping by it collapses unrelated decisions into one apparent
+ * trace, which is precisely the question the field exists to answer.
+ */
+function present(value: string | undefined): string | undefined {
+	return value !== undefined && value !== "" ? value : undefined;
 }
 
 /** `satisfiedBy` for a passing group; `undefined` for a group that is not one. */
@@ -95,11 +118,13 @@ export function decisionEvent({
 	requestId,
 	durationMs,
 }: DecisionEventInput): Record<string, unknown> {
+	// Omitted rather than emitted empty — see `present`. Most callers send no
+	// request id at all, and a token carrying no subject is legitimate.
+	const id = present(requestId);
+	const sub = present(subject);
 	const event: Record<string, unknown> = {
-		// Omitted rather than emitted empty: `sub: ""` in an audit record reads as
-		// a subject that exists, and most callers send no request id at all.
-		...(requestId !== undefined ? { requestId } : {}),
-		...(subject !== undefined ? { sub: subject } : {}),
+		...(id !== undefined ? { requestId: id } : {}),
+		...(sub !== undefined ? { sub } : {}),
 		resource,
 		action,
 		decision: decision.decision,
