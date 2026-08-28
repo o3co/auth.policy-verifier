@@ -73,6 +73,36 @@ export class SubscriberDidCollector implements AttributeCollector {
 
 The rule then reads `attrs.get(ATTR_SUBSCRIBER_DID)` without ever touching `CollectorContext`.
 
+## Two-Boundary Config Validation
+
+`packages/server` takes its configuration two ways, and both have to reach the same verdict.
+
+- **`AppConfigSchema`** ([`packages/server/src/config/application.schema.mts`](packages/server/src/config/application.schema.mts)) parses config files. It runs at boot and reports every issue at once, at the path the operator wrote.
+- **The runtime guards** — `createApp`, the `KeyResolverFactory` implementations, `createVerifyRouter` — serve the hand-built config objects those entry points also accept. A library consumer reaches them with the schema never having run, and the TypeScript shapes are not a defence: a JavaScript caller ignores them, and a config assembled from `process.env` arrives as strings.
+
+**The rule:** a wire invariant is enforced at **both** boundaries, through **one shared check function**. Not two implementations agreeing on a constant — one function, imported by each side. The schema turns its verdict into a zod issue at the operator's path; the guard throws it, naming the caller and the path. What is accepted, what a missing key defaults to, and how a refusal is worded all come from that one function.
+
+**Why both.** A hand-built config bypasses the schema entirely, so without the guard `createApp` would accept what a config file cannot, and the invariant would be advice. And a check duplicated rather than shared is worse than it looks: the two drift, and the drift is silent — the same configuration written two ways, answered two ways, with nothing failing to say so.
+
+**"Must not get a different answer" is the deciding formulation, not decoration.** It was the explicit tiebreaker for the `previousSecrets` `null` contract (#147): `null` is refused rather than read as "no rotation configured" — diverging from auth.provider's own precedent — because `AppConfigSchema` types the field `z.array(...).optional()` and rejects `null` before `checkHs256Rotation` is ever reached. Accepting it in the guard would have handed a hand-built config a different answer from a parsed one. The full reasoning is written on `checkHs256Rotation`.
+
+**What breaking it cost.** The numeric knobs were the family that shared only *constants*: the schema read each through its own `z.coerce.number().int()…` chain, the runtime through an ad-hoc `??` or `Number(…)`. #157 found seven values the two genuinely disagreed on. `oauth.jwt.jwksCooldownMs = false` meant `0` through the schema — refetch on every miss, the fetch storm the knob exists to prevent — and a boot failure through the resolver. `verify.maxBatchSize = null` was refused at boot by the schema, while `createVerifyRouter`'s `?? DEFAULT` silently applied a 50-entry cap. Nobody wrote either behaviour; both fell out of one knob having two readers. The full table is in the #157 entry of [`CHANGELOG.md`](CHANGELOG.md). This rule is written down because breaking it produced real divergence, not because it is tidy.
+
+**The worked examples**, all under `packages/server/src`:
+
+- `checkJwksUri` ([`jwt/jwks.mts`](packages/server/src/jwt/jwks.mts)) — the JWKS transport policy (#109). Returns a result; the schema renders it as a zod issue, and `parseJwksUri` throws the same message for the `KeyResolverFactory`.
+- `checkHs256Rotation` ([`jwt/hs256Rotation.mts`](packages/server/src/jwt/hs256Rotation.mts)) — the HS256 rotation shape, and the entropy floor over every secret in it (#112, #114). Collects every issue with its path, so both boundaries report a block with two mistakes in one round trip.
+- `resolveBound` ([`config/bounds.mts`](packages/server/src/config/bounds.mts)) — every numeric knob (#157). One spec table carries each knob's default, range and unit; a boundary supplies only the config path it saw the key at.
+
+All three are dependency-free on purpose, and that is part of the rule rather than a coincidence: `AppConfigSchema` imports them, so anything they reached back for would arrive in every config-only consumer of the schema. `jwt/tokenAuthenticator.mts` brings jose with it and `routes/verify.mts` brings express — a check living beside either could not be shared with the schema at all. So write the check function first, somewhere the config layer can import, and only then call it from both sides.
+
+**The deciding test:** write the same configuration twice — once as a config file through `AppConfigSchema`, once as an object handed straight to `createApp` or `createVerifyRouter`. Both must accept it, or both must refuse it and name the same key in the same words. If you cannot point at the single function that decides, the invariant is not enforced twice; it is implemented twice.
+
+**Two known departures**, both deliberate, and to be matched rather than copied:
+
+- `assertVerifyRouterJwtConfig` (`jwt/tokenAuthenticator.mts`) and the schema's `superRefine` enforce the same two invariants — RFC 9068 `iss`/`aud`/`typ` presence, and consent to decode-only mode — as separate implementations, because #134 split the spellings. On the wire the consent is the single key `oauth.jwt.mode = "insecure-decode"`; internally it stays the two-key `validate: false` + `allowInsecureDecode: true` interlock. There is no one shape for a shared function to read, so the two are kept in step by hand and their messages worded alike.
+- A default that only one boundary applies is a divergence of the same kind, which is why `resolveBound` carries each knob's `fallback` and `createApp` spells out `mode ?? "verify"`. The exception is `oauth.jwt.tokenType`: the schema defaults it to `at+jwt` while `assertVerifyRouterJwtConfig` requires it outright, because `VerifyingJwtConfig` declares it required and the API boundary's static contract therefore already asks the caller for it. Adding a default means mirroring it at the other boundary, or writing down why not.
+
 ## Release Process
 
 Releases are triggered by pushing a `v*` tag to GitHub. There is no manual publish step; `.github/workflows/release.yml` handles the rest.

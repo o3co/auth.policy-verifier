@@ -31,9 +31,8 @@
  * imports it so a malformed rotation block fails at config-parse time (at boot,
  * where an operator sees it) rather than at the first request, and config-only
  * consumers of the schema must not pull jose or express in behind it. The
- * `KeyResolverFactory` re-checks at construction for hand-built configs that
- * never went through the schema — the same division of labor as
- * `checkJwksUri` / `parseJwksUri`.
+ * `KeyResolverFactory` re-checks at construction, through this same function —
+ * see AGENTS.md, "Two-Boundary Config Validation".
  */
 
 import { MAX_PREVIOUS_SECRETS, MIN_SECRET_ENTROPY_BYTES } from "../config/defaults.mjs";

@@ -130,10 +130,10 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	// 6. Map the wire `oauth.jwt.mode` onto the router's internal discriminated
 	// union (#134). AppConfigSchema already enforces the wire invariants (the
 	// mode enum, iss/aud/typ presence, rejection of the removed keys) for
-	// schema-validated configs; everything is re-checked here because createApp
-	// also accepts hand-built config objects that never went through the schema
-	// (#106) — with this boundary's field paths, so the operator is pointed at
-	// the oauth.jwt.* key they actually wrote.
+	// schema-validated configs; everything is re-checked here (#106) — see
+	// AGENTS.md, "Two-Boundary Config Validation" — with this boundary's field
+	// paths, so the operator is pointed at the oauth.jwt.* key they actually
+	// wrote.
 	//
 	// Shape first: a hand-built config can carry anything at these paths, and
 	// the key checks below reach into the block with `in` and object spread,

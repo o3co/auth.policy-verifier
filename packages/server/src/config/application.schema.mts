@@ -28,11 +28,9 @@ export const JWT_MODE_MIGRATION_MESSAGE =
  * `resolveBound` decides everything about the knob: the default when the key is
  * absent, the coercion of the string a HOCON env substitution delivers, the
  * range, and the wording of the refusal. This wrapper only carries the verdict
- * into zod's issue list at the path the operator wrote — the same division of
- * labour `jwksUri` has with `checkJwksUri` and `previousSecrets` with
- * `checkHs256Rotation`. What it replaced was a `z.coerce.number().int()…` chain
- * per knob that shared only the *constants* with `resolveBound`, which is how
- * `jwksCooldownMs = false` came to mean 0 here and a boot failure there.
+ * into zod's issue list at the path the operator wrote — see AGENTS.md,
+ * "Two-Boundary Config Validation", which this boundary shares with
+ * `checkJwksUri` for `jwksUri` and `checkHs256Rotation` for `previousSecrets`.
  *
  * `z.unknown().optional()` and not `z.coerce.number()`: the check must see the
  * value exactly as the operator wrote it. Anything narrower would have zod

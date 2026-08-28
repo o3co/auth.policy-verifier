@@ -28,10 +28,9 @@ interface JwtFactoryInput extends JwksFetchConfig, Hs256RotationConfig {
  * file path (in that priority). Throws if no key source is configured.
  *
  * A JWKS URI must be https, or http on a loopback host — see the trust
- * assumption and the carve-out in `jwt/jwks.mts` (#109). The check is repeated
- * here, after `AppConfigSchema` has already made it at config-parse time,
- * because `createApp` also accepts hand-built configs that never met the
- * schema.
+ * assumption and the carve-out in `jwt/jwks.mts` (#109). Checked here as well as
+ * in `AppConfigSchema`, through the one shared function — see AGENTS.md,
+ * "Two-Boundary Config Validation".
  */
 async function resolveAsymmetric(algorithm: string, config: JwtFactoryInput): Promise<KeyResolver> {
 	if (config.jwksUri) {
@@ -162,9 +161,9 @@ export const HS256KeyResolverFactory: KeyResolverFactory = async (config: JwtFac
 	if (!config.secret) {
 		throw new Error("secret is required for HS256");
 	}
-	// Re-checked here, after `AppConfigSchema` has already checked it at
-	// config-parse time, because `createApp` also accepts hand-built configs that
-	// never met the schema — the same division of labor as the JWKS URI above.
+	// Checked here as well as in `AppConfigSchema`, through the one shared
+	// function, as for the JWKS URI above — see AGENTS.md, "Two-Boundary Config
+	// Validation".
 	const { kid, previousSecrets } = parseHs256Rotation(config);
 	const current = toSecretKey(config.secret);
 	if (kid === undefined && previousSecrets.length === 0) {

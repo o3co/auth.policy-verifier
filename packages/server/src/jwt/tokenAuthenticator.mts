@@ -206,15 +206,15 @@ function isPresent(value: string | string[] | undefined): boolean {
  *    acknowledgment (#106): one mistyped flag must never be enough to disable
  *    all signature verification.
  *
- * Division of labor with `AppConfigSchema`: the schema enforces the same
- * invariants for schema-validated configs at config-parse time — the RFC 9068
- * presence checks via `superRefine`, the decode-only consent via the `mode`
- * enum whose `"insecure-decode"` value is itself the acknowledgment (#134) —
- * reporting every issue at once with zod paths. This guard is the runtime
- * enforcement for hand-built configs that never went through the schema — a
- * JavaScript caller can reach `createApp` or `createVerifyRouter` with fields
- * missing even though the TypeScript shapes require them. Both stay: the
- * schema serves config files, the guard serves the API boundary.
+ * Both boundaries enforce these — see AGENTS.md, "Two-Boundary Config
+ * Validation" — and this is the pair named there as a departure from it, the
+ * one place the two boundaries cannot share a check function. `AppConfigSchema`
+ * reads the wire spelling: the presence checks via `superRefine`, the
+ * decode-only consent via the `mode` enum whose `"insecure-decode"` value is
+ * itself the acknowledgment (#134), every issue reported at once with zod
+ * paths. This guard reads the internal two-key interlock, because #134 split
+ * the two spellings. There is no one shape to check from both sides, so the two
+ * are kept in step by hand and their messages worded alike.
  */
 export function assertVerifyRouterJwtConfig<T extends UncheckedJwtConfig>(
 	jwt: T,

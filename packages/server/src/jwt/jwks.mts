@@ -17,9 +17,8 @@
  * Deliberately dependency-free: `AppConfigSchema` imports it so a rejected URI
  * fails at config-parse time (at boot, where an operator sees it) instead of at
  * the first request, and config-only consumers of the schema must not pull jose
- * or express in behind it. The `KeyResolverFactory` re-checks at construction
- * for hand-built configs that never went through the schema — the same division
- * of labor as `assertVerifyRouterJwtConfig`.
+ * or express in behind it. The `KeyResolverFactory` re-checks at construction,
+ * through this same function — see AGENTS.md, "Two-Boundary Config Validation".
  */
 
 import { NUMERIC_BOUNDS, resolveBound } from "../config/bounds.mjs";

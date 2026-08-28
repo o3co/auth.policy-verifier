@@ -13,15 +13,11 @@
  * both need exactly that, so it is written once here rather than restated per
  * knob, and the rejection message has a single shape operators learn once.
  *
- * Both boundaries read a knob through this one function (#157). `AppConfigSchema`
+ * Both boundaries read a knob through this one function (#157): `AppConfigSchema`
  * serves config files and the runtime resolvers serve the hand-built configs
- * `createApp` also accepts; until #157 the schema re-implemented each knob as a
- * `z.coerce.number().int()…` chain and shared only the constants, which is how
- * `jwksCooldownMs = false` came to mean 0 through the schema and a boot failure
- * through the resolver. That is the divergence `checkJwksUri` and
- * `checkHs256Rotation` exist to prevent, and the reasoning written on
- * `checkHs256Rotation` (the `previousSecrets` `null` contract, #147) is the same
- * one: a hand-built config must not get a different answer from a parsed one.
+ * `createApp` also accepts. See AGENTS.md, "Two-Boundary Config Validation" —
+ * the numeric knobs are the worked cautionary example there, since they were the
+ * family that shared only the constants until #157.
  *
  * {@link NUMERIC_BOUNDS} is the whole table, in one place, for the same reason
  * the reader is: a spec kept beside the module that consumes it could not be
