@@ -165,6 +165,28 @@ describe("verify router failure logging: token rejections (warn)", () => {
 		expect((events[0].obj.err as { code?: string }).code).toBe("ERR_JWT_EXPIRED");
 	});
 
+	it("keeps the token's claim set out of the rejection log", async () => {
+		const { events, logger } = captureEvents();
+		const app = createTestApp({ logger });
+		// jose throws JWTExpired *after* the signature verifies and hangs the whole
+		// decoded token off the error as `payload`, so logging the error object
+		// wrote every claim — here an email — to the log on a routine expiry.
+		const token = await signToken(
+			{ scope: "read:project", email: "victim@example.com" },
+			{ expiresAt: Math.floor(Date.now() / 1000) - 3600 },
+		);
+
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project", action: "read" });
+
+		expect(res.status).toBe(401);
+		expect(events).toHaveLength(1);
+		expect((events[0].obj.err as { payload?: unknown }).payload).toBeUndefined();
+		expect(JSON.stringify(events[0])).not.toContain("victim@example.com");
+	});
+
 	it("logs jwt_token_rejected for a bad signature", async () => {
 		const { events, logger } = captureEvents();
 		const app = createTestApp({ logger });

@@ -303,6 +303,37 @@ export function isVerificationUnavailable(cause: unknown): boolean {
 	);
 }
 
+/**
+ * The rejection reason, projected onto the fields that explain it — and nothing
+ * else.
+ *
+ * `JWTExpired` and `JWTClaimValidationFailed` are thrown *after* the signature
+ * verifies, and jose attaches the entire decoded token to each as an own
+ * `payload` property. Logging the error object therefore writes the whole claim
+ * set — `sub`, `email`, group membership, whatever else the issuer mints — into
+ * the log on every expired token, which is a routine event rather than an
+ * incident. {@link ../observability/decisionEvent.mts} states the rule this
+ * keeps: a claim set is not needed to explain an outcome, and carrying one into
+ * the log widens the blast radius of somebody else's data.
+ *
+ * `code` and `claim` are what an operator acts on (`ERR_JWT_EXPIRED` vs
+ * `ERR_JWS_SIGNATURE_VERIFICATION_FAILED` vs a `"iss"` mismatch), and jose's
+ * messages name the failing claim without quoting its value.
+ */
+function describeRejection(cause: unknown): Record<string, unknown> {
+	if (!(cause instanceof Error)) {
+		return { name: "NonError" };
+	}
+	const code: unknown = (cause as { code?: unknown }).code;
+	const claim: unknown = (cause as { claim?: unknown }).claim;
+	return {
+		name: cause.name,
+		message: cause.message,
+		...(typeof code === "string" ? { code } : {}),
+		...(typeof claim === "string" ? { claim } : {}),
+	};
+}
+
 /** Time claims the decode path reads, in the order `jwtVerify` type-checks them. */
 type TimeClaim = "iat" | "nbf" | "exp";
 
@@ -502,7 +533,7 @@ export function createTokenAuthenticator(
 				if (isVerificationUnavailable(cause)) {
 					logger.error({ err: cause }, "jwt_verification_unavailable");
 				} else {
-					logger.warn({ err: cause }, "jwt_token_rejected");
+					logger.warn({ err: describeRejection(cause) }, "jwt_token_rejected");
 				}
 				return {
 					ok: false,

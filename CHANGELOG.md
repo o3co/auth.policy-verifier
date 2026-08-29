@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
-## [Unreleased]
+## [0.4.0] - 2026-08-29
 
 ### Security
 
@@ -514,7 +514,79 @@ and version sections follow the release labeling policy in
   vulnerable range, so it lapses on its own once `express` requires a fixed
   version instead of holding the floor down indefinitely.
 
+- **BREAKING**: an empty rule set is now a **deny**, not an allow
+  ([#104](https://github.com/o3co/auth.policy-verifier/issues/104)).
+
+  `evaluate` returned `{ decision: "allow" }` whenever no rule was collected, so
+  a scope-only pipeline allowed any validly-signed token that carried no `scope`
+  claim — for every resource and every action. The paired provider mints exactly
+  such tokens (id_tokens among them), so this was reachable with a credential a
+  deployment hands out by design. `evaluate` now denies an empty rule set with
+  `no_applicable_rule`; `EvaluateOptions.onEmptyRuleSet: "allow"` is the explicit
+  opt-out, surfaced as `rule.onEmptyRuleSet` in the server config.
+
+  Paired with it, `ResourceActionScopeRuleCollector` no longer stays silent on a
+  scopeless token: it emits its `HasScope` rule regardless, `scopeless` defaulting
+  to `"deny"`. Emitting nothing was the other half of the same hole — a permissive
+  absence, which is the shape this release spent several changes eliminating.
+  Pipelines that genuinely serve scopeless flows (DID grants) opt out with
+  `{ scopeless: "skip" }`, which is only safe when another rule group decides,
+  since an empty rule set is now a deny. `createApp` also fails at boot when no
+  rule collector is configured at all — such a pipeline can never authorize
+  anything.
+
+  **This is the most consequential semantic change in 0.4.0.** A deployment that
+  relied on the old fall-through (knowingly or not) starts denying at upgrade.
+  Set `rule.onEmptyRuleSet = "allow"` to keep the previous behaviour, and treat
+  needing it as a finding.
+
+- **BREAKING**: `iss`, `aud` and the `typ` header are validated, per RFC 9068 §4
+  ([#105](https://github.com/o3co/auth.policy-verifier/issues/105)).
+
+  `jwtVerify` was called with `{ algorithms }` alone, so acceptance rested on the
+  signature and `exp`. The paired provider signs access tokens, id_tokens
+  (`id+jwt`), refresh tokens (`rt+jwt`, which carry `scope`) and logout tokens
+  with one key, and neighbouring services share issuers — so a caller could
+  present any of those, or a token minted for another audience, and have it flow
+  into rule evaluation. `createVerifyRouter` now checks `iss` against `issuer`,
+  `aud` against `audience`, and the `typ` header against `tokenType`.
+
+  A 0.3.1 configuration that verified signatures only will **fail at boot** until
+  it declares the issuer and audience it accepts.
+
+- The rejection log no longer carries the token's claim set.
+
+  `jwt_token_rejected` logged the jose error object. `JWTExpired` and
+  `JWTClaimValidationFailed` are thrown *after* the signature verifies, and jose
+  hangs the entire decoded token off each one as an own `payload` property — so
+  every expired token wrote its whole claim set (`sub`, `email`, group
+  membership, any custom claim the issuer mints) into the log. Expiry is routine
+  traffic, not an incident, so this was a steady stream of other people's data
+  into the log aggregator, and a token minted for a *different* audience leaked
+  its claims here too.
+
+  The line now carries a projection — `name`, `message`, and jose's `code` /
+  `claim` — which is what tells `ERR_JWT_EXPIRED` from a signature failure or an
+  `iss` mismatch, without quoting any value. This restores the rule
+  `observability/decisionEvent.mts` already states for the decision line: a claim
+  set is not needed to explain an outcome. Introduced during this release cycle,
+  so no released version shipped it.
+
 ### Added
+
+- **`POST /verify/batch` — many decisions in one request**
+  ([#124](https://github.com/o3co/auth.policy-verifier/issues/124)). Body
+  `{ decisions: [{ resource, action, context? }, …] }`, answered as
+  `200 { decisions: DecisionResponse[] }` in request order. The `200` is about
+  the batch being decided, not about any entry being allowed — each entry
+  carries its own `decision`, and a batch of denies is still a `200`. Entry
+  count is bounded by `verify.maxBatchSize`
+  ([#157](https://github.com/o3co/auth.policy-verifier/issues/157)); an
+  oversized batch is refused rather than trimmed.
+
+  The same change thickened the single-decision contract that the batch entries
+  reuse: `reason.groups[]` structured reasons — renamed and extended under
+  *Changed*, below — and a request-context collector.
 
 - **A wire-contract conformance suite, so "drop-in replaceable behind
   `VerifierEndpoint`" is a claim this repository can fail**
@@ -835,7 +907,7 @@ and version sections follow the release labeling policy in
     shape. Rejections log `caller_auth_rejected` at warn.
   - `GET /healthcheck` is never gated: an orchestrator probe has no credential
     to present, and it reveals nothing a decision does.
-  - **Optional in this release** and off unless configured, so existing
+  - **Optional in v0.4.0** and off unless configured, so existing
     deployments (and container-to-container callers such as the cross-repo E2E)
     keep working. An empty `HTTP_CALLER_AUTH_TOKEN=` is rejected at boot rather
     than read as "disabled". Making it mandatory later is a one-line change to
@@ -863,6 +935,41 @@ and version sections follow the release labeling policy in
   result rather than throwing.
 
 ### Changed
+
+- **BREAKING**: JWT key resolution moves to the Module/Registry pattern —
+  `createKeyResolver` and the `JwtKeyConfig` type are gone from
+  `@o3co/auth.policy-verifier.server`'s public surface
+  ([#37](https://github.com/o3co/auth.policy-verifier/issues/37),
+  [#38](https://github.com/o3co/auth.policy-verifier/issues/38)).
+
+  Key resolution was the last strategy routed through a hard-coded if-chain over
+  a closed `z.enum(["HS256","RS256","ES256","EdDSA"])`, so a user-defined
+  algorithm could be implemented but never selected from config. It now uses the
+  same Module + Registry shape as `AttributeCollector`, `RuleCollector` and
+  `ResourceParser`.
+
+  A 0.3.1 caller that imported `createKeyResolver` (or annotated with
+  `JwtKeyConfig`) must drop the import and pass `builtinKeyResolversModule` in
+  `createApp({ modules })` instead. `KeyResolver` itself survives — though as of
+  [#170](https://github.com/o3co/auth.policy-verifier/issues/170), below, it is
+  exported from the server package rather than from core.
+
+- **BREAKING**: `AttrLiteralIn` / `AttrLiteralNotIn` `ruleType` strings change —
+  `computeValuesKey` hashes with FNV-1a 64-bit instead of `node:crypto` SHA-256
+  ([#34](https://github.com/o3co/auth.policy-verifier/issues/34)).
+
+  This removed the only `node:*` import in core and builtins, so both packages
+  now load on edge and non-Node server runtimes (Cloudflare Workers, Deno, Bun,
+  Vercel Edge) alongside Node.js 22+. **Browsers are deliberately not on that
+  list**: a browser-side decision can be bypassed by patching the JS, so
+  authorization must be enforced server-side. (An earlier README revision listed
+  them by mistake; the corrected wording ships in 0.4.0.)
+
+  The hash is wire-visible — it appears in `reason.groups[].ruleType` — so
+  anything asserting on those exact strings needs updating. 64-bit was chosen
+  over 32-bit during review: short random strings collide under FNV-1a 32-bit
+  within seconds, and a collision would silently OR-combine distinct rules on the
+  same attribute, weakening authorization rather than merely mislabelling it.
 
 - **BREAKING**: core's input vocabulary is neutral — `CollectorContext.payload:
   VerifierPayload` becomes `subject: SubjectAttributes`, and
