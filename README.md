@@ -61,7 +61,7 @@ so the enforcement layer can implement against the same table.
 
 - **Collector pattern** — Attributes and rules are gathered by composable collectors, not a static policy file. Add custom collectors for any attribute source (database, external API, JWT claims).
 - **A decision contract, not a boolean** — every request is `(subject, resource, action, context)` and every answer carries a structured `reason` naming each rule group and how it came out, so "why was this denied" is answerable without re-running the pipeline. `POST /verify/batch` decides many resources in one round trip.
-- **Configurable JWT verification** — HS256 (shared secret), RS256/ES256/EdDSA (JWKS URI or direct public key). Symmetric design with [auth.provider](https://github.com/o3co/auth.provider)'s JWT config.
+- **Configurable JWT verification** — HS256 (shared secret), RS256/ES256/EdDSA (JWKS URI or direct public key). Config lives under `oauth.jwt`, deliberately symmetric with [auth.provider](https://github.com/o3co/auth.provider)'s — see [Configuration](#configuration) for what the namespace means on a verifier.
 - **RFC 9068 §4 token validation** — `iss`, `aud` and the `typ` header are checked alongside the signature, so an `id_token`, refresh token or logout token signed with the same key, or a token minted for another service, is rejected. `issuer` and `audience` are required whenever `mode = "verify"` (the default).
 - **Bounded token lifetime** — `exp` and `iat` are **required**, not merely honoured when present, and `maxTokenAgeSeconds` caps how long after issuance a token is accepted whatever `exp` its issuer chose. A token minted or forged without an expiry is refused rather than accepted forever. `clockToleranceSeconds` (0 by default, capped at 300) is the skew allowance. Every one of these applies in `insecure-decode` mode too, so the two modes never disagree about the same token.
 - **JWKS support** — Point `jwksUri` at auth.provider's `https://.../.well-known/jwks.json` for automatic key rotation. The endpoint must be TLS-protected (loopback hosts excepted for local development), and the fetch is bounded by an operator-set timeout, cooldown and cache age so a provider outage cannot stall the decision path.
@@ -199,6 +199,8 @@ collector writing `permissions` / `roles` in the same edit.
 | `RequestContextAttributeCollector` | declared fields of the request `context` | the operator's own keys |
 
 ## Configuration
+
+The `oauth` namespace (env prefix `OAUTH_JWT_*`) is this module's credential layer: how the verifier authenticates the subject before any rule runs. The verifier implements no OAuth flow — the name is a mapping, not a claim of ownership: the keys are deliberately symmetric with [auth.provider](https://github.com/o3co/auth.provider)'s `oauth { jwt { … } }`, so one deployment addresses both sides of the token boundary with one vocabulary. The claim-level half of that boundary is specified in the umbrella's [claims-contract](https://github.com/o3co/auth/blob/develop/docs/claims-contract.md); the keys here are the key-distribution half.
 
 HOCON config with environment variable overrides:
 
@@ -368,6 +370,8 @@ a second `:` in a segment (`a:1:2` is not truncated to `a:1`), and surrounding o
 parser that guessed at malformed input could hand a caller a grant written for a different resource.
 
 ## Connecting to auth.provider
+
+The claim-level contract — which claims auth.provider writes and this verifier reads, and what each side means by them — is specified in the umbrella's [docs/claims-contract.md](https://github.com/o3co/auth/blob/develop/docs/claims-contract.md). This section covers the key-distribution half.
 
 When auth.provider uses asymmetric JWT signing (RS256/ES256/EdDSA), point the policy-verifier's `jwksUri` at the provider's JWKS endpoint:
 
