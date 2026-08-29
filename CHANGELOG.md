@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
-## [Unreleased]
+## [0.4.0] - 2026-08-29
 
 ### Security
 
@@ -835,7 +835,7 @@ and version sections follow the release labeling policy in
     shape. Rejections log `caller_auth_rejected` at warn.
   - `GET /healthcheck` is never gated: an orchestrator probe has no credential
     to present, and it reveals nothing a decision does.
-  - **Optional in this release** and off unless configured, so existing
+  - **Optional in v0.4.0** and off unless configured, so existing
     deployments (and container-to-container callers such as the cross-repo E2E)
     keep working. An empty `HTTP_CALLER_AUTH_TOKEN=` is rejected at boot rather
     than read as "disabled". Making it mandatory later is a one-line change to
