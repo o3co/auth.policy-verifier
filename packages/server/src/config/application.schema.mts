@@ -147,6 +147,16 @@ export const AppConfigSchema = z.object({
 		// The default object is taken verbatim — zod does not parse it back through
 		// the shape — so it has to state every key that has no other source.
 		.default(() => ({ hostname: DEFAULT_HOSTNAME, port: DEFAULT_HTTP_PORT, pathPrefix: "" })),
+	/**
+	 * The credential layer: how this verifier authenticates the subject before
+	 * any rule runs. This module implements no OAuth flow, so the namespace
+	 * name is a mapping, not a claim of ownership — the keys live under
+	 * `oauth.jwt` (env: `OAUTH_JWT_*`) deliberately symmetric with
+	 * auth.provider's `oauth { jwt { … } }`, so one deployment addresses both
+	 * sides of the token boundary with one vocabulary. The claim-level half of
+	 * that boundary is specified in the umbrella's docs/claims-contract.md
+	 * (o3co/auth); the keys below are the key-distribution half.
+	 */
 	oauth: z.object({
 		// Algorithm names are free-form strings so user-registered algorithms can be selected
 		// from config without editing the schema enum. Built-in algorithms keep schema-level

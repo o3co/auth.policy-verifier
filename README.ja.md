@@ -61,7 +61,7 @@ POST /verify/batch — 同じ契約で、1 往復に N 件の decision
 
 - **Collector パターン** — 属性とルールはコンポーザブルな Collector で収集。静的なポリシーファイルではない。任意の属性ソース（DB, 外部 API, JWT クレーム）向けにカスタム Collector を追加可能。
 - **boolean ではなく decision 契約** — リクエストは `(subject, resource, action, context)`、応答は各ルールグループとその結果を並べた構造化 `reason` を必ず伴う。「なぜ deny されたか」をパイプラインの再実行なしに答えられる。`POST /verify/batch` は複数リソースを 1 往復で判定する。
-- **JWT 検証アルゴリズム設定可能** — HS256（共有シークレット）、RS256/ES256/EdDSA（JWKS URI または公開鍵直接指定）。[auth.provider](https://github.com/o3co/auth.provider) の JWT 設定と対称設計。
+- **JWT 検証アルゴリズム設定可能** — HS256（共有シークレット）、RS256/ES256/EdDSA（JWKS URI または公開鍵直接指定）。設定は `oauth.jwt` 配下にあり、[auth.provider](https://github.com/o3co/auth.provider) と意図的に対称 — この namespace が verifier 上で何を意味するかは[設定](#設定)を参照。
 - **RFC 9068 §4 のトークン検証** — 署名だけでなく `iss` / `aud` / `typ` ヘッダも検証する。同じ鍵で署名された `id_token` / refresh token / logout token や、他サービス向けに発行されたトークンは拒否される。`mode = "verify"`（デフォルト）のとき `issuer` と `audience` は必須。
 - **トークン寿命の上限** — `exp` と `iat` は「あれば検証する」ではなく**必須**。さらに `maxTokenAgeSeconds` が、発行者がどれだけ先の `exp` を付けたかに関わらず「発行からどれだけ経ったトークンまで受け入れるか」の上限を課す。`exp` を持たずに発行（あるいは偽造）されたトークンは、永久に有効ではなく拒否される。`clockToleranceSeconds`（デフォルト 0、上限 300）はクロックずれの許容幅。これらはすべて `insecure-decode` モードでも同じく適用されるので、2 つのモードが同一トークンについて食い違うことはない。
 - **JWKS サポート** — `jwksUri` を auth.provider の `https://.../.well-known/jwks.json` に向ければ鍵ローテーションに自動対応。エンドポイントは TLS 必須（ローカル開発向けにループバックのみ例外）。取得はタイムアウト / クールダウン / キャッシュ期間で必ず上限が付き、プロバイダー障害が判定パスを止めない。
@@ -196,6 +196,8 @@ RuleCollector だけではポリシーになりません。ルールグループ
 | `RequestContextAttributeCollector` | リクエスト `context` の宣言済みフィールド | 運用者が決めたキー |
 
 ## 設定
+
+`oauth` namespace（env prefix `OAUTH_JWT_*`）は本モジュールの credential 層 — rule が走る前に verifier が subject を認証する方法 — である。verifier は OAuth flow を実装しない。この名前は所有の主張ではなくマッピングであり、キーは [auth.provider](https://github.com/o3co/auth.provider) の `oauth { jwt { … } }` と意図的に対称にしてある。1 つのデプロイが token 境界の両側を 1 つの語彙で扱えるようにするためだ。境界の claim レベルの半面は umbrella の [claims-contract](https://github.com/o3co/auth/blob/develop/docs/claims-contract.ja.md) に規定されており、ここにあるキーは鍵配布の半面である。
 
 HOCON 設定 + 環境変数オーバーライド:
 
@@ -362,6 +364,8 @@ scope ルールが使う認可の名前空間なので、不正な入力を推�
 発行された grant を呼び出し側に与えてしまいます。
 
 ## auth.provider との接続
+
+auth.provider が書き、この verifier が読む claim と、それぞれの側での意味 — claim レベルの契約 — は umbrella の [docs/claims-contract.ja.md](https://github.com/o3co/auth/blob/develop/docs/claims-contract.ja.md) に規定されている。本節はその鍵配布の半面を扱う。
 
 auth.provider が非対称 JWT 署名 (RS256/ES256/EdDSA) を使う場合、policy-verifier の `jwksUri` をプロバイダーの JWKS エンドポイントに向ける:
 
