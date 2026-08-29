@@ -554,6 +554,24 @@ and version sections follow the release labeling policy in
   A 0.3.1 configuration that verified signatures only will **fail at boot** until
   it declares the issuer and audience it accepts.
 
+- The rejection log no longer carries the token's claim set.
+
+  `jwt_token_rejected` logged the jose error object. `JWTExpired` and
+  `JWTClaimValidationFailed` are thrown *after* the signature verifies, and jose
+  hangs the entire decoded token off each one as an own `payload` property — so
+  every expired token wrote its whole claim set (`sub`, `email`, group
+  membership, any custom claim the issuer mints) into the log. Expiry is routine
+  traffic, not an incident, so this was a steady stream of other people's data
+  into the log aggregator, and a token minted for a *different* audience leaked
+  its claims here too.
+
+  The line now carries a projection — `name`, `message`, and jose's `code` /
+  `claim` — which is what tells `ERR_JWT_EXPIRED` from a signature failure or an
+  `iss` mismatch, without quoting any value. This restores the rule
+  `observability/decisionEvent.mts` already states for the decision line: a claim
+  set is not needed to explain an outcome. Introduced during this release cycle,
+  so no released version shipped it.
+
 ### Added
 
 - **`POST /verify/batch` — many decisions in one request**
