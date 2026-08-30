@@ -48,17 +48,20 @@ export class HasPermission implements Rule {
 	}
 
 	verify(attrs: ReadonlyAttributes): boolean {
-		const direct = (attrs.get(ATTR_PERMISSIONS) as string[] | undefined) ?? [];
-		// The casts above are not trusted (#180): roles arrive from collectors,
-		// and a store-backed one can hand back a role whose `permissions` is
-		// missing or not an array. `flatMap` would smuggle the raw value (or
-		// `undefined`) into the list, and `match` would throw — one bad row in a
-		// role store turned into a 500 deny. A malformed shape is ignored, not
-		// half-honoured.
-		const fromRoles = ((attrs.get(ATTR_ROLES) as Role[] | undefined) ?? []).flatMap((role) =>
+		// Nothing about these values is taken on the cast's word (#180): both
+		// arrive from collectors, and a store-backed one can hand back anything
+		// — a non-array under either key, a role whose `permissions` is missing
+		// or not an array, non-string entries. Every malformed shape is ignored
+		// rather than half-honoured: an entry-level guard alone still throws on
+		// a non-array container, and spreading a bare string under
+		// `permissions` would splay it into characters, letting a
+		// one-character requirement match a value that was never a grant.
+		const direct = attrs.get(ATTR_PERMISSIONS);
+		const roles = attrs.get(ATTR_ROLES);
+		const fromRoles = (Array.isArray(roles) ? (roles as Role[]) : []).flatMap((role) =>
 			Array.isArray(role?.permissions) ? role.permissions : [],
 		);
-		const all = [...direct, ...fromRoles];
+		const all = [...(Array.isArray(direct) ? direct : []), ...fromRoles];
 
 		// Non-string entries never match and never throw, as in HasScope (#116).
 		return all.some((p) => typeof p === "string" && this.match(p, this.permission));

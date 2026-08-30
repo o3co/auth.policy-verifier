@@ -186,5 +186,29 @@ describe("HasPermission", () => {
 			const attrs: Attributes = new Map([["permissions", [42, null, "posts.read"]]]);
 			expect(rule.verify(attrs)).toBe(true);
 		});
+
+		// The CONTAINERS get the same treatment as their entries: the values
+		// under ATTR_PERMISSIONS / ATTR_ROLES arrive from collectors through an
+		// unchecked cast, so "an array or ignored" has to be decided here, not
+		// assumed. A string under `permissions` is the sharp case — spreading it
+		// would splay it into characters, and a one-character requirement could
+		// then match a character of a value that was never a grant.
+		it("ignores a roles value that is not an array", () => {
+			const rule = new HasPermission("posts.read");
+			const attrs: Attributes = new Map([["roles", "admin"]]);
+			expect(rule.verify(attrs)).toBe(false);
+		});
+
+		it("ignores a permissions value that is a bare string, not one entry of it", () => {
+			const rule = new HasPermission("posts.read");
+			const attrs: Attributes = new Map([["permissions", "posts.read"]]);
+			expect(rule.verify(attrs)).toBe(false);
+		});
+
+		it("ignores a permissions value that is not iterable at all", () => {
+			const rule = new HasPermission("posts.read");
+			const attrs: Attributes = new Map([["permissions", 42]]);
+			expect(rule.verify(attrs)).toBe(false);
+		});
 	});
 });

@@ -23,12 +23,14 @@ and version sections follow the release labeling policy in
   toward at most one half, while the wildcard itself may still match the empty
   string.
 
-  From the same audit: malformed role data never matches and never throws — the
-  discipline `HasScope` already applies to non-string scope values. A role
-  whose `permissions` is missing or not an array is ignored rather than
-  half-honoured, and non-string entries in a permissions list are skipped.
-  Before, one bad row from a store-backed role collector threw inside `verify`
-  and surfaced as a 500 deny.
+  From the same audit: malformed permission and role data never matches and
+  never throws — the discipline `HasScope` already applies to non-string scope
+  values. A non-array value under either attribute key, a role whose
+  `permissions` is missing or not an array, and non-string entries are all
+  ignored rather than half-honoured — notably, a bare string under
+  `permissions` is no longer spread into characters. Before, one bad row from
+  a store-backed role collector threw inside `verify` and surfaced as a 500
+  deny.
 
 ## [0.4.0] - 2026-08-29
 
