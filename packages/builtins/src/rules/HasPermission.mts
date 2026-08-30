@@ -31,6 +31,12 @@ import { ATTR_PERMISSIONS, ATTR_ROLES } from "@o3co/auth.policy-verifier.core";
  * literal halves around the `*` still compare exactly and case-sensitively.
  * Multiple wildcards are rejected outright because the two-part split would
  * silently drop segments and over-grant.
+ *
+ * The two halves must not overlap in the required permission (#180): a grant
+ * of `"posts.*.read"` does not match `"posts.read"`, where the single `.`
+ * would satisfy `startsWith` and `endsWith` at once. The wildcard may match
+ * the empty string, but each character of the required permission counts
+ * toward at most one half.
  */
 export class HasPermission implements Rule {
 	readonly ruleType = "permission";
@@ -42,13 +48,23 @@ export class HasPermission implements Rule {
 	}
 
 	verify(attrs: ReadonlyAttributes): boolean {
-		const direct = (attrs.get(ATTR_PERMISSIONS) as string[] | undefined) ?? [];
-		const fromRoles = ((attrs.get(ATTR_ROLES) as Role[] | undefined) ?? []).flatMap(
-			(role) => role.permissions,
+		// Nothing about these values is taken on the cast's word (#180): both
+		// arrive from collectors, and a store-backed one can hand back anything
+		// — a non-array under either key, a role whose `permissions` is missing
+		// or not an array, non-string entries. Every malformed shape is ignored
+		// rather than half-honoured: an entry-level guard alone still throws on
+		// a non-array container, and spreading a bare string under
+		// `permissions` would splay it into characters, letting a
+		// one-character requirement match a value that was never a grant.
+		const direct = attrs.get(ATTR_PERMISSIONS);
+		const roles = attrs.get(ATTR_ROLES);
+		const fromRoles = (Array.isArray(roles) ? (roles as Role[]) : []).flatMap((role) =>
+			Array.isArray(role?.permissions) ? role.permissions : [],
 		);
-		const all = [...direct, ...fromRoles];
+		const all = [...(Array.isArray(direct) ? direct : []), ...fromRoles];
 
-		return all.some((p) => this.match(p, this.permission));
+		// Non-string entries never match and never throw, as in HasScope (#116).
+		return all.some((p) => typeof p === "string" && this.match(p, this.permission));
 	}
 
 	private match(permission: string, required: string): boolean {
@@ -66,6 +82,12 @@ export class HasPermission implements Rule {
 			if ((permission.match(/\*/g) ?? []).length > 1) return false;
 
 			const [prefix, suffix] = permission.split("*");
+			// The halves must not overlap in `required` (#180): "posts.*.read"
+			// must not match "posts.read", where the single "." satisfies both
+			// startsWith and endsWith. Length is the whole check — the wildcard
+			// may match the empty string, but a character may only count toward
+			// one half.
+			if (required.length < prefix.length + suffix.length) return false;
 			return (!prefix || required.startsWith(prefix)) && (!suffix || required.endsWith(suffix));
 		}
 

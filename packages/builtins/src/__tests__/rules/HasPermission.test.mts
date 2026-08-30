@@ -119,4 +119,96 @@ describe("HasPermission", () => {
 			expect(rule.verify(attrs)).toBe(false);
 		});
 	});
+
+	// #180: the halves around the wildcard must not overlap in the required
+	// permission. `startsWith(prefix) && endsWith(suffix)` alone lets one
+	// character satisfy both halves — "posts.*.read" matched "posts.read",
+	// where the single "." was counted as the prefix's trailing "." and the
+	// suffix's leading "." at once. An over-grant, the failure direction that
+	// matters in an authorization service.
+	describe("wildcard halves must not overlap (#180)", () => {
+		it("does NOT match when one character would satisfy both halves: posts.*.read vs posts.read", () => {
+			const rule = new HasPermission("posts.read");
+			const attrs: Attributes = new Map([["permissions", ["posts.*.read"]]]);
+			expect(rule.verify(attrs)).toBe(false);
+		});
+
+		it("does NOT match when the required permission is shorter than the two halves: a*a vs a", () => {
+			const rule = new HasPermission("a");
+			const attrs: Attributes = new Map([["permissions", ["a*a"]]]);
+			expect(rule.verify(attrs)).toBe(false);
+		});
+
+		it("still matches a real middle segment: posts.*.read vs posts.123.read", () => {
+			const rule = new HasPermission("posts.123.read");
+			const attrs: Attributes = new Map([["permissions", ["posts.*.read"]]]);
+			expect(rule.verify(attrs)).toBe(true);
+		});
+
+		it("matches when the halves touch without sharing: a*a vs aa — the wildcard may match empty", () => {
+			// The guard refuses shared characters, not an empty middle: each
+			// character of the required permission counts toward at most one half.
+			const rule = new HasPermission("aa");
+			const attrs: Attributes = new Map([["permissions", ["a*a"]]]);
+			expect(rule.verify(attrs)).toBe(true);
+		});
+	});
+
+	// #180 (related): roles reach this rule from collectors, so a store-backed
+	// role collector can hand back shapes the operator-config
+	// StaticRoleCollector never produces. Malformed entries never match and
+	// never throw — the discipline HasScope already applies to non-string
+	// scope values. Before the guard, an undefined `permissions` reached
+	// `match` and threw, turning one bad row in a role store into a 500 deny.
+	describe("malformed role data never matches and never throws (#180)", () => {
+		it("ignores a role whose permissions is missing", () => {
+			const rule = new HasPermission("posts.read");
+			const attrs: Attributes = new Map([["roles", [{ name: "broken" }]]]);
+			expect(rule.verify(attrs)).toBe(false);
+		});
+
+		it("ignores a role whose permissions is not an array — malformed shapes are not half-honoured", () => {
+			const rule = new HasPermission("posts.read");
+			const attrs: Attributes = new Map([
+				["roles", [{ name: "broken", permissions: "posts.read" }]],
+			]);
+			expect(rule.verify(attrs)).toBe(false);
+		});
+
+		it("ignores a null role entry", () => {
+			const rule = new HasPermission("posts.read");
+			const attrs: Attributes = new Map([["roles", [null]]]);
+			expect(rule.verify(attrs)).toBe(false);
+		});
+
+		it("ignores non-string entries among granted permissions and still finds a string match", () => {
+			const rule = new HasPermission("posts.read");
+			const attrs: Attributes = new Map([["permissions", [42, null, "posts.read"]]]);
+			expect(rule.verify(attrs)).toBe(true);
+		});
+
+		// The CONTAINERS get the same treatment as their entries: the values
+		// under ATTR_PERMISSIONS / ATTR_ROLES arrive from collectors through an
+		// unchecked cast, so "an array or ignored" has to be decided here, not
+		// assumed. A string under `permissions` is the sharp case — spreading it
+		// would splay it into characters, and a one-character requirement could
+		// then match a character of a value that was never a grant.
+		it("ignores a roles value that is not an array", () => {
+			const rule = new HasPermission("posts.read");
+			const attrs: Attributes = new Map([["roles", "admin"]]);
+			expect(rule.verify(attrs)).toBe(false);
+		});
+
+		it("ignores a permissions value that is a bare string, not one entry of it", () => {
+			const rule = new HasPermission("posts.read");
+			const attrs: Attributes = new Map([["permissions", "posts.read"]]);
+			expect(rule.verify(attrs)).toBe(false);
+		});
+
+		it("ignores a permissions value that is not iterable at all", () => {
+			const rule = new HasPermission("posts.read");
+			const attrs: Attributes = new Map([["permissions", 42]]);
+			expect(rule.verify(attrs)).toBe(false);
+		});
+	});
 });
