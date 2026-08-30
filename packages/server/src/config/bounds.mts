@@ -210,14 +210,14 @@ export const NUMERIC_BOUNDS = {
 		unit: "milliseconds",
 	},
 	/**
-	 * How long a whole collector fan-out may take. Not bounded above and not
-	 * bounded below by `collectorTimeoutMs`: a deployment may legitimately want
-	 * a deadline tighter than one collector's budget (every stall then reported
-	 * as a deadline, which is a cruder message but a correct decision), and
+	 * How long a whole collector fan-out may take. Not bounded below by
+	 * `collectorTimeoutMs`: a deployment may legitimately want a deadline
+	 * tighter than one collector's budget (every stall then reported as a
+	 * deadline, which is a cruder message but a correct decision), and
 	 * cross-knob validation is not something one `BoundSpec` can express.
 	 * `Infinity` is refused like every other knob here — an unbounded deadline
-	 * is the state #115 found. Bounded above by the timer ceiling (#181), like
-	 * `collectorTimeoutMs` and for the same reason.
+	 * is the state #115 found — and the ceiling is the timer's own (#181),
+	 * like `collectorTimeoutMs` and for the same reason.
 	 */
 	collectorDeadlineMs: {
 		field: "collectorDeadlineMs",

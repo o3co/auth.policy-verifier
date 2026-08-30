@@ -46,9 +46,9 @@ interface VerifyRouterConfig {
   /** Evaluator semantics overrides; omitted means deny on an empty rule set. */
   evaluateOptions?: EvaluateOptions;
   /** Most entries POST /verify/batch will decide in one request. Defaults to 50. */
-  maxBatchSize?: number;
+  maxBatchSize?: number | string;
   /** How many of a batch's entries are decided at once (#183). Defaults to 8. */
-  batchConcurrency?: number;
+  batchConcurrency?: number | string;
 }
 
 // Discriminated on `validate`: verification parameters exist only when verifying.
