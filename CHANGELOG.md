@@ -66,6 +66,21 @@ and version sections follow the release labeling policy in
   `resolveCollectorLimits` refuses the same ceiling for a hand-built pipeline
   that never met a config boundary.
 
+- The wire-contract fixture names every code a deployed instance can answer
+  ([#182](https://github.com/o3co/auth.policy-verifier/issues/182)).
+
+  `responseEnvelopes.json` documents its key lists as EXHAUSTIVE — it is the
+  table [o3co/protobuf.interceptors](https://github.com/o3co/protobuf.interceptors)
+  implements against — but three answers a deployed instance can legally give
+  were missing: `attribute_conflict` (a 403 deny code shipped in v0.4.0),
+  `caller_unauthenticated` (the optional #108 caller-auth gate's 401) and
+  `internal_error` / 500. The `codes` and `status` maps now carry all three,
+  the conformance suite exercises the first two on the wire against the
+  reference deployment (new optional `conflicting` / `failing` adapter
+  fixtures), and the table notes that the caller-auth gate answers ahead of
+  the pinned surface — which is why it appears in the vocabulary but never as
+  a request case.
+
 ## [0.4.0] - 2026-08-29
 
 ### Security

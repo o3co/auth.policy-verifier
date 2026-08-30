@@ -48,6 +48,12 @@ const secret = new TextEncoder().encode("wire-contract-conformance-secret");
 /** The action the stalling collector below never answers for. */
 const STALLING_ACTION = "stall";
 
+/** The action that makes two collectors disagree about `tenantId` (#174). */
+const CONFLICTING_ACTION = "conflict";
+
+/** The action the failing collector below throws on — a fault, not a timeout. */
+const FAILING_ACTION = "explode";
+
 /**
  * Small enough that a case can exceed them cheaply, and stated here rather than
  * defaulted so the 413 and the batch-cap cases do not depend on this package's
@@ -66,6 +72,33 @@ const stallableCollector: AttributeCollector = {
 	collect: (collectorContext: CollectorContext) =>
 		collectorContext.action === STALLING_ACTION
 			? new Promise<Attributes>(() => {})
+			: Promise.resolve(new Map<string, unknown>()),
+};
+
+/**
+ * For `CONFLICTING_ACTION`, answers `tenantId` with a value the request's own
+ * `tenant_id` context never carries — so it and
+ * `RequestContextAttributeCollector` disagree about one scalar, which is the
+ * `attribute_conflict` deny (#174). Inert for every other action.
+ */
+const conflictableCollector: AttributeCollector = {
+	collect: (collectorContext: CollectorContext) =>
+		Promise.resolve(
+			collectorContext.action === CONFLICTING_ACTION
+				? new Map<string, unknown>([["tenantId", "a-tenant-no-request-names"]])
+				: new Map<string, unknown>(),
+		),
+};
+
+/**
+ * For `FAILING_ACTION`, rejects with a plain error — the store-outage shape,
+ * which is a genuine fault and must surface as the terminal `internal_error`
+ * envelope rather than as any refusal (#182). Inert for every other action.
+ */
+const failableCollector: AttributeCollector = {
+	collect: (collectorContext: CollectorContext) =>
+		collectorContext.action === FAILING_ACTION
+			? Promise.reject(new Error("wire-contract synthetic collector fault"))
 			: Promise.resolve(new Map<string, unknown>()),
 };
 
@@ -105,6 +138,8 @@ app.use(
 					attributes: [{ from: "tenant_id", to: "tenantId" }],
 				}),
 				stallableCollector,
+				conflictableCollector,
+				failableCollector,
 			],
 			// Bounds low enough that the stall is answered well inside vitest's own
 			// timeout, and high enough that the in-memory collectors beside it are
@@ -199,6 +234,13 @@ const adapter: WireContractAdapter = {
 		// so one response carries a `satisfiedBy` and an absence of one.
 		partiallySatisfied: { resource: "project:1", action: "read", context: { tenant_id: "other" } },
 		stalling: { resource: "project:1", action: STALLING_ACTION, context: { tenant_id: "acme" } },
+		// `tenant_id` here and the collector's own answer disagree on `tenantId`.
+		conflicting: {
+			resource: "project:1",
+			action: CONFLICTING_ACTION,
+			context: { tenant_id: "acme" },
+		},
+		failing: { resource: "project:1", action: FAILING_ACTION, context: { tenant_id: "acme" } },
 	},
 };
 
