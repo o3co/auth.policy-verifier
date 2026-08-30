@@ -292,6 +292,8 @@ verify {
   collectorDeadlineMs  = ${?VERIFY_COLLECTOR_DEADLINE_MS}
   collectorConcurrency = 8      # 同時に走らせるコレクター数
   collectorConcurrency = ${?VERIFY_COLLECTOR_CONCURRENCY}
+  batchConcurrency     = 8      # バッチのうち同時に決定する entry 数 (#183)
+  batchConcurrency     = ${?VERIFY_BATCH_CONCURRENCY}
 }
 ```
 
@@ -339,6 +341,7 @@ Attribute / Rule コレクターはデータベースや HTTP API を呼ぶ層�
 | `verify.collectorTimeoutMs` | `2000` | コレクター 1 本の所要時間。予算はそのコレクターが**開始した時点**から数えるので、同時実行上限による順番待ちで消費されることはない |
 | `verify.collectorDeadlineMs` | `5000` | pipeline 単位の fan-out 全体の所要時間。個々の予算は超えていないのに合計では超えている、というケースを捕える |
 | `verify.collectorConcurrency` | `8` | 1 決定・1 pipeline あたりの同時実行数。現実的なコレクター構成より大きいので通常は何も変わらず、依存先が遅くなって処理が積み上がり始めたときだけ効く |
+| `verify.batchConcurrency` | `8` | 1 バッチのうち同時に決定する entry 数 (#183)。上の 3 つの上限は decision 単位なので、バッチとの積を抑えるのがこの knob。fan-out の天井よりバッチ全体の所要時間を優先したい deployment が引き上げる |
 
 各コレクターには `CollectorContext.signal` で `AbortSignal` が渡されます。そのコレクターの予算切れ、pipeline のデッドライン超過、兄弟コレクターの失敗による決定の中止、呼び出し側の切断のいずれでも abort します。コレクターが待つ相手にそのまま渡してください — `fetch(url, { signal: context.signal })` — そうすれば外向きの処理も実際に取り消されます。
 
