@@ -1,0 +1,43 @@
+{
+	"name": "@o3co/auth.policy-verifier.cedar",
+	"version": "0.0.0",
+	"license": "Apache-2.0",
+	"type": "module",
+	"engines": {
+		"node": ">=22.0.0"
+	},
+	"main": "./dist/index.mjs",
+	"types": "./dist/index.d.mts",
+	"exports": {
+		".": {
+			"import": "./dist/index.mjs",
+			"types": "./dist/index.d.mts"
+		}
+	},
+	"files": [
+		"dist",
+		"LICENSE",
+		"README.md"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/o3co/auth.policy-verifier.git",
+		"directory": "packages/cedar"
+	},
+	"scripts": {
+		"prebuild": "rimraf dist",
+		"build": "tsc",
+		"typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage"
+	},
+	"dependencies": {
+		"@cedar-policy/cedar-wasm": "4.12.0",
+		"@o3co/auth.policy-verifier.core": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/node": "^26.2.0",
+		"@vitest/coverage-v8": "^4.1.10",
+		"vitest": "^4.1.10"
+	}
+}

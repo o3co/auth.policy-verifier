@@ -5,6 +5,7 @@ import {
 	ResourceActionPermissionRuleCollector,
 	ResourceActionScopeRuleCollector,
 } from "@o3co/auth.policy-verifier.builtins";
+import { CedarPolicyRuleCollector } from "@o3co/auth.policy-verifier.cedar";
 import type {
 	Attributes,
 	CollectorContext,
@@ -339,4 +340,60 @@ describe("rule purity conformance — the check itself", () => {
 			/not a deterministic function/,
 		);
 	});
+});
+
+// CedarPolicyRuleCollector (packages/cedar): the policy set is compiled at
+// boot and the rule builds its Cedar request from `attrs` inside `verify`, so
+// the suite proves exactly the property #185 claims — discard the request,
+// the answer stands. The mapping reads `department` / `suspended` out of the
+// attribute map, never out of the context.
+const cedarContext: CollectorRequest = {
+	subject: { sub: "user-1" },
+	resource: { raw: "document:42", resourceType: "document", resourceId: "42" },
+	action: "read",
+};
+
+const cedarCollector = new CedarPolicyRuleCollector({
+	policies: `
+		permit(principal, action == Action::"read", resource) when { principal.dept == "eng" };
+		forbid(principal, action, resource) when { context.suspended == true };
+	`,
+	onNoDeterminingPolicy: "deny",
+	principal: { attributes: { dept: "department" } },
+	context: { suspended: "suspended" },
+	logEvaluationErrors: false,
+});
+
+const cedarFacts: ReadonlyArray<[string, unknown]> = [
+	["userId", "user-1"],
+	["requestAction", "read"],
+	["requestResourceType", "Document"],
+	["requestResourceId", "42"],
+];
+
+describeRulePurityConformance({
+	name: "CedarPolicyRuleCollector",
+	collect: (context) => cedarCollector.collect(context),
+	cases: [
+		{
+			name: "a request a permit determines",
+			context: cedarContext,
+			attrs: new Map<string, unknown>([...cedarFacts, ["department", "eng"]]),
+		},
+		{
+			name: "a request a forbid determines",
+			context: cedarContext,
+			attrs: new Map<string, unknown>([...cedarFacts, ["department", "eng"], ["suspended", true]]),
+		},
+		{
+			name: "a request no policy determines",
+			context: cedarContext,
+			attrs: new Map<string, unknown>([...cedarFacts, ["department", "sales"]]),
+		},
+		{
+			name: "attributes that cannot supply the request at all",
+			context: cedarContext,
+			attrs: new Map<string, unknown>(),
+		},
+	],
 });
