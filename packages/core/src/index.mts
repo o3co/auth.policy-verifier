@@ -11,6 +11,7 @@ export {
 	DEFAULT_COLLECT_DEADLINE_MS,
 	DEFAULT_COLLECTOR_CONCURRENCY,
 	DEFAULT_COLLECTOR_TIMEOUT_MS,
+	MAX_TIMER_MS,
 	resolveCollectorLimits,
 } from "./collectorLimits.mjs";
 export type { CollectorTimeoutDetail, CollectorTimeoutLimit } from "./errors.mjs";

@@ -47,6 +47,8 @@ interface VerifyRouterConfig {
   evaluateOptions?: EvaluateOptions;
   /** Most entries POST /verify/batch will decide in one request. Defaults to 50. */
   maxBatchSize?: number;
+  /** How many of a batch's entries are decided at once (#183). Defaults to 8. */
+  batchConcurrency?: number;
 }
 
 // Discriminated on `validate`: verification parameters exist only when verifying.
@@ -132,6 +134,9 @@ const AppConfigSchema = z.object({
     collectorDeadlineMs: boundedNumber(NUMERIC_BOUNDS.collectorDeadlineMs, "verify"), // default 5000
     collectorConcurrency:
       boundedNumber(NUMERIC_BOUNDS.collectorConcurrency, "verify"),               // default 8
+    // How many of a batch's entries are decided at once (#183). The collector
+    // bounds are per decision; this bounds their product with the batch.
+    batchConcurrency: boundedNumber(NUMERIC_BOUNDS.batchConcurrency, "verify"),   // default 8
   }),
 });
 
@@ -278,7 +283,7 @@ HTTP/1.1 200 OK
 { "decisions": [ { ... }, { ... } ] }
 ```
 
-Entries come back in request order, each the same object `POST /verify` would have answered for it. The status reports whether the batch was **decided**, not what it decided — a batch of denials is still `200`, and the caller reads each entry. `400 invalid_request` when `decisions` is absent, empty, over `verify.maxBatchSize`, or carries a malformed entry — including one whose `resource` the parser refuses — with the message naming the index; `401` rejects the whole batch when the token does not verify. The whole batch is validated before any of it is decided, so one bad entry refuses the request rather than yielding a partial answer.
+Entries come back in request order, each the same object `POST /verify` would have answered for it. The status reports whether the batch was **decided**, not what it decided — a batch of denials is still `200`, and the caller reads each entry. Entries are decided at most `verify.batchConcurrency` (default 8) at a time (#183): the collector bounds are per decision, so this is what keeps one batch from holding `maxBatchSize × collectorConcurrency` collectors in flight per pipeline. `400 invalid_request` when `decisions` is absent, empty, over `verify.maxBatchSize`, or carries a malformed entry — including one whose `resource` the parser refuses — with the message naming the index; `401` rejects the whole batch when the token does not verify. The whole batch is validated before any of it is decided, so one bad entry refuses the request rather than yielding a partial answer.
 
 ## Usage Example
 

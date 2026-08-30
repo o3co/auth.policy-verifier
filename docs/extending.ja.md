@@ -121,7 +121,7 @@ unwrap した後の指針:
 
 ## デッドラインとキャンセル
 
-各コレクターには `CollectorContext.signal` で `AbortSignal` が渡され、そのコレクターが属する fan-out には 3 つの上限が掛かります: コレクター単位のタイムアウト（既定 2 秒）、fan-out 全体のデッドライン（5 秒）、同時実行数の上限（8）。運用側は `verify.collectorTimeoutMs` / `verify.collectorDeadlineMs` / `verify.collectorConcurrency` で調整します。
+各コレクターには `CollectorContext.signal` で `AbortSignal` が渡され、そのコレクターが属する fan-out には 3 つの上限が掛かります: コレクター単位のタイムアウト（既定 2 秒）、fan-out 全体のデッドライン（5 秒）、同時実行数の上限（8）。運用側は `verify.collectorTimeoutMs` / `verify.collectorDeadlineMs` / `verify.collectorConcurrency` で調整します。この 3 つはいずれも decision 単位です。`POST /verify/batch` は一度に最大 `verify.batchConcurrency` 件（既定 8）ずつ決定するので、バッチ全体の fan-out は「バッチサイズ × コレクター上限」ではなく 2 つの上限の積に収まります。
 
 **待つ相手には signal をそのまま渡してください。** キャンセルが名目でなく実効になるのはそれによってです:
 

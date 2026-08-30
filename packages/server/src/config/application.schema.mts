@@ -6,6 +6,7 @@ import { checkHs256Rotation } from "../jwt/hs256Rotation.mjs";
 import { checkJwksUri } from "../jwt/jwks.mjs";
 import { type BoundSpec, NUMERIC_BOUNDS, resolveBound } from "./bounds.mjs";
 import {
+	DEFAULT_BATCH_CONCURRENCY,
 	DEFAULT_CALLER_AUTH_HEADER,
 	DEFAULT_COLLECT_DEADLINE_MS,
 	DEFAULT_COLLECTOR_CONCURRENCY,
@@ -464,6 +465,12 @@ export const AppConfigSchema = z.object({
 			collectorDeadlineMs: boundedNumber(NUMERIC_BOUNDS.collectorDeadlineMs, "verify"),
 			collectorConcurrency: boundedNumber(NUMERIC_BOUNDS.collectorConcurrency, "verify"),
 			/**
+			 * How many of a batch's entries are decided at once (#183). The
+			 * three collector bounds above are per decision; this is what keeps
+			 * one `POST /verify/batch` from multiplying them by `maxBatchSize`.
+			 */
+			batchConcurrency: boundedNumber(NUMERIC_BOUNDS.batchConcurrency, "verify"),
+			/**
 			 * Whether collectors receive the raw credential as
 			 * `CollectorContext.credential` (#175). `"never"` (default): verified
 			 * claims only — the credential is replayable and a collector that
@@ -503,6 +510,7 @@ export const AppConfigSchema = z.object({
 			collectorTimeoutMs: DEFAULT_COLLECTOR_TIMEOUT_MS,
 			collectorDeadlineMs: DEFAULT_COLLECT_DEADLINE_MS,
 			collectorConcurrency: DEFAULT_COLLECTOR_CONCURRENCY,
+			batchConcurrency: DEFAULT_BATCH_CONCURRENCY,
 			credentialToCollectors: "never" as const,
 		})),
 	// Defaulted (not shape-only): deployments mount an overlay config OVER the

@@ -16,6 +16,24 @@
  */
 export const DEFAULT_MAX_BATCH_SIZE = 50;
 
+/**
+ * How many of a batch's entries are decided at once (#183).
+ *
+ * The collector concurrency cap is per pipeline, **per decision** — it never
+ * bounded the batch. Before this knob the batch route started every entry
+ * under a bare `Promise.all`, so one request at `DEFAULT_MAX_BATCH_SIZE`
+ * could hold `50 × DEFAULT_COLLECTOR_CONCURRENCY` collectors in flight per
+ * pipeline: real amplification for a store-backed collector deployment, from
+ * a single HTTP request, past any per-request rate limit in front of
+ * `/verify`.
+ *
+ * Eight, the same number and the same reasoning as
+ * `DEFAULT_COLLECTOR_CONCURRENCY`: a small batch still decides in one wave,
+ * and the per-request ceiling is the stated product — 8 × 8 per pipeline,
+ * not 50 × 8.
+ */
+export const DEFAULT_BATCH_CONCURRENCY = 8;
+
 /*
  * Bounds on what one `/verify` request may carry (#118).
  *
@@ -105,11 +123,17 @@ export const DEFAULT_MAX_CONTEXT_VALUE_LENGTH = 1_024;
  * own, so a config-only consumer of `AppConfigSchema` still pulls in nothing but
  * the engine's own vocabulary — which is the property `config/bounds.mts`
  * guards, and the reason nothing heavier may ever be reached for from here.
+ *
+ * `MAX_TIMER_MS` rides along for the same reason (#181): it is a fact about
+ * `setTimeout`, defined once beside the engine's own timer use, and it is the
+ * ceiling every millisecond knob here is held to — the JWKS fetch timeout
+ * included, not just the collector bounds.
  */
 export {
 	DEFAULT_COLLECT_DEADLINE_MS,
 	DEFAULT_COLLECTOR_CONCURRENCY,
 	DEFAULT_COLLECTOR_TIMEOUT_MS,
+	MAX_TIMER_MS,
 } from "@o3co/auth.policy-verifier.core";
 
 /*

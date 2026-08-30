@@ -121,7 +121,7 @@ A transport that builds a `CollectorContext` by hand — your own interceptor, o
 
 ## Deadlines and cancellation
 
-Every collector is handed an `AbortSignal` on `CollectorContext.signal`, and the fan-out it runs in is bounded three ways: a per-collector timeout (2s by default), an end-to-end deadline for the whole wave (5s), and a cap on how many collectors run at once (8). Operators tune all three through `verify.collectorTimeoutMs`, `verify.collectorDeadlineMs` and `verify.collectorConcurrency`.
+Every collector is handed an `AbortSignal` on `CollectorContext.signal`, and the fan-out it runs in is bounded three ways: a per-collector timeout (2s by default), an end-to-end deadline for the whole wave (5s), and a cap on how many collectors run at once (8). Operators tune all three through `verify.collectorTimeoutMs`, `verify.collectorDeadlineMs` and `verify.collectorConcurrency`. All three are per decision; `POST /verify/batch` decides at most `verify.batchConcurrency` entries at a time (8 by default), so a batch's fan-out is the product of the two caps rather than the batch size times one of them.
 
 **Pass the signal to whatever you wait on.** That is what makes cancellation real rather than nominal:
 

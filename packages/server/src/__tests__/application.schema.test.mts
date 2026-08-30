@@ -8,6 +8,7 @@ import {
 	JWT_MODE_REMOVED_KEYS,
 } from "#/config/application.schema.mjs";
 import {
+	DEFAULT_BATCH_CONCURRENCY,
 	DEFAULT_COLLECT_DEADLINE_MS,
 	DEFAULT_COLLECTOR_CONCURRENCY,
 	DEFAULT_COLLECTOR_TIMEOUT_MS,
@@ -608,7 +609,7 @@ describe("AppConfigSchema — one numeric reader at both boundaries (#157)", () 
 
 	it("refuses jwksTimeoutMs = true, which used to become a 1 ms timeout", () => {
 		expect(schemaRefusal({ jwksTimeoutMs: true }, "jwksTimeoutMs")).toBe(
-			"oauth.jwt.jwksTimeoutMs must be a positive integer number of milliseconds, got true",
+			"oauth.jwt.jwksTimeoutMs must be an integer between 1 and 2147483647 milliseconds, got true",
 		);
 	});
 
@@ -1213,6 +1214,7 @@ describe("AppConfigSchema — the verify block's default names every knob", () =
 			collectorTimeoutMs: DEFAULT_COLLECTOR_TIMEOUT_MS,
 			collectorDeadlineMs: DEFAULT_COLLECT_DEADLINE_MS,
 			collectorConcurrency: DEFAULT_COLLECTOR_CONCURRENCY,
+			batchConcurrency: DEFAULT_BATCH_CONCURRENCY,
 			credentialToCollectors: "never",
 		});
 	});
@@ -1237,5 +1239,77 @@ describe("AppConfigSchema — the verify block's default names every knob", () =
 				`verify.${key} is missing from the block's .default() literal`,
 			).toBeDefined();
 		}
+	});
+});
+
+describe("AppConfigSchema — millisecond knobs are bounded above (#181)", () => {
+	// Node clamps a `setTimeout` delay above 2^31 - 1 to ~1 ms. Before the
+	// ceiling, a collectorTimeoutMs of 3_000_000_000 passed validation and
+	// became a ~1 ms timer: every decision denied with collector_timeout, and
+	// every JWKS fetch aborted — a validated configuration producing a total
+	// outage, the failure class this module's own header forbids.
+	const MAX_TIMER = 2_147_483_647;
+	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
+	const rs256 = {
+		algorithm: "RS256",
+		mode: "verify",
+		jwksUri: "https://issuer.test/jwks.json",
+		...rfc9068,
+	};
+
+	it("accepts each millisecond knob at the timer ceiling", () => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: { ...rs256, jwksTimeoutMs: MAX_TIMER } },
+			...baseBody,
+			verify: { collectorTimeoutMs: MAX_TIMER, collectorDeadlineMs: MAX_TIMER },
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it.each([
+		[
+			"oauth.jwt.jwksTimeoutMs",
+			{ oauth: { jwt: { ...rs256, jwksTimeoutMs: MAX_TIMER + 1 } }, ...baseBody },
+		],
+		[
+			"verify.collectorTimeoutMs",
+			{ oauth: { jwt: validJwt }, ...baseBody, verify: { collectorTimeoutMs: MAX_TIMER + 1 } },
+		],
+		[
+			"verify.collectorDeadlineMs",
+			{ oauth: { jwt: validJwt }, ...baseBody, verify: { collectorDeadlineMs: MAX_TIMER + 1 } },
+		],
+	])("rejects %s above the timer ceiling", (_label, body) => {
+		expect(AppConfigSchema.safeParse(body).success).toBe(false);
+	});
+});
+
+describe("AppConfigSchema — batch decision concurrency (#183)", () => {
+	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
+
+	const parseVerify = (verify: Record<string, unknown>) =>
+		AppConfigSchema.safeParse({ oauth: { jwt: validJwt }, ...baseBody, verify });
+
+	it("defaults to the shipped bound", () => {
+		const result = AppConfigSchema.parse({ oauth: { jwt: validJwt }, ...baseBody });
+		expect(result.verify.batchConcurrency).toBe(DEFAULT_BATCH_CONCURRENCY);
+	});
+
+	it("takes an operator-set bound, coercing the string a HOCON env substitution produces", () => {
+		const result = parseVerify({ batchConcurrency: "4" });
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.data.verify.batchConcurrency).toBe(4);
+		}
+	});
+
+	it.each([
+		["zero — a batch that decides nothing", 0],
+		["a negative bound", -1],
+		["a fractional bound", 1.5],
+		["a non-numeric bound", "abc"],
+		["an empty string — `VAR=` substituted", ""],
+	])("rejects %s", (_label, batchConcurrency) => {
+		expect(parseVerify({ batchConcurrency }).success).toBe(false);
 	});
 });

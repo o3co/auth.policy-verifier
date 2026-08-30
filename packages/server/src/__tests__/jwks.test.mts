@@ -130,7 +130,7 @@ describe("resolveJwksFetchBounds — bounded fetches on the decision path (#109)
 
 	it.each(["soon", "", "  ", "5s", "1_000"])("rejects the unparsable string %o", (value) => {
 		expect(() => resolveJwksFetchBounds({ jwksTimeoutMs: value })).toThrow(
-			/oauth\.jwt\.jwksTimeoutMs must be a positive integer/,
+			/oauth\.jwt\.jwksTimeoutMs must be an integer between 1 and 2147483647 milliseconds/,
 		);
 	});
 
@@ -138,7 +138,7 @@ describe("resolveJwksFetchBounds — bounded fetches on the decision path (#109)
 		"rejects %o as a timeout — an unbounded or nonsensical fetch is the bug",
 		(value) => {
 			expect(() => resolveJwksFetchBounds({ jwksTimeoutMs: value })).toThrow(
-				/oauth\.jwt\.jwksTimeoutMs must be a positive integer/,
+				/oauth\.jwt\.jwksTimeoutMs must be an integer between 1 and 2147483647 milliseconds/,
 			);
 		},
 	);
@@ -162,17 +162,17 @@ describe("resolveJwksFetchBounds — bounded fetches on the decision path (#109)
 			// Number(true) is 1 and Number(null) is 0: coercing anything that is not
 			// a number or a string would invent a bound the operator never wrote.
 			expect(() => resolveJwksFetchBounds({ jwksTimeoutMs: value as unknown as number })).toThrow(
-				/oauth\.jwt\.jwksTimeoutMs must be a positive integer/,
+				/oauth\.jwt\.jwksTimeoutMs must be an integer between 1 and 2147483647 milliseconds/,
 			);
 		},
 	);
 
 	it("names the config path the operator wrote, and takes an override", () => {
 		expect(() => resolveJwksFetchBounds({ jwksTimeoutMs: "soon" })).toThrow(
-			'oauth.jwt.jwksTimeoutMs must be a positive integer number of milliseconds, got "soon"',
+			'oauth.jwt.jwksTimeoutMs must be an integer between 1 and 2147483647 milliseconds, got "soon"',
 		);
 		expect(() => resolveJwksFetchBounds({ jwksTimeoutMs: "soon" }, "jwt")).toThrow(
-			"jwt.jwksTimeoutMs must be a positive integer number of milliseconds",
+			"jwt.jwksTimeoutMs must be an integer between 1 and 2147483647 milliseconds",
 		);
 	});
 

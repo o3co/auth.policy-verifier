@@ -64,12 +64,27 @@ export const DEFAULT_COLLECT_DEADLINE_MS = 5_000;
  * Eight: more than the collector set of any deployment this project has seen,
  * so a normal configuration still fans out in a single wave and nothing about
  * its latency changes. What the cap removes is the tail — a config with dozens
- * of collectors, or a `POST /verify/batch` of 50 entries, multiplying into
- * simultaneous outbound calls against a dependency that has just started to
- * slow down. That is the amplification the bound exists for; the number is a
- * ceiling on pathology, not a tuning parameter.
+ * of collectors multiplying into simultaneous outbound calls against a
+ * dependency that has just started to slow down. That is the amplification the
+ * bound exists for; the number is a ceiling on pathology, not a tuning
+ * parameter.
+ *
+ * Per **decision**, which is worth saying twice: the cap does not bound a
+ * request that carries many decisions. A `POST /verify/batch` multiplies it by
+ * however many entries are decided at once — bounding that product is the
+ * batch route's own job (`verify.batchConcurrency`, #183), not this cap's.
  */
 export const DEFAULT_COLLECTOR_CONCURRENCY = 8;
+
+/**
+ * The largest delay a timer can actually hold: 2^31 - 1 milliseconds, about
+ * 24.8 days. Node stores a `setTimeout` delay in a signed 32-bit integer and
+ * silently clamps anything above to ~1 ms — so a bigger "budget" is not a
+ * generous bound but a timer that fires almost immediately, cancelling every
+ * collector and denying every decision (#181). A millisecond knob above this
+ * is refused wherever one is read.
+ */
+export const MAX_TIMER_MS = 2_147_483_647;
 
 /** Which fan-out a bound was tripped in. Carried into the failure message. */
 export type CollectorPipeline = "attribute" | "rule";
@@ -103,28 +118,32 @@ export interface ResolvedCollectorLimits {
 
 /**
  * Fills in the defaults and refuses a limit that is not a positive whole
- * number, naming the field.
+ * number — or a millisecond budget above what a timer can hold (#181) —
+ * naming the field.
  *
  * Refused rather than repaired, and refused at construction rather than at the
  * first request: `concurrency: 0` would otherwise start no collector at all and
  * resolve with an empty result — an empty attribute map and an empty rule set,
  * which is precisely the fail-open this module exists to close. A silently
- * ignored bound is the failure mode #157 catalogued for the config knobs.
+ * ignored bound is the failure mode #157 catalogued for the config knobs, and
+ * a timeout past {@link MAX_TIMER_MS} is its twin: `setTimeout` quietly clamps
+ * it to ~1 ms, a bound nobody wrote that denies everything.
  *
  * This check is deliberately *weaker* than the config layer's `resolveBound`
  * rather than a second opinion on the same values: every number `resolveBound`
- * produces for these knobs is a positive integer, so anything accepted there is
- * accepted here. The two cannot reach different verdicts on a configured value
- * — this only catches a hand-written call that never met a config boundary.
+ * produces for these knobs is a positive integer within the timer ceiling, so
+ * anything accepted there is accepted here. The two cannot reach different
+ * verdicts on a configured value — this only catches a hand-written call that
+ * never met a config boundary.
  */
 export function resolveCollectorLimits(limits?: CollectorLimits): ResolvedCollectorLimits {
 	return {
-		collectorTimeoutMs: positive(
+		collectorTimeoutMs: timer(
 			limits?.collectorTimeoutMs,
 			DEFAULT_COLLECTOR_TIMEOUT_MS,
 			"collectorTimeoutMs",
 		),
-		deadlineMs: positive(limits?.deadlineMs, DEFAULT_COLLECT_DEADLINE_MS, "deadlineMs"),
+		deadlineMs: timer(limits?.deadlineMs, DEFAULT_COLLECT_DEADLINE_MS, "deadlineMs"),
 		concurrency: positive(limits?.concurrency, DEFAULT_COLLECTOR_CONCURRENCY, "concurrency"),
 	};
 }
@@ -138,6 +157,17 @@ function positive(value: number | undefined, fallback: number, field: string): n
 		throw new RangeError(`${field} must be a positive integer, got ${String(value)}`);
 	}
 	return value;
+}
+
+/** A millisecond budget: positive, and small enough for a timer to hold (#181). */
+function timer(value: number | undefined, fallback: number, field: string): number {
+	const resolved = positive(value, fallback, field);
+	if (resolved > MAX_TIMER_MS) {
+		throw new RangeError(
+			`${field} must be at most ${MAX_TIMER_MS} milliseconds, got ${String(value)}`,
+		);
+	}
+	return resolved;
 }
 
 /** The half of a collector this runner uses — either kind produces some `T`. */

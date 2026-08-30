@@ -566,3 +566,26 @@ describe("RulePipeline — collector deadlines (#115)", () => {
 		expect(peak).toBe(2);
 	});
 });
+
+describe("pipeline limits — timer knobs are bounded above (#181)", () => {
+	// Node clamps a `setTimeout` delay above 2^31 - 1 to ~1 ms, so a huge
+	// budget would cancel every collector almost on arrival — a verifier that
+	// denies everything, produced by a value that looked valid. Refused at
+	// construction, like every other unusable bound.
+	it("accepts the largest delay a timer can represent", () => {
+		expect(
+			() =>
+				new AttributePipeline([], {
+					collectorTimeoutMs: 2_147_483_647,
+					deadlineMs: 2_147_483_647,
+				}),
+		).not.toThrow();
+	});
+
+	it.each([
+		["collectorTimeoutMs", { collectorTimeoutMs: 2_147_483_648 }],
+		["deadlineMs", { deadlineMs: 2_147_483_648 }],
+	])("refuses a %s above the timer ceiling, naming the field", (field, limits) => {
+		expect(() => new AttributePipeline([], limits)).toThrow(field);
+	});
+});

@@ -34,6 +34,7 @@
  */
 
 import {
+	DEFAULT_BATCH_CONCURRENCY,
 	DEFAULT_CLOCK_TOLERANCE_SECONDS,
 	DEFAULT_COLLECT_DEADLINE_MS,
 	DEFAULT_COLLECTOR_CONCURRENCY,
@@ -51,6 +52,7 @@ import {
 	DEFAULT_MAX_TOKEN_AGE_SECONDS,
 	MAX_CLOCK_TOLERANCE_SECONDS,
 	MAX_TCP_PORT,
+	MAX_TIMER_MS,
 } from "./defaults.mjs";
 
 /** How one numeric knob is read: what it defaults to and what it admits. */
@@ -93,11 +95,16 @@ export const NUMERIC_BOUNDS = {
 		minimum: 1,
 		maximum: MAX_TCP_PORT,
 	},
-	/** Abort a JWKS fetch after this long. */
+	/**
+	 * Abort a JWKS fetch after this long. Bounded above by what a timer can
+	 * hold (#181): Node clamps a `setTimeout` delay past 2^31 - 1 to ~1 ms,
+	 * which would abort every fetch rather than none of them.
+	 */
 	jwksTimeoutMs: {
 		field: "jwksTimeoutMs",
 		fallback: DEFAULT_JWKS_TIMEOUT_MS,
 		minimum: 1,
+		maximum: MAX_TIMER_MS,
 		unit: "milliseconds",
 	},
 	/**
@@ -191,12 +198,15 @@ export const NUMERIC_BOUNDS = {
 	 * How long one collector may take before it is cancelled (#115). The floor
 	 * is 1: a zero budget cancels every collector before it can answer, which is
 	 * a verifier that denies everything — the same shape as the `0` cap
-	 * `maxBatchSize` refuses.
+	 * `maxBatchSize` refuses. The ceiling is the timer's own (#181): past
+	 * 2^31 - 1, Node clamps the delay to ~1 ms and the huge budget *is* the
+	 * zero budget, reached through validation instead of refused by it.
 	 */
 	collectorTimeoutMs: {
 		field: "collectorTimeoutMs",
 		fallback: DEFAULT_COLLECTOR_TIMEOUT_MS,
 		minimum: 1,
+		maximum: MAX_TIMER_MS,
 		unit: "milliseconds",
 	},
 	/**
@@ -206,12 +216,14 @@ export const NUMERIC_BOUNDS = {
 	 * as a deadline, which is a cruder message but a correct decision), and
 	 * cross-knob validation is not something one `BoundSpec` can express.
 	 * `Infinity` is refused like every other knob here — an unbounded deadline
-	 * is the state #115 found.
+	 * is the state #115 found. Bounded above by the timer ceiling (#181), like
+	 * `collectorTimeoutMs` and for the same reason.
 	 */
 	collectorDeadlineMs: {
 		field: "collectorDeadlineMs",
 		fallback: DEFAULT_COLLECT_DEADLINE_MS,
 		minimum: 1,
+		maximum: MAX_TIMER_MS,
 		unit: "milliseconds",
 	},
 	/**
@@ -225,6 +237,19 @@ export const NUMERIC_BOUNDS = {
 		fallback: DEFAULT_COLLECTOR_CONCURRENCY,
 		minimum: 1,
 		unit: "collectors",
+	},
+	/**
+	 * How many of a batch's entries are decided at once (#183). The three
+	 * collector bounds above are per decision, so without this one
+	 * `POST /verify/batch` multiplied them by up to `maxBatchSize`. The floor
+	 * is 1 for `collectorConcurrency`'s reason: `0` is not "no limit", it is a
+	 * batch that decides nothing.
+	 */
+	batchConcurrency: {
+		field: "batchConcurrency",
+		fallback: DEFAULT_BATCH_CONCURRENCY,
+		minimum: 1,
+		unit: "decisions",
 	},
 } satisfies Record<string, BoundSpec>;
 
