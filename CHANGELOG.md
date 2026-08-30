@@ -32,6 +32,40 @@ and version sections follow the release labeling policy in
   a store-backed role collector threw inside `verify` and surfaced as a 500
   deny.
 
+- `POST /verify/batch` decides its entries in bounded lanes, at most
+  `verify.batchConcurrency` at a time (default 8, new knob)
+  ([#183](https://github.com/o3co/auth.policy-verifier/issues/183)).
+
+  The collector concurrency cap (#115) is per pipeline, **per decision** — it
+  never bounded the batch. The batch route started every entry under a bare
+  `Promise.all`, so one request at the default `maxBatchSize` of 50 could hold
+  50 × 8 collectors in flight per pipeline: for a store-backed collector
+  deployment, ~800 simultaneous outbound calls from a single authenticated
+  HTTP request, past any per-request rate limit in front of `/verify`. The
+  per-request ceiling is now the stated product of the two caps — 8 × 8, not
+  50 × 8 — and answers still come back in request order. The knob is read
+  through `resolveBound` at both config boundaries like every other numeric
+  knob, and the comment on `DEFAULT_COLLECTOR_CONCURRENCY` no longer claims
+  the per-decision cap protects the batch.
+
+### Fixed
+
+- The millisecond knobs are bounded above by what a timer can hold
+  ([#181](https://github.com/o3co/auth.policy-verifier/issues/181)).
+
+  `verify.collectorTimeoutMs`, `verify.collectorDeadlineMs` and
+  `oauth.jwt.jwksTimeoutMs` had a floor and no ceiling. Node stores a
+  `setTimeout` delay in a signed 32-bit integer and silently clamps anything
+  above 2 147 483 647 to ~1 ms — so a validated value became a ~1 ms budget,
+  and every decision denied with `collector_timeout` (or every JWKS fetch
+  aborted). Fail-closed, so availability rather than an authorization hole,
+  but exactly the failure the two-boundary doctrine exists to prevent: *"a
+  value must be refused rather than passed to a library that quietly applies
+  its own default."* All three now carry `maximum: MAX_TIMER_MS` (exported
+  from core) at both config boundaries, and core's own
+  `resolveCollectorLimits` refuses the same ceiling for a hand-built pipeline
+  that never met a config boundary.
+
 ## [0.4.0] - 2026-08-29
 
 ### Security

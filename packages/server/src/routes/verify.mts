@@ -46,6 +46,14 @@ export interface VerifyRouterConfig {
 	 */
 	maxBatchSize?: number | string;
 	/**
+	 * How many of a batch's entries are decided at once (#183). Defaults to 8
+	 * (`DEFAULT_BATCH_CONCURRENCY`), and admits the string form for the reason
+	 * `maxBatchSize` does. The collector concurrency cap is per decision, so
+	 * this is the other factor in what one `POST /verify/batch` may hold in
+	 * flight — see the lane loop in the batch route.
+	 */
+	batchConcurrency?: number | string;
+	/**
 	 * Ceiling on the JSON body, in bytes — the `limit` handed to
 	 * `express.json()`. Defaults to 64 KiB (`DEFAULT_MAX_BODY_BYTES`), below
 	 * Express's unstated 100 KB default, and is the outer envelope: it is what
@@ -456,6 +464,11 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	// the schema refused to boot — and let a `0` through as a cap that rejects
 	// every batch there is.
 	const maxBatchSize = resolveBound(config.maxBatchSize, NUMERIC_BOUNDS.maxBatchSize, "verify");
+	const batchConcurrency = resolveBound(
+		config.batchConcurrency,
+		NUMERIC_BOUNDS.batchConcurrency,
+		"verify",
+	);
 	// The request limits (#118), read the same way and at the same boundary.
 	const maxBodyBytes = resolveBound(config.maxBodyBytes, NUMERIC_BOUNDS.maxBodyBytes, "verify");
 	const limits: RequestLimits = {
@@ -677,7 +690,37 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				return;
 			}
 
-			const decisions = await Promise.all(entries.map((entry) => decide(req, auth, entry)));
+			// Decided in lanes, batchConcurrency wide, not under a bare
+			// `Promise.all` (#183): the collector concurrency cap is per
+			// decision, so starting every entry at once multiplied it by the
+			// batch size — one request at the default caps could hold
+			// 50 × 8 collectors in flight per pipeline against a dependency
+			// that had just started to slow down. The same shared-cursor shape
+			// as core's runCollectors; each lane writes into the entry's own
+			// slot, so the answer order is the request order however the lanes
+			// interleave.
+			const decisions = new Array<DecisionResponse>(entries.length);
+			let next = 0;
+			let abandoned = false;
+			const lane = async (): Promise<void> => {
+				while (!abandoned && next < entries.length) {
+					const index = next++;
+					decisions[index] = await decide(req, auth, entries[index]);
+				}
+			};
+			try {
+				await Promise.all(
+					Array.from({ length: Math.min(batchConcurrency, entries.length) }, () => lane()),
+				);
+			} catch (cause) {
+				// A decide that throws is a genuine fault — denials are answered
+				// inside it — and the 500 below speaks for the whole batch, so
+				// the lanes stop pulling entries nobody will read. What is
+				// already in flight settles on its own, exactly as it did under
+				// Promise.all.
+				abandoned = true;
+				throw cause;
+			}
 			res.status(200).json({ decisions });
 		} catch (cause) {
 			logger.error({ err: cause, endpoint: "/verify/batch" }, "verify_internal_error");

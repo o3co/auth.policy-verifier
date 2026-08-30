@@ -1470,3 +1470,112 @@ describe("createVerifyRouter — a collector that runs out of time denies (#115)
 		expect(res.body.decisions[1].code).toBe("collector_timeout");
 	});
 });
+
+describe("POST /verify/batch — decisions in flight are bounded (#183)", () => {
+	// The collector concurrency cap is per pipeline, per decision. Before this
+	// bound the batch route started every entry's decision at once under a bare
+	// `Promise.all`, so one request at the default maxBatchSize of 50 could
+	// hold 50 × collectorConcurrency collectors in flight per pipeline —
+	// amplification a store-backed collector deployment feels as ~800
+	// simultaneous outbound calls from a single HTTP request. Entries are now
+	// decided in lanes, `verify.batchConcurrency` wide.
+	const gaugedApp = (batchConcurrency: number | string, gauge: AttributeCollector) => {
+		const app = express();
+		app.use(
+			createVerifyRouter({
+				jwt: {
+					validate: true,
+					key: hs256Key.key,
+					algorithms: hs256Key.algorithms,
+					issuer: ISSUER,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				},
+				resourceParser: new DotNotationResourceParser(),
+				attributePipeline: new AttributePipeline([gauge]),
+				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
+				batchConcurrency,
+			}),
+		);
+		return app;
+	};
+
+	it("never has more than batchConcurrency decisions in flight, and preserves entry order", async () => {
+		let inFlight = 0;
+		let peak = 0;
+		// One gauged collector per decision, so attribute collectors in flight
+		// equals decisions in flight.
+		const gauge: AttributeCollector = {
+			collect: async () => {
+				inFlight += 1;
+				peak = Math.max(peak, inFlight);
+				await new Promise((resolve) => setTimeout(resolve, 5));
+				inFlight -= 1;
+				return new Map<string, unknown>([["scopes", ["read:project"]]]);
+			},
+		};
+		const token = await signHS256Token({ sub: "user-1", scope: "read:project" });
+		const resources = Array.from({ length: 8 }, (_, i) => `project:${i}`);
+
+		const res = await request(gaugedApp(2, gauge))
+			.post("/verify/batch")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ decisions: resources.map((resource) => ({ resource, action: "read" })) });
+
+		expect(res.status).toBe(200);
+		expect(peak).toBe(2);
+		// The lanes write into the entry's own slot, so the answer order is the
+		// request order however the lanes interleave.
+		expect(res.body.decisions.map((d: { resource: string }) => d.resource)).toEqual(resources);
+		expect(res.body.decisions.every((d: { decision: string }) => d.decision === "allow")).toBe(
+			true,
+		);
+	});
+
+	it("takes the string a hand-built env config carries", async () => {
+		const gauge: AttributeCollector = {
+			collect: async () => new Map<string, unknown>([["scopes", ["read:project"]]]),
+		};
+		const token = await signHS256Token({ sub: "user-1", scope: "read:project" });
+
+		const res = await request(gaugedApp("2", gauge))
+			.post("/verify/batch")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ decisions: [{ resource: "project:1", action: "read" }] });
+
+		expect(res.status).toBe(200);
+	});
+
+	it("refuses zero at router construction, in the schema's wording (#157)", () => {
+		// Zero lanes is a batch that decides nothing — the same shape as the
+		// `0` cap maxBatchSize refuses, and one reader at both boundaries.
+		const fromRouter = (() => {
+			try {
+				gaugedApp(0, { collect: async () => new Map() });
+				return undefined;
+			} catch (cause) {
+				return (cause as Error).message;
+			}
+		})();
+		expect(fromRouter).toBeDefined();
+
+		const result = AppConfigSchema.safeParse({
+			oauth: {
+				jwt: {
+					algorithm: "HS256",
+					secret: JWT_SECRET,
+					mode: "verify",
+					issuer: ISSUER,
+					audience: AUDIENCE,
+				},
+			},
+			attribute: { collectors: [] },
+			rule: { collectors: [] },
+			verify: { batchConcurrency: 0 },
+		});
+		const fromSchema = result.success
+			? undefined
+			: result.error.issues.find((issue) => issue.path.at(-1) === "batchConcurrency")?.message;
+		expect(fromSchema).toBe(fromRouter);
+	});
+});

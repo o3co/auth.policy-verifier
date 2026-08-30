@@ -292,6 +292,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 			rulePipeline: new RulePipeline(ruleCollectors, collectorLimits),
 			evaluateOptions: { onEmptyRuleSet: config.rule.onEmptyRuleSet },
 			maxBatchSize: config.verify.maxBatchSize,
+			batchConcurrency: config.verify.batchConcurrency,
 			// Forwarded rather than defaulted here (#118): the router resolves each
 			// through the same `resolveBound` the schema used, so a hand-built config
 			// reaching `createApp` gets the schema's verdict either way.
