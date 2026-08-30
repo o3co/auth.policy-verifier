@@ -9,7 +9,15 @@
 		"Key lists are EXHAUSTIVE. A response carrying a key not named here is drift, and",
 		"the suite fails on the extra key as readily as on a missing one — an enforcement",
 		"layer that switched on a field this contract never promised is exactly the coupling",
-		"#125 exists to prevent."
+		"#125 exists to prevent.",
+		"Three vocabulary notes (#182). `attribute_conflict` is a deny code and arrives",
+		"with `status.deny`, wearing the decision envelope like `collector_timeout`.",
+		"`internal_error` is the terminal envelope — the one 5xx in this table, still",
+		"shaped like `error` so a client parsing only decision JSON reads it as a deny.",
+		"`caller_unauthenticated` is the optional `http.callerAuth` gate's refusal (#108):",
+		"the gate sits IN FRONT of this surface and answers before the body is parsed, so",
+		"it appears in `codes`/`status` but never as a request case — where a deployment",
+		"sets the gate, every refusal below is reachable only through it."
 	],
 	"error": {
 		"keys": ["decision", "code", "message"],
@@ -38,8 +46,10 @@
 		"batchDecided": 200,
 		"invalidRequest": 400,
 		"unauthenticated": 401,
+		"callerUnauthenticated": 401,
 		"payloadTooLarge": 413,
-		"unsupportedMediaType": 415
+		"unsupportedMediaType": 415,
+		"internalError": 500
 	},
 	"codes": {
 		"invalidRequest": "invalid_request",
@@ -48,6 +58,9 @@
 		"unsupportedScheme": "unsupported_scheme",
 		"payloadTooLarge": "payload_too_large",
 		"unsupportedMediaType": "unsupported_media_type",
-		"collectorTimeout": "collector_timeout"
+		"collectorTimeout": "collector_timeout",
+		"attributeConflict": "attribute_conflict",
+		"callerUnauthenticated": "caller_unauthenticated",
+		"internalError": "internal_error"
 	}
 }

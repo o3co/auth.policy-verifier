@@ -142,6 +142,19 @@ export interface WireFixtures {
 	 * omits it and the two cases that need it do not run.
 	 */
 	stalling?: WireDecisionRequest;
+	/**
+	 * Optional: a request two attribute collectors answer with different scalar
+	 * values for one key, for the `attribute_conflict` deny (#174, shipped in
+	 * v0.4.0 and missing from this table until #182). Omitted by a deployment
+	 * that cannot stage a conflict.
+	 */
+	conflicting?: WireDecisionRequest;
+	/**
+	 * Optional: a request whose collector fails outright — not a timeout — for
+	 * the terminal `internal_error` envelope (#182). Omitted by a deployment
+	 * with no failable collector.
+	 */
+	failing?: WireDecisionRequest;
 }
 
 /** Hooks a decision endpoint must provide to be checked against the wire contract. */
@@ -466,6 +479,62 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 					expect(body.decisions[1].code).toBe(codes.collectorTimeout);
 				},
 			);
+		});
+
+		// #182: three codes a deployed instance can legally answer were missing
+		// from the table, so the contract an enforcement layer reads was narrower
+		// than the surface it meets. Two are exercised on the wire below; the
+		// third — the optional caller-auth gate's — cannot be, and the case says
+		// why.
+		describe("a scalar attribute conflict (#174, table row #182)", () => {
+			it.runIf(adapter.fixtures.conflicting)("denies with 403 and an empty reason", async () => {
+				const conflicting = adapter.fixtures.conflicting;
+				if (!conflicting) return;
+				const res = await post("/verify", conflicting);
+
+				// The same rendering as collector_timeout, for the same reason:
+				// two collectors disagreeing about one attribute means the
+				// decision's inputs are not established, and the safe answer is a
+				// deny an enforcement layer will not retry around.
+				expect(res.status).toBe(status.deny);
+				const body = expectDecisionEnvelope(res.body);
+				expect(body.decision).toBe("deny");
+				expect(body.code).toBe(codes.attributeConflict);
+				// No rule group was evaluated, and the reason says so.
+				expect(body.reason).toEqual({ groups: [] });
+			});
+		});
+
+		describe("a collector failure that is not a timeout (table row #182)", () => {
+			it.runIf(adapter.fixtures.failing)("answers the terminal 500 envelope", async () => {
+				const failing = adapter.fixtures.failing;
+				if (!failing) return;
+				const res = await post("/verify", failing);
+
+				// A genuine fault, not a refusal the verifier can stand behind —
+				// the one answer in this table that IS a 5xx, and it still wears
+				// the deny envelope so a client that parses only decision JSON
+				// reads it as the deny it must treat it as.
+				expect(res.status).toBe(status.internalError);
+				expect(keysOf(res.body)).toEqual([...error.keys].sort());
+				const body = res.body as { decision: string; code: string };
+				expect(body.decision).toBe(error.decision);
+				expect(body.code).toBe(codes.internalError);
+			});
+		});
+
+		describe("the code the table names without a request case (#182)", () => {
+			it("names the caller-auth gate's refusal, which answers ahead of this surface (#108)", () => {
+				// The optional `http.callerAuth` gate sits IN FRONT of the pinned
+				// surface — it answers before the body is parsed, so it is not one
+				// of the per-request refusals the request cases enumerate, and this
+				// reference deployment does not mount it. The table still names it:
+				// an enforcement layer switching on `code` meets it wherever a
+				// deployment sets the gate, and a vocabulary documented as
+				// exhaustive must not be narrower than the wire.
+				expect(codes.callerUnauthenticated).toBe("caller_unauthenticated");
+				expect(status.callerUnauthenticated).toBe(401);
+			});
 		});
 	});
 }
