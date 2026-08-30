@@ -296,6 +296,8 @@ verify {
   collectorDeadlineMs  = ${?VERIFY_COLLECTOR_DEADLINE_MS}
   collectorConcurrency = 8      # collectors in flight at once
   collectorConcurrency = ${?VERIFY_COLLECTOR_CONCURRENCY}
+  batchConcurrency     = 8      # batch entries decided at once (#183)
+  batchConcurrency     = ${?VERIFY_BATCH_CONCURRENCY}
 }
 ```
 
@@ -345,6 +347,7 @@ Attribute and rule collectors are the layer that talks to databases and HTTP API
 | `verify.collectorTimeoutMs` | `2000` | how long one collector may take. The budget starts when that collector starts, so queueing behind the concurrency cap does not spend it |
 | `verify.collectorDeadlineMs` | `5000` | how long a whole fan-out may take, per pipeline. Catches the case where nothing overran its own budget but the total still did |
 | `verify.collectorConcurrency` | `8` | how many collectors run at once, per pipeline, per decision. More than any realistic collector set, so it changes nothing until a dependency slows down and work starts piling up |
+| `verify.batchConcurrency` | `8` | how many of a batch's entries are decided at once (#183). The three bounds above are per decision; this bounds their product with the batch, and it is what a deployment raises if a full batch's wall time matters more than its fan-out ceiling |
 
 Every collector is handed an `AbortSignal` on `CollectorContext.signal`; it aborts when that collector's budget runs out, when the pipeline's deadline does, when a sibling collector has already failed the decision, or when the caller went away. Pass it to whatever the collector waits on — `fetch(url, { signal: context.signal })` — so the outbound work is actually cancelled and not merely stopped being waited for.
 

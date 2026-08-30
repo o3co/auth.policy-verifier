@@ -46,7 +46,9 @@ interface VerifyRouterConfig {
   /** 評価セマンティクスの上書き。省略時は空 rule set を deny。 */
   evaluateOptions?: EvaluateOptions;
   /** POST /verify/batch の 1 リクエストあたり件数上限。既定は 50。 */
-  maxBatchSize?: number;
+  maxBatchSize?: number | string;
+  /** バッチのうち同時に決定する entry 数 (#183)。既定は 8。 */
+  batchConcurrency?: number | string;
 }
 
 // `validate` による判別可能ユニオン。検証パラメータは検証するときにだけ存在する。
@@ -132,6 +134,9 @@ const AppConfigSchema = z.object({
     collectorDeadlineMs: boundedNumber(NUMERIC_BOUNDS.collectorDeadlineMs, "verify"), // 既定 5000
     collectorConcurrency:
       boundedNumber(NUMERIC_BOUNDS.collectorConcurrency, "verify"),               // 既定 8
+    // バッチのうち同時に決定する entry 数 (#183)。collector の上限は decision 単位
+    // なので、バッチとの積を抑えるのがこの knob。
+    batchConcurrency: boundedNumber(NUMERIC_BOUNDS.batchConcurrency, "verify"),   // 既定 8
   }),
 });
 
@@ -284,7 +289,9 @@ HTTP/1.1 200 OK
 
 エントリはリクエスト順で返り、それぞれ `POST /verify` が同じ入力に返すのと同じオブジェクトです。
 ステータスはバッチが**判定できたか**を表し、判定結果そのものではありません — 全件 deny でも `200` で、
-呼び出し側が各エントリを読みます。`decisions` が無い / 空 / `verify.maxBatchSize` 超過 / 不正なエントリ
+呼び出し側が各エントリを読みます。エントリは一度に最大 `verify.batchConcurrency` 件（既定 8）ずつ
+決定されます (#183) — collector の上限は decision 単位なので、これが 1 バッチに
+`maxBatchSize × collectorConcurrency` 本の collector を同時に持たせないための上限です。`decisions` が無い / 空 / `verify.maxBatchSize` 超過 / 不正なエントリ
 （`resource` がパーサーに拒否されたものを含む）を含む場合は `400 invalid_request`（メッセージが該当 index を
 示します）、トークンが検証できない場合は `401` でバッチ全体を拒否します。バッチは 1 件も判定する前に全件を
 検証するため、1 件の不正なエントリは部分的な回答ではなくリクエスト全体の拒否になります。

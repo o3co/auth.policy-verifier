@@ -48,6 +48,13 @@ and version sections follow the release labeling policy in
   knob, and the comment on `DEFAULT_COLLECTOR_CONCURRENCY` no longer claims
   the per-decision cap protects the batch.
 
+  **The trade is wall time.** A full batch used to run every entry
+  concurrently; it now runs in up to `ceil(maxBatchSize / batchConcurrency)`
+  waves — with collectors near the 5 s deadline, a 50-entry batch's worst
+  case moves from ~one deadline to ~seven. A caller whose HTTP timeout was
+  sized to the old behaviour should either raise it or raise
+  `verify.batchConcurrency`, which is exactly the knob's job.
+
 ### Fixed
 
 - The millisecond knobs are bounded above by what a timer can hold
@@ -65,6 +72,11 @@ and version sections follow the release labeling policy in
   from core) at both config boundaries, and core's own
   `resolveCollectorLimits` refuses the same ceiling for a hand-built pipeline
   that never met a config boundary.
+
+  The boot-refusal wording for these three knobs changes accordingly, from
+  "must be a positive integer number of milliseconds" to "must be an integer
+  between 1 and 2147483647 milliseconds" — alerting that pattern-matches the
+  old text should update.
 
 - The wire-contract fixture names every code a deployed instance can answer
   ([#182](https://github.com/o3co/auth.policy-verifier/issues/182)).
