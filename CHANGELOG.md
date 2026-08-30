@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
+## [Unreleased]
+
+### Security
+
+- `HasPermission` no longer lets the two halves of a single-wildcard grant
+  overlap in the required permission
+  ([#180](https://github.com/o3co/auth.policy-verifier/issues/180)).
+
+  `required.startsWith(prefix) && required.endsWith(suffix)` had nothing
+  stopping the halves from sharing characters, so a grant of `posts.*.read`
+  matched a required permission of `posts.read` — the single `.` satisfied both
+  checks at once. That is an over-grant, and it contradicted the rule's own
+  contract ("the literal halves around the `*` still compare exactly"). The
+  guard is one length check: each character of the required permission counts
+  toward at most one half, while the wildcard itself may still match the empty
+  string.
+
+  From the same audit: malformed role data never matches and never throws — the
+  discipline `HasScope` already applies to non-string scope values. A role
+  whose `permissions` is missing or not an array is ignored rather than
+  half-honoured, and non-string entries in a permissions list are skipped.
+  Before, one bad row from a store-backed role collector threw inside `verify`
+  and surfaced as a 500 deny.
+
 ## [0.4.0] - 2026-08-29
 
 ### Security
