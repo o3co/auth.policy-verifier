@@ -67,7 +67,7 @@ POST /verify/batch — 同じ契約で、1 往復に N 件の decision
 - **JWKS サポート** — `jwksUri` を auth.provider の `https://.../.well-known/jwks.json` に向ければ鍵ローテーションに自動対応。エンドポイントは TLS 必須（ローカル開発向けにループバックのみ例外）。取得はタイムアウト / クールダウン / キャッシュ期間で必ず上限が付き、プロバイダー障害が判定パスを止めない。
 - **本番で答えられる** — 判定 1 件ごとに構造化された `decision` イベント（subject / resource / action / 決め手になったルール / request id / レイテンシ）を出力し、allow/deny カウンタを持つ Prometheus `/metrics` を提供する。メトリクスのラベルはすべて有界であり、bearer トークン・`sub` を超えるクレーム集合・呼び出し元の `context` はログに載らない。[可観測性](#可観測性)を参照。
 - **プラグイン可能なアーキテクチャ** — Module システムでカスタム Collector、ルール、リソースパーサーをファクトリ経由で登録。
-- **DSL ロックインなし** — 認可ロジックは TypeScript。DSL は一切必須ではない。Cedar は*オプションの同居言語*として利用できる（[`packages/cedar`](packages/cedar/)）: 本物の Cedar evaluator が in-process で 1 ルールグループとして動き、Collector が集めた事実を entity store の構築・同期なしで判定する。どちらの言語を選んでも topology には縛られない — 同じ `.cedar` ファイルは後から埋め込み evaluator にも Cedar Agent にも無変更でロードでき、[protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) 経由で共通 `VerifierEndpoint` の背後をまるごと OPA / Cedar に差し替える道も残る。
+- **DSL ロックインなし** — 認可ロジックは TypeScript。DSL は一切必須ではない。Cedar は「オプションの同居言語」として利用できる（[`packages/cedar`](packages/cedar/)）: 本物の Cedar evaluator が in-process で 1 ルールグループとして動き、Collector が集めた事実を entity store の構築・同期なしで判定する。どちらの言語を選んでも topology には縛られない — 同じ `.cedar` ファイルは後から埋め込み evaluator にも Cedar Agent にも無変更でロードでき、[protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) 経由で共通 `VerifierEndpoint` の背後をまるごと OPA / Cedar に差し替える道も残る。
 
 ## いつ選ぶか
 
