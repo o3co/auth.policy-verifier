@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
-## [Unreleased]
+## [0.5.0] - 2026-09-03
 
 ### Security
 
