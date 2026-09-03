@@ -67,12 +67,13 @@ POST /verify/batch — 同じ契約で、1 往復に N 件の decision
 - **JWKS サポート** — `jwksUri` を auth.provider の `https://.../.well-known/jwks.json` に向ければ鍵ローテーションに自動対応。エンドポイントは TLS 必須（ローカル開発向けにループバックのみ例外）。取得はタイムアウト / クールダウン / キャッシュ期間で必ず上限が付き、プロバイダー障害が判定パスを止めない。
 - **本番で答えられる** — 判定 1 件ごとに構造化された `decision` イベント（subject / resource / action / 決め手になったルール / request id / レイテンシ）を出力し、allow/deny カウンタを持つ Prometheus `/metrics` を提供する。メトリクスのラベルはすべて有界であり、bearer トークン・`sub` を超えるクレーム集合・呼び出し元の `context` はログに載らない。[可観測性](#可観測性)を参照。
 - **プラグイン可能なアーキテクチャ** — Module システムでカスタム Collector、ルール、リソースパーサーをファクトリ経由で登録。
-- **DSL ロックインなし** — 認可ロジックは TypeScript。Rego も Cedar ポリシー言語も不要。スケールアウトが必要になれば [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) 経由で OPA や Cedar に差し替え可能 — interceptor がバックエンドを抽象化する。
+- **DSL ロックインなし** — 認可ロジックは TypeScript。DSL は一切必須ではない。Cedar は*オプションの同居言語*として利用できる（[`packages/cedar`](packages/cedar/)）: 本物の Cedar evaluator が in-process で 1 ルールグループとして動き、Collector が集めた事実を entity store の構築・同期なしで判定する。どちらの言語を選んでも topology には縛られない — 同じ `.cedar` ファイルは後から埋め込み evaluator にも Cedar Agent にも無変更でロードでき、[protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) 経由で共通 `VerifierEndpoint` の背後をまるごと OPA / Cedar に差し替える道も残る。
 
 ## いつ選ぶか
 
 - ポリシーを書くのは開発者で、DSL を学習したくない → **これ**
-- ポリシーを非開発者が編集する、または形式検証が必要 → **[Cedar](https://www.cedarpolicy.com/)**
+- Cedar の言語は使いたいが entity store を構築・同期したくない → **これ + [`packages/cedar`](packages/cedar/)**。規模が超えたら（階層探索・entity store が必要になったら）同じ `.cedar` ファイルを無変更でフル Cedar 構成へ移せる
+- ポリシーを非開発者が編集する、またはポリシー全面の形式検証が必要 → **[Cedar](https://www.cedarpolicy.com/)**
 - 組織全体のポリシー基盤として広範な built-in operator 群が必要 → **[OPA](https://www.openpolicyagent.org/)**
 
 ## Quick Start
@@ -149,6 +150,7 @@ standalone → server   → core
 | --- | --- | --- |
 | [`packages/core`](packages/core/) | `@o3co/auth.policy-verifier.core` | 型定義、evaluate、パイプライン、Module 基盤 |
 | [`packages/builtins`](packages/builtins/) | `@o3co/auth.policy-verifier.builtins` | 組み込み Collector、ルール、リソースパーサー |
+| [`packages/cedar`](packages/cedar/) | `@o3co/auth.policy-verifier.cedar` | オプションの同居 Cedar ポリシー評価（policy set ごとに 1 ルールグループ） |
 | [`packages/server`](packages/server/) | `@o3co/auth.policy-verifier.server` | Express サーバー、`createApp`、`POST /verify`、JWT 鍵リゾルバ |
 | [`templates/standalone`](templates/standalone/) | — | デプロイ可能なサーバーテンプレート (コンポジションルート) |
 | [`create-app`](create-app/) | `@o3co/create-auth-policy-verifier` | CLI スキャフォルダー |
