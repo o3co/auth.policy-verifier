@@ -270,15 +270,33 @@ describe("createApp", () => {
 		expect(res.body.code).toBe("invalid_token");
 	});
 
-	it("includes healthcheck endpoint", async () => {
+	it("serves the liveness probe at /_healthcheck", async () => {
+		// The path every component of the stack answers on (o3co/auth.provider#293).
 		const app = await createApp({
 			pathResolver: (s: string) => s,
 			config: testConfig,
 			modules: [testModule, builtinKeyResolversModule],
 		});
 
-		const res = await request(app).get("/healthcheck");
+		const res = await request(app).get("/_healthcheck");
 		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ status: "ok" });
+	});
+
+	it("keeps /healthcheck answering identically as a compatibility alias", async () => {
+		// The path this server answered on before the stack settled on
+		// `/_healthcheck`. An orchestrator probe config that was not updated must
+		// not start failing on upgrade, so the alias gives the canonical answer.
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: testConfig,
+			modules: [testModule, builtinKeyResolversModule],
+		});
+
+		const canonical = await request(app).get("/_healthcheck");
+		const alias = await request(app).get("/healthcheck");
+		expect(alias.status).toBe(200);
+		expect(alias.body).toEqual(canonical.body);
 	});
 
 	it("starts successfully and decodes tokens in insecure-decode mode with no key material", async () => {
@@ -753,18 +771,23 @@ describe("createApp caller authentication (#108)", () => {
 		expect(res.body.code).toBe("caller_unauthenticated");
 	});
 
-	it("leaves the healthcheck reachable without a credential", async () => {
-		// The container healthcheck (and every orchestrator probe) has no
-		// credential to present; gating liveness would make the service unschedulable.
-		const app = await createApp({
-			pathResolver: (s: string) => s,
-			config: guardedConfig,
-			modules: [testModule, builtinKeyResolversModule],
-		});
+	it.each(["/_healthcheck", "/healthcheck"])(
+		"leaves the liveness probe at %s reachable without a credential",
+		async (path) => {
+			// The container healthcheck (and every orchestrator probe) has no
+			// credential to present; gating liveness would make the service
+			// unschedulable. The compatibility alias is covered too: a probe config
+			// that still names it must not start being rejected on upgrade.
+			const app = await createApp({
+				pathResolver: (s: string) => s,
+				config: guardedConfig,
+				modules: [testModule, builtinKeyResolversModule],
+			});
 
-		const res = await request(app).get("/healthcheck");
-		expect(res.status).toBe(200);
-	});
+			const res = await request(app).get(path);
+			expect(res.status).toBe(200);
+		},
+	);
 
 	it("serves decisions with no caller credential configured — the gate is opt-in", async () => {
 		// Deliberately optional in this pass: container deployments and the

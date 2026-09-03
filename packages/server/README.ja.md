@@ -30,7 +30,7 @@ function createApp(options: CreateAppOptions): Promise<express.Express>
 2. `modules` の各モジュールに対して `mod.init(context)` を順に呼び出し、各モジュールがファクトリ関数を登録できるようにする。
 3. `config.attribute.collectors` と `config.rule.collectors` の各エントリについて、`collector` 名で登録済みファクトリを検索して AttributeCollector と RuleCollector を生成する。
 4. `config.resource.parser` から ResourceParser を生成する。
-5. `config.http.pathPrefix` 以下に `GET /healthcheck`・任意の caller 認証ゲート・`POST /verify` をこの順にマウントする。
+5. `config.http.pathPrefix` 以下に liveness probe（`GET /_healthcheck` — スタックの全コンポーネントが応答するパス。`GET /healthcheck` は互換 alias として残す）・任意の caller 認証ゲート・`POST /verify` をこの順にマウントする。
 6. 設定済みの `express.Express` インスタンスを返す。
 
 `pathResolver` には、コンポジションルート側の `import.meta.resolve`（または互換リゾルバー）を渡します。モジュール相対パスの解決が必要なモジュールに渡されます。
@@ -163,7 +163,7 @@ HOCON の `${?VAR}` 置換が渡す文字列のいずれかで到着し、その
 これを抑えるのが次の 2 つの設定です。
 
 - **`http.hostname` の既定値は `127.0.0.1`。** 本プロジェクトが想定するのはサイドカー構成 — enforcement 層が verifier と同居し、ループバック経由で到達する形です。全インターフェースへの bind は明示的なオプトイン（`http.hostname = "0.0.0.0"`）であり、コンテナデプロイではこれを設定しない限り到達できません。
-- **`http.callerAuth.token` は呼び出し元サービスを認証します。** 設定すると、`/verify` と `/verify/batch` への全リクエストがその値を `http.callerAuth.header`（既定 `x-caller-token`。`Authorization` を避けているのは意図的）にそのまま載せる必要があります。比較は定数時間で、body のパースより前・パイプライン処理より前に走るため、未認証のピアはプロセスの処理時間を消費できません。資格情報の欠落と誤りは同一の `401 { decision: "deny", code: "caller_unauthenticated", message: "Caller authentication failed" }` を返します — 推測した値が正しい形だったかを探索者に教えてはならないからです。`GET /healthcheck` は常に非ゲートで、オーケストレーターの probe はそのまま動作します。
+- **`http.callerAuth.token` は呼び出し元サービスを認証します。** 設定すると、`/verify` と `/verify/batch` への全リクエストがその値を `http.callerAuth.header`（既定 `x-caller-token`。`Authorization` を避けているのは意図的）にそのまま載せる必要があります。比較は定数時間で、body のパースより前・パイプライン処理より前に走るため、未認証のピアはプロセスの処理時間を消費できません。資格情報の欠落と誤りは同一の `401 { decision: "deny", code: "caller_unauthenticated", message: "Caller authentication failed" }` を返します — 推測した値が正しい形だったかを探索者に教えてはならないからです。`GET /_healthcheck` は常に非ゲートで、オーケストレーターの probe はそのまま動作します。
 
 caller 認証は**本リリースでは任意**です。未設定かつ bind がループバックでない場合、`createApp` は `unauthenticated_non_loopback_bind` を warn で記録します — 本当に危険な組み合わせを、塞ぐのではなく名指しします。必須化は `config/defaults` の `CALLER_AUTH_REQUIRED` の 1 行変更で行えます（同定数の doc コメント参照）。
 
