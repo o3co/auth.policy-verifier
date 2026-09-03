@@ -101,7 +101,18 @@ function createShippedApp(config: AppConfig = shippedConfig) {
 }
 
 describe("standalone smoke", () => {
-	it("GET /healthcheck returns 200", async () => {
+	it("GET /_healthcheck returns 200", async () => {
+		// The liveness path the Dockerfile's HEALTHCHECK probes, and the one every
+		// component of the stack answers on (o3co/auth.provider#293).
+		const app = await createShippedApp();
+
+		const res = await request(app).get("/_healthcheck");
+		expect(res.status).toBe(200);
+	});
+
+	it("GET /healthcheck returns 200 as a compatibility alias", async () => {
+		// The path this image probed before; a probe config that still names it
+		// must keep working.
 		const app = await createShippedApp();
 
 		const res = await request(app).get("/healthcheck");

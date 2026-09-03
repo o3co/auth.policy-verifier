@@ -30,7 +30,7 @@ Steps performed:
 2. Calls `mod.init(context)` for each module in order, allowing each to register factory functions.
 3. Instantiates attribute collectors and rule collectors from `config.attribute.collectors` and `config.rule.collectors` by looking up the registered factory for each `collector` name.
 4. Instantiates the resource parser from `config.resource.parser`.
-5. Mounts `GET /healthcheck`, the optional caller-authentication gate, then `POST /verify` and `POST /verify/batch` under `config.http.pathPrefix`.
+5. Mounts the liveness probe (`GET /_healthcheck`, the path every component of the stack answers on, with `GET /healthcheck` kept as a compatibility alias), the optional caller-authentication gate, then `POST /verify` and `POST /verify/batch` under `config.http.pathPrefix`.
 6. Returns the configured `express.Express` instance.
 
 `pathResolver` must be `import.meta.resolve` (or a compatible resolver) from the composition root. It is passed to modules that need to resolve module-relative paths.
@@ -164,7 +164,7 @@ The bearer token on `/verify` establishes the **subject** a decision is about. I
 Two settings bound that exposure:
 
 - **`http.hostname` defaults to `127.0.0.1`.** The deployment this project targets is a sidecar — the enforcement layer runs alongside the verifier and reaches it over loopback. Binding all interfaces is an explicit opt-in (`http.hostname = "0.0.0.0"`), which a containerised deployment must set to be reachable at all.
-- **`http.callerAuth.token` authenticates the calling service.** When set, every request to `/verify` and `/verify/batch` must carry that credential verbatim in `http.callerAuth.header` (default `x-caller-token`, deliberately not `Authorization`). The comparison is constant-time, and it runs before the body is parsed and before any pipeline work, so an unauthenticated peer costs the process nothing. A missing credential and a wrong one get the same `401 { decision: "deny", code: "caller_unauthenticated", message: "Caller authentication failed" }` — the rejection must not tell a prober whether their guess had the right shape. `GET /healthcheck` is never gated, so orchestrator probes keep working.
+- **`http.callerAuth.token` authenticates the calling service.** When set, every request to `/verify` and `/verify/batch` must carry that credential verbatim in `http.callerAuth.header` (default `x-caller-token`, deliberately not `Authorization`). The comparison is constant-time, and it runs before the body is parsed and before any pipeline work, so an unauthenticated peer costs the process nothing. A missing credential and a wrong one get the same `401 { decision: "deny", code: "caller_unauthenticated", message: "Caller authentication failed" }` — the rejection must not tell a prober whether their guess had the right shape. `GET /_healthcheck` is never gated, so orchestrator probes keep working.
 
 Caller authentication is **optional in this release**. When it is not configured and the bind is not loopback, `createApp` logs `unauthenticated_non_loopback_bind` at warn — the genuinely dangerous combination, named rather than blocked. Making it mandatory is a one-line change to `CALLER_AUTH_REQUIRED` in `config/defaults`; see that constant's doc comment.
 

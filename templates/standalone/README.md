@@ -94,7 +94,7 @@ x-caller-token: <secret>
 Authorization: Bearer <jwt>
 ```
 
-Anything else gets `401 { "decision": "deny", "code": "caller_unauthenticated", "message": "Caller authentication failed" }`, decided before the body is parsed. `GET /healthcheck` is never gated, so the container healthcheck keeps working.
+Anything else gets `401 { "decision": "deny", "code": "caller_unauthenticated", "message": "Caller authentication failed" }`, decided before the body is parsed. `GET /_healthcheck` is never gated, so the container healthcheck keeps working.
 
 Leaving the credential unset is supported and is fine on loopback. On a non-loopback bind the server logs `unauthenticated_non_loopback_bind` at warn on boot — that combination is the one worth fixing.
 
@@ -306,7 +306,10 @@ server is bound to loopback and no caller can reach it — it would report
 container is actually reachable at asks the same question a caller does, so
 forgetting `HTTP_HOSTNAME=0.0.0.0` shows up as `unhealthy` instead of hiding.
 
-`GET /healthcheck` is never gated by `http.callerAuth`, so the probe needs no
+The probe hits `GET /_healthcheck`, the liveness path every component of the
+stack answers on. `GET /healthcheck` — the path this image probed before — is
+kept as a compatibility alias, so a probe config that still names it keeps
+working. Neither is gated by `http.callerAuth`, so the probe needs no
 credential. It follows `HTTP_PATH_PREFIX` and `HTTP_PORT`.
 
 One deployment shape is the exception: a sidecar sharing a network namespace

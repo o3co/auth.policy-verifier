@@ -93,7 +93,7 @@ x-caller-token: <secret>
 Authorization: Bearer <jwt>
 ```
 
-それ以外は body のパースより前に `401 { "decision": "deny", "code": "caller_unauthenticated", "message": "Caller authentication failed" }` を返します。`GET /healthcheck` は常に非ゲートなので、コンテナの healthcheck はそのまま動作します。
+それ以外は body のパースより前に `401 { "decision": "deny", "code": "caller_unauthenticated", "message": "Caller authentication failed" }` を返します。`GET /_healthcheck` は常に非ゲートなので、コンテナの healthcheck はそのまま動作します。
 
 資格情報を未設定のままにする運用もサポートされており、ループバックであれば問題ありません。ループバック以外に bind した場合は起動時に `unauthenticated_non_loopback_bind` が warn で記録されます — 修正する価値があるのはこの組み合わせです。
 
@@ -303,8 +303,11 @@ tag と digest を意図的に一緒に上げます。
 アドレスを叩けば呼び出し元と同じ問いになるため、`HTTP_HOSTNAME=0.0.0.0` の
 付け忘れは隠れずに `unhealthy` として現れます。
 
-`GET /healthcheck` は `http.callerAuth` で決してゲートされないので、probe に
-資格情報は不要です。`HTTP_PATH_PREFIX` と `HTTP_PORT` には追従します。
+probe が叩くのは `GET /_healthcheck` で、スタックの全コンポーネントが応答する
+liveness パスです。以前このイメージが probe していた `GET /healthcheck` は互換
+alias として残しているので、そのパスのままの probe 設定でも動き続けます。
+どちらも `http.callerAuth` でゲートされないので、probe に資格情報は不要です。
+`HTTP_PATH_PREFIX` と `HTTP_PORT` には追従します。
 
 例外は 1 つ、呼び出し元と network namespace を共有する sidecar 構成です。
 そこでは loopback bind が正しく、到達可能アドレスでは何も listen していま

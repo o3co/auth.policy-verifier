@@ -71,18 +71,30 @@ function assertConfigObject(value: unknown, path: string): asserts value is obje
 }
 
 /**
+ * Where the liveness probe answers, under `config.http.pathPrefix`.
+ *
+ * `/_healthcheck` is the canonical path: the one every component of the stack
+ * serves (auth.provider and auth.proxy already did — o3co/auth.provider#293
+ * item 14) and the one the standalone image's `HEALTHCHECK` probes. This server
+ * answered on `/healthcheck` before the stack settled on one spelling; it is
+ * kept as a compatibility alias so an orchestrator probe config that was not
+ * updated does not start failing on upgrade. Both paths give the same answer.
+ */
+const LIVENESS_PATHS = ["/_healthcheck", "/healthcheck"] as const;
+
+/**
  * Builds the Express app with registries initialized by the supplied modules.
  *
  * Flow: (1) create registries, (2) run `mod.init` sequentially so later modules
  * can see earlier ones' registrations, (3) resolve concrete collectors /
- * resource parser / key resolver from config, (4) mount the healthcheck, the
- * optional caller-auth gate and the `/verify` router under the configured path
- * prefix.
+ * resource parser / key resolver from config, (4) mount the liveness probe
+ * (`LIVENESS_PATHS`), the optional caller-auth gate and the `/verify` router
+ * under the configured path prefix.
  *
  * `config.http.callerAuth.token` authenticates the *calling service* before any
- * decision work runs (#108). It is optional in this release; the healthcheck is
- * never gated. See `CALLER_AUTH_REQUIRED` in `config/defaults` for the one-line
- * change that makes it mandatory.
+ * decision work runs (#108). It is optional in this release; the liveness probe
+ * is never gated. See `CALLER_AUTH_REQUIRED` in `config/defaults` for the
+ * one-line change that makes it mandatory.
  *
  * `config.oauth.jwt.mode = "insecure-decode"` disables signature verification
  * and only decodes the token (the time claims are still enforced in full —
@@ -263,9 +275,12 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	// including the responses produced before any route runs, such as the
 	// caller-auth gate's 401s. A surge of those is exactly what it exists to show.
 	app.use(metrics.middleware);
-	// Healthcheck stays open: an orchestrator probe has no credential to present,
-	// and it reveals nothing a decision does.
-	app.use(prefix, createHealthcheckRouter());
+	// The liveness probe stays open on both its canonical path and its alias:
+	// an orchestrator probe has no credential to present, and it reveals nothing
+	// a decision does.
+	for (const path of LIVENESS_PATHS) {
+		app.use(prefix, createHealthcheckRouter(path));
+	}
 	// `/metrics` is ungated for the same reason, and one more (#111). Prometheus
 	// scrape configs carry `authorization`, `basic_auth` and `oauth2` — not an
 	// arbitrary header — so gating it behind `http.callerAuth`'s `x-caller-token`

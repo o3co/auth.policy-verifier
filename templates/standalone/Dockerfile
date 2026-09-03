@@ -91,8 +91,10 @@ EXPOSE ${HTTP_PORT}
 # operator's port — the config reads `${?HTTP_PORT}`, so app.listen() and the
 # probe stay in sync. Shell form, so both expand at probe time.
 #
-# `GET /healthcheck` is never gated by `http.callerAuth`, so setting
-# HTTP_CALLER_AUTH_TOKEN does not require a credential here.
+# `GET /_healthcheck` is the liveness path every component of the stack answers
+# on (`/healthcheck` stays as a compatibility alias). It is never gated by
+# `http.callerAuth`, so setting HTTP_CALLER_AUTH_TOKEN does not require a
+# credential here.
 #
 # The deployment where loopback is genuinely correct — a sidecar sharing a
 # network namespace with its caller — is the one shape this check is wrong for.
@@ -101,7 +103,7 @@ EXPOSE ${HTTP_PORT}
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD addr="$(hostname -i | cut -d' ' -f1)"; \
       case "$addr" in *:*) addr="[$addr]" ;; esac; \
-      wget -q -O /dev/null "http://${addr}:${HTTP_PORT}${HTTP_PATH_PREFIX%/}/healthcheck" || exit 1
+      wget -q -O /dev/null "http://${addr}:${HTTP_PORT}${HTTP_PATH_PREFIX%/}/_healthcheck" || exit 1
 
 ENTRYPOINT ["tini", "--"]
 CMD ["node", "dist/main.mjs"]
