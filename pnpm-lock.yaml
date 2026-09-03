@@ -50,6 +50,25 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.4.0)(@vitest/coverage-v8@4.1.11)(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@26.4.0)(esbuild@0.27.4)(tsx@4.23.12)(yaml@2.9.0))
 
+  packages/cedar:
+    dependencies:
+      '@cedar-policy/cedar-wasm':
+        specifier: 4.12.0
+        version: 4.12.0
+      '@o3co/auth.policy-verifier.core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: ^26.2.0
+        version: 26.4.0
+      '@vitest/coverage-v8':
+        specifier: ^4.1.10
+        version: 4.1.11(vitest@4.1.11)
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.4.0)(@vitest/coverage-v8@4.1.11)(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@26.4.0)(esbuild@0.27.4)(tsx@4.23.12)(yaml@2.9.0))
+
   packages/core:
     devDependencies:
       '@types/node':
@@ -156,6 +175,9 @@ importers:
       '@o3co/auth.policy-verifier.builtins':
         specifier: workspace:*
         version: link:../../packages/builtins
+      '@o3co/auth.policy-verifier.cedar':
+        specifier: workspace:*
+        version: link:../../packages/cedar
       '@o3co/auth.policy-verifier.core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -264,6 +286,9 @@ packages:
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [win32]
+
+  '@cedar-policy/cedar-wasm@4.12.0':
+    resolution: {integrity: sha512-tCSj92hh4fnmas4ojO4tjx8wAAW3mKVgQ7M388NsSpXp64FVeYY6xwhKtJRaaYGK0qLiN2jnq8/SNIU2r5fdPw==}
 
   '@emnapi/core@1.9.1':
     resolution: {integrity: sha512-mukuNALVsoix/w1BJwFzwXBN/dHeejQtuVzcDsfOEsdpCumXb/E9j8w11h5S54tT1xhifGfbbSm/ICrObRb3KA==}
@@ -1716,6 +1741,8 @@ snapshots:
 
   '@biomejs/cli-win32-x64@2.5.11':
     optional: true
+
+  '@cedar-policy/cedar-wasm@4.12.0': {}
 
   '@emnapi/core@1.9.1':
     dependencies:

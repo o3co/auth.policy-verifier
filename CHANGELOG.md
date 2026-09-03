@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
+## [Unreleased]
+
+### Added
+
+- **`@o3co/auth.policy-verifier.cedar`** — co-resident [Cedar](https://www.cedarpolicy.com/)
+  policy evaluation as an optional plugin package
+  ([#185](https://github.com/o3co/auth.policy-verifier/issues/185),
+  [#186](https://github.com/o3co/auth.policy-verifier/issues/186)).
+
+  `CedarPolicyRuleCollector` compiles a `.cedar` policy set at boot (official
+  `@cedar-policy/cedar-wasm`, evaluated in-process) and surfaces the whole
+  set's verdict as one rule in one group, ANDed with the TypeScript groups —
+  Cedar's forbid-overrides-permit semantics hold inside the group, core's
+  default-deny composition across groups. Entities are synthesized per request
+  from the attribute map (attributes, group membership via parents, entity
+  references), so Cedar's language works against collector-gathered facts with
+  no entity store to build or sync. `RequestFactsCollector` promotes
+  `action` / `resourceType` / `resourceId` into attributes for the rule to
+  decide over.
+
+  Evaluation errors always deny and log, regardless of the
+  `onNoDeterminingPolicy` knob: Cedar reports a policy that reads a missing
+  attribute only in its diagnostics, and an erroring `forbid` stops
+  forbidding — the errors check runs before the decision is trusted, so a
+  typo'd attribute mapping fails closed instead of open.
+
+  Core, builtins and the server are unchanged; nothing loads unless the
+  module is imported.
+
 ## [0.5.0] - 2026-09-03
 
 ### Security

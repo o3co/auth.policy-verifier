@@ -12,6 +12,7 @@
 	},
 	"dependencies": {
 		"@o3co/auth.policy-verifier.builtins": "workspace:*",
+		"@o3co/auth.policy-verifier.cedar": "workspace:*",
 		"@o3co/auth.policy-verifier.core": "workspace:*",
 		"@o3co/auth.policy-verifier.server": "workspace:*"
 	},

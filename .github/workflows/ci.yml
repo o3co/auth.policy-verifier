@@ -132,7 +132,7 @@ jobs:
       # never run in CI at all.
       - run: pnpm run test
 
-      # Re-runs the three published packages under instrumentation to produce
+      # Re-runs the published packages under instrumentation to produce
       # the reports uploaded below.
       - run: pnpm run test:coverage
 
@@ -151,6 +151,15 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: packages/builtins/coverage/coverage-final.json
           flags: builtins
+          disable_search: true
+          fail_ci_if_error: false
+
+      - name: Upload coverage to Codecov (cedar)
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: packages/cedar/coverage/coverage-final.json
+          flags: cedar
           disable_search: true
           fail_ci_if_error: false
 
