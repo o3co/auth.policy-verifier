@@ -7,7 +7,7 @@
 
 > This repository handles **authorization decision** in the three-layer separation of concerns ([authentication & token issuance](https://github.com/o3co/auth.provider) / authorization decision / [authorization enforcement](https://github.com/o3co/protobuf.interceptors)) of the [auth](https://github.com/o3co/auth) stack.
 
-Attribute-based access control (ABAC) engine for microservice authorization. Receives a JWT + resource + action, evaluates collector-driven rules, and returns allow/deny. No policy DSL — authorization logic is composed in TypeScript.
+Attribute-based access control (ABAC) engine for microservice authorization. Receives a JWT + resource + action, evaluates collector-driven rules, and returns allow/deny. No policy DSL required — authorization logic is composed in TypeScript.
 
 - Drop-in replaceable with OPA or Cedar — [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) can route to this service, OPA, or Cedar Agent via a common `VerifierEndpoint` interface
 - Runs as an HTTP sidecar — swapping engines is a config change, not a code change
@@ -67,12 +67,13 @@ so the enforcement layer can implement against the same table.
 - **JWKS support** — Point `jwksUri` at auth.provider's `https://.../.well-known/jwks.json` for automatic key rotation. The endpoint must be TLS-protected (loopback hosts excepted for local development), and the fetch is bounded by an operator-set timeout, cooldown and cache age so a provider outage cannot stall the decision path.
 - **Answerable in production** — one structured `decision` event per decision (subject, resource, action, the rule that decided, request id, latency) and a Prometheus `/metrics` endpoint with allow/deny counters. Every metric label is bounded; the bearer token, the claim set beyond `sub`, and the caller's `context` never reach the log. See [Observability](#observability).
 - **Pluggable architecture** — Module system for registering custom collectors, rules, and resource parsers via factories.
-- **No DSL lock-in** — Authorization logic is TypeScript. No Rego, no Cedar policy language. If you outgrow this, swap to OPA or Cedar via [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) — the interceptor abstracts over the backend.
+- **No DSL lock-in** — Authorization logic is TypeScript; no DSL is ever required. Cedar is available as an *optional co-resident language* ([`packages/cedar`](packages/cedar/)): the real Cedar evaluator runs in-process as one rule group beside your TypeScript rules, deciding over collector-gathered facts with no entity store to build or sync. Whichever language you choose, the topology doesn't bind you — the same `.cedar` files later load unchanged into an embedded evaluator or a Cedar Agent, and [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) can still swap the whole backend for OPA or Cedar behind the common `VerifierEndpoint`.
 
 ## When to choose this
 
 - Policy authors are developers, and you don't want to learn a DSL → **this**
-- Policies are edited by non-developers, or you need formal verification → **[Cedar](https://www.cedarpolicy.com/)**
+- You want Cedar's policy language without building and syncing an entity store → **this, with [`packages/cedar`](packages/cedar/)**; when you outgrow it (hierarchy traversal, an entity store), the same `.cedar` files move to a full Cedar deployment unchanged
+- Policies are edited by non-developers, or you need formal verification over the whole policy surface → **[Cedar](https://www.cedarpolicy.com/)**
 - You need org-wide policy infrastructure with a large built-in operator surface → **[OPA](https://www.openpolicyagent.org/)**
 
 ## Quick Start
@@ -149,6 +150,7 @@ standalone → server   → core
 | --- | --- | --- |
 | [`packages/core`](packages/core/) | `@o3co/auth.policy-verifier.core` | Types, evaluate, pipelines, Module infrastructure |
 | [`packages/builtins`](packages/builtins/) | `@o3co/auth.policy-verifier.builtins` | Built-in collectors, rules, resource parser |
+| [`packages/cedar`](packages/cedar/) | `@o3co/auth.policy-verifier.cedar` | Optional co-resident Cedar policy evaluation, one rule group per policy set |
 | [`packages/server`](packages/server/) | `@o3co/auth.policy-verifier.server` | Express server, `createApp`, `POST /verify`, JWT key resolver |
 | [`templates/standalone`](templates/standalone/) | — | Deployable server template (composition root) |
 | [`create-app`](create-app/) | `@o3co/create-auth-policy-verifier` | CLI scaffolder |
