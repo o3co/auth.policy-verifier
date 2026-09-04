@@ -143,6 +143,42 @@ The `ATTR_*` constants are limited to well-known OAuth 2.0 / OIDC and RBAC vocab
 | `ATTR_USER_ID` | `"userId"` | Attribute key for the subject user ID (JWT `sub`) |
 | `ATTR_CLIENT_ID` | `"clientId"` | Attribute key for the client ID (JWT `azp`) |
 
+### The attribute key registry
+
+Those five are what the engine decides from, so a collector promoting
+caller-supplied data must not write them — see
+[docs/extending.md](../../docs/extending.md#the-trust-boundary-requestcontext-is-the-callers).
+Core cannot enumerate every such key, though: a package that owns attribute
+vocabulary of its own (`@o3co/auth.policy-verifier.cedar` owns `requestAction`,
+`requestResourceType`, `requestResourceId`, `requestResourceRaw`) lives outside
+core's sight. So the reservation is a registry rather than a frozen set, and a
+package reserves its own:
+
+```typescript
+import { reserveAttributeKeys } from '@o3co/auth.policy-verifier.core'
+
+export const ATTR_SUBSCRIBER_DID = 'subscriberDid' as const
+
+// At module scope, beside the constants — see reserveAttributeKeys' doc comment
+// for why that placement is what makes the ordering hold.
+reserveAttributeKeys({
+  owner: '@example/subscriber-policy',
+  keys: [ATTR_SUBSCRIBER_DID],
+  reason: 'resolved from the verified subject by SubscriberDidCollector',
+})
+```
+
+| Export | Purpose |
+| --- | --- |
+| `RESERVED_ATTRIBUTE_KEYS` | Every reserved key, as a **live** `ReadonlySet` — read it when you need the verdict, never copy it at module scope |
+| `reserveAttributeKeys({ owner, keys, reason? })` | Reserves a package's keys. Idempotent per owner; two owners claiming one key is refused |
+| `attributeKeyReservation(key)` | Who owns a key, so a refusal can name the package instead of assuming core |
+| `suggestUnreservedAttributeKey(key)` | A rename no package has reserved — what a refusal advises |
+| `CORE_ATTRIBUTE_KEY_OWNER` | The owner name core's own five are reserved under |
+
+`RequestContextAttributeCollector` (builtins) is the guard that consults it, and
+a collector you write yourself should consult it too.
+
 ## Usage Example
 
 ```typescript

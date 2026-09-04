@@ -40,22 +40,30 @@ Each mapping is `{ from: string; to?: string; type?: "string" | "number" | "bool
 
 The declaration is the trust boundary — this collector is the ready-made way to stay on the right side of the one described in [docs/extending.md](../../docs/extending.md#the-trust-boundary-requestcontext-is-the-callers). `requestContext` is free-form and unvalidated, so **nothing undeclared becomes an attribute** and a configured dot path traverses own properties only (`constructor.name` reads nothing). This collector invents no vocabulary of its own: the operator names both the fields and the keys, which is what keeps [AGENTS.md — Core Vocabulary Scope](../../AGENTS.md#core-vocabulary-scope) intact while still shipping something usable. For anything beyond read-check-write — deriving a value, calling out to a store — write a focused project-side `AttributeCollector` as that section describes.
 
-#### The core vocabulary is not a valid destination
+#### Reserved vocabulary is not a valid destination
 
-A mapping's `to` may not name one of core's `ATTR_*` keys — `scopes`, `permissions`, `roles`, `userId`, `clientId` (exported as `RESERVED_ATTRIBUTE_KEYS`). Naming one is a **configuration error, refused at construction**, so a deployment that writes it fails at boot rather than on the first request:
+A mapping's `to` may not name a **reserved attribute key**. Naming one is a **configuration error, refused at construction**, so a deployment that writes it fails at boot rather than on the first request:
 
 ```hocon
-# refused at boot
+# refused at boot — core's own vocabulary
 { from = "groups", to = "scopes" }
+
+# refused at boot — @o3co/auth.policy-verifier.cedar's vocabulary,
+# reserved as soon as that package is loaded
+{ from = "rid", to = "requestResourceId" }
 
 # fine — the field may be called anything; only the attribute key is reserved
 { from = "groups", to = "requestGroups", type = "string[]" }
 { from = "scopes", to = "requestedScopes", type = "string[]" }
 ```
 
-`context` is the caller's, and those five keys are the engine's. Under the default server `scopes`, `userId` and `clientId` are read out of the **signature-verified token**, and `permissions` / `roles` carry the entitlements the builtin rules decide from — so the two sides of that mapping carry entirely different trust, and the request body must not join the token in one bucket.
+The reserved set is **not a list this package keeps**. It is core's registry (`RESERVED_ATTRIBUTE_KEYS`, `reserveAttributeKeys`, `attributeKeyReservation`): core reserves its own five — `scopes`, `permissions`, `roles`, `userId`, `clientId` — and every package that owns attribute vocabulary reserves its own at module load. `@o3co/auth.policy-verifier.cedar` reserves `requestAction`, `requestResourceType`, `requestResourceId` and `requestResourceRaw`; a project-side collector should reserve the keys it writes the same way. A composition that can name a package's collectors in config has already imported that package, so its keys are registered before this collector is constructed — which is why the guard covers vocabulary core cannot see. The refusal names the owning package, and suggests a rename that is not itself reserved.
+
+`context` is the caller's, and those keys are the deployment's. Under the default server `scopes`, `userId` and `clientId` are read out of the **signature-verified token**, `permissions` / `roles` carry the entitlements the builtin rules decide from, and cedar's four carry the parsed request — so the two sides of such a mapping carry entirely different trust, and the request body must not join them in one bucket.
 
 What makes it worth refusing rather than documenting is the merge: `AttributePipeline` **unions** array-valued attributes across collectors. A mapping onto `scopes` therefore does not overwrite what `PayloadScopeCollector` produced and lose an argument with it — it *extends* it. A caller sending `context.groups = ["admin:write"]` would be authorized for a scope its token never carried, and nothing in the decision, the logs or the metrics would tell that apart from an issuer that granted it. See `AttributePipeline`'s merge doc comment.
+
+A scalar key is no safer, in two ways. Where both sides write it the values disagree and `AttributeConflictError` denies the request — fail-closed, but an unannounced denial rather than a refusal at boot. And where the owning collector writes its key only *sometimes* there is no second writer at all: cedar's `RequestFactsCollector` omits `requestResourceId` for an id-less resource such as `"document"`, so `{ from = "rid", to = "requestResourceId" }` would land unopposed and the Cedar resource entity would be built from the caller's own request body.
 
 ## Rules
 
