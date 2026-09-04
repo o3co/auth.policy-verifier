@@ -24,6 +24,25 @@ and version sections follow the release labeling policy in
   The standalone image's `HEALTHCHECK` and every README name `/_healthcheck` as
   the primary path and note the alias once.
 
+- **A prerelease tag publishes under npm dist-tag `next` and as a GitHub prerelease** (#203). `release.yml`
+  published every `v*` tag under npm's default `latest` and as a full GitHub
+  Release, so pushing a prerelease tag (`vX.Y.Z-rc.1`) would have made the
+  release candidate what `npm install @o3co/auth.policy-verifier.core` resolves
+  to for every consumer. The step that already validates the tag now also
+  classifies it, and the publish and both release steps read that
+  classification. A final release moves `latest` forward as before.
+
+### Documentation
+
+- **`pnpm audit` runs in its own CI job, on every push and pull request and daily
+  on the default branch** (#204). It was a step of `build-and-test`, the one
+  required status check, so an outage of the npm audit endpoint blocked every
+  merge — three consecutive failures on `ERR_SOCKET_TIMEOUT` while cutting this
+  release, with no change in the pull requests themselves. A finding is still a
+  red check the reviewer sees; it is no longer a merge held hostage to a
+  third-party endpoint. `--prod` and the deliberate `--audit-level=low` floor
+  are unchanged.
+
 ## [0.6.0] - 2026-09-03
 
 ### Added
