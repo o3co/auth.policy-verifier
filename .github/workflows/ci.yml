@@ -5,9 +5,14 @@ on:
     branches: [develop, main]
   pull_request:
     branches: [develop, main]
+  # Daily audit of develop (see the `audit` job). Nothing else runs on this
+  # trigger: build-and-test is gated on the event below.
+  schedule:
+    - cron: '23 3 * * *'
 
 jobs:
   build-and-test:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,16 +34,6 @@ jobs:
           restore-keys: pnpm-store-
 
       - run: pnpm install --frozen-lockfile
-
-      # `pnpm audit --prod --audit-level=low`. Runs before lint/build so a known
-      # advisory in a shipped dependency fails fast and is not buried under a
-      # test log. `--prod` scopes it to what consumers actually install; the
-      # `--audit-level=low` floor is deliberate — this is an authorization
-      # service, and a "low" DoS in the request-parsing path is not cosmetic.
-      #
-      # Same entry point as `make audit`, so a contributor reproduces this
-      # locally with one command instead of re-deriving the flags.
-      - run: pnpm run audit
 
       - run: pnpm run lint
 
@@ -178,6 +173,42 @@ jobs:
   # build resolves. Catches the class of defect where the template references a
   # symbol that is not in the published tarball — invisible in the workspace,
   # where `src/` is right there, and only observable after the tag is pushed.
+  # `pnpm audit --prod --audit-level=low` in its own job (#204). `--prod`
+  # scopes it to what consumers actually install; the `--audit-level=low` floor
+  # is deliberate — this is an authorization service, and a "low" DoS in the
+  # request-parsing path is not cosmetic. Same entry point as `make audit`.
+  #
+  # It used to be a step of build-and-test — the one required status check — so
+  # an outage of registry.npmjs.org's audit endpoint blocked every merge (three
+  # consecutive release-PR failures on ERR_SOCKET_TIMEOUT, 2026-09-04). It now
+  # runs on every push and pull request (visible on the PR) and daily on develop
+  # so an advisory published between pushes is caught. Deliberately not a
+  # required check: a finding on a PR is a red check the reviewer sees, not a
+  # merge held hostage to a third-party endpoint.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run audit
+
   publish-readiness:
     runs-on: ubuntu-latest
     needs: build-and-test

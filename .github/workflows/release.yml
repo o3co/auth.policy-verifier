@@ -59,10 +59,22 @@ jobs:
             exit 1
           fi
 
-          # The one place the tag is parsed. Later steps read this output
-          # instead of re-deriving the version from GITHUB_REF, so the tag
+          # The one place the tag is parsed. Later steps read these outputs
+          # instead of re-deriving anything from GITHUB_REF, so the tag
           # grammar cannot drift between two copies of the same expression.
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+          # A prerelease identifier (v1.0.0-rc1, v2.0.0-beta.2) must neither
+          # move npm's `latest` dist-tag nor be listed as a full GitHub Release
+          # (#203). PRERELEASE above already validated the shape; here it only
+          # has to be present.
+          if [[ "$VERSION" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "npm_tag=next" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "npm_tag=latest" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Get pnpm store path
         id: pnpm-store
@@ -101,6 +113,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           draft: true
+          prerelease: ${{ steps.release.outputs.prerelease == 'true' }}
           generate_release_notes: true
 
       # `pnpm -r publish` decides package by package: it asks the registry about
@@ -123,11 +136,17 @@ jobs:
       #
       # templates/standalone and tests/integration are `private: true`, so pnpm
       # never offers them to the registry.
+      # `--tag` is the npm dist-tag: `latest` for a final release, `next` for a
+      # prerelease, so `npm install @o3co/<pkg>` never resolves to an RC. A final
+      # release after an RC moves `latest` forward as before.
       - name: Publish packages
-        run: pnpm -r publish --access public --no-git-checks --provenance
+        env:
+          NPM_TAG: ${{ steps.release.outputs.npm_tag }}
+        run: pnpm -r publish --access public --no-git-checks --provenance --tag "$NPM_TAG"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           draft: false
+          prerelease: ${{ steps.release.outputs.prerelease == 'true' }}
           generate_release_notes: true
