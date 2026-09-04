@@ -32,8 +32,6 @@ and version sections follow the release labeling policy in
   classifies it, and the publish and both release steps read that
   classification. A final release moves `latest` forward as before.
 
-### Documentation
-
 - **`pnpm audit` runs in its own CI job, on every push and pull request and daily
   on the default branch** (#204). It was a step of `build-and-test`, the one
   required status check, so an outage of the npm audit endpoint blocked every
