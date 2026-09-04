@@ -6,7 +6,10 @@ import type {
 	Attributes,
 	CollectorContext,
 } from "@o3co/auth.policy-verifier.core";
-import { readUntrustedRequestContext } from "@o3co/auth.policy-verifier.core";
+import {
+	RESERVED_ATTRIBUTE_KEYS,
+	readUntrustedRequestContext,
+} from "@o3co/auth.policy-verifier.core";
 
 /** Types a `requestContext` field may be promoted as. */
 export type RequestContextAttributeType = "string" | "number" | "boolean" | "string[]";
@@ -22,7 +25,13 @@ const ATTRIBUTE_TYPES: readonly RequestContextAttributeType[] = [
 export interface RequestContextAttributeMapping {
 	/** Field to read, as a dot path (`"tenant.id"`) into `requestContext`. */
 	from: string;
-	/** Attribute key to write. Defaults to `from`. */
+	/**
+	 * Attribute key to write. Defaults to `from`.
+	 *
+	 * May not name a key in `RESERVED_ATTRIBUTE_KEYS` — see the class doc
+	 * comment for why the caller's body may not land on the engine's own
+	 * vocabulary.
+	 */
 	to?: string;
 	/** Expected type; a value of any other shape is not promoted. Defaults to `"string"`. */
 	type?: RequestContextAttributeType;
@@ -49,6 +58,31 @@ export interface RequestContextAttributeCollectorConfig {
  * boundary — `requestContext` is caller-supplied and unvalidated, so a field the
  * config did not name cannot reach a rule, and one whose value does not match
  * its declared type is dropped rather than passed along.
+ *
+ * ## The core vocabulary is not a valid destination
+ *
+ * A mapping's `to` may not name a key in `RESERVED_ATTRIBUTE_KEYS` — `scopes`,
+ * `permissions`, `roles`, `userId`, `clientId`. Those are what the engine
+ * decides from, and under the default server the first, fourth and fifth are
+ * read out of the signature-verified token; `requestContext` is the request
+ * body, which anyone holding a valid token fills in as they like. The two
+ * carry different trust and must not share a bucket.
+ *
+ * The reason it is refused outright rather than left to the operator is what
+ * `AttributePipeline` does with two collectors writing one key: array-valued
+ * entries **union**. So `{ from = "groups", to = "scopes" }` does not replace
+ * the token's scopes and lose an argument with `PayloadScopeCollector` — it
+ * quietly *adds to* them, and the request that arrives with
+ * `context.groups = ["admin:write"]` is authorized for a scope its token never
+ * carried. Nothing in the decision, the logs or the metrics distinguishes that
+ * from an issuer that granted it.
+ *
+ * This is reachable only through operator configuration, which is why it is a
+ * configuration error rather than a vulnerability. It is refused at
+ * construction — boot, not first request — so a deployment that wrote it never
+ * serves a decision. Every other destination keeps working: the *field* may be
+ * called anything (`{ from = "scopes", to = "requestedScopes" }` is fine), only
+ * the attribute key is reserved.
  *
  * ```hocon
  * { collector = "RequestContextAttributeCollector"
@@ -85,7 +119,20 @@ export class RequestContextAttributeCollector implements AttributeCollector {
 					`RequestContextAttributeCollector: attributes[${index}].type must be one of ${ATTRIBUTE_TYPES.join(", ")}, got "${type}"`,
 				);
 			}
-			return { from, to: to ?? from, type };
+			// Checked on the resolved key, not on `to`: `to` defaults to `from`,
+			// so `{ from = "scopes" }` reaches the reserved key without ever
+			// spelling it out. See the class doc comment for why this is refused.
+			const key = to ?? from;
+			if (RESERVED_ATTRIBUTE_KEYS.has(key)) {
+				throw new Error(
+					`RequestContextAttributeCollector: attributes[${index}] maps onto the reserved core attribute "${key}". ` +
+						"That key is the engine's own vocabulary — under the default server it is derived from the " +
+						"signature-verified token — while requestContext is caller-supplied, and array attributes union " +
+						"across collectors, so this mapping would let the request body extend it rather than contribute " +
+						`a separate attribute. Promote the field under a key of your own (for example "request${key[0].toUpperCase()}${key.slice(1)}").`,
+				);
+			}
+			return { from, to: key, type };
 		});
 	}
 

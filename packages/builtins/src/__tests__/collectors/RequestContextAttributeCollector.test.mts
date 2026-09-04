@@ -2,7 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { CollectorContext } from "@o3co/auth.policy-verifier.core";
-import { markUntrustedRequestContext } from "@o3co/auth.policy-verifier.core";
+import {
+	ATTR_CLIENT_ID,
+	ATTR_PERMISSIONS,
+	ATTR_ROLES,
+	ATTR_SCOPES,
+	ATTR_USER_ID,
+	markUntrustedRequestContext,
+} from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 import { RequestContextAttributeCollector } from "#/collectors/RequestContextAttributeCollector.mjs";
 
@@ -169,5 +176,65 @@ describe("RequestContextAttributeCollector", () => {
 					config as unknown as ConstructorParameters<typeof RequestContextAttributeCollector>[0],
 				),
 		).toThrow(pattern);
+	});
+});
+
+describe("RequestContextAttributeCollector — the reserved core vocabulary", () => {
+	// The guard exists because of what happens *downstream*: `AttributePipeline`
+	// unions array-valued attributes across collectors, so a mapping onto
+	// `scopes` does not overwrite the token-derived list, it extends it. The
+	// request body would top up the signed token, silently.
+	it.each([[ATTR_SCOPES], [ATTR_PERMISSIONS], [ATTR_ROLES], [ATTR_USER_ID], [ATTR_CLIENT_ID]])(
+		"refuses a mapping whose `to` is the reserved key %s",
+		(key) => {
+			expect(
+				() => new RequestContextAttributeCollector({ attributes: [{ from: "anything", to: key }] }),
+			).toThrow(new RegExp(`reserved core attribute "${key}"`));
+		},
+	);
+
+	it("refuses a reserved key reached through the `to` default", () => {
+		// `to` defaults to `from`, so `{ from: "scopes" }` writes `scopes` just
+		// as surely as spelling it out would.
+		expect(
+			() => new RequestContextAttributeCollector({ attributes: [{ from: ATTR_SCOPES }] }),
+		).toThrow(/reserved core attribute "scopes"/);
+	});
+
+	it("names the offending mapping's index and says why", () => {
+		expect(
+			() =>
+				new RequestContextAttributeCollector({
+					attributes: [
+						{ from: "tenant_id", to: "tenantId" },
+						{ from: "groups", to: ATTR_ROLES },
+					],
+				}),
+		).toThrow(/attributes\[1\].*caller-supplied/s);
+	});
+
+	it("still promotes a reserved-sounding field under a key of the operator's own", () => {
+		// The field name is the caller's; only the attribute key is reserved.
+		const collector = new RequestContextAttributeCollector({
+			attributes: [{ from: ATTR_SCOPES, to: "requestedScopes", type: "string[]" }],
+		});
+
+		expect(collector).toBeInstanceOf(RequestContextAttributeCollector);
+	});
+
+	it("leaves every unreserved mapping working", async () => {
+		const collector = new RequestContextAttributeCollector({
+			attributes: [
+				{ from: "tenant.id", to: "tenantId" },
+				{ from: "groups", type: "string[]" },
+			],
+		});
+
+		const attrs = await collector.collect(
+			makeContext({ tenant: { id: "acme" }, groups: ["eng", "sre"] }),
+		);
+
+		expect(attrs.get("tenantId")).toBe("acme");
+		expect(attrs.get("groups")).toEqual(["eng", "sre"]);
 	});
 });

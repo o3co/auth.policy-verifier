@@ -40,6 +40,23 @@ Each mapping is `{ from: string; to?: string; type?: "string" | "number" | "bool
 
 The declaration is the trust boundary — this collector is the ready-made way to stay on the right side of the one described in [docs/extending.md](../../docs/extending.md#the-trust-boundary-requestcontext-is-the-callers). `requestContext` is free-form and unvalidated, so **nothing undeclared becomes an attribute** and a configured dot path traverses own properties only (`constructor.name` reads nothing). This collector invents no vocabulary of its own: the operator names both the fields and the keys, which is what keeps [AGENTS.md — Core Vocabulary Scope](../../AGENTS.md#core-vocabulary-scope) intact while still shipping something usable. For anything beyond read-check-write — deriving a value, calling out to a store — write a focused project-side `AttributeCollector` as that section describes.
 
+#### The core vocabulary is not a valid destination
+
+A mapping's `to` may not name one of core's `ATTR_*` keys — `scopes`, `permissions`, `roles`, `userId`, `clientId` (exported as `RESERVED_ATTRIBUTE_KEYS`). Naming one is a **configuration error, refused at construction**, so a deployment that writes it fails at boot rather than on the first request:
+
+```hocon
+# refused at boot
+{ from = "groups", to = "scopes" }
+
+# fine — the field may be called anything; only the attribute key is reserved
+{ from = "groups", to = "requestGroups", type = "string[]" }
+{ from = "scopes", to = "requestedScopes", type = "string[]" }
+```
+
+`context` is the caller's, and those five keys are the engine's. Under the default server `scopes`, `userId` and `clientId` are read out of the **signature-verified token**, and `permissions` / `roles` carry the entitlements the builtin rules decide from — so the two sides of that mapping carry entirely different trust, and the request body must not join the token in one bucket.
+
+What makes it worth refusing rather than documenting is the merge: `AttributePipeline` **unions** array-valued attributes across collectors. A mapping onto `scopes` therefore does not overwrite what `PayloadScopeCollector` produced and lose an argument with it — it *extends* it. A caller sending `context.groups = ["admin:write"]` would be authorized for a scope its token never carried, and nothing in the decision, the logs or the metrics would tell that apart from an issuer that granted it. See `AttributePipeline`'s merge doc comment.
+
 ## Rules
 
 ### HasPermission

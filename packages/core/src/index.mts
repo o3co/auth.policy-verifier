@@ -24,6 +24,7 @@ export {
 	ATTR_ROLES,
 	ATTR_SCOPES,
 	ATTR_USER_ID,
+	RESERVED_ATTRIBUTE_KEYS,
 } from "./keys.mjs";
 export type { ConsoleLoggerOptions } from "./logging/consoleLogger.mjs";
 export { consoleLogger, createConsoleLogger } from "./logging/consoleLogger.mjs";

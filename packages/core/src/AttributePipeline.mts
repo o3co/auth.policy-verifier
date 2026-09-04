@@ -61,6 +61,20 @@ export class AttributePipeline {
  * (#126 item 3): the previous shape re-copied the whole accumulated array for
  * every contributing map (`[...existing, ...value]`), which is quadratic in
  * collector count for a repeatedly-contributed key like roles or permissions.
+ *
+ * **The trap the union sets for collector authors.** Two collectors writing
+ * the same scalar key disagree loudly; two writing the same *array* key never
+ * disagree at all — the second one's entries are simply added. That is the
+ * point for `roles` and `permissions`, which several collectors are meant to
+ * contribute to, and it must not change. But it means a collector promoting
+ * caller-supplied data onto an engine-owned key does not overwrite the
+ * deployment's value and lose the argument: it EXTENDS it, silently, and the
+ * decision looks exactly like one the issuer granted. So a collector reading
+ * untrusted input owes its destination keys a guard — see
+ * `RESERVED_ATTRIBUTE_KEYS` in `keys.mts`, and
+ * `RequestContextAttributeCollector` in builtins for the worked example. The
+ * union is not the bug; writing to a shared bucket from an unverified source
+ * is, and the union is why it is quiet.
  */
 function merge(maps: Attributes[]): Attributes {
 	const merged: Attributes = new Map();
