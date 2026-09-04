@@ -5,8 +5,10 @@ on:
     branches: [develop, main]
   pull_request:
     branches: [develop, main]
-  # Daily audit of develop (see the `audit` job). Nothing else runs on this
-  # trigger: build-and-test is gated on the event below.
+  # Daily audit (see the `audit` job). A `schedule` event runs on the
+  # repository's default branch — `develop` here — so this is a daily audit of
+  # develop only as long as develop stays the default branch. Nothing else runs
+  # on this trigger: build-and-test is gated on the event below.
   schedule:
     - cron: '23 3 * * *'
 
@@ -181,8 +183,9 @@ jobs:
   # It used to be a step of build-and-test — the one required status check — so
   # an outage of registry.npmjs.org's audit endpoint blocked every merge (three
   # consecutive release-PR failures on ERR_SOCKET_TIMEOUT, 2026-09-04). It now
-  # runs on every push and pull request (visible on the PR) and daily on develop
-  # so an advisory published between pushes is caught. Deliberately not a
+  # runs on every push and pull request (visible on the PR) and daily on the
+  # default branch (`develop`; `schedule` events always run there) so an
+  # advisory published between pushes is caught. Deliberately not a
   # required check: a finding on a PR is a red check the reviewer sees, not a
   # merge held hostage to a third-party endpoint.
   audit:
