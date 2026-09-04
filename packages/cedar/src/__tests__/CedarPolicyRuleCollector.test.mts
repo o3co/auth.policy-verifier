@@ -136,24 +136,47 @@ describe("CedarPolicyRuleCollector — answer interpretation", () => {
 		expect(rule.verify(attrsWith([["suspended", false]]))).toBe(true);
 	});
 
-	it("abstains by default when no policy determines the request", async () => {
+	it("denies by default when no policy determines the request", async () => {
 		// The permit's condition is simply false — no error, no determining
-		// policy — so under the default abstain the group passes and the other
-		// rule groups own the decision.
+		// policy. The default is Cedar's own implicit deny: a pipeline whose
+		// only rule group is Cedar must not pass a request no policy matched.
 		const rule = await collectRule({
 			policies: DEPT_POLICY,
 			principal: { attributes: { dept: "department" } },
 		});
-		expect(rule.verify(attrsWith([["department", "sales"]]))).toBe(true);
+		expect(rule.verify(attrsWith([["department", "sales"]]))).toBe(false);
 	});
 
-	it("no-determining-policy honours the knob", async () => {
-		// An empty policy set never determines anything.
-		const abstain = await collectRule({ policies: "" });
-		expect(abstain.verify(attrsWith())).toBe(true);
+	it("denies by default on an empty policy set", async () => {
+		// An empty policy set never determines anything — the shape a first
+		// deployment reaches with policies it has not written yet.
+		const rule = await collectRule({ policies: "" });
+		expect(rule.verify(attrsWith())).toBe(false);
+	});
 
-		const deny = await collectRule({ policies: "", onNoDeterminingPolicy: "deny" });
-		expect(deny.verify(attrsWith())).toBe(false);
+	it("abstains when the deployment asks for it — the migration posture", async () => {
+		// Still selectable, and still the right answer where Cedar is one group
+		// beside TypeScript rules that own the rest of the surface.
+		const rule = await collectRule({ policies: "", onNoDeterminingPolicy: "abstain" });
+		expect(rule.verify(attrsWith())).toBe(true);
+	});
+
+	it("denies when the deployment spells the default out", async () => {
+		const rule = await collectRule({ policies: "", onNoDeterminingPolicy: "deny" });
+		expect(rule.verify(attrsWith())).toBe(false);
+	});
+
+	it("leaves a determining permit alone under either setting", async () => {
+		// The knob decides only the no-determining-policy branch; a policy that
+		// does determine the request is unaffected by it.
+		for (const onNoDeterminingPolicy of ["abstain", "deny"] as const) {
+			const rule = await collectRule({
+				policies: DEPT_POLICY,
+				principal: { attributes: { dept: "department" } },
+				onNoDeterminingPolicy,
+			});
+			expect(rule.verify(attrsWith([["department", "eng"]]))).toBe(true);
+		}
 	});
 
 	it("denies and logs on evaluation errors even under abstain — the fail-open trap", async () => {
