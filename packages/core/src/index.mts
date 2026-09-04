@@ -18,13 +18,21 @@ export type { CollectorTimeoutDetail, CollectorTimeoutLimit } from "./errors.mjs
 export { AttributeConflictError, CollectorTimeoutError, ResourceParseError } from "./errors.mjs";
 export type { EvaluateOptions } from "./evaluate.mjs";
 export { evaluate } from "./evaluate.mjs";
+export type {
+	AttributeKeyReservation,
+	AttributeKeyReservationRequest,
+} from "./keys.mjs";
 export {
 	ATTR_CLIENT_ID,
 	ATTR_PERMISSIONS,
 	ATTR_ROLES,
 	ATTR_SCOPES,
 	ATTR_USER_ID,
+	attributeKeyReservation,
+	CORE_ATTRIBUTE_KEY_OWNER,
 	RESERVED_ATTRIBUTE_KEYS,
+	reserveAttributeKeys,
+	suggestUnreservedAttributeKey,
 } from "./keys.mjs";
 export type { ConsoleLoggerOptions } from "./logging/consoleLogger.mjs";
 export { consoleLogger, createConsoleLogger } from "./logging/consoleLogger.mjs";

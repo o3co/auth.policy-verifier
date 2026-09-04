@@ -72,6 +72,32 @@ attributes. Promote them with the builtins' `RequestContextAttributeCollector`
 (the declared-allowlist trust boundary, #123) and map them here; nothing
 undeclared can reach a policy.
 
+## Reserved attribute keys
+
+Loading this package reserves the four keys it owns —
+`requestAction`, `requestResourceType`, `requestResourceId`,
+`requestResourceRaw` — in core's attribute key registry
+(`reserveAttributeKeys`, exported by `@o3co/auth.policy-verifier.core`). A
+`RequestContextAttributeCollector` mapping whose `to` names one of them is then
+refused at boot, naming this package.
+
+That matters most for `requestResourceId`, which `RequestFactsCollector` writes
+**only when the parsed resource carried an id**. For an id-less resource such as
+`document` nothing else writes it, so a mapping
+`{ from = "rid", to = "requestResourceId" }` would have met no competing writer:
+`{"resource":"document","action":"read","context":{"rid":"someone-elses-doc"}}`
+would have been decided as `Document::"someone-elses-doc"`, with the entity
+chosen by the caller's own request body. Where the resource *does* carry an id
+the two writers collide instead and `AttributeConflictError` denies — fail-closed,
+but an unannounced denial rather than a refusal at boot.
+
+The reservation happens at module scope, so it is in place before any collector
+of any package is constructed: a composition can only name
+`RequestFactsCollector` or `CedarPolicyRuleCollector` in config by importing this
+package. If you write a collector that promotes caller-supplied data, consult
+`RESERVED_ATTRIBUTE_KEYS` (live, not a snapshot) and reserve your own keys the
+same way — see [docs/extending.md](../../docs/extending.md#the-trust-boundary-requestcontext-is-the-callers).
+
 ## Semantics
 
 - **Layered PDP.** Cedar's own semantics (forbid overrides permit) hold inside

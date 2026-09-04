@@ -65,6 +65,8 @@ Consuming projects wire their interceptor's `requestContext` into attributes by 
 1. Read exactly the fields it intends to promote.
 2. Validate the shape of each value (type, non-empty, format) — `requestContext` is unvalidated free-form data, supplied by the caller.
 3. Write into the `Attributes` map under the project's own constant keys.
+4. **Reserve those keys**, at module scope beside the constants:
+   `reserveAttributeKeys({ owner, keys, reason })`. The reserved set is a registry core exposes, not a list core enumerates — core cannot see a package's vocabulary, so each package reserves its own, and `RequestContextAttributeCollector` refuses an operator mapping onto any of them. Module scope is what makes the ordering hold: a composition can only name your collectors by importing your module, so the keys are registered before any collector is constructed. `packages/cedar` reserves its four `request*` keys this way.
 
 ```typescript
 // project-side: collectors/SubscriberDidCollector.mts
