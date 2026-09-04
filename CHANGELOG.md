@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
+## [0.7.0] - 2026-09-04
+
+### Changed
+
+- **Liveness is served at `GET /_healthcheck`, with `GET /healthcheck` kept as
+  an alias** ([o3co/auth.provider#293](https://github.com/o3co/auth.provider/issues/293)
+  item 14). `auth.provider` and `auth.proxy` answer liveness on `/_healthcheck`
+  while this server answered on `/healthcheck` (the `@o3co/auth.utils`
+  default), so a probe configuration had to know which component it was pointed
+  at. `createApp` now mounts the healthcheck router on both paths:
+  `/_healthcheck` is the canonical spelling across the stack, and `/healthcheck`
+  stays as a compatibility alias so an orchestrator probe that was not updated
+  does not start failing on upgrade. Both answer identically, and neither is
+  gated by `http.callerAuth`.
+
+  The standalone image's `HEALTHCHECK` and every README name `/_healthcheck` as
+  the primary path and note the alias once.
+
 ## [0.6.0] - 2026-09-03
 
 ### Added
