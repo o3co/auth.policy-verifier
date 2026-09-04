@@ -45,10 +45,9 @@ rule {
       # Cedar agent would load. XOR an inline `policies = "..."` string.
       policyDir = "config/policies"
 
-      # "abstain" (default): no determining policy leaves the decision to the
-      # other rule groups — the migration posture. Flip to "deny" when the
-      # policy set is authoritative.
-      onNoDeterminingPolicy = "abstain"
+      # What the group answers when no policy determined the request.
+      # "deny" is the default; see "No determining policy" below.
+      onNoDeterminingPolicy = "deny"
 
       principal {
         # type = "User"          # default
@@ -78,6 +77,28 @@ undeclared can reach a policy.
 - **Layered PDP.** Cedar's own semantics (forbid overrides permit) hold inside
   the group; the group ANDs with every TypeScript group. During migration both
   are active and compose only toward strictness.
+- **No determining policy denies by default.** When no `permit` and no `forbid`
+  matched, `onNoDeterminingPolicy` decides what the group answers:
+
+  | value | the group | choose it when |
+  | --- | --- | --- |
+  | `"deny"` (**default**) | fails | Cedar is authoritative over the surface it is asked about — including the common case where it is the **only** rule group |
+  | `"abstain"` | passes | Cedar is one group beside TypeScript rules that own the rest of the surface, and having no opinion outside its own coverage is the intent |
+
+  `"deny"` is Cedar's own implicit deny, and it is the default because the
+  default is what a first deployment gets: with Cedar as the only rule group,
+  an abstention passes the group and therefore passes the request — the one
+  composition where abstaining is indistinguishable from allowing, and also the
+  simplest one to assemble. The surrounding engine composes rule groups with
+  default-deny; this matches it.
+
+  `"abstain"` is the migration posture and stays a first-class choice: while the
+  policy set covers part of the surface and the TypeScript rules hold the rest,
+  a request outside Cedar's coverage should be decided by the group that does
+  cover it. Selecting it is a statement that another group will decide — so a
+  pipeline whose only rule group is Cedar should not.
+
+  Neither value affects an evaluation error, which always denies (below).
 - **Evaluation errors always deny, and log.** Cedar reports a policy that
   reads a missing attribute as `deny` with the cause only in diagnostics — and
   an erroring `forbid` stops forbidding, so the top-level decision can read

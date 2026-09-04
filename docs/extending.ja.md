@@ -116,6 +116,9 @@ unwrap した後の指針:
 - **identity や entitlement をここから昇格させない。** role、permission、scope、subject id、テナント所属は、検証済みの `subject` か、検証済み ID で問い合わせたストアから取得すること。ボディからではありません。
 - **呼び出し側が嘘をついても得をしないリクエスト事実は昇格させてよい** — locale、UI ヒント、操作の形など。判断基準は「攻撃者がこのフィールドを好きな値にしたとき、何が手に入るか」です。答えが「permission」なら、それは誤った出どころです。
 - **場当たり的な読み取りより宣言的な allowlist を優先する。** `builtins` の `RequestContextAttributeCollector` は、運用者が設定で名前と型を宣言したフィールドだけを昇格させます。誰も宣言していないフィールドは Rule に到達できません。
+- **書き込み先は自分のキーにし、core のキーは使わない。** `scopes` / `permissions` / `roles` / `userId` / `clientId` — core の `ATTR_*`、`RESERVED_ATTRIBUTE_KEYS` として export されている集合 — はエンジンが判断に使うキーであり、既定のサーバーではこのうち `scopes` / `userId` / `clientId` は検証済みトークン由来です。`requestContext` は `subject` とは信頼レベルが異なるため、両者が同じキーに着地してはなりません。`RequestContextAttributeCollector` はそのようなマッピングをコンストラクタで拒否します。自分で書く Collector も同じ集合を参照してください。
+
+**キーの共有は上書きより悪い。** `AttributePipeline` は各 Collector のマップをマージしますが、配列値のエントリは競合ではなく **union** されます（スカラー同士の不一致は `AttributeConflictError` を投げますが、配列同士は単に連結されます）。これは意図的な設計です — `roles` や `permissions` は複数の Collector が寄与することを想定しています — が、その結果、呼び出し側のデータを共有キーへ昇格させる Collector は、デプロイ側の値を上書きして競合するのではなく、*追加*します。`context.groups = ["admin:write"]` を載せたリクエストを `scopes` へ昇格させれば、そのトークンが一度も持たなかった scope で認可され、判定・ログ・メトリクスのいずれも issuer が付与した場合と区別がつきません。union 自体はバグではありません。未検証のソースから共有バケツへ書き込むことがバグであり、union はそれが静かに起きる理由です。
 
 `CollectorContext` を自前で組み立てるトランスポート（自作の interceptor やテスト）は、`markUntrustedRequestContext` で受け取った時点の record をマークします。本リポジトリの verify route はボディの `context` に対してまさにこれを行っており、brand を生成できるのはこの関数だけなので、生のボディオブジェクトが誤って Collector に届くことはありません。
 

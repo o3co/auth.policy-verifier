@@ -34,11 +34,26 @@ export interface CedarPolicyRuleCollectorConfig {
 	 * What the rule answers when Cedar reports no determining policy — no
 	 * `permit` matched and no `forbid` matched.
 	 *
-	 * `"abstain"` (default) passes the group, leaving the decision to the other
-	 * rule groups: the migration posture, where the policy set covers part of
-	 * the surface and the TypeScript rules still hold the rest. `"deny"` makes
-	 * the policy set authoritative — Cedar's own implicit-deny — for the moment
-	 * it covers everything.
+	 * | value | the group | choose it when |
+	 * | --- | --- | --- |
+	 * | `"deny"` (**default**) | fails | Cedar is authoritative over the surface it is asked about — including the common case where it is the only rule group |
+	 * | `"abstain"` | passes | Cedar is one group beside TypeScript rules that own the rest of the surface, and abstaining is the intent |
+	 *
+	 * `"deny"` is Cedar's own implicit deny, and it is the default because the
+	 * default is what a first deployment gets: with Cedar as the only rule
+	 * group, `"abstain"` meant a request no policy matched passed the group and
+	 * therefore passed. That is the one composition where an abstention is
+	 * indistinguishable from an allow, and it is also the simplest one to
+	 * assemble. The surrounding engine composes rule groups with default-deny;
+	 * this now matches it.
+	 *
+	 * `"abstain"` stays selectable and is the right answer during a migration:
+	 * the policy set covers part of the surface, the TypeScript rules still hold
+	 * the rest, and the Cedar group is meant to have no opinion outside its own
+	 * coverage. Choosing it is a statement that another group will decide.
+	 *
+	 * Neither value affects an evaluation error, which always denies — see the
+	 * class doc comment's answer table.
 	 */
 	onNoDeterminingPolicy?: NoDeterminingPolicy;
 	/**
@@ -102,7 +117,7 @@ let policySetCounter = 0;
  * | --- | --- | --- |
  * | `allow` | no errors | pass |
  * | `deny` | determining `forbid` | fail |
- * | `deny` | no determining policy | `onNoDeterminingPolicy` |
+ * | `deny` | no determining policy | `onNoDeterminingPolicy` (default `"deny"`) |
  * | anything | evaluation errors | **fail, and log** |
  *
  * The last row is unconditional — an evaluation error is never an abstention.
@@ -123,7 +138,10 @@ export class CedarPolicyRuleCollector implements RuleCollector {
 			);
 		}
 
-		const onNoDeterminingPolicy = (raw.onNoDeterminingPolicy ?? "abstain") as NoDeterminingPolicy;
+		// Fail-closed by default: see the config field's doc comment. A pipeline
+		// whose only rule group is Cedar would otherwise pass every request no
+		// policy matched, which is the shape a first deployment assembles.
+		const onNoDeterminingPolicy = (raw.onNoDeterminingPolicy ?? "deny") as NoDeterminingPolicy;
 		if (!NO_DETERMINING_POLICIES.includes(onNoDeterminingPolicy)) {
 			throw new Error(
 				`CedarPolicyRuleCollector: onNoDeterminingPolicy must be one of ${NO_DETERMINING_POLICIES.join(", ")}, got ${JSON.stringify(raw.onNoDeterminingPolicy)}`,

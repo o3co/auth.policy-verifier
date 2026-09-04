@@ -95,7 +95,13 @@ Authorization: Bearer <jwt>
 
 それ以外は body のパースより前に `401 { "decision": "deny", "code": "caller_unauthenticated", "message": "Caller authentication failed" }` を返します。`GET /_healthcheck` は常に非ゲートなので、コンテナの healthcheck はそのまま動作します。
 
-資格情報を未設定のままにする運用もサポートされており、ループバックであれば問題ありません。ループバック以外に bind した場合は起動時に `unauthenticated_non_loopback_bind` が warn で記録されます — 修正する価値があるのはこの組み合わせです。
+資格情報を未設定のままにする運用もサポートされており、ループバックであれば問題ありません。ループバック以外に bind した場合は起動時に `unauthenticated_non_loopback_bind` が warn で記録され、関係する 2 つの設定と何が晒されているかが示されます — 修正する価値があるのはこの組み合わせです。起動を拒否せず warn に留めているのは、ネットワーク側が正当な制御になっている場合があり、拒否すればアップグレード時に既存のコンテナデプロイをすべて壊すためです。
+
+**このテンプレートは初期状態でまさにその組み合わせです。** `docker-compose.yml` が `HTTP_HOSTNAME=0.0.0.0` を設定する一方、`HTTP_CALLER_AUTH_TOKEN` はどこにも設定されていません。したがって publish したポートがホスト外から到達できる状態で `docker compose up` すると、未認証の判定エンドポイントが公開されます。ローカル開発では問題なく、だからこそ warn に留めています。実トラフィックを流す前に、次のいずれかを行ってください。
+
+- **ポートをプライベートネットワークに置く。** セキュリティグループ、プライベートサブネット、Kubernetes の `NetworkPolicy` など、誰が接続してよいかを決める仕組みです。compose の `3000:3000` の publish はこれに該当しません — そのホストに到達できるすべてに到達を許します。
+- **`.env` に `HTTP_CALLER_AUTH_TOKEN` を設定する。** ポートに到達できるだけでは判定を要求できなくなります。攻撃者が既にネットワーク境界の内側にいる場合でも有効なのは、2 つのうちこちらだけです。なお Go の enforcement 層（[protobuf.interceptors](https://github.com/o3co/protobuf.interceptors)）がこのヘッダを送るオプションを備えるのは**次のリリースから**です。それまで、同ライブラリを使う呼び出し元にはネットワーク側の制御が必要です。
+- **あるいは `HTTP_HOSTNAME` を外し、verifier をサイドカーとして動かす。** enforcement 層とネットワーク名前空間を共有すれば、ループバックで足ります。
 
 `GET /metrics` も非ゲートです。理由と、ループバック以外に bind したときに何を意味するかは [`/metrics` への到達方法](#metrics-への到達方法)を参照してください。
 

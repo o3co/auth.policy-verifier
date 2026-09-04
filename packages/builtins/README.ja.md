@@ -40,6 +40,23 @@ npm install @o3co/auth.policy-verifier.builtins
 
 この宣言が信頼境界です — [docs/extending.ja.md](../../docs/extending.ja.md#信頼境界-requestcontext-は呼び出し側のもの) が説明する境界の、既製の守り方がこのコレクターです。`requestContext` は自由形式かつ未検証なので、**宣言していないフィールドは attribute になりません**。dot path は own property のみを辿るため `constructor.name` のような指定は何も読みません。このコレクター自身は語彙を持ち込みません — フィールド名もキー名も運用者が決めるため、[AGENTS.md — Core Vocabulary Scope](../../AGENTS.md#core-vocabulary-scope) の方針を崩さずに実用的なものを提供できます。read-check-write を超える処理（値の導出、外部ストア参照など）が必要な場合は、同節が説明するプロジェクト側の `AttributeCollector` を書いてください。
 
+#### core の語彙は書き込み先にできません
+
+マッピングの `to` に core の `ATTR_*` キー — `scopes`、`permissions`、`roles`、`userId`、`clientId`（`RESERVED_ATTRIBUTE_KEYS` として export）— を指定することはできません。指定した場合は**構成エラーとしてコンストラクタで拒否**されるため、そう書いたデプロイは最初のリクエストではなく起動時に失敗します:
+
+```hocon
+# 起動時に拒否される
+{ from = "groups", to = "scopes" }
+
+# 問題なし — フィールド名は自由。予約されているのは attribute キーだけ
+{ from = "groups", to = "requestGroups", type = "string[]" }
+{ from = "scopes", to = "requestedScopes", type = "string[]" }
+```
+
+`context` は呼び出し側のもので、この 5 キーはエンジンのものです。既定のサーバーでは `scopes` / `userId` / `clientId` は**署名検証済みトークン**から読まれ、`permissions` / `roles` は builtin の Rule が判断に使う権限を運びます。両者は信頼レベルがまったく異なり、リクエストボディがトークンと同じバケツに合流してはなりません。
+
+ドキュメントで注意喚起するのではなく拒否する価値があるのはマージの挙動ゆえです。`AttributePipeline` はコレクター間で配列値の attribute を**union** します。したがって `scopes` へのマッピングは `PayloadScopeCollector` の出力を上書きして競合するのではなく、*追加*します。`context.groups = ["admin:write"]` を送った呼び出し側は、トークンが一度も持たなかった scope で認可され、判定・ログ・メトリクスのいずれにも issuer が付与した場合との区別は現れません。`AttributePipeline` の merge の doc コメントを参照してください。
+
 ## Rules
 
 ### HasPermission
