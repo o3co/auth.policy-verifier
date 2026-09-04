@@ -822,6 +822,49 @@ describe("createApp caller authentication (#108)", () => {
 		expect(warnings[0].obj).toMatchObject({ hostname: "0.0.0.0" });
 	});
 
+	it("names both settings and the exposure, not just the hostname", async () => {
+		// An operator reading this line has to be able to act on it without
+		// going to the source: which two settings combined to produce it, what
+		// is exposed, and what to do about it.
+		const { calls, logger } = captureLogger();
+		await createApp({
+			pathResolver: (s: string) => s,
+			config: configWithHttp({ hostname: "0.0.0.0" }),
+			modules: [testModule, builtinKeyResolversModule],
+			logger,
+		});
+
+		const warning = calls.find((c) => c.msg === "unauthenticated_non_loopback_bind");
+		expect(warning?.obj).toMatchObject({
+			hostname: "0.0.0.0",
+			bindSetting: "http.hostname",
+			callerAuthSetting: "http.callerAuth",
+		});
+		const rendered = JSON.stringify(warning?.obj);
+		expect(rendered).toMatch(/authorization decision/i);
+		expect(rendered).toMatch(/http\.callerAuth\.token/);
+	});
+
+	it("boots anyway — the warning never refuses the deployment", async () => {
+		// Refusing would break every containerised deployment on upgrade, and
+		// the network may legitimately be the control. See app.mts.
+		const { logger } = captureLogger();
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: configWithHttp({ hostname: "0.0.0.0" }),
+			modules: [testModule, builtinKeyResolversModule],
+			logger,
+		});
+
+		const token = await signToken({ scope: "read:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project", action: "read" });
+
+		expect(res.status).toBe(200);
+	});
+
 	it("stays quiet on a loopback bind — the sidecar case is the default", async () => {
 		const { calls, logger } = captureLogger();
 		await createApp({

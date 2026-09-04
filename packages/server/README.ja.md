@@ -165,7 +165,19 @@ HOCON の `${?VAR}` 置換が渡す文字列のいずれかで到着し、その
 - **`http.hostname` の既定値は `127.0.0.1`。** 本プロジェクトが想定するのはサイドカー構成 — enforcement 層が verifier と同居し、ループバック経由で到達する形です。全インターフェースへの bind は明示的なオプトイン（`http.hostname = "0.0.0.0"`）であり、コンテナデプロイではこれを設定しない限り到達できません。
 - **`http.callerAuth.token` は呼び出し元サービスを認証します。** 設定すると、`/verify` と `/verify/batch` への全リクエストがその値を `http.callerAuth.header`（既定 `x-caller-token`。`Authorization` を避けているのは意図的）にそのまま載せる必要があります。比較は定数時間で、body のパースより前・パイプライン処理より前に走るため、未認証のピアはプロセスの処理時間を消費できません。資格情報の欠落と誤りは同一の `401 { decision: "deny", code: "caller_unauthenticated", message: "Caller authentication failed" }` を返します — 推測した値が正しい形だったかを探索者に教えてはならないからです。`GET /_healthcheck` は常に非ゲートで、オーケストレーターの probe はそのまま動作します。
 
-caller 認証は**本リリースでは任意**です。未設定かつ bind がループバックでない場合、`createApp` は `unauthenticated_non_loopback_bind` を warn で記録します — 本当に危険な組み合わせを、塞ぐのではなく名指しします。必須化は `config/defaults` の `CALLER_AUTH_REQUIRED` の 1 行変更で行えます（同定数の doc コメント参照）。
+caller 認証は**本リリースでは任意**です。未設定かつ bind がループバックでない場合、`createApp` は `unauthenticated_non_loopback_bind` を warn で記録します。ログには関係する 2 つの設定・何が晒されているか・どう対処するかが載ります:
+
+```json
+{"level":40,"msg":"unauthenticated_non_loopback_bind","hostname":"0.0.0.0","bindSetting":"http.hostname","callerAuthSetting":"http.callerAuth","exposure":"POST /verify and /verify/batch answer authorization decisions to any caller that can reach this port with a valid subject token — the endpoint is a decision oracle","remediation":"restrict the port to a private network, or set http.callerAuth.token (env HTTP_CALLER_AUTH_TOKEN) so the calling service authenticates itself"}
+```
+
+起動を拒否せず warn に留めています。ネットワーク側が正当な制御になっている場合があり（プライベートサブネット、Pod ローカルのサービス、mesh のポリシーなど）、プロセスからはそれが見えません。分かるのは bind するよう指示されたアドレスだけです。ここで拒否すれば、下せる立場にない判断と引き換えに、アップグレード時に既存のコンテナデプロイをすべて壊すことになります。caller 認証の必須化は `config/defaults` の `CALLER_AUTH_REQUIRED` の 1 行変更です — 全体に対して一度だけ行う、意図的な breaking change です（同定数の doc コメント参照）。
+
+**推奨する構え（優先順）。** いずれかを選んでください。2 つ組み合わせればさらに良いです。
+
+1. **bind をループバックのままにする。** サイドカー構成です。enforcement 層が同一ホスト（あるいは同一 Kubernetes Pod のネットワーク名前空間）に同居し、`127.0.0.1:3000` に到達します。設定も資格情報のローテーションも不要で、既定がすでにこの形です。
+2. **ループバック以外に bind せざるを得ない場合は、ネットワーク層でポートを制限する** — プライベートサブネット、セキュリティグループ、`NetworkPolicy` など。コンテナのポート publish はこれに**該当しません**: `HTTP_HOSTNAME=0.0.0.0` と `ports: ["3000:3000"]` の組み合わせは、そのホストに到達できるすべてに到達を許します。
+3. **併せて `http.callerAuth.token`（env `HTTP_CALLER_AUTH_TOKEN`）を設定する。** ポートに到達できるだけでは判定を要求できなくなります。3 つのうち、攻撃者が既にネットワーク境界の内側にいる場合でも有効なのはこれだけです。なお Go の enforcement 層（[protobuf.interceptors](https://github.com/o3co/protobuf.interceptors)）がこのヘッダを送るオプションを備えるのは**次のリリースから**です。それまでは、同ライブラリを使う呼び出し元は 1 か 2 を使ってください。
 
 共有資格情報はネットワークポリシーや enforcement 層との mTLS の代替ではありません。下限であって上限ではありません。
 

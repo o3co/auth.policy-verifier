@@ -96,7 +96,13 @@ Authorization: Bearer <jwt>
 
 Anything else gets `401 { "decision": "deny", "code": "caller_unauthenticated", "message": "Caller authentication failed" }`, decided before the body is parsed. `GET /_healthcheck` is never gated, so the container healthcheck keeps working.
 
-Leaving the credential unset is supported and is fine on loopback. On a non-loopback bind the server logs `unauthenticated_non_loopback_bind` at warn on boot — that combination is the one worth fixing.
+Leaving the credential unset is supported and is fine on loopback. On a non-loopback bind the server logs `unauthenticated_non_loopback_bind` at warn on boot, naming both settings and the exposure — that combination is the one worth fixing. It warns rather than refusing to boot: the network may legitimately be the control, and refusing would break every existing containerised deployment on upgrade.
+
+**This template is that combination out of the box.** `HTTP_HOSTNAME=0.0.0.0` is set in `docker-compose.yml` and `HTTP_CALLER_AUTH_TOKEN` is not set anywhere, so a `docker compose up` with the published port reachable from off-host is an unauthenticated decision endpoint. That is fine for local development and is why the warning is a warning. Before it carries traffic, do one of:
+
+- **Put the port on a private network.** A security group, a private subnet, a Kubernetes `NetworkPolicy` — something that decides who may connect. Publishing `3000:3000` from compose is not this: it reaches everything that can route to the host.
+- **Set `HTTP_CALLER_AUTH_TOKEN` in `.env`.** Then reaching the port is not enough to ask for a decision, which is the only one of the two that still holds against an attacker already inside the network boundary. Note that the Go enforcement layer ([protobuf.interceptors](https://github.com/o3co/protobuf.interceptors)) gains the option to send this header **from its next release**; until then a caller built on it needs the network control instead.
+- **Or drop `HTTP_HOSTNAME` and run the verifier as a sidecar**, sharing a network namespace with the enforcement layer so loopback is enough.
 
 `GET /metrics` is not gated either — see [Reaching `/metrics`](#reaching-metrics) for why, and for what that means when the bind is not loopback.
 

@@ -166,7 +166,19 @@ Two settings bound that exposure:
 - **`http.hostname` defaults to `127.0.0.1`.** The deployment this project targets is a sidecar — the enforcement layer runs alongside the verifier and reaches it over loopback. Binding all interfaces is an explicit opt-in (`http.hostname = "0.0.0.0"`), which a containerised deployment must set to be reachable at all.
 - **`http.callerAuth.token` authenticates the calling service.** When set, every request to `/verify` and `/verify/batch` must carry that credential verbatim in `http.callerAuth.header` (default `x-caller-token`, deliberately not `Authorization`). The comparison is constant-time, and it runs before the body is parsed and before any pipeline work, so an unauthenticated peer costs the process nothing. A missing credential and a wrong one get the same `401 { decision: "deny", code: "caller_unauthenticated", message: "Caller authentication failed" }` — the rejection must not tell a prober whether their guess had the right shape. `GET /_healthcheck` is never gated, so orchestrator probes keep working.
 
-Caller authentication is **optional in this release**. When it is not configured and the bind is not loopback, `createApp` logs `unauthenticated_non_loopback_bind` at warn — the genuinely dangerous combination, named rather than blocked. Making it mandatory is a one-line change to `CALLER_AUTH_REQUIRED` in `config/defaults`; see that constant's doc comment.
+Caller authentication is **optional in this release**. When it is not configured and the bind is not loopback, `createApp` logs `unauthenticated_non_loopback_bind` at warn, naming both settings, what is exposed and what to do about it:
+
+```json
+{"level":40,"msg":"unauthenticated_non_loopback_bind","hostname":"0.0.0.0","bindSetting":"http.hostname","callerAuthSetting":"http.callerAuth","exposure":"POST /verify and /verify/batch answer authorization decisions to any caller that can reach this port with a valid subject token — the endpoint is a decision oracle","remediation":"restrict the port to a private network, or set http.callerAuth.token (env HTTP_CALLER_AUTH_TOKEN) so the calling service authenticates itself"}
+```
+
+It warns rather than refusing. The network may legitimately be the control — a private subnet, a pod-local service, a mesh policy — and the process cannot see any of that; all it knows is the address it was told to bind. Refusing would break every existing containerised deployment on upgrade in exchange for a verdict it is not equipped to reach. Making caller auth mandatory is a one-line change to `CALLER_AUTH_REQUIRED` in `config/defaults` — a deliberate breaking change, made once for everyone; see that constant's doc comment.
+
+**Recommended posture, in order.** Pick one; two is better.
+
+1. **Keep the bind loopback.** The sidecar shape: the enforcement layer shares the host (or the Kubernetes pod's network namespace) and reaches `127.0.0.1:3000`. Nothing to configure, nothing to rotate — the default already is this.
+2. **Where the bind must be non-loopback, restrict the port at the network layer** — a private subnet, a security group, a `NetworkPolicy`. A published container port is *not* this: `HTTP_HOSTNAME=0.0.0.0` plus `ports: ["3000:3000"]` reaches everything that can route to the host.
+3. **And/or set `http.callerAuth.token`** (env `HTTP_CALLER_AUTH_TOKEN`), so reaching the port is not enough to ask for a decision. This is the only one of the three that survives an attacker already inside the network boundary. Note that the Go enforcement layer ([protobuf.interceptors](https://github.com/o3co/protobuf.interceptors)) gains the option to send this header **from its next release** — until then, callers built on it must use options 1 or 2.
 
 A shared credential is not a substitute for network policy or mTLS between the enforcement layer and this service. It is the floor, not the ceiling.
 

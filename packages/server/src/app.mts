@@ -260,10 +260,36 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 		}
 		if (!isLoopbackBindAddress(config.http.hostname)) {
 			// The genuinely dangerous combination, named rather than blocked: a
-			// port reachable from off-host that will answer any caller. Warning
-			// keeps container deployments and the cross-repo E2E working while
-			// still telling their operators what they are running.
-			logger.warn({ hostname: config.http.hostname }, "unauthenticated_non_loopback_bind");
+			// port reachable from off-host that will answer any caller.
+			//
+			// WARN, NOT REFUSE, and deliberately so. The network may legitimately
+			// be the control — a private subnet, a pod-local service, a mesh
+			// policy — and this process cannot see any of it; all it knows is the
+			// address it was told to bind. A refusal would therefore break every
+			// existing containerised deployment on upgrade (the shipped
+			// `templates/standalone/docker-compose.yml` sets `HTTP_HOSTNAME=0.0.0.0`
+			// precisely because loopback inside a container publishes nothing) in
+			// exchange for a verdict it is not equipped to reach. `CALLER_AUTH_REQUIRED`
+			// in `config/defaults` is where that judgement gets made, once, for
+			// everyone — flipping it is the deliberate breaking change; this line
+			// is the notice in the meantime.
+			//
+			// Both settings are named because neither one alone is the problem:
+			// a non-loopback bind behind caller auth is fine, and no caller auth
+			// on loopback is the documented default. The operator needs to know
+			// which pair produced this and which half to change.
+			logger.warn(
+				{
+					hostname: config.http.hostname,
+					bindSetting: "http.hostname",
+					callerAuthSetting: "http.callerAuth",
+					exposure:
+						"POST /verify and /verify/batch answer authorization decisions to any caller that can reach this port with a valid subject token — the endpoint is a decision oracle",
+					remediation:
+						"restrict the port to a private network, or set http.callerAuth.token (env HTTP_CALLER_AUTH_TOKEN) so the calling service authenticates itself",
+				},
+				"unauthenticated_non_loopback_bind",
+			);
 		}
 	}
 
