@@ -126,10 +126,11 @@ export class RequestContextAttributeCollector implements AttributeCollector {
 			if (RESERVED_ATTRIBUTE_KEYS.has(key)) {
 				throw new Error(
 					`RequestContextAttributeCollector: attributes[${index}] maps onto the reserved core attribute "${key}". ` +
-						"That key is the engine's own vocabulary — under the default server it is derived from the " +
-						"signature-verified token — while requestContext is caller-supplied, and array attributes union " +
-						"across collectors, so this mapping would let the request body extend it rather than contribute " +
-						`a separate attribute. Promote the field under a key of your own (for example "request${key[0].toUpperCase()}${key.slice(1)}").`,
+						"That key is the engine's own vocabulary, written by the deployment — from the " +
+						"signature-verified token for scopes/userId/clientId, from configuration for roles/permissions — " +
+						"while requestContext is caller-supplied, and array attributes union across collectors, so this " +
+						"mapping would let the request body extend the deployment's value rather than contribute a " +
+						`separate attribute. Promote the field under a key of your own (for example "request${key[0].toUpperCase()}${key.slice(1)}").`,
 				);
 			}
 			return { from, to: key, type };
