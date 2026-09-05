@@ -149,6 +149,34 @@ interface ModuleContext {
 | `ATTR_USER_ID` | `"userId"` | サブジェクトユーザー ID（JWT `sub`）の属性キー |
 | `ATTR_CLIENT_ID` | `"clientId"` | クライアント ID（JWT `azp`）の属性キー |
 
+### 属性キーのレジストリ
+
+この 5 つはエンジンが判断に使うキーなので、呼び出し側のデータを昇格させる Collector が書き込んではいけません（[docs/extending.ja.md](../../docs/extending.ja.md#信頼境界-requestcontext-は呼び出し側のもの)）。ただし、そうしたキーを core が列挙し切ることはできません。独自の属性語彙を持つパッケージ（`@o3co/auth.policy-verifier.cedar` は `requestAction` / `requestResourceType` / `requestResourceId` / `requestResourceRaw` を所有）は core からは見えないからです。そのため予約は固定集合ではなくレジストリであり、各パッケージが自分の語彙を予約します:
+
+```typescript
+import { reserveAttributeKeys } from '@o3co/auth.policy-verifier.core'
+
+export const ATTR_SUBSCRIBER_DID = 'subscriberDid' as const
+
+// 定数のすぐ横、モジュールスコープで呼ぶ — 順序が保証される理由は
+// reserveAttributeKeys の doc コメントを参照。
+reserveAttributeKeys({
+  owner: '@example/subscriber-policy',
+  keys: [ATTR_SUBSCRIBER_DID],
+  reason: 'resolved from the verified subject by SubscriberDidCollector',
+})
+```
+
+| export | 役割 |
+| --- | --- |
+| `RESERVED_ATTRIBUTE_KEYS` | 予約済みキー全体の **ライブな** `ReadonlySet`。判定が必要なその場で読むこと。モジュールスコープでコピーしてはいけません |
+| `reserveAttributeKeys({ owner, keys, reason? })` | パッケージのキーを予約する。同一 owner なら冪等、別 owner が同じキーを要求した場合は拒否 |
+| `attributeKeyReservation(key)` | キーの所有者。拒否メッセージが core と決めつけずにパッケージ名を出せる |
+| `suggestUnreservedAttributeKey(key)` | どのパッケージも予約していない代替名。拒否メッセージが提案する名前 |
+| `CORE_ATTRIBUTE_KEY_OWNER` | core 自身の 5 キーの owner 名 |
+
+このレジストリを参照する guard が builtins の `RequestContextAttributeCollector` です。自作の Collector も同じレジストリを参照してください。
+
 ## 使い方
 
 ```typescript

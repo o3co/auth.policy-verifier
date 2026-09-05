@@ -3,12 +3,15 @@
 
 import type {
 	AttributeCollector,
+	AttributeKeyReservation,
 	Attributes,
 	CollectorContext,
 } from "@o3co/auth.policy-verifier.core";
 import {
-	RESERVED_ATTRIBUTE_KEYS,
+	attributeKeyReservation,
+	CORE_ATTRIBUTE_KEY_OWNER,
 	readUntrustedRequestContext,
+	suggestUnreservedAttributeKey,
 } from "@o3co/auth.policy-verifier.core";
 
 /** Types a `requestContext` field may be promoted as. */
@@ -28,9 +31,9 @@ export interface RequestContextAttributeMapping {
 	/**
 	 * Attribute key to write. Defaults to `from`.
 	 *
-	 * May not name a key in `RESERVED_ATTRIBUTE_KEYS` — see the class doc
-	 * comment for why the caller's body may not land on the engine's own
-	 * vocabulary.
+	 * May not name a reserved key — core's five, plus whatever the packages a
+	 * composition loaded reserved for themselves. See the class doc comment for
+	 * why the caller's body may not land on vocabulary a deployment writes.
 	 */
 	to?: string;
 	/** Expected type; a value of any other shape is not promoted. Defaults to `"string"`. */
@@ -59,14 +62,22 @@ export interface RequestContextAttributeCollectorConfig {
  * config did not name cannot reach a rule, and one whose value does not match
  * its declared type is dropped rather than passed along.
  *
- * ## The core vocabulary is not a valid destination
+ * ## Reserved vocabulary is not a valid destination
  *
- * A mapping's `to` may not name a key in `RESERVED_ATTRIBUTE_KEYS` — `scopes`,
- * `permissions`, `roles`, `userId`, `clientId`. Those are what the engine
- * decides from, and under the default server the first, fourth and fifth are
- * read out of the signature-verified token; `requestContext` is the request
- * body, which anyone holding a valid token fills in as they like. The two
- * carry different trust and must not share a bucket.
+ * A mapping's `to` may not name a key any package has reserved. Core reserves
+ * five — `scopes`, `permissions`, `roles`, `userId`, `clientId` — and every
+ * package that owns attribute vocabulary reserves its own at module load:
+ * `packages/cedar` reserves `requestAction`, `requestResourceType`,
+ * `requestResourceId` and `requestResourceRaw`. The check is a lookup in core's
+ * registry, not a list this collector or core keeps by hand, so a package core
+ * cannot see is covered by importing it — which a composition naming that
+ * package's collectors has already done.
+ *
+ * Those keys are what the engine decides from, and under the default server
+ * `scopes` / `userId` / `clientId` are read out of the signature-verified
+ * token; `requestContext` is the request body, which anyone holding a valid
+ * token fills in as they like. The two carry different trust and must not share
+ * a bucket.
  *
  * The reason it is refused outright rather than left to the operator is what
  * `AttributePipeline` does with two collectors writing one key: array-valued
@@ -76,6 +87,15 @@ export interface RequestContextAttributeCollectorConfig {
  * `context.groups = ["admin:write"]` is authorized for a scope its token never
  * carried. Nothing in the decision, the logs or the metrics distinguishes that
  * from an issuer that granted it.
+ *
+ * A scalar key is not safe either, in two different ways. Two writers that
+ * disagree throw `AttributeConflictError`, which denies — fail-closed, but an
+ * unannounced outage rather than a refusal. And where the owning collector
+ * writes its key only *sometimes*, there is no second writer at all: cedar's
+ * `RequestFactsCollector` omits `requestResourceId` for an id-less resource
+ * such as `"document"`, so `{ from = "rid", to = "requestResourceId" }` would
+ * land unopposed and the Cedar resource entity would be built out of the
+ * caller's own request body.
  *
  * This is reachable only through operator configuration, which is why it is a
  * configuration error rather than a vulnerability. It is refused at
@@ -123,15 +143,9 @@ export class RequestContextAttributeCollector implements AttributeCollector {
 			// so `{ from = "scopes" }` reaches the reserved key without ever
 			// spelling it out. See the class doc comment for why this is refused.
 			const key = to ?? from;
-			if (RESERVED_ATTRIBUTE_KEYS.has(key)) {
-				throw new Error(
-					`RequestContextAttributeCollector: attributes[${index}] maps onto the reserved core attribute "${key}". ` +
-						"That key is the engine's own vocabulary, written by the deployment — from the " +
-						"signature-verified token for scopes/userId/clientId, from configuration for roles/permissions — " +
-						"while requestContext is caller-supplied, and array attributes union across collectors, so this " +
-						"mapping would let the request body extend the deployment's value rather than contribute a " +
-						`separate attribute. Promote the field under a key of your own (for example "request${key[0].toUpperCase()}${key.slice(1)}").`,
-				);
+			const reservation = attributeKeyReservation(key);
+			if (reservation !== undefined) {
+				throw new Error(refusal(index, reservation));
 			}
 			return { from, to: key, type };
 		});
@@ -153,6 +167,38 @@ export class RequestContextAttributeCollector implements AttributeCollector {
 		}
 		return attrs;
 	}
+}
+
+/**
+ * Why this mapping is refused, in the words of whoever owns the key.
+ *
+ * Core's five get the account of the trust boundary they sit on. Another
+ * package's keys get its name and its own stated reason instead: asserting they
+ * are "the core vocabulary" would be false, and the operator's next move is to
+ * go read that package's docs, so the message says which one.
+ *
+ * The suggested rename is drawn from core's registry rather than spelled
+ * `request<Key>` unconditionally, because `request*` is a real package's
+ * namespace (cedar's) and advice that lands there would be refused by this same
+ * guard.
+ */
+function refusal(index: number, reservation: AttributeKeyReservation): string {
+	const { key, owner, reason } = reservation;
+	const head =
+		owner === CORE_ATTRIBUTE_KEY_OWNER
+			? `RequestContextAttributeCollector: attributes[${index}] maps onto the reserved core attribute "${key}". ` +
+				"That key is the engine's own vocabulary, written by the deployment — from the " +
+				"signature-verified token for scopes/userId/clientId, from configuration for roles/permissions — " +
+				"while requestContext is caller-supplied, and array attributes union across collectors, so this " +
+				"mapping would let the request body extend the deployment's value rather than contribute a " +
+				"separate attribute. "
+			: `RequestContextAttributeCollector: attributes[${index}] maps onto the reserved attribute "${key}", ` +
+				`which belongs to ${owner}${reason === undefined ? "" : ` — ${reason}`}. ` +
+				"That package writes the key from what the deployment established, while requestContext is " +
+				"caller-supplied: where both write it the values collide and every such request is denied, and " +
+				"where that package writes nothing for a given request the caller's value stands unopposed as " +
+				"the one the deployment was supposed to supply. ";
+	return `${head}Promote the field under a key of your own (for example "${suggestUnreservedAttributeKey(key)}").`;
 }
 
 /**

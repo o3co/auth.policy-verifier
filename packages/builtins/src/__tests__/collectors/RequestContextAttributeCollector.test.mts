@@ -9,6 +9,8 @@ import {
 	ATTR_SCOPES,
 	ATTR_USER_ID,
 	markUntrustedRequestContext,
+	RESERVED_ATTRIBUTE_KEYS,
+	reserveAttributeKeys,
 } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 import { RequestContextAttributeCollector } from "#/collectors/RequestContextAttributeCollector.mjs";
@@ -236,5 +238,95 @@ describe("RequestContextAttributeCollector — the reserved core vocabulary", ()
 
 		expect(attrs.get("tenantId")).toBe("acme");
 		expect(attrs.get("groups")).toEqual(["eng", "sre"]);
+	});
+});
+
+/**
+ * The name in a refusal's "for example …" clause. Read back out of the message
+ * rather than recomputed, so the test checks the advice an operator is actually
+ * given.
+ */
+function suggestedKeyIn(message: string): string {
+	const match = /for example "([^"]+)"/.exec(message);
+	expect(match).not.toBeNull();
+	return (match as RegExpExecArray)[1];
+}
+
+function refusalFor(to: string): string {
+	try {
+		new RequestContextAttributeCollector({ attributes: [{ from: "anything", to }] });
+	} catch (error) {
+		return (error as Error).message;
+	}
+	throw new Error(`expected a mapping onto "${to}" to be refused`);
+}
+
+describe("RequestContextAttributeCollector — vocabulary another package reserved", () => {
+	// The reservation is a registry core exposes, not a list core enumerates:
+	// `packages/cedar` owns four `request*` keys core cannot see, and any
+	// consuming package may own more. Reserving one here is exactly what such a
+	// package does at module load.
+	it("refuses a mapping onto a key another package owns, and names that package", () => {
+		reserveAttributeKeys({
+			owner: "@example/policy-plugin",
+			keys: ["pluginResourceId"],
+			reason: "written by the plugin's own request-facts collector",
+		});
+
+		const message = refusalFor("pluginResourceId");
+
+		expect(message).toContain("attributes[0]");
+		expect(message).toContain('"pluginResourceId"');
+		expect(message).toContain("@example/policy-plugin");
+		expect(message).toContain("written by the plugin's own request-facts collector");
+	});
+
+	it("does not call another package's key core's own", () => {
+		reserveAttributeKeys({ owner: "@example/other", keys: ["otherOwnedKey"] });
+
+		expect(refusalFor("otherOwnedKey")).not.toContain("reserved core attribute");
+	});
+
+	it("refuses such a key reached through the `to` default", () => {
+		reserveAttributeKeys({ owner: "@example/defaulted", keys: ["defaultedKey"] });
+
+		expect(
+			() => new RequestContextAttributeCollector({ attributes: [{ from: "defaultedKey" }] }),
+		).toThrow(/defaultedKey/);
+	});
+
+	it("suggests a rename that is not itself reserved", () => {
+		// The advice used to be "call it request<Key>" unconditionally — into the
+		// namespace `packages/cedar` occupies, so it could propose a name the very
+		// next guard refuses.
+		reserveAttributeKeys({
+			owner: "@example/crowding",
+			keys: ["crowdedKey", "requestCrowdedKey"],
+		});
+
+		const suggestion = suggestedKeyIn(refusalFor("crowdedKey"));
+
+		expect(suggestion).not.toBe("requestCrowdedKey");
+		expect(RESERVED_ATTRIBUTE_KEYS.has(suggestion)).toBe(false);
+		// And the suggestion is usable: it constructs.
+		expect(
+			new RequestContextAttributeCollector({
+				attributes: [{ from: "crowdedKey", to: suggestion }],
+			}),
+		).toBeInstanceOf(RequestContextAttributeCollector);
+	});
+
+	it("still advises the request namespace for a core key, which is free", () => {
+		expect(suggestedKeyIn(refusalFor(ATTR_SCOPES))).toBe("requestScopes");
+	});
+
+	it("leaves a key nobody reserved working", async () => {
+		const collector = new RequestContextAttributeCollector({
+			attributes: [{ from: "rid", to: "callerSuppliedResourceId" }],
+		});
+
+		const attrs = await collector.collect(makeContext({ rid: "someone-elses-doc" }));
+
+		expect(attrs.get("callerSuppliedResourceId")).toBe("someone-elses-doc");
 	});
 });

@@ -40,22 +40,30 @@ npm install @o3co/auth.policy-verifier.builtins
 
 この宣言が信頼境界です — [docs/extending.ja.md](../../docs/extending.ja.md#信頼境界-requestcontext-は呼び出し側のもの) が説明する境界の、既製の守り方がこのコレクターです。`requestContext` は自由形式かつ未検証なので、**宣言していないフィールドは attribute になりません**。dot path は own property のみを辿るため `constructor.name` のような指定は何も読みません。このコレクター自身は語彙を持ち込みません — フィールド名もキー名も運用者が決めるため、[AGENTS.md — Core Vocabulary Scope](../../AGENTS.md#core-vocabulary-scope) の方針を崩さずに実用的なものを提供できます。read-check-write を超える処理（値の導出、外部ストア参照など）が必要な場合は、同節が説明するプロジェクト側の `AttributeCollector` を書いてください。
 
-#### core の語彙は書き込み先にできません
+#### 予約済みの語彙は書き込み先にできません
 
-マッピングの `to` に core の `ATTR_*` キー — `scopes`、`permissions`、`roles`、`userId`、`clientId`（`RESERVED_ATTRIBUTE_KEYS` として export）— を指定することはできません。指定した場合は**構成エラーとしてコンストラクタで拒否**されるため、そう書いたデプロイは最初のリクエストではなく起動時に失敗します:
+マッピングの `to` に**予約済み属性キー**を指定することはできません。指定した場合は**構成エラーとしてコンストラクタで拒否**されるため、そう書いたデプロイは最初のリクエストではなく起動時に失敗します:
 
 ```hocon
-# 起動時に拒否される
+# 起動時に拒否される — core 自身の語彙
 { from = "groups", to = "scopes" }
+
+# 起動時に拒否される — @o3co/auth.policy-verifier.cedar の語彙。
+# 同パッケージがロードされた時点で予約される
+{ from = "rid", to = "requestResourceId" }
 
 # 問題なし — フィールド名は自由。予約されているのは attribute キーだけ
 { from = "groups", to = "requestGroups", type = "string[]" }
 { from = "scopes", to = "requestedScopes", type = "string[]" }
 ```
 
-`context` は呼び出し側のもので、この 5 キーはエンジンのものです。既定のサーバーでは `scopes` / `userId` / `clientId` は**署名検証済みトークン**から読まれ、`permissions` / `roles` は builtin の Rule が判断に使う権限を運びます。両者は信頼レベルがまったく異なり、リクエストボディがトークンと同じバケツに合流してはなりません。
+予約集合は**このパッケージが保持するリストではありません**。core のレジストリ（`RESERVED_ATTRIBUTE_KEYS` / `reserveAttributeKeys` / `attributeKeyReservation`）です。core は自身の 5 キー — `scopes`、`permissions`、`roles`、`userId`、`clientId` — を予約し、属性語彙を持つ各パッケージはモジュールロード時に自分の語彙を予約します。`@o3co/auth.policy-verifier.cedar` は `requestAction` / `requestResourceType` / `requestResourceId` / `requestResourceRaw` を予約します。プロジェクト側の Collector も、書き込むキーを同じ方法で予約してください。設定でそのパッケージの Collector 名を書ける構成は、すでにそのパッケージを import しているため、このコレクターが構築される前にキーは登録済みです — core から見えない語彙まで guard が効くのはこのためです。拒否メッセージは所有パッケージ名を示し、それ自体が予約されていない代替名を提案します。
+
+`context` は呼び出し側のもので、これらのキーはデプロイ側のものです。既定のサーバーでは `scopes` / `userId` / `clientId` は**署名検証済みトークン**から読まれ、`permissions` / `roles` は builtin の Rule が判断に使う権限を、cedar の 4 キーはパース済みリクエストを運びます。信頼レベルがまったく異なり、リクエストボディがそれらと同じバケツに合流してはなりません。
 
 ドキュメントで注意喚起するのではなく拒否する価値があるのはマージの挙動ゆえです。`AttributePipeline` はコレクター間で配列値の attribute を**union** します。したがって `scopes` へのマッピングは `PayloadScopeCollector` の出力を上書きして競合するのではなく、*追加*します。`context.groups = ["admin:write"]` を送った呼び出し側は、トークンが一度も持たなかった scope で認可され、判定・ログ・メトリクスのいずれにも issuer が付与した場合との区別は現れません。`AttributePipeline` の merge の doc コメントを参照してください。
+
+スカラーキーなら安全というわけでもなく、理由は 2 つあります。双方が書けば値が食い違い、`AttributeConflictError` でそのリクエストは拒否されます — fail-closed ではありますが、起動時の拒否ではなく予告のない拒否です。そして所有側のコレクターが*条件付きでしか*書かないキーには、そもそも競合相手がいません。cedar の `RequestFactsCollector` は `"document"` のような id を持たないリソースでは `requestResourceId` を書かないため、`{ from = "rid", to = "requestResourceId" }` は誰とも競合せずに着地し、Cedar の resource エンティティが呼び出し側のリクエストボディから組み立てられてしまいます。
 
 ## Rules
 
