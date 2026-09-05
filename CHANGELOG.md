@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
+## [Unreleased]
+
+### Security
+
+- The Bearer-only token authenticator rejects every token carrying `cnf`, including malformed and unsupported confirmations, before policy evaluation on both `/verify` and `/verify/batch`. Ordinary unbound Bearer tokens retain their behavior.
+
 ## [0.7.0] - 2026-09-04
 
 ### Changed

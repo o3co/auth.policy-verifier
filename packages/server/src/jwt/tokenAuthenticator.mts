@@ -526,6 +526,18 @@ export function createTokenAuthenticator(
 					decoded = decodeJwt(token);
 					assertTimeClaims(decoded, { maxTokenAge, clockTolerance });
 				}
+				// This boundary receives only a Bearer credential, not trusted
+				// evidence of possession for the original protected request. Reject
+				// every cnf shape (including malformed or future mechanisms) rather
+				// than silently downgrade a bound token to an unbound credential.
+				if (Object.hasOwn(decoded, "cnf")) {
+					throw new errors.JWTClaimValidationFailed(
+						"Sender-constrained tokens are not supported on the Bearer authentication path",
+						decoded,
+						"cnf",
+						"check_failed",
+					);
+				}
 			} catch (cause) {
 				// Same invalid_token rejection either way — the caller is
 				// unauthenticated regardless — but the log line is what lets the
