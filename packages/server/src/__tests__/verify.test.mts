@@ -85,6 +85,39 @@ function createTestApp(resourceParser?: ResourceParser, ruleCollectors?: RuleCol
 describe("POST /verify", () => {
 	const app = createTestApp();
 
+	it.each([{ jkt: "proof-key" }, { "x5t#S256": "certificate" }])(
+		"rejects bound tokens before policy collection on both endpoints: %j",
+		async (cnf) => {
+			let collected = false;
+			const app = createTestApp(undefined, [
+				{
+					async collect() {
+						collected = true;
+						return [];
+					},
+				},
+			]);
+			const token = await signHS256Token({ scope: "read:project", cnf });
+			const decision = {
+				resource: "project:1",
+				action: "read",
+				context: { proof_verified: true },
+			};
+			for (const [path, body] of [
+				["/verify", decision],
+				["/verify/batch", { decisions: [decision] }],
+			] as const) {
+				const res = await request(app)
+					.post(path)
+					.set("Authorization", `Bearer ${token}`)
+					.send(body);
+				expect(res.status).toBe(401);
+				expect(res.body.code).toBe("invalid_token");
+			}
+			expect(collected).toBe(false);
+		},
+	);
+
 	it("returns allow for valid token with matching scope", async () => {
 		const token = await signHS256Token({ scope: "read:project" });
 		const res = await request(app)
