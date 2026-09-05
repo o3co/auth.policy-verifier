@@ -105,10 +105,20 @@ describe("the attribute key registry — a package reserving its own vocabulary"
 		[{ owner: 7, keys: ["k"] }, /owner/],
 		[{ owner: "@example/bad", keys: [""] }, /key/],
 		[{ owner: "@example/bad", keys: [3] }, /key/],
+		[{ owner: "@example/bad", keys: "accidental-string" }, /keys must be a non-string iterable/],
+		[{ owner: "@example/bad", keys: {} }, /keys must be a non-string iterable/],
+		[{ owner: "@example/bad", keys: null }, /keys must be a non-string iterable/],
+		[{ owner: "@example/bad" }, /keys must be a non-string iterable/],
+		[{ owner: "@example/bad", keys: 42 }, /keys must be a non-string iterable/],
 	])("rejects the malformed reservation %j", (reservation, pattern) => {
 		expect(() =>
 			reserveAttributeKeys(reservation as unknown as Parameters<typeof reserveAttributeKeys>[0]),
 		).toThrow(pattern);
+	});
+
+	it("accepts a Set of keys", () => {
+		reserveAttributeKeys({ owner: "@example/set", keys: new Set(["setOwnedKey"]) });
+		expect(attributeKeyReservation("setOwnedKey")?.owner).toBe("@example/set");
 	});
 });
 

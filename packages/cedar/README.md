@@ -86,7 +86,7 @@ That matters most for `requestResourceId`, which `RequestFactsCollector` writes
 `document` nothing else writes it, so a mapping
 `{ from = "rid", to = "requestResourceId" }` would have met no competing writer:
 `{"resource":"document","action":"read","context":{"rid":"someone-elses-doc"}}`
-would have been decided as `Document::"someone-elses-doc"`, with the entity
+would have been decided as `document::"someone-elses-doc"`, with the entity
 chosen by the caller's own request body. Where the resource *does* carry an id
 the two writers collide instead and `AttributeConflictError` denies — fail-closed,
 but an unannounced denial rather than a refusal at boot.

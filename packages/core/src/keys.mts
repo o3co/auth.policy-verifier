@@ -118,7 +118,8 @@ export const RESERVED_ATTRIBUTE_KEYS: ReadonlySet<string> = reservedKeys;
  * ```
  *
  * @throws Error if `owner` or a key is not a non-empty string, or if any key is
- * already reserved by another package. Nothing is registered when it throws:
+ * already reserved by another package, or `keys` is not a non-string iterable.
+ * Nothing is registered when it throws:
  * a half-applied batch would leave the calling package believing it holds a key
  * the registry never recorded.
  */
@@ -131,8 +132,11 @@ export function reserveAttributeKeys(request: AttributeKeyReservationRequest): v
 	}
 
 	// Validated and checked for conflicts in full before anything is written.
+	if (typeof keys === "string" || keys == null || typeof keys[Symbol.iterator] !== "function") {
+		throw new Error("reserveAttributeKeys: keys must be a non-string iterable");
+	}
 	const pending: AttributeKeyReservation[] = [];
-	for (const key of keys ?? []) {
+	for (const key of keys) {
 		if (typeof key !== "string" || key.length === 0) {
 			throw new Error(
 				`reserveAttributeKeys: ${owner} supplied a key that is not a non-empty string, got ${describe(key)}`,

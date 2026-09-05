@@ -48,7 +48,7 @@ export const CEDAR_ATTRIBUTE_KEYS = [
  * so a mapping `{ from = "rid", to = "requestResourceId" }` was unopposed and
  * `mapping.mts` built the Cedar resource entity out of the caller's own request
  * body: `{"resource":"document","action":"read","context":{"rid":"x"}}` decided
- * as `Document::"x"`. Where the resource *does* carry an id the two writers
+ * as `document::"x"`. Where the resource *does* carry an id the two writers
  * collide and `AttributeConflictError` denies — fail-closed, but an
  * unannounced denial rather than a refusal at boot.
  */
