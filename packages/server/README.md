@@ -2,6 +2,16 @@
 
 Express HTTP server for auth.policy-verifier. Provides `createApp` to assemble the application from modules and config, and `POST /verify` / `POST /verify/batch` for authorization decisions.
 
+## Bearer authentication boundary
+
+The built-in authenticator accepts unbound Bearer access tokens. A token carrying
+any `cnf` claim is refused with `401 invalid_token`, including DPoP, mTLS,
+malformed confirmations, and unknown mechanisms. This applies to `/verify` and
+`/verify/batch`, including test-only decode mode. Request context cannot claim
+that possession has been verified. Deployments using bound tokens need an
+authentication boundary that verifies possession for the original protected
+request; this server does not provide that protocol.
+
 ## Install
 
 ```bash

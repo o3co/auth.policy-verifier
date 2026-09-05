@@ -190,6 +190,27 @@ describe("assertVerifyRouterJwtConfig — caller-facing error context", () => {
 describe("createTokenAuthenticator — construction and bearer parsing", () => {
 	const silentLogger = { info() {}, warn() {}, error() {} };
 
+	it.each([
+		{ jkt: "proof-key" },
+		{ "x5t#S256": "certificate" },
+		{ jwk: { kty: "EC" } },
+		{},
+		null,
+		"invalid",
+	])("rejects a token with cnf %j on the Bearer-only boundary", async (cnf) => {
+		const token = await signToken({ cnf });
+		for (const config of [
+			SIGNING_CONFIG,
+			{ validate: false as const, allowInsecureDecode: true as const },
+		]) {
+			const authenticator = createTokenAuthenticator(config, silentLogger);
+			expect(await authenticator.authenticate(`Bearer ${token}`)).toMatchObject({
+				ok: false,
+				code: "invalid_token",
+			});
+		}
+	});
+
 	it("runs the guard at construction, so a hand-built invalid config cannot produce an authenticator", () => {
 		expect(() =>
 			createTokenAuthenticator(
