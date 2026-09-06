@@ -39,7 +39,6 @@
 	},
 	"dependencies": {
 		"@o3co/auth.policy-verifier.core": "workspace:*",
-		"@o3co/auth.utils": "^0.0.4",
 		"express": "^5.0.0",
 		"jose": "^6.2.10",
 		"prom-client": "^15.1.3",
