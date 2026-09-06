@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
-## [Unreleased]
+## [0.8.1] - 2026-09-06
 
 ### Fixed
 
@@ -15,7 +15,7 @@ and version sections follow the release labeling policy in
   failed it set the exit code but not the reason, so the one line an operator
   alerts on contradicted itself. `reason` now names whatever decided the exit
   code (`cleanup-timeout` / `cleanup-failed`) and the drain outcome keeps its
-  own `drain` key, so the shape stays stable and neither fact is lost. Shipped
+  own `drain` key, so the shape stays stable and neither fact is lost. Introduced
   in 0.8.0; found reviewing the same code in
   [auth.provider#511](https://github.com/o3co/auth.provider/pull/511).
 
