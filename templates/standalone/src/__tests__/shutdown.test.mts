@@ -20,7 +20,7 @@
 import type { Server } from "node:http";
 import type { Logger } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it, vi } from "vitest";
-import { installGracefulShutdown } from "../shutdown.js";
+import { deferExit, installGracefulShutdown } from "../shutdown.js";
 
 /** A `Server` double whose `close` callback fires only when we say so. */
 function makeServer() {
@@ -187,6 +187,56 @@ describe("installGracefulShutdown", () => {
 		await settle();
 		expect(logger.error).toHaveBeenCalledWith({ err }, expect.stringContaining("close failed"));
 		expect(exit).toHaveBeenCalledWith(1);
+	});
+
+	it("bounds cleanup so a hanging dispose cannot wedge the process", async () => {
+		// `finish` awaited cleanup with no deadline, and the drain deadline was
+		// already cleared by then, so a dispose that never settled meant `exit`
+		// was never reached — the wedge the deadline was added to remove.
+		vi.useFakeTimers();
+		try {
+			const { signals, finishDraining, exit, logger } = install({
+				cleanup: () => new Promise<void>(() => {}),
+				drainTimeoutMs: 5_000,
+			});
+			signals.get("SIGTERM")?.();
+			finishDraining();
+			await vi.advanceTimersByTimeAsync(5_000);
+			expect(logger.error).toHaveBeenCalledWith(
+				expect.objectContaining({ cleanupTimeoutMs: 5_000 }),
+				expect.stringContaining("cleanup timed out"),
+			);
+			expect(exit).toHaveBeenCalledWith(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("does not penalise a cleanup that finishes inside its budget", async () => {
+		vi.useFakeTimers();
+		try {
+			const { signals, finishDraining, exit } = install({
+				cleanup: () => Promise.resolve(),
+				drainTimeoutMs: 5_000,
+			});
+			signals.get("SIGTERM")?.();
+			finishDraining();
+			await vi.advanceTimersByTimeAsync(10_000);
+			expect(exit).toHaveBeenCalledExactlyOnceWith(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("defers the real exit a turn so pino's buffered destination can flush (#210 review)", async () => {
+		// `createAppLogger` uses pino's default (non-synchronous) destination, so
+		// exiting in the same tick as the last `logger.error` can drop exactly the
+		// `cleanup failed` line an operator would go looking for.
+		const exitProcess = vi.fn();
+		deferExit(3, exitProcess);
+		expect(exitProcess).not.toHaveBeenCalled();
+		await new Promise((resolve) => setImmediate(resolve));
+		expect(exitProcess).toHaveBeenCalledWith(3);
 	});
 
 	it("removes its own signal listeners once shutting down", () => {

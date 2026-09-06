@@ -27,7 +27,10 @@ and version sections follow the release labeling policy in
   its contract: drain for `drainTimeoutMs` (default 10s, size it below the
   orchestrator's kill grace period), then force-close and exit non-zero; a
   `close` that reports a failure is not a clean drain; cleanup runs through the
-  app logger and never wedges the process. `auth.provider`'s standalone template
+  app logger, is itself bounded by `cleanupTimeoutMs` (defaulting to
+  `drainTimeoutMs`) so a dispose that never settles cannot replace the wedge
+  the deadline removed, and the process yields the loop once before exiting so
+  pino's buffered destination can flush the lines that say why. `auth.provider`'s standalone template
   made the same move for the same reasons
   ([auth.provider#290](https://github.com/o3co/auth.provider/issues/290)), and
   the two composition roots stay symmetric.
