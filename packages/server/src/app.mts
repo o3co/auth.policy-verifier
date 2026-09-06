@@ -14,7 +14,6 @@ import {
 	type RuleCollectorFactory,
 	RulePipeline,
 } from "@o3co/auth.policy-verifier.core";
-import { createHealthcheckRouter } from "@o3co/auth.utils/express";
 import express from "express";
 import {
 	type AppConfig,
@@ -32,6 +31,7 @@ import {
 } from "./jwt/tokenAuthenticator.mjs";
 import { isLoopbackBindAddress } from "./net/loopback.mjs";
 import { createMetrics } from "./observability/metrics.mjs";
+import { createHealthcheckRouter } from "./routes/healthcheck.mjs";
 import { createVerifyRouter } from "./routes/verify.mjs";
 
 /** Options accepted by `createApp`. */

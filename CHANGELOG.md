@@ -12,6 +12,40 @@ and version sections follow the release labeling policy in
 
 - The Bearer-only token authenticator rejects every token carrying `cnf`, including malformed and unsupported confirmations, before policy evaluation on both `/verify` and `/verify/batch`. Ordinary unbound Bearer tokens retain their behavior.
 
+### Fixed
+
+- **The standalone template's shutdown had no drain deadline.** It delegated to
+  `gracefulShutdown` from `@o3co/auth.utils@0.0.4`, which called
+  `server.close()` with no timeout: one stuck decision meant the process never
+  exited on its own and the orchestrator's SIGKILL took it down mid-flight — the
+  opposite of a graceful shutdown, arriving only under the load that produces a
+  stuck request. Cleanup failures wrote to `console.error`, one bare line in a
+  composition root that went to the trouble of wiring NDJSON (#107), and every
+  exit was zero, so a truncated shutdown looked exactly like a clean one.
+
+  `templates/standalone/src/shutdown.ts` now owns the behaviour, with tests as
+  its contract: drain for `drainTimeoutMs` (default 10s, size it below the
+  orchestrator's kill grace period), then force-close and exit non-zero; a
+  `close` that reports a failure is not a clean drain; cleanup runs through the
+  app logger and never wedges the process. `auth.provider`'s standalone template
+  made the same move for the same reasons
+  ([auth.provider#290](https://github.com/o3co/auth.provider/issues/290)), and
+  the two composition roots stay symmetric.
+
+### Changed
+
+- **`@o3co/auth.utils` is no longer a dependency of this repository.** The
+  server used one helper from it (`createHealthcheckRouter`) and the standalone
+  template one more (`gracefulShutdown`); both now live here.
+
+  The liveness router is the clearest case for the move. `auth.utils` defaulted
+  to `/healthcheck`, and that default is exactly why this server answered on a
+  different path from `auth.provider` and `auth.proxy` until 0.7.0 added the
+  canonical `/_healthcheck` alongside it — a shared default each component then
+  has to override is not a shared decision. Both paths and their identical
+  answer are unchanged; only the code behind them moved, into
+  `packages/server/src/routes/healthcheck.mts`.
+
 ## [0.7.0] - 2026-09-04
 
 ### Changed
