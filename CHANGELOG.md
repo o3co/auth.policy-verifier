@@ -21,20 +21,15 @@ and version sections follow the release labeling policy in
   opaque tokens, an IdP SDK's session verification, a gateway's attestation —
   and the factory receives the whole `oauth` block plus `{ logger,
   keyResolverRegistry }`. The built-in `"jwt"` entry is the default and is
-  what every existing config selects, so nothing deployed reads differently;
-  `createApp` registers it before any module runs, so it cannot be replaced,
+  what every existing config selects, so the selection changes nothing for a
+  deployed config; `createApp` registers it before any module runs, so it cannot be replaced,
   only supplemented. `oauth.jwt` is required only while `"jwt"` is selected
   (both boundaries decide that through one shared function,
   `checkTokenAuthenticatorSelection`), and another authenticator's own
   sub-block rides along on the parsed config. `createVerifyRouter` takes an
   already-built `authenticator` in place of `jwt` for a library consumer.
-  Written up in `docs/extending.md`, "Writing a token authenticator".
-
-  Two edges for a consumer building the server's types by hand: a
-  `ServerModuleContext` assembled outside `createApp` needs the new registry,
-  and `AppConfig["oauth"]["jwt"]` is optional on the parsed type. A hand-built
-  config with `oauth.jwt` absent is now refused as *required when
-  `oauth.authenticator` is "jwt"* rather than as *not a config object*.
+  Written up in `docs/extending.md`, "Writing a token authenticator". The
+  type-level edges are under Changed below.
 
 - **The built-in JWT path accepts an external IdP's token shape**
   (`@o3co/auth.policy-verifier.server`,
@@ -73,6 +68,31 @@ and version sections follow the release labeling policy in
   request-context field whose name itself carries a dot becomes readable the
   same way. `RequestContextAttributeMapping` / `…Type` / `…CollectorConfig`
   are now aliases of the shared `AttributeMapping` types, unchanged in shape.
+
+### Changed
+
+- **BREAKING (types only)**: `ServerModuleContext` gained a required
+  `tokenAuthenticatorRegistry` (`@o3co/auth.policy-verifier.server`, #219).
+  A context assembled outside `createApp` — a host that initializes modules
+  itself — fails typecheck until it adds
+  `tokenAuthenticatorRegistry: new Registry<TokenAuthenticatorFactory>()`.
+  `createApp` callers are unaffected.
+- **BREAKING (types only)**: `AppConfig["oauth"]["jwt"]` is optional on the
+  parsed type (#219), because `oauth.jwt` is required only while
+  `oauth.authenticator` is `"jwt"`. Code reading `config.oauth.jwt.<key>`
+  fails typecheck; read it as `config.oauth.jwt?.<key>`, or narrow on
+  `config.oauth.authenticator === "jwt"`. A hand-built config with `oauth.jwt`
+  absent is now refused as *required when `oauth.authenticator` is "jwt"*
+  rather than as *not a config object*.
+- **`PayloadScopeCollector` reads an array-valued scope claim under the
+  default `scope` too** (`@o3co/auth.policy-verifier.builtins`, #219). A token
+  whose issuer emits `scope: ["a", "b"]` previously asserted no scopes at all
+  and was denied by every `HasScope` rule; it now asserts `a` and `b`. A
+  space-delimited string reads exactly as before.
+- `RequestContextAttributeCollector` reads an exact key on `context` before
+  walking a dot path (#219): a literal `"tenant.id"` field, unreachable
+  before, is read, and wins when both spellings are present. Both are the
+  caller's, so no trust line moves.
 
 ## [0.8.1] - 2026-09-06
 

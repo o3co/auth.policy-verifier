@@ -230,7 +230,15 @@ rule {
 }
 ```
 
-`audienceClaim` moves the audience check to the named claim; it never removes it, and `audience` stays required, so a token minted for another app is still refused. `tokenType = "*"` is the explicit opt-out of pinning the `typ` header — with it set, the audience is the only thing telling an access token from an id_token signed with the same key, so pair it with an `audienceClaim` the other kind does not carry (Cognito's id_token carries `aud`, not `client_id`). Opaque tokens — Okta's org authorization server, Auth0 without an `audience` — cannot be verified locally at all and need an introspection authenticator.
+Keep `claim` identical on `PayloadScopeCollector` and `ResourceActionScopeRuleCollector`: under `scopeless = "skip"` a mismatch treats a token that does carry scopes as scopeless and drops the scope rule.
+
+`audienceClaim` moves the audience check to the named claim; it never removes it, and `audience` stays required, so a token minted for another app is still refused. Three things to get right:
+
+- **With `audienceClaim` set to anything but `aud`, `aud` is not consulted at all.** A token whose `aud` names another resource server passes if the named claim matches — `azp` names the *client*, and every backend one frontend talks to shares it. Use it only for issuers that emit no `aud` (a Clerk session token, a Cognito access token). For an issuer that does emit `aud` — Okta, Auth0, a Clerk JWT template that sets one — keep the default and pin `audience` to your API identifier.
+- **`tokenType = "*"` must be exactly `*`** (`application/*` pins that literal and refuses every token). With `typ` unpinned nothing tells an access token from an id_token or logout token signed by the same key, so **`audience` must never be an OIDC client id** — an id_token for that client would satisfy it. Use a distinct API identifier, or an `audienceClaim` that id_tokens lack (Cognito's id_token carries `aud`, not `client_id`).
+- **Bind and map only claims the IdP populates from its own registration or admin data.** A signed claim is not a trusted one if the user can write it: Clerk's `unsafe_metadata` and Auth0's `user_metadata` are user-editable, and a claim minted from them must reach neither `audienceClaim` nor a `PayloadClaimAttributeCollector` mapping.
+
+Opaque tokens — Okta's org authorization server, Auth0 without an `audience` — cannot be verified locally at all and need an introspection authenticator.
 
 ## Configuration
 

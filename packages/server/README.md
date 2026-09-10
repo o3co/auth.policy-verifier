@@ -36,10 +36,10 @@ Assembles and returns a configured Express application. Does not start listening
 
 Steps performed:
 
-1. Creates `Registry` instances for attribute collector, rule collector, and resource parser factories.
+1. Creates `Registry` instances for attribute collector, rule collector, resource parser, key resolver and token authenticator factories, and registers the built-in `"jwt"` authenticator before any module runs (#219).
 2. Calls `mod.init(context)` for each module in order, allowing each to register factory functions.
 3. Instantiates attribute collectors and rule collectors from `config.attribute.collectors` and `config.rule.collectors` by looking up the registered factory for each `collector` name.
-4. Instantiates the resource parser from `config.resource.parser`.
+4. Instantiates the resource parser from `config.resource.parser`, and the token authenticator `config.oauth.authenticator` names — the built-in one resolves `config.oauth.jwt.algorithm` through the key resolvers.
 5. Mounts the liveness probe (`GET /_healthcheck`, the path every component of the stack answers on, with `GET /healthcheck` kept as a compatibility alias), the optional caller-authentication gate, then `POST /verify` and `POST /verify/batch` under `config.http.pathPrefix`.
 6. Returns the configured `express.Express` instance.
 

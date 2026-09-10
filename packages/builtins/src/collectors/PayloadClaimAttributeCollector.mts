@@ -61,6 +61,15 @@ export type PayloadClaimAttributeCollectorConfig = AttributeMappingCollectorConf
  * Keys another package reserved — cedar's `request*` — stay refused: those
  * are derived from the parsed request, not from the subject, and a claim
  * landing on one would be a second writer with a different meaning.
+ *
+ * Two cautions the trust argument depends on. A signed claim is only as
+ * trustworthy as what the IdP put in it: map claims the IdP populates from
+ * its own registration or admin data, never from user-editable profile
+ * metadata (Clerk's `unsafe_metadata`, Auth0's `user_metadata`) — a mapping
+ * from those hands the end user their own roles. And the union rule is for
+ * lists: a *scalar* key written by two collectors with different values
+ * throws `AttributeConflictError` and denies every request, so do not map
+ * onto `userId` / `clientId` while `PayloadSubjectIdCollector` writes them.
  */
 export class PayloadClaimAttributeCollector implements AttributeCollector {
 	private readonly mappings: ResolvedAttributeMapping[];

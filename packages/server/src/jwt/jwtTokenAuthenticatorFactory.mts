@@ -7,6 +7,7 @@ import {
 } from "../config/application.schema.mjs";
 import { assertConfigObject } from "../config/assertConfigObject.mjs";
 import { JWT_TOKEN_AUTHENTICATOR } from "../config/tokenAuthenticatorSelection.mjs";
+import { checkAudienceClaim } from "./audienceClaim.mjs";
 import type { TokenAuthenticatorFactory } from "./keyResolver.mjs";
 import {
 	assertVerifyRouterJwtConfig,
@@ -60,6 +61,15 @@ export const JwtTokenAuthenticatorFactory: TokenAuthenticatorFactory = async (
 	// them — and resolving here is what lets a bad value be reported against the
 	// `oauth.jwt.*` key the operator actually wrote.
 	const timeClaims = resolveJwtTimeClaimBounds(jwtWire, "oauth.jwt");
+	// Likewise ahead of the split (#219 release audit): the schema checks
+	// `audienceClaim` in every mode, and the guard only runs on the verify
+	// branch — so without this line a decode-only config the schema refused
+	// booted through createApp, a second, undocumented departure from
+	// "Two-Boundary Config Validation".
+	const audienceClaim = checkAudienceClaim(jwtWire.audienceClaim);
+	if (!audienceClaim.ok) {
+		throw new Error(`createApp: oauth.jwt.${audienceClaim.message}`);
+	}
 	const bounds = {
 		maxTokenAgeSeconds: timeClaims.maxTokenAge,
 		clockToleranceSeconds: timeClaims.clockTolerance,
