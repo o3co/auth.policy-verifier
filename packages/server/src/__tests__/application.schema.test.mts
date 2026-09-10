@@ -1425,13 +1425,23 @@ describe("AppConfigSchema — audienceClaim and an unpinned typ (#219)", () => {
 });
 
 describe("AppConfigSchema — oauth.jwt is validated only for the built-in authenticator (#219 release audit)", () => {
-	it("carries a jwt block untouched when another authenticator is selected", () => {
-		const raw = { algorithm: "RS256", mode: "verify", note: "for the stub to read" };
-		const config = AppConfigSchema.parse({
-			oauth: { authenticator: "introspection", jwt: raw },
+	it("refuses a jwt block when another authenticator is selected, at oauth.jwt", () => {
+		// The block would be carried unread — a leftover, or a mistake — and a
+		// parsed type that says otherwise would lie about it. Refused by name,
+		// pointing at the sub-block the selected authenticator does read.
+		const result = AppConfigSchema.safeParse({
+			oauth: { authenticator: "introspection", jwt: { algorithm: "RS256", mode: "verify" } },
 			...baseBody,
 		});
-		expect(config.oauth.jwt).toEqual(raw);
+		expect(result.success).toBe(false);
+		if (result.success) return;
+		expect(result.error.issues).toContainEqual(
+			expect.objectContaining({
+				path: ["oauth", "jwt"],
+				message:
+					'oauth.jwt is not read when oauth.authenticator is "introspection"; move its keys under oauth.introspection',
+			}),
+		);
 	});
 
 	it("still refuses a malformed audienceClaim in insecure-decode mode when jwt is selected", () => {

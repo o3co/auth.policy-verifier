@@ -41,8 +41,8 @@ export type TokenAuthenticatorSelectionCheck =
 
 /**
  * Resolves `oauth.authenticator`, defaulting an absent key to
- * {@link JWT_TOKEN_AUTHENTICATOR}, and requires `oauth.jwt` when that is the
- * selection.
+ * {@link JWT_TOKEN_AUTHENTICATOR}, requires `oauth.jwt` when that is the
+ * selection, and refuses it when it is not.
  *
  * A present-but-empty name is refused rather than defaulted: `${?ENV}`
  * substitution leaves an unset variable's key absent, so an empty string was
@@ -67,6 +67,18 @@ export function checkTokenAuthenticatorSelection(
 			ok: false,
 			key: "jwt",
 			message: `${path}.jwt is required when ${path}.authenticator is "${JWT_TOKEN_AUTHENTICATOR}"`,
+		};
+	}
+	if (name !== JWT_TOKEN_AUTHENTICATOR && oauth.jwt !== undefined) {
+		// Nobody reads the block under another authenticator: the built-in
+		// factory is not selected, and the selected one reads its own sub-block.
+		// Carrying it unread would leave a leftover from switching authenticators
+		// — or a mistake — in place, and a parsed type claiming a shape nothing
+		// checked. Refused, pointing at the sub-block that is read.
+		return {
+			ok: false,
+			key: "jwt",
+			message: `${path}.jwt is not read when ${path}.authenticator is "${name}"; move its keys under ${path}.${name}`,
 		};
 	}
 	return { ok: true, name };
