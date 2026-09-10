@@ -76,8 +76,10 @@ const reservedKeys = new Set<string>();
  * there is no second writer to disagree with, and the caller's value stands
  * alone. See `AttributePipeline`'s merge doc comment.
  *
- * `RequestContextAttributeCollector` (builtins) is the one guard that consults
- * this today.
+ * `RequestContextAttributeCollector` (builtins) consults this for every key;
+ * `PayloadClaimAttributeCollector` (builtins) consults it for the keys other
+ * packages own, and lets a verified claim land on core's five — its source is
+ * the signature-verified token, the trust those keys are written from.
  */
 export const RESERVED_ATTRIBUTE_KEYS: ReadonlySet<string> = reservedKeys;
 

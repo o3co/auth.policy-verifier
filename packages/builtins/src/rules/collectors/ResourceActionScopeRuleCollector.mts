@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { CollectorContext, Rule, RuleCollector } from "@o3co/auth.policy-verifier.core";
+import { DEFAULT_SCOPE_CLAIM, resolveClaimName } from "../../collectors/_claims.mjs";
 import { HasScope } from "../HasScope.mjs";
 
 /** How the collector treats a token that carries no `scope` claim. */
@@ -23,6 +24,12 @@ export interface ResourceActionScopeRuleCollectorConfig {
 	 * `read:x`. See `HasScopeOptions.allowBareScopeRewrite`.
 	 */
 	allowBareScopeRewrite?: boolean;
+	/**
+	 * The claim whose presence says the token asserted scopes (#219). Defaults
+	 * to `scope`; set it to what `PayloadScopeCollector` reads (`scp` for Okta)
+	 * so the two agree about which tokens are scopeless.
+	 */
+	claim?: string;
 }
 
 /**
@@ -65,8 +72,14 @@ export interface ResourceActionScopeRuleCollectorConfig {
 export class ResourceActionScopeRuleCollector implements RuleCollector {
 	private readonly scopeless: ScopelessPolicy;
 	private readonly allowBareScopeRewrite: boolean;
+	private readonly claim: string;
 
 	constructor(config?: ResourceActionScopeRuleCollectorConfig) {
+		this.claim = resolveClaimName(
+			"ResourceActionScopeRuleCollector",
+			config?.claim,
+			DEFAULT_SCOPE_CLAIM,
+		);
 		const scopeless = config?.scopeless ?? "deny";
 		if (!SCOPELESS_POLICIES.includes(scopeless)) {
 			throw new Error(
@@ -88,7 +101,7 @@ export class ResourceActionScopeRuleCollector implements RuleCollector {
 	}
 
 	async collect(context: CollectorContext): Promise<Rule[]> {
-		if (this.scopeless === "skip" && context.subject.scope === undefined) {
+		if (this.scopeless === "skip" && context.subject[this.claim] === undefined) {
 			return [];
 		}
 		const scope = `${context.action}:${context.resource.resourceType}`;

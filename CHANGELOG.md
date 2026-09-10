@@ -52,6 +52,28 @@ and version sections follow the release labeling policy in
   rows in the two-boundary parity table. The README gains "Accepting tokens
   from an external IdP" with the Clerk / Okta / Cognito shapes.
 
+- **Claims become attributes by declaration** (`@o3co/auth.policy-verifier.builtins`,
+  [#219](https://github.com/o3co/auth.policy-verifier/issues/219)). The
+  builtins read three claims — `scope`, `sub`, `azp` — and an external IdP
+  puts what a rule needs elsewhere. `PayloadScopeCollector` takes
+  `{ claim }` (`"scp"` for Okta, `"permissions"` for Auth0) and reads either
+  the space-delimited string or an array of strings; a list carrying a
+  non-string asserts no capability, as a non-string `scope` never did.
+  `ResourceActionScopeRuleCollector` takes the same `claim`, so the two agree
+  about which tokens are scopeless under `scopeless = "skip"`. New
+  `PayloadClaimAttributeCollector` promotes declared claims of the verified
+  subject — the `RequestContextAttributeCollector` declaration (`{ from, to,
+  type }`, dot paths) pointed at the token instead of the caller's body.
+  Because its source is the signature-verified token, a mapping may land on
+  core's five keys (`roles` from Clerk's `o.rol`, `permissions` from Auth0's)
+  where the request-context collector refuses them; keys another package
+  reserved stay refused. An exact key on the source now wins over walking the
+  dots in both mapping collectors, so Auth0's namespaced
+  `https://example.com/roles` is one claim rather than a path; a
+  request-context field whose name itself carries a dot becomes readable the
+  same way. `RequestContextAttributeMapping` / `…Type` / `…CollectorConfig`
+  are now aliases of the shared `AttributeMapping` types, unchanged in shape.
+
 ## [0.8.1] - 2026-09-06
 
 ### Fixed

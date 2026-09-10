@@ -8,43 +8,32 @@ import type {
 	CollectorContext,
 } from "@o3co/auth.policy-verifier.core";
 import {
-	attributeKeyReservation,
 	CORE_ATTRIBUTE_KEY_OWNER,
 	readUntrustedRequestContext,
 	suggestUnreservedAttributeKey,
 } from "@o3co/auth.policy-verifier.core";
+import {
+	type AttributeMapping,
+	type AttributeMappingCollectorConfig,
+	type AttributeMappingType,
+	parseAttributeMappings,
+	promoteMappings,
+	type ResolvedAttributeMapping,
+} from "./_attributeMapping.mjs";
 
 /** Types a `requestContext` field may be promoted as. */
-export type RequestContextAttributeType = "string" | "number" | "boolean" | "string[]";
+export type RequestContextAttributeType = AttributeMappingType;
 
-const ATTRIBUTE_TYPES: readonly RequestContextAttributeType[] = [
-	"string",
-	"number",
-	"boolean",
-	"string[]",
-];
-
-/** One field this collector promotes out of `requestContext`. */
-export interface RequestContextAttributeMapping {
-	/** Field to read, as a dot path (`"tenant.id"`) into `requestContext`. */
-	from: string;
-	/**
-	 * Attribute key to write. Defaults to `from`.
-	 *
-	 * May not name a reserved key — core's five, plus whatever the packages a
-	 * composition loaded reserved for themselves. See the class doc comment for
-	 * why the caller's body may not land on vocabulary a deployment writes.
-	 */
-	to?: string;
-	/** Expected type; a value of any other shape is not promoted. Defaults to `"string"`. */
-	type?: RequestContextAttributeType;
-}
+/**
+ * One field this collector promotes out of `requestContext`. `to` may not
+ * name a reserved key — core's five, plus whatever the packages a composition
+ * loaded reserved for themselves. See the class doc comment for why the
+ * caller's body may not land on vocabulary a deployment writes.
+ */
+export type RequestContextAttributeMapping = AttributeMapping;
 
 /** Config entry accepted by `RequestContextAttributeCollector`. */
-export interface RequestContextAttributeCollectorConfig {
-	/** The fields to promote. Must declare at least one. */
-	attributes: RequestContextAttributeMapping[];
-}
+export type RequestContextAttributeCollectorConfig = AttributeMappingCollectorConfig;
 
 /**
  * Promotes declared fields of `CollectorContext.requestContext` into attributes.
@@ -113,59 +102,22 @@ export interface RequestContextAttributeCollectorConfig {
  * ```
  */
 export class RequestContextAttributeCollector implements AttributeCollector {
-	private readonly mappings: Required<RequestContextAttributeMapping>[];
+	private readonly mappings: ResolvedAttributeMapping[];
 
 	constructor(config: RequestContextAttributeCollectorConfig) {
-		const attributes = config?.attributes;
-		if (!Array.isArray(attributes) || attributes.length === 0) {
-			throw new Error(
-				"RequestContextAttributeCollector: attributes must be a non-empty array of mappings",
-			);
-		}
-		this.mappings = attributes.map((mapping, index) => {
-			const { from, to, type = "string" } = mapping ?? {};
-			if (typeof from !== "string" || from === "") {
-				throw new Error(
-					`RequestContextAttributeCollector: attributes[${index}].from must be a non-empty string`,
-				);
-			}
-			if (to !== undefined && (typeof to !== "string" || to === "")) {
-				throw new Error(
-					`RequestContextAttributeCollector: attributes[${index}].to must be a non-empty string`,
-				);
-			}
-			if (!ATTRIBUTE_TYPES.includes(type)) {
-				throw new Error(
-					`RequestContextAttributeCollector: attributes[${index}].type must be one of ${ATTRIBUTE_TYPES.join(", ")}, got "${type}"`,
-				);
-			}
-			// Checked on the resolved key, not on `to`: `to` defaults to `from`,
-			// so `{ from = "scopes" }` reaches the reserved key without ever
-			// spelling it out. See the class doc comment for why this is refused.
-			const key = to ?? from;
-			const reservation = attributeKeyReservation(key);
-			if (reservation !== undefined) {
-				throw new Error(refusal(index, reservation));
-			}
-			return { from, to: key, type };
-		});
+		// Every reserved destination is refused here — the source is the caller's
+		// body. The declaration parsing is shared with the collector that reads
+		// verified claims (#219); the policy is this collector's own.
+		this.mappings = parseAttributeMappings("RequestContextAttributeCollector", config, refusal);
 	}
 
 	async collect(context: CollectorContext): Promise<Attributes> {
-		const attrs: Attributes = new Map();
 		// The unwrap is the acknowledgement `UntrustedRequestContext` asks for:
 		// everything below this line is the caller's own data, which is why the
 		// mapping list — not the request — decides what becomes an attribute.
 		const requestContext = readUntrustedRequestContext(context.requestContext);
-		if (requestContext === undefined) return attrs;
-
-		for (const mapping of this.mappings) {
-			const raw = readPath(requestContext, mapping.from);
-			if (matchesType(raw, mapping.type)) {
-				attrs.set(mapping.to, Array.isArray(raw) ? [...raw] : raw);
-			}
-		}
-		return attrs;
+		if (requestContext === undefined) return new Map();
+		return promoteMappings(this.mappings, requestContext);
 	}
 }
 
@@ -199,33 +151,4 @@ function refusal(index: number, reservation: AttributeKeyReservation): string {
 				"where that package writes nothing for a given request the caller's value stands unopposed as " +
 				"the one the deployment was supposed to supply. ";
 	return `${head}Promote the field under a key of your own (for example "${suggestUnreservedAttributeKey(key)}").`;
-}
-
-/**
- * Reads a dot path, traversing own properties only. `requestContext` is
- * caller-supplied, so inherited members (`constructor`, `toString`, …) must not
- * be reachable through a configured path.
- */
-function readPath(root: Record<string, unknown>, path: string): unknown {
-	let current: unknown = root;
-	for (const segment of path.split(".")) {
-		if (typeof current !== "object" || current === null) return undefined;
-		if (!Object.hasOwn(current, segment)) return undefined;
-		current = (current as Record<string, unknown>)[segment];
-	}
-	return current;
-}
-
-/** Whether `value` is usable as the declared type. Empty strings count as absent. */
-function matchesType(value: unknown, type: RequestContextAttributeType): boolean {
-	switch (type) {
-		case "string":
-			return typeof value === "string" && value !== "";
-		case "number":
-			return typeof value === "number" && Number.isFinite(value);
-		case "boolean":
-			return typeof value === "boolean";
-		case "string[]":
-			return Array.isArray(value) && value.every((item) => typeof item === "string" && item !== "");
-	}
 }

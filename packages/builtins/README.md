@@ -16,13 +16,31 @@ All collectors implement `AttributeCollector`.
 
 | Name | Reads from | Emits | Constructor args |
 | --- | --- | --- | --- |
-| `PayloadScopeCollector` | `subject.scope` (space-separated string) | `ATTR_SCOPES: string[]` | none |
+| `PayloadScopeCollector` | the scope claim — `subject.scope` by default, a space-separated string or an array of strings | `ATTR_SCOPES: string[]` | `{ claim?: string }` (#219: `"scp"` for Okta, `"permissions"` for Auth0) |
 | `PayloadSubjectIdCollector` | `subject.sub`, `subject.azp` | `ATTR_USER_ID`, `ATTR_CLIENT_ID` | none |
 | `StaticPermissionCollector` | — | `ATTR_PERMISSIONS: string[]` | `{ permissions: string[] }` |
 | `StaticRoleCollector` | — | `ATTR_ROLES: Role[]` | `{ roles: Role[] }` |
 | `RequestContextAttributeCollector` | declared fields of `requestContext` | the operator's own keys | `{ attributes: Mapping[] }` |
+| `PayloadClaimAttributeCollector` | declared claims of the verified `subject` | the operator's own keys, or core's five | `{ attributes: Mapping[] }` (#219) |
 
 `StaticPermissionCollector` and `StaticRoleCollector` always emit the values supplied at construction time, regardless of request context.
+
+### PayloadClaimAttributeCollector
+
+Promotes declared claims of the **verified subject** into attributes (#219) — the operator-declared way to turn an external IdP's claims into what the rules read, without a bespoke collector:
+
+```hocon
+{ collector = "PayloadClaimAttributeCollector"
+  attributes = [
+    { from = "o.rol", to = "roles", type = "string[]" }                      # Clerk: org role, by dot path
+    { from = "https://example.com/roles", to = "roles", type = "string[]" }  # Auth0: a namespaced claim is one key, not a path
+    { from = "tid", to = "tenantId" }
+  ] }
+```
+
+Same mapping shape as `RequestContextAttributeCollector` (`{ from, to?, type? }`, an exact key winning over a dot path, own properties only). What differs is the source, and therefore the trust: the subject bag is what the authenticator verified, so a mapping **may** land on core's five keys — `scopes`, `permissions`, `roles`, `userId`, `clientId` — where the request-context collector refuses them. Two collectors writing one list key union it; that is the deployment composing two issuer-derived sources, and it says so in config. Keys another package reserved (cedar's `request*`) stay refused, because they are derived from the request, not from the subject.
+
+For the scope claim specifically, prefer `PayloadScopeCollector { claim = "scp" }`, which also reads the space-delimited string form and pairs with `ResourceActionScopeRuleCollector { claim = "scp" }` so both agree about which tokens are scopeless.
 
 ### RequestContextAttributeCollector
 
@@ -285,11 +303,12 @@ import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
 
 | Registry | Name | Factory |
 | --- | --- | --- |
-| `attributeCollector` | `"PayloadScopeCollector"` | `() => new PayloadScopeCollector()` |
+| `attributeCollector` | `"PayloadScopeCollector"` | `(config) => new PayloadScopeCollector(config)` |
 | `attributeCollector` | `"PayloadSubjectIdCollector"` | `() => new PayloadSubjectIdCollector()` |
 | `attributeCollector` | `"StaticPermissionCollector"` | `(config) => new StaticPermissionCollector(config)` |
 | `attributeCollector` | `"StaticRoleCollector"` | `(config) => new StaticRoleCollector(config)` |
 | `attributeCollector` | `"RequestContextAttributeCollector"` | `(config) => new RequestContextAttributeCollector(config)` |
+| `attributeCollector` | `"PayloadClaimAttributeCollector"` | `(config) => new PayloadClaimAttributeCollector(config)` |
 | `ruleCollector` | `"ResourceActionScopeRuleCollector"` | `(config) => new ResourceActionScopeRuleCollector(config)` |
 | `ruleCollector` | `"ResourceActionPermissionRuleCollector"` | `() => new ResourceActionPermissionRuleCollector()` |
 | `resourceParser` | `"DotNotationResourceParser"` | `() => new DotNotationResourceParser()` |
