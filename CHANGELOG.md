@@ -23,9 +23,10 @@ and version sections follow the release labeling policy in
   keyResolverRegistry }`. The built-in `"jwt"` entry is the default and is
   what every existing config selects, so the selection changes nothing for a
   deployed config; `createApp` registers it before any module runs, so it cannot be replaced,
-  only supplemented. `oauth.jwt` is required only while `"jwt"` is selected
-  (both boundaries decide that through one shared function,
-  `checkTokenAuthenticatorSelection`), and another authenticator's own
+  only supplemented. `oauth.jwt` is required while `"jwt"` is selected and
+  refused under any other name — nobody would read it — with both boundaries
+  deciding that through one shared function,
+  `checkTokenAuthenticatorSelection`; another authenticator's own
   sub-block rides along on the parsed config. `createVerifyRouter` takes an
   already-built `authenticator` in place of `jwt` for a library consumer.
   Written up in `docs/extending.md`, "Writing a token authenticator". The

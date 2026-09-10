@@ -256,7 +256,8 @@ oauth {
   # Which token authenticator establishes the subject. "jwt" (the default)
   # is the built-in bearer-JWT path configured by the block below; any other
   # name must have been registered by a module — see docs/extending.md,
-  # "Writing a token authenticator". With another name, `jwt` may be omitted.
+  # "Writing a token authenticator". With another name, `jwt` must be omitted —
+  # that authenticator's keys go under its own sub-block (oauth.<name> { … }).
   authenticator = "jwt"
   authenticator = ${?OAUTH_AUTHENTICATOR}
   jwt {

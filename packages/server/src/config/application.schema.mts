@@ -114,10 +114,10 @@ const collectorSchema = z
  * their `KeyResolverFactory`.
  */
 /**
- * The built-in JWT authenticator's block, `oauth.jwt`. Parsed only when
- * `oauth.authenticator` selects `"jwt"` — see the `oauth` transform below:
- * another authenticator may reuse the block for its own, narrower needs, and
- * the built-in's `iss` / `aud` / `typ` invariants are not imposed on it.
+ * The built-in JWT authenticator's block, `oauth.jwt`. Parsed when
+ * `oauth.authenticator` selects `"jwt"` — see the `oauth` transform below.
+ * Under another authenticator the block is refused rather than carried, so
+ * that authenticator's keys live under its own sub-block.
  */
 const OAuthJwtSchema = z
 	.object({
@@ -397,10 +397,11 @@ const OAuthJwtSchema = z
 	});
 
 /**
- * The parsed `oauth` block. `jwt` is the built-in block's parsed shape when
- * `"jwt"` is selected; with another authenticator it is carried as written
- * (typed as the parsed shape for the common case — a factory registered under
- * another name reads its own keys and owes its own validation).
+ * The parsed `oauth` block. `jwt` is present exactly when `"jwt"` is
+ * selected, and then it is the built-in block's parsed shape — under another
+ * authenticator a `jwt` block is refused at both boundaries, so the optional
+ * never hides an unparsed value. A factory registered under another name
+ * reads its own sub-block and owes its own validation.
  */
 export type OAuthConfig = {
 	authenticator: string;
@@ -473,9 +474,9 @@ export const AppConfigSchema = z.object({
 			// Custom algorithms are expected to validate their own config in their factory.
 			/**
 			 * The built-in authenticator's block. Read as `unknown` here and parsed
-			 * through `OAuthJwtSchema` in the transform below only when `"jwt"` is
-			 * selected, so both boundaries agree: `createApp` hands the block to
-			 * whichever factory was selected, and only the built-in one reads it.
+			 * through `OAuthJwtSchema` in the transform below when `"jwt"` is
+			 * selected; under another authenticator its presence is refused by the
+			 * selection check, so both boundaries agree and nothing is carried unread.
 			 */
 			jwt: z.unknown().optional(),
 		})
@@ -497,7 +498,8 @@ export const AppConfigSchema = z.object({
 				return z.NEVER;
 			}
 			if (selection.name !== JWT_TOKEN_AUTHENTICATOR) {
-				// Carried, not parsed: the selected factory reads it, or not.
+				// `jwt` is absent here — the selection check refused a present one —
+				// so the parsed type's `jwt?` reads truthfully: present means parsed.
 				return { ...data, authenticator: selection.name } as OAuthConfig;
 			}
 			const jwt = OAuthJwtSchema.safeParse(data.jwt);

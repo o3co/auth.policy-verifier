@@ -69,6 +69,17 @@ describe("checkTokenAuthenticatorSelection (#219)", () => {
 		expect(checkTokenAuthenticatorSelection({ authenticator: "introspection" }).ok).toBe(true);
 	});
 
+	it("refuses a jwt block for another authenticator, naming that authenticator's own sub-block", () => {
+		expect(
+			checkTokenAuthenticatorSelection({ authenticator: "introspection", jwt: { mode: "verify" } }),
+		).toEqual({
+			ok: false,
+			key: "jwt",
+			message:
+				'oauth.jwt is not read when oauth.authenticator is "introspection"; move its keys under oauth.introspection',
+		});
+	});
+
 	it.each([
 		["an empty string", ""],
 		["a number", 42],
@@ -115,10 +126,10 @@ describe("token authenticator selection — one reader at both boundaries (#219)
 			},
 		],
 		["an empty name", { authenticator: "", jwt: JWT_BLOCK }],
-		// A jwt block the built-in path would refuse is not the schema's business
-		// when another authenticator is selected: its factory reads it, or not.
+		// A jwt block under another authenticator is carried by nobody: refused
+		// by both boundaries, naming the sub-block that authenticator reads.
 		[
-			"another authenticator, with a jwt block missing its secret",
+			"another authenticator, with a jwt block",
 			{ authenticator: "introspection", jwt: { algorithm: "HS256", mode: "verify" } },
 		],
 	])("%s", (_label, oauth) => {
