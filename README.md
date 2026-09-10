@@ -199,6 +199,7 @@ collector writing `permissions` / `roles` in the same edit.
 | `PayloadSubjectIdCollector` | JWT `sub` claim | `userId` |
 | `StaticPermissionCollector` / `StaticRoleCollector` | config constants | `permissions` / `roles` |
 | `RequestContextAttributeCollector` | declared fields of the request `context` | the operator's own keys |
+| `PayloadClaimAttributeCollector` | declared claims of the verified subject (`o.rol`, `https://example.com/roles`, …) | the operator's own keys, or core's five |
 
 ## Accepting tokens from an external IdP
 
@@ -207,8 +208,27 @@ The built-in bearer-JWT path is pinned to RFC 9068 as [auth.provider](https://gi
 | IdP token | what differs | `oauth.jwt` |
 | --- | --- | --- |
 | Clerk session token | no `aud`; the app is bound in `azp`; `typ: JWT` | `algorithm = RS256`, `jwksUri = https://<frontend-api>/.well-known/jwks.json`, `issuer = https://<frontend-api>`, `audienceClaim = "azp"`, `audience = "https://app.example"`, `tokenType = "JWT"` |
-| Okta custom authorization server | `typ` is `JWT`; scopes are the `scp` array | `algorithm = RS256`, `jwksUri = https://<org>.okta.com/oauth2/<as>/v1/keys`, `issuer` / `audience` as configured on the server, `tokenType = "JWT"`. Scopes arrive as the `scp` array, which the built-in `PayloadScopeCollector` does not read yet — that is the claim-to-attribute half of #219 |
+| Okta custom authorization server | `typ` is `JWT`; scopes are the `scp` array | `algorithm = RS256`, `jwksUri = https://<org>.okta.com/oauth2/<as>/v1/keys`, `issuer` / `audience` as configured on the server, `tokenType = "JWT"`. Scopes arrive as the `scp` array: `PayloadScopeCollector { claim = "scp" }` and `ResourceActionScopeRuleCollector { claim = "scp" }` (see the collectors below) |
 | Cognito access token | no `typ` header; the app is bound in `client_id`, not `aud` | `algorithm = RS256`, `jwksUri = https://cognito-idp.<region>.amazonaws.com/<pool>/.well-known/jwks.json`, `audienceClaim = "client_id"`, `audience = "<app client id>"`, `tokenType = "*"` |
+
+Once the signature verifies, the collectors have to find what the rules read. The builtins read `scope` (a space-delimited string), `sub` and `azp`; an external IdP puts scopes and roles elsewhere:
+
+```hocon
+attribute {
+  collectors = [
+    { collector = "PayloadScopeCollector", claim = "scp" }          # Okta: scopes are the `scp` array
+    { collector = "PayloadSubjectIdCollector" }
+    { collector = "PayloadClaimAttributeCollector"
+      attributes = [
+        { from = "o.rol", to = "roles", type = "string[]" }         # Clerk: org role
+        { from = "https://example.com/roles", to = "roles", type = "string[]" }  # Auth0: namespaced claim
+      ] }
+  ]
+}
+rule {
+  collectors = [ { collector = "ResourceActionScopeRuleCollector", claim = "scp" } ]
+}
+```
 
 `audienceClaim` moves the audience check to the named claim; it never removes it, and `audience` stays required, so a token minted for another app is still refused. `tokenType = "*"` is the explicit opt-out of pinning the `typ` header — with it set, the audience is the only thing telling an access token from an id_token signed with the same key, so pair it with an `audienceClaim` the other kind does not carry (Cognito's id_token carries `aud`, not `client_id`). Opaque tokens — Okta's org authorization server, Auth0 without an `audience` — cannot be verified locally at all and need an introspection authenticator.
 

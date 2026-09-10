@@ -33,6 +33,7 @@ describe("builtinCollectorsModule", () => {
 		expect(attributeCollectorRegistry.has("StaticPermissionCollector")).toBe(true);
 		expect(attributeCollectorRegistry.has("StaticRoleCollector")).toBe(true);
 		expect(attributeCollectorRegistry.has("RequestContextAttributeCollector")).toBe(true);
+		expect(attributeCollectorRegistry.has("PayloadClaimAttributeCollector")).toBe(true);
 	});
 
 	it("registers all builtin rule collector factories", async () => {

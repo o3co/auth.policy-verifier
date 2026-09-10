@@ -133,3 +133,34 @@ describe("ResourceActionScopeRuleCollector", () => {
 		});
 	});
 });
+
+describe("ResourceActionScopeRuleCollector — the claim option (#219)", () => {
+	const withSubject = (subject: SubjectAttributes): CollectorContext => ({
+		subject,
+		resource: { raw: "document:1", resourceType: "document", resourceId: "1" },
+		action: "read",
+		signal: NEVER_CANCELLED,
+	});
+
+	it("decides scopeless-ness from the configured claim, not from scope", async () => {
+		const skipping = new ResourceActionScopeRuleCollector({ scopeless: "skip", claim: "scp" });
+		// `scp` present: the token asserts capabilities, the rule is emitted.
+		expect(await skipping.collect(withSubject({ scp: ["read:document"] }))).toHaveLength(1);
+		// Only `scope` present: under the configured claim this token is
+		// scopeless, so the opted-in skip applies.
+		expect(await skipping.collect(withSubject({ scope: "read:document" }))).toHaveLength(0);
+	});
+
+	it("keeps emitting the rule under the default deny policy whatever the claim", async () => {
+		const denying = new ResourceActionScopeRuleCollector({ claim: "scp" });
+		expect(await denying.collect(withSubject({}))).toHaveLength(1);
+	});
+
+	it("refuses an empty or non-string claim at construction", () => {
+		for (const claim of ["", 42, null]) {
+			expect(() => new ResourceActionScopeRuleCollector({ claim } as never)).toThrow(
+				"ResourceActionScopeRuleCollector: claim must be a non-empty string",
+			);
+		}
+	});
+});

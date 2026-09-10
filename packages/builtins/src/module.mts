@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Module } from "@o3co/auth.policy-verifier.core";
+import { PayloadClaimAttributeCollector } from "./collectors/PayloadClaimAttributeCollector.mjs";
 import { PayloadScopeCollector } from "./collectors/PayloadScopeCollector.mjs";
 import { PayloadSubjectIdCollector } from "./collectors/PayloadSubjectIdCollector.mjs";
 import { RequestContextAttributeCollector } from "./collectors/RequestContextAttributeCollector.mjs";
@@ -22,7 +23,7 @@ export const builtinCollectorsModule: Module = {
 		// Attribute collector factories
 		context.attributeCollectorRegistry.register(
 			"PayloadScopeCollector",
-			() => new PayloadScopeCollector(),
+			(config) => new PayloadScopeCollector(config),
 		);
 		context.attributeCollectorRegistry.register(
 			"PayloadSubjectIdCollector",
@@ -39,6 +40,10 @@ export const builtinCollectorsModule: Module = {
 		context.attributeCollectorRegistry.register(
 			"RequestContextAttributeCollector",
 			(config) => new RequestContextAttributeCollector(config),
+		);
+		context.attributeCollectorRegistry.register(
+			"PayloadClaimAttributeCollector",
+			(config) => new PayloadClaimAttributeCollector(config),
 		);
 
 		// Rule collector factories

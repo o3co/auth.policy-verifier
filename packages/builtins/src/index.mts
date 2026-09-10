@@ -2,7 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Collectors
-export { PayloadScopeCollector } from "./collectors/PayloadScopeCollector.mjs";
+export {
+	PayloadClaimAttributeCollector,
+	type PayloadClaimAttributeCollectorConfig,
+	type PayloadClaimAttributeMapping,
+	type PayloadClaimAttributeType,
+} from "./collectors/PayloadClaimAttributeCollector.mjs";
+export {
+	PayloadScopeCollector,
+	type PayloadScopeCollectorConfig,
+} from "./collectors/PayloadScopeCollector.mjs";
 export { PayloadSubjectIdCollector } from "./collectors/PayloadSubjectIdCollector.mjs";
 export {
 	RequestContextAttributeCollector,

@@ -45,7 +45,8 @@ That test is executable, not rhetorical. `describeRulePurityConformance` in [`te
 | --- | --- | --- |
 | `sub` | `PayloadSubjectIdCollector` (builtins) | `ATTR_USER_ID` |
 | `azp` | `PayloadSubjectIdCollector` (builtins) | `ATTR_CLIENT_ID` |
-| `scope` | `PayloadScopeCollector`, `ResourceActionScopeRuleCollector` (builtins) | `ATTR_SCOPES` |
+| `scope` (or the configured `claim`, e.g. `scp`) | `PayloadScopeCollector`, `ResourceActionScopeRuleCollector` (builtins) | `ATTR_SCOPES` |
+| any declared claim (#219) | `PayloadClaimAttributeCollector` (builtins) | the operator's own keys, or core's five |
 
 `iss` / `aud` / `exp` / `iat` are enforced inside the authenticator before the bag is built and are read by nothing downstream. `KeyResolver` / `KeyResolverFactory` are server types for the same reason: token-credential plumbing, not engine vocabulary.
 
