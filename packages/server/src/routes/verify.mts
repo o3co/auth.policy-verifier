@@ -22,14 +22,35 @@ import express from "express";
 import { NUMERIC_BOUNDS, resolveBound } from "../config/bounds.mjs";
 import {
 	createTokenAuthenticator,
+	type TokenAuthenticator,
 	type VerifyRouterJwtConfig,
 } from "../jwt/tokenAuthenticator.mjs";
 import { DECISION_EVENT, decisionEvent, present } from "../observability/decisionEvent.mjs";
 import type { DecisionMetrics } from "../observability/metrics.mjs";
 
-/** Config for `createVerifyRouter`. The `jwt.key` type is library-specific and is narrowed at call-time. */
+/**
+ * Config for `createVerifyRouter`.
+ *
+ * Exactly one of `jwt` and `authenticator` says how the subject is
+ * authenticated; construction refuses both and neither. Two optional fields
+ * rather than a discriminated union on purpose: this is the boundary a
+ * hand-built config reaches, and a consumer assembling one from pieces
+ * (`{ ...base, jwt }`) should not have to fight the type for a rule the
+ * runtime check states in one sentence.
+ */
 export interface VerifyRouterConfig {
-	jwt: VerifyRouterJwtConfig;
+	/**
+	 * The built-in bearer-JWT path, constructed here. The `key` type is
+	 * library-specific and is narrowed at call time.
+	 */
+	jwt?: VerifyRouterJwtConfig;
+	/**
+	 * An already-built {@link TokenAuthenticator} (#219): what `createApp`
+	 * hands in after resolving `oauth.authenticator`, and what a library
+	 * consumer passes to run this router over a subject established some
+	 * other way — introspection, an IdP SDK, a gateway's attestation.
+	 */
+	authenticator?: TokenAuthenticator;
 	resourceParser: ResourceParser;
 	attributePipeline: AttributePipeline;
 	rulePipeline: RulePipeline;
@@ -490,9 +511,15 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 		),
 	};
 	const logger = config.logger ?? consoleLogger;
-	// Constructing the authenticator runs assertVerifyRouterJwtConfig, so an
-	// invalid hand-built jwt config still fails here, at router construction.
-	const authenticator = createTokenAuthenticator(config.jwt, logger);
+	// Exactly one way to authenticate (#219). Checked at runtime as well as in
+	// the type: this is the boundary a hand-built config reaches. Constructing
+	// the built-in authenticator runs assertVerifyRouterJwtConfig, so an invalid
+	// hand-built jwt config still fails here, at router construction.
+	if ((config.jwt === undefined) === (config.authenticator === undefined)) {
+		throw new Error("createVerifyRouter: exactly one of jwt or authenticator must be supplied");
+	}
+	const authenticator =
+		config.authenticator ?? createTokenAuthenticator(config.jwt as VerifyRouterJwtConfig, logger);
 	// #175: resolved once — the per-request cost is a spread, not a branch tree.
 	const exposeCredential = config.credentialToCollectors === "expose";
 

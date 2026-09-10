@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
+## [Unreleased]
+
+### Added
+
+- **The token authenticator is a port** (`@o3co/auth.policy-verifier.server`,
+  [#219](https://github.com/o3co/auth.policy-verifier/issues/219)). Which
+  authenticator establishes the subject of a decision is now a config
+  decision, `oauth.authenticator`, resolved through a registry the way
+  `oauth.jwt.algorithm` and `attribute.collectors[].collector` are.
+  `ServerModuleContext` gains `tokenAuthenticatorRegistry`, a
+  `Module<ServerModuleContext>` registers a `TokenAuthenticatorFactory` under
+  its own name — an RFC 7662 introspection client for an IdP that issues
+  opaque tokens, an IdP SDK's session verification, a gateway's attestation —
+  and the factory receives the whole `oauth` block plus `{ logger,
+  keyResolverRegistry }`. The built-in `"jwt"` entry is the default and is
+  what every existing config selects, so nothing deployed reads differently;
+  `createApp` registers it before any module runs, so it cannot be replaced,
+  only supplemented. `oauth.jwt` is required only while `"jwt"` is selected
+  (both boundaries decide that through one shared function,
+  `checkTokenAuthenticatorSelection`), and another authenticator's own
+  sub-block rides along on the parsed config. `createVerifyRouter` takes an
+  already-built `authenticator` in place of `jwt` for a library consumer.
+  Written up in `docs/extending.md`, "Writing a token authenticator".
+
+  Two edges for a consumer building the server's types by hand: a
+  `ServerModuleContext` assembled outside `createApp` needs the new registry,
+  and `AppConfig["oauth"]["jwt"]` is optional on the parsed type. A hand-built
+  config with `oauth.jwt` absent is now refused as *required when
+  `oauth.authenticator` is "jwt"* rather than as *not a config object*.
+
 ## [0.8.1] - 2026-09-06
 
 ### Fixed

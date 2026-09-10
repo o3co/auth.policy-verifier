@@ -28,7 +28,7 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import { MAX_PREVIOUS_SECRETS } from "#/config/defaults.mjs";
 import { builtinKeyResolversModule } from "#/jwt/builtinKeyResolversModule.mjs";
-import type { KeyResolverFactory } from "#/jwt/keyResolver.mjs";
+import type { KeyResolverFactory, TokenAuthenticatorFactory } from "#/jwt/keyResolver.mjs";
 
 const generateKeyPairAsync = promisify(generateKeyPair);
 
@@ -40,6 +40,7 @@ function makeContext() {
 		ruleCollectorRegistry: new Registry<RuleCollectorFactory>(),
 		resourceParserRegistry: new Registry<ResourceParserFactory>(),
 		keyResolverRegistry: new Registry<KeyResolverFactory>(),
+		tokenAuthenticatorRegistry: new Registry<TokenAuthenticatorFactory>(),
 	};
 }
 

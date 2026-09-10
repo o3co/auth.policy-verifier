@@ -49,7 +49,11 @@ Steps performed:
 
 ```typescript
 interface VerifyRouterConfig {
-  jwt: VerifyRouterJwtConfig;
+  // Exactly one of the two (#219): the built-in bearer-JWT path, or an
+  // already-built TokenAuthenticator — what createApp hands in after
+  // resolving `oauth.authenticator`.
+  jwt?: VerifyRouterJwtConfig;
+  authenticator?: TokenAuthenticator;
   resourceParser: ResourceParser;
   attributePipeline: AttributePipeline;
   rulePipeline: RulePipeline;
@@ -86,7 +90,7 @@ Returns an Express Router that handles `POST /verify` and `POST /verify/batch`. 
 
 Request flow:
 
-1. Extract `Authorization: <type> <token>` header. Returns 401 if missing.
+1. Hand the `Authorization` header to the authenticator. The built-in one (`jwt`) extracts `Bearer <token>` and returns 401 if it is missing or the scheme is not Bearer; an `authenticator` supplied directly answers with its own `code` / `message`, and steps 2–4 are its business.
 2. If `validate` is `true`: verify the signature **and** the RFC 9068 §4 claims — `iss` against `issuer`, `aud` against `audience`, and the `typ` header against `tokenType` (an `application/` prefix is ignored). Returns 401 on failure. `createVerifyRouter` throws if any of the three is missing.
 3. If `validate` is `false`: decode the JWT without verification. Returns 401 if the token is malformed.
 4. Either way, enforce the token's own lifetime: `exp` and `iat` are **required** (a token that never states an expiry never expires), `nbf` is honoured when present, `exp` must be in the future, and `now - iat` must not exceed `maxTokenAgeSeconds` — which is what refuses a token whose issuer set `exp` years out. `clockToleranceSeconds` widens every one of those comparisons. Returns 401 on failure. The decode-only path restates these checks by hand rather than skipping them, so both modes answer the same for the same token.
@@ -359,6 +363,8 @@ const app = await createApp({
 ```
 
 `builtinKeyResolversModule` registers HS256 / RS256 / ES256 / EdDSA factories into the `keyResolverRegistry`. Compose it alongside your custom modules; omit it only if you provide your own key resolver module.
+
+The same context carries `tokenAuthenticatorRegistry` (#219). `createApp` registers the built-in `"jwt"` authenticator there before any module runs; a module registers a `TokenAuthenticatorFactory` under its own name — an introspection client, an IdP SDK, a gateway's attestation — and `oauth.authenticator` selects it, at which point `oauth.jwt` may be omitted. See [docs/extending.md — Writing a token authenticator](../../docs/extending.md#writing-a-token-authenticator).
 
 ## See Also
 

@@ -210,9 +210,9 @@ describe("AppConfigSchema — JWKS transport security (#109)", () => {
 
 	it("defaults the JWKS fetch bounds", () => {
 		const result = AppConfigSchema.parse({ oauth: { jwt: rs256 }, ...baseBody });
-		expect(result.oauth.jwt.jwksTimeoutMs).toBe(5000);
-		expect(result.oauth.jwt.jwksCooldownMs).toBe(30_000);
-		expect(result.oauth.jwt.jwksCacheMaxAgeMs).toBe(600_000);
+		expect(result.oauth.jwt?.jwksTimeoutMs).toBe(5000);
+		expect(result.oauth.jwt?.jwksCooldownMs).toBe(30_000);
+		expect(result.oauth.jwt?.jwksCacheMaxAgeMs).toBe(600_000);
 	});
 
 	it("coerces the strings a HOCON env substitution produces", () => {
@@ -227,9 +227,9 @@ describe("AppConfigSchema — JWKS transport security (#109)", () => {
 			},
 			...baseBody,
 		});
-		expect(result.oauth.jwt.jwksTimeoutMs).toBe(2000);
-		expect(result.oauth.jwt.jwksCooldownMs).toBe(10_000);
-		expect(result.oauth.jwt.jwksCacheMaxAgeMs).toBe(120_000);
+		expect(result.oauth.jwt?.jwksTimeoutMs).toBe(2000);
+		expect(result.oauth.jwt?.jwksCooldownMs).toBe(10_000);
+		expect(result.oauth.jwt?.jwksCacheMaxAgeMs).toBe(120_000);
 	});
 
 	it.each(["jwksTimeoutMs", "jwksCacheMaxAgeMs"])("rejects a non-positive %s", (key) => {
@@ -332,7 +332,7 @@ describe("AppConfigSchema — RFC 9068 token validation (#105)", () => {
 			oauth: { jwt: { ...hs256, mode: "verify", ...rfc9068 } },
 			...baseBody,
 		});
-		expect(result.oauth.jwt.tokenType).toBe("at+jwt");
+		expect(result.oauth.jwt?.tokenType).toBe("at+jwt");
 	});
 
 	it("does not require issuer/audience in insecure-decode mode", () => {
@@ -446,8 +446,8 @@ describe("AppConfigSchema — token lifetime bounds (#110)", () => {
 
 	it("defaults maxTokenAgeSeconds to a day and clockToleranceSeconds to zero", () => {
 		const result = AppConfigSchema.parse({ oauth: { jwt: validJwt }, ...baseBody });
-		expect(result.oauth.jwt.maxTokenAgeSeconds).toBe(86_400);
-		expect(result.oauth.jwt.clockToleranceSeconds).toBe(0);
+		expect(result.oauth.jwt?.maxTokenAgeSeconds).toBe(86_400);
+		expect(result.oauth.jwt?.clockToleranceSeconds).toBe(0);
 	});
 
 	// The defaults must reach insecure-decode deployments too: the decode path
@@ -458,8 +458,8 @@ describe("AppConfigSchema — token lifetime bounds (#110)", () => {
 			oauth: { jwt: { mode: "insecure-decode" } },
 			...baseBody,
 		});
-		expect(result.oauth.jwt.maxTokenAgeSeconds).toBe(86_400);
-		expect(result.oauth.jwt.clockToleranceSeconds).toBe(0);
+		expect(result.oauth.jwt?.maxTokenAgeSeconds).toBe(86_400);
+		expect(result.oauth.jwt?.clockToleranceSeconds).toBe(0);
 	});
 
 	it("coerces the strings a HOCON env substitution produces", () => {
@@ -467,8 +467,8 @@ describe("AppConfigSchema — token lifetime bounds (#110)", () => {
 			oauth: { jwt: { ...validJwt, maxTokenAgeSeconds: "600", clockToleranceSeconds: "60" } },
 			...baseBody,
 		});
-		expect(result.oauth.jwt.maxTokenAgeSeconds).toBe(600);
-		expect(result.oauth.jwt.clockToleranceSeconds).toBe(60);
+		expect(result.oauth.jwt?.maxTokenAgeSeconds).toBe(600);
+		expect(result.oauth.jwt?.clockToleranceSeconds).toBe(60);
 	});
 
 	it.each([0, -1, 1.5])("rejects %s as a maxTokenAgeSeconds", (value) => {
@@ -829,7 +829,7 @@ describe("AppConfigSchema — oauth.jwt.mode (#134)", () => {
 			oauth: { jwt: { secret: SECRET, ...rfc9068 } },
 			...baseBody,
 		});
-		expect(result.oauth.jwt.mode).toBe("verify");
+		expect(result.oauth.jwt?.mode).toBe("verify");
 	});
 
 	it("enforces the verify-mode requirements when mode is omitted", () => {
@@ -1002,8 +1002,8 @@ describe("AppConfigSchema — HS256 secret rotation (#112)", () => {
 		const result = parseJwt({ secret: SECRET, kid: "v1", previousSecrets });
 		expect(result.success).toBe(true);
 		if (result.success) {
-			expect(result.data.oauth.jwt.previousSecrets).toEqual(previousSecrets);
-			expect(result.data.oauth.jwt.kid).toBe("v1");
+			expect(result.data.oauth.jwt?.previousSecrets).toEqual(previousSecrets);
+			expect(result.data.oauth.jwt?.kid).toBe("v1");
 		}
 	});
 
@@ -1011,7 +1011,7 @@ describe("AppConfigSchema — HS256 secret rotation (#112)", () => {
 		const result = parseJwt({ secret: SECRET });
 		expect(result.success).toBe(true);
 		if (result.success) {
-			expect(result.data.oauth.jwt.previousSecrets).toBeUndefined();
+			expect(result.data.oauth.jwt?.previousSecrets).toBeUndefined();
 		}
 	});
 
@@ -1311,5 +1311,72 @@ describe("AppConfigSchema — batch decision concurrency (#183)", () => {
 		["an empty string — `VAR=` substituted", ""],
 	])("rejects %s", (_label, batchConcurrency) => {
 		expect(parseVerify({ batchConcurrency }).success).toBe(false);
+	});
+});
+
+describe("AppConfigSchema — token authenticator selection (#219)", () => {
+	const jwt = { secret: SECRET, mode: "verify", ...rfc9068 };
+
+	it("defaults oauth.authenticator to jwt", () => {
+		const config = AppConfigSchema.parse({ oauth: { jwt }, ...baseBody });
+		expect(config.oauth.authenticator).toBe("jwt");
+	});
+
+	it("accepts another authenticator with no oauth.jwt block, keeping its own sub-block", () => {
+		const config = AppConfigSchema.parse({
+			oauth: { authenticator: "introspection", introspection: { endpoint: "https://idp.test/x" } },
+			...baseBody,
+		});
+		expect(config.oauth.authenticator).toBe("introspection");
+		expect(config.oauth.jwt).toBeUndefined();
+		expect((config.oauth as Record<string, unknown>).introspection).toEqual({
+			endpoint: "https://idp.test/x",
+		});
+	});
+
+	it('refuses oauth.authenticator = "jwt" without oauth.jwt, at oauth.jwt', () => {
+		const result = AppConfigSchema.safeParse({ oauth: { authenticator: "jwt" }, ...baseBody });
+		expect(result.success).toBe(false);
+		if (result.success) return;
+		expect(result.error.issues).toContainEqual(
+			expect.objectContaining({
+				path: ["oauth", "jwt"],
+				message: 'oauth.jwt is required when oauth.authenticator is "jwt"',
+			}),
+		);
+	});
+
+	it("refuses the defaulted jwt authenticator without oauth.jwt with the same issue", () => {
+		const result = AppConfigSchema.safeParse({ oauth: {}, ...baseBody });
+		expect(result.success).toBe(false);
+		if (result.success) return;
+		expect(result.error.issues).toContainEqual(
+			expect.objectContaining({
+				path: ["oauth", "jwt"],
+				message: 'oauth.jwt is required when oauth.authenticator is "jwt"',
+			}),
+		);
+	});
+
+	it("refuses an empty oauth.authenticator, at oauth.authenticator", () => {
+		const result = AppConfigSchema.safeParse({ oauth: { authenticator: "", jwt }, ...baseBody });
+		expect(result.success).toBe(false);
+		if (result.success) return;
+		expect(result.error.issues).toContainEqual(
+			expect.objectContaining({
+				path: ["oauth", "authenticator"],
+				message: "oauth.authenticator must be a non-empty string",
+			}),
+		);
+	});
+
+	it("still validates the jwt block when jwt is selected by name", () => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { authenticator: "jwt", jwt: { mode: "verify", ...rfc9068 } },
+			...baseBody,
+		});
+		expect(result.success).toBe(false);
+		if (result.success) return;
+		expect(result.error.issues.map((i) => i.message)).toContain("secret is required for HS256");
 	});
 });
