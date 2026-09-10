@@ -1,14 +1,22 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import { preparsePolicySet, statefulIsAuthorized } from "@cedar-policy/cedar-wasm/nodejs";
 import type {
+	AnyRule,
+	AsyncRule,
 	CollectorContext,
 	Logger,
+	ReadonlyAttributes,
 	Rule,
 	RuleCollector,
 } from "@o3co/auth.policy-verifier.core";
 import { createConsoleLogger } from "@o3co/auth.policy-verifier.core";
+import {
+	type CedarDecision,
+	type CedarEngine,
+	type LoadedCedarPolicySet,
+	resolveCedarEngine,
+} from "./engine.mjs";
 import {
 	buildCedarRequest,
 	type CedarRequest,
@@ -28,6 +36,15 @@ export interface CedarPolicyRuleCollectorConfig {
 	policyDir?: string;
 	/** Inline Cedar policy text. XOR `policyDir`. */
 	policies?: string;
+	/**
+	 * Which registered `CedarEngine` evaluates the set — `"wasm"` is the
+	 * in-process evaluator `@o3co/auth.policy-verifier.cedar-wasm` registers
+	 * when imported. Absent: the first registered of `wasm`, `http`, so a
+	 * deployment that imports the wasm package gets it without saying so.
+	 * Naming an engine that is not registered refuses to start, naming the
+	 * package that would register it. See `resolveCedarEngine`.
+	 */
+	engine?: string;
 	/** Rule group the Cedar decision joins AND-evaluation as. Default `"cedar"`. */
 	ruleType?: string;
 	/**
@@ -78,11 +95,9 @@ export interface CedarPolicyRuleCollectorOptions {
 	logger?: Logger;
 }
 
-/** Distinguishes concurrently-constructed collectors' preparsed sets. */
-let policySetCounter = 0;
-
 /**
- * Evaluates a Cedar policy set, co-resident, as one core `Rule`.
+ * Evaluates a Cedar policy set as one core rule, through whichever
+ * `CedarEngine` the deployment registered.
  *
  * ## Why one rule, not a translation
  *
@@ -93,18 +108,27 @@ let policySetCounter = 0;
  * group. Layered PDP: Cedar semantics inside the group, core semantics across
  * groups, composing only toward strictness.
  *
- * ## Why evaluation happens in `verify`
+ * ## Why evaluation happens in the rule, not in `collect`
  *
- * The attribute and rule pipelines run concurrently, so `collect` never sees
- * the merged attributes — and the point of the design is that Cedar policies
- * decide over what the attribute collectors gathered. `verify(attrs)` is where
- * that map exists. Cedar evaluation is a deterministic, synchronous function
- * of `(preparsed policy set, request)` with the request built from `attrs`
- * alone, so the rule satisfies the purity contract exactly: the policy set id
- * and mapping are fixed at boot, nothing of `CollectorContext` is retained,
- * and equal attributes give equal answers. The rule object is built once, in
- * the constructor — the hoisted form `metrics.test.mts` documents as the
+ * The attribute and rule *collectors* run concurrently, so `collect` never
+ * sees the merged attributes — and the point of the design is that Cedar
+ * policies decide over what the attribute collectors gathered. The rule runs
+ * after both pipelines, with that map. Cedar evaluation is a deterministic
+ * function of `(loaded policy set, request)` with the request built from
+ * `attrs` alone, so the rule satisfies the purity contract exactly: the policy
+ * set and mapping are fixed at boot, nothing of `CollectorContext` is
+ * retained, and equal attributes give equal answers. The rule object is built
+ * once, in `create` — the hoisted form `metrics.test.mts` documents as the
  * strongest compliance shape.
+ *
+ * ## Which kind of rule
+ *
+ * The engine decides. A synchronous policy set (in-process wasm) becomes a
+ * `Rule` and is asked through `verify`; an asynchronous one (an out-of-process
+ * evaluator, #225) becomes an `AsyncRule` and is asked through `decide`, under
+ * the server's rule deadline. Everything else — config, mapping, the answer
+ * table below, the `ruleType` / `code` / `message` the decision reports — is
+ * the same, so switching engines is a dependency change, not a config change.
  *
  * The one deliberate softening: on the *error* branch the rule emits a log
  * line (config `logEvaluationErrors`, default on). The decision itself remains
@@ -119,16 +143,30 @@ let policySetCounter = 0;
  * | `deny` | determining `forbid` | fail |
  * | `deny` | no determining policy | `onNoDeterminingPolicy` (default `"deny"`) |
  * | anything | evaluation errors | **fail, and log** |
+ * | — | the call itself failed | **fail, and log** |
  *
- * The last row is unconditional — an evaluation error is never an abstention.
- * Cedar treats a policy that errors as not satisfied, so a `forbid` that
- * errors stops forbidding and the top-level decision can read `allow`; the
- * errors check runs first precisely so that a broken input fails closed.
+ * The errors row is unconditional — an evaluation error is never an
+ * abstention. Cedar treats a policy that errors as not satisfied, so a
+ * `forbid` that errors stops forbidding and the top-level decision can read
+ * `allow`; the errors check runs first precisely so that a broken input fails
+ * closed. The last row is the engine not answering at all (`CedarEngineError`,
+ * a rejected call): also a deny, also logged, never an abstention.
  */
 export class CedarPolicyRuleCollector implements RuleCollector {
-	private readonly rule: Rule;
+	private constructor(private readonly rule: AnyRule) {}
 
-	constructor(config: CedarPolicyRuleCollectorConfig, options?: CedarPolicyRuleCollectorOptions) {
+	/**
+	 * Validates the config entry, loads the policy set through the selected
+	 * engine and fixes the rule. Asynchronous because an engine's `load` may
+	 * be — an out-of-process engine takes the policy set over the network —
+	 * and a set that cannot be loaded must refuse to start here, at boot,
+	 * rather than deny every request (two-boundary validation). The module's
+	 * registry factory is this function; `createApp` awaits it.
+	 */
+	static async create(
+		config: CedarPolicyRuleCollectorConfig,
+		options?: CedarPolicyRuleCollectorOptions,
+	): Promise<CedarPolicyRuleCollector> {
 		const raw = (config ?? {}) as Record<string, unknown>;
 
 		const ruleType = raw.ruleType === undefined ? "cedar" : raw.ruleType;
@@ -156,87 +194,140 @@ export class CedarPolicyRuleCollector implements RuleCollector {
 		}
 		const logEvaluationErrors = rawLog ?? true;
 
+		const engine = selectEngine(raw.engine);
 		const mapping: ResolvedMapping = resolveMapping(raw);
 		const source = loadPolicySource(raw);
 
-		// Boot-time compile. `preparsePolicySet` stores the compiled set in wasm
-		// memory under this id; the per-request call references it without
-		// re-parsing. The id is per-instance so two collectors never share a slot.
-		const policySetId = `auth.policy-verifier.cedar:${policySetCounter++}`;
-		const parsed = preparsePolicySet(policySetId, { staticPolicies: source.text });
-		if (parsed.type === "failure") {
-			const details = parsed.errors.map((error) => error.message).join("; ");
-			throw new Error(
-				`CedarPolicyRuleCollector: policy set from ${source.description} failed to compile: ${details}`,
-			);
+		// Boot-time compile, by the engine: a set it cannot parse refuses to
+		// start here, with the engine's message naming the offending file.
+		let policySet: LoadedCedarPolicySet;
+		try {
+			policySet = await engine.load(source);
+		} catch (cause) {
+			throw new Error(`CedarPolicyRuleCollector: ${errorMessage(cause)}`);
 		}
 
 		const logger = logEvaluationErrors
 			? (options?.logger ?? createConsoleLogger({ collector: "CedarPolicyRuleCollector" }))
 			: undefined;
 
-		this.rule = buildRule({ ruleType, onNoDeterminingPolicy, policySetId, mapping, logger });
+		return new CedarPolicyRuleCollector(
+			buildRule({
+				ruleType,
+				onNoDeterminingPolicy,
+				engine,
+				policySet,
+				policySource: source.description,
+				mapping,
+				logger,
+			}),
+		);
 	}
 
-	async collect(_context: CollectorContext): Promise<Rule[]> {
+	async collect(_context: CollectorContext): Promise<AnyRule[]> {
 		// Nothing is read from the context: everything the rule needs was fixed
 		// at boot, and everything request-shaped reaches it through `attrs`.
 		return [this.rule];
 	}
 }
 
-function buildRule(bound: {
+function selectEngine(name: unknown): CedarEngine {
+	try {
+		return resolveCedarEngine(name);
+	} catch (cause) {
+		throw new Error(`CedarPolicyRuleCollector: ${errorMessage(cause)}`);
+	}
+}
+
+interface BoundRule {
 	ruleType: string;
 	onNoDeterminingPolicy: NoDeterminingPolicy;
-	policySetId: string;
+	engine: CedarEngine;
+	policySet: LoadedCedarPolicySet;
+	policySource: string;
 	mapping: ResolvedMapping;
 	logger: Logger | undefined;
-}): Rule {
-	const { ruleType, onNoDeterminingPolicy, policySetId, mapping, logger } = bound;
-	return {
-		ruleType,
-		code: "cedar_deny",
-		message: "Denied by Cedar policy",
-		verify(attrs) {
-			let request: CedarRequest;
-			try {
-				request = buildCedarRequest(mapping, attrs);
-			} catch (cause) {
-				logger?.error(
-					{ policySetId, reason: cause instanceof Error ? cause.message : String(cause) },
-					"cedar request could not be built from attributes — denying",
-				);
-				return false;
-			}
+}
 
-			const answer = statefulIsAuthorized({ ...request, preparsedPolicySetId: policySetId });
-			if (answer.type !== "success") {
-				logger?.error(
-					{ policySetId, errors: answer.errors.map((error) => error.message) },
-					"cedar authorization call failed — denying",
-				);
-				return false;
-			}
+function buildRule(bound: BoundRule): AnyRule {
+	const { ruleType, onNoDeterminingPolicy, engine, policySet, policySource, mapping, logger } =
+		bound;
+	// `ruleType` too: two collectors over the same source (two inline sets, one
+	// directory twice) are told apart in a log line only by the group they decide for.
+	const identity = { engine: engine.name, policySet: policySource, ruleType };
+	const base = { ruleType, code: "cedar_deny", message: "Denied by Cedar policy" };
 
-			const { decision, diagnostics } = answer.response;
-			if (diagnostics.errors.length > 0) {
-				// Checked before the decision on purpose: an erroring `forbid` stops
-				// forbidding, so `decision` can read "allow" exactly when it is least
-				// trustworthy. Never an abstention.
-				logger?.error(
-					{
-						policySetId,
-						decision,
-						errors: diagnostics.errors.map((error) => `${error.policyId}: ${error.error.message}`),
-					},
-					"cedar policy evaluation raised errors — denying",
-				);
-				return false;
-			}
-
-			if (decision === "allow") return true;
-			if (diagnostics.reason.length === 0) return onNoDeterminingPolicy === "abstain";
+	// Shared by both kinds of rule: request building and answer interpretation
+	// are the same function of `attrs`; only the call in between differs.
+	const request = (attrs: ReadonlyAttributes): CedarRequest | undefined => {
+		try {
+			return buildCedarRequest(mapping, attrs);
+		} catch (cause) {
+			logger?.error(
+				{ ...identity, reason: errorMessage(cause) },
+				"cedar request could not be built from attributes — denying",
+			);
+			return undefined;
+		}
+	};
+	const callFailed = (cause: unknown): false => {
+		logger?.error(
+			{ ...identity, reason: errorMessage(cause) },
+			"cedar authorization call failed — denying",
+		);
+		return false;
+	};
+	const interpret = (answer: CedarDecision): boolean => {
+		if (answer.errors.length > 0) {
+			// Checked before the decision on purpose: an erroring `forbid` stops
+			// forbidding, so `decision` can read "allow" exactly when it is least
+			// trustworthy. Never an abstention.
+			logger?.error(
+				{ ...identity, decision: answer.decision, errors: [...answer.errors] },
+				"cedar policy evaluation raised errors — denying",
+			);
 			return false;
+		}
+		if (answer.decision === "allow") return true;
+		if (answer.reason.length === 0) return onNoDeterminingPolicy === "abstain";
+		return false;
+	};
+
+	if (!policySet.async) {
+		const rule: Rule = {
+			...base,
+			verify(attrs) {
+				const built = request(attrs);
+				if (built === undefined) return false;
+				let answer: CedarDecision;
+				try {
+					answer = policySet.isAuthorized(built);
+				} catch (cause) {
+					return callFailed(cause);
+				}
+				return interpret(answer);
+			},
+		};
+		return rule;
+	}
+
+	const rule: AsyncRule = {
+		...base,
+		async decide(attrs, signal) {
+			const built = request(attrs);
+			if (built === undefined) return false;
+			let answer: CedarDecision;
+			try {
+				answer = await policySet.isAuthorized(built, signal);
+			} catch (cause) {
+				return callFailed(cause);
+			}
+			return interpret(answer);
 		},
 	};
+	return rule;
+}
+
+function errorMessage(cause: unknown): string {
+	return cause instanceof Error ? cause.message : String(cause);
 }

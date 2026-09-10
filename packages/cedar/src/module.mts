@@ -20,8 +20,12 @@ import { RequestFactsCollector } from "./RequestFactsCollector.mjs";
  * ]
  * ```
  *
- * Nothing loads unless this module is imported: the WASM evaluator is a
- * dependency of this package, not of core or the server.
+ * This package holds no evaluator of its own. The policy set is evaluated by
+ * whichever `CedarEngine` the deployment registered — importing
+ * `@o3co/auth.policy-verifier.cedar-wasm` registers the in-process one — and
+ * the collector refuses to start, naming that package, when none is. Nothing
+ * of Cedar loads unless a deployment imports these packages: neither core nor
+ * the server depends on them.
  */
 export const cedarPolicyModule: Module = {
 	name: "cedar-policy",
@@ -30,9 +34,8 @@ export const cedarPolicyModule: Module = {
 			"RequestFactsCollector",
 			() => new RequestFactsCollector(),
 		);
-		context.ruleCollectorRegistry.register(
-			"CedarPolicyRuleCollector",
-			(config) => new CedarPolicyRuleCollector(config),
+		context.ruleCollectorRegistry.register("CedarPolicyRuleCollector", (config) =>
+			CedarPolicyRuleCollector.create(config),
 		);
 	},
 };

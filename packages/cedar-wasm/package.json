@@ -1,5 +1,5 @@
 {
-	"name": "@o3co/auth.policy-verifier.cedar",
+	"name": "@o3co/auth.policy-verifier.cedar-wasm",
 	"version": "0.0.0",
 	"license": "Apache-2.0",
 	"type": "module",
@@ -22,7 +22,7 @@
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/o3co/auth.policy-verifier.git",
-		"directory": "packages/cedar"
+		"directory": "packages/cedar-wasm"
 	},
 	"scripts": {
 		"prebuild": "rimraf dist",
@@ -32,9 +32,11 @@
 		"test:coverage": "vitest run --coverage"
 	},
 	"dependencies": {
-		"@o3co/auth.policy-verifier.core": "workspace:*"
+		"@cedar-policy/cedar-wasm": "4.12.0",
+		"@o3co/auth.policy-verifier.cedar": "workspace:*"
 	},
 	"devDependencies": {
+		"@o3co/auth.policy-verifier.core": "workspace:*",
 		"@types/node": "^26.2.0",
 		"@vitest/coverage-v8": "^4.1.10",
 		"vitest": "^4.1.10"

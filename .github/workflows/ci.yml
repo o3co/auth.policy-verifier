@@ -160,6 +160,15 @@ jobs:
           disable_search: true
           fail_ci_if_error: false
 
+      - name: Upload coverage to Codecov (cedar-wasm)
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: packages/cedar-wasm/coverage/coverage-final.json
+          flags: cedar-wasm
+          disable_search: true
+          fail_ci_if_error: false
+
       - name: Upload coverage to Codecov (server)
         uses: codecov/codecov-action@v5
         with:
@@ -248,9 +257,9 @@ jobs:
           # `@o3co/create-auth-policy-verifier`, which lives outside
           # `packages/` and does not share the prefix.
           #
-          # Today that resolves to four: .core, .builtins, .server and
-          # @o3co/create-auth-policy-verifier. templates/standalone and
-          # tests/integration are `private: true` and are never offered.
+          # Today that resolves to six: .core, .builtins, .cedar, .cedar-wasm,
+          # .server and @o3co/create-auth-policy-verifier. templates/standalone
+          # and tests/integration are `private: true` and are never offered.
           #
           # `pnpm pack`, not `npm pack`: npm pack leaves `workspace:*` ranges in
           # the tarball's package.json, which `npm install` in the scratch dir

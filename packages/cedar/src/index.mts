@@ -7,6 +7,20 @@ export type {
 	NoDeterminingPolicy,
 } from "./CedarPolicyRuleCollector.mjs";
 export { CedarPolicyRuleCollector } from "./CedarPolicyRuleCollector.mjs";
+export type { CedarContext, CedarEntity, CedarEntityUid, CedarValue } from "./cedarJson.mjs";
+export type {
+	AsyncCedarPolicySet,
+	CedarDecision,
+	CedarEngine,
+	LoadedCedarPolicySet,
+	SyncCedarPolicySet,
+} from "./engine.mjs";
+export {
+	CedarEngineError,
+	registerCedarEngine,
+	registeredCedarEngines,
+	resolveCedarEngine,
+} from "./engine.mjs";
 export {
 	ATTR_REQUEST_ACTION,
 	ATTR_REQUEST_RESOURCE_ID,
@@ -15,7 +29,8 @@ export {
 	CEDAR_ATTRIBUTE_KEY_OWNER,
 	CEDAR_ATTRIBUTE_KEYS,
 } from "./keys.mjs";
-export type { AttributeMapping, EntityMappingConfig } from "./mapping.mjs";
+export type { AttributeMapping, CedarRequest, EntityMappingConfig } from "./mapping.mjs";
 export { CedarInputError } from "./mapping.mjs";
 export { cedarPolicyModule } from "./module.mjs";
+export type { PolicyFile, PolicySource } from "./policySource.mjs";
 export { RequestFactsCollector } from "./RequestFactsCollector.mjs";

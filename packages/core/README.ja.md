@@ -138,7 +138,7 @@ interface ModuleContext {
 | `SubjectAttributes` | `{ readonly [key: string]: unknown }` — トランスポートが保証するサブジェクトの検証済み属性バッグ。core はフィールド名を一切定めない。デフォルト server の下ではキーは検証済み JWT のクレーム（`sub`、`azp`、`scope`、…）と `authScheme`（クレームではなく、トークンが到着した `Authorization` スキーム） |
 | `PathResolver` | `(specifier: string) => string` — モジュール相対パスを解決する |
 | `AttributeCollectorFactory` | config から `AttributeCollector` を生成するファクトリー関数 |
-| `RuleCollectorFactory` | config から `RuleCollector` を生成するファクトリー関数 |
+| `RuleCollectorFactory` | config から `RuleCollector` を生成するファクトリー関数。boot に I/O が要る collector のために `Promise` を返してもよい (#225)。`createApp` が await する |
 | `ResourceParserFactory` | config から `ResourceParser` を生成するファクトリー関数 |
 
 `KeyResolver` / `KeyResolverFactory` は core の型ではありません。トークンクレデンシャルの配管であり、`@o3co/auth.policy-verifier.server` にあります (#170)。
