@@ -515,11 +515,22 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	// the type: this is the boundary a hand-built config reaches. Constructing
 	// the built-in authenticator runs assertVerifyRouterJwtConfig, so an invalid
 	// hand-built jwt config still fails here, at router construction.
+	//
+	// `null` is refused by name rather than read as "omitted" — the rule the
+	// `previousSecrets` contract set (#147): a `null` in a hand-built config was
+	// produced rather than written, and reading `{ jwt: null, authenticator }`
+	// as a choice the caller made would be a guess. Without this line it fell
+	// through to the guard as a bare TypeError off `.validate`.
+	if (config.jwt === null || config.authenticator === null) {
+		throw new Error("createVerifyRouter: jwt and authenticator are omitted rather than null");
+	}
 	if ((config.jwt === undefined) === (config.authenticator === undefined)) {
 		throw new Error("createVerifyRouter: exactly one of jwt or authenticator must be supplied");
 	}
 	const authenticator =
-		config.authenticator ?? createTokenAuthenticator(config.jwt as VerifyRouterJwtConfig, logger);
+		config.jwt !== undefined
+			? createTokenAuthenticator(config.jwt, logger)
+			: (config.authenticator as TokenAuthenticator);
 	// #175: resolved once — the per-request cost is a spread, not a branch tree.
 	const exposeCredential = config.credentialToCollectors === "expose";
 
