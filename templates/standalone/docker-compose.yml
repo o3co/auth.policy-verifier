@@ -18,3 +18,25 @@ services:
     env_file:
       - path: .env
         required: false
+
+  # Out-of-process Cedar engine, for deployments that evaluate Cedar policies
+  # through @o3co/auth.policy-verifier.cedar without the in-process wasm
+  # package (its README, "Running out of process"). Opt in per run:
+  #
+  #   docker compose --profile cedar up --build
+  #
+  # It shares the app container's network namespace, so the verifier reaches
+  # it on loopback at the engine's default endpoint (http://127.0.0.1:8180)
+  # with no configuration, and nothing outside the pair can reach it at all —
+  # the same trust boundary the verifier's own bind address draws. The
+  # verifier pushes its config/policies into the agent at boot; nothing is
+  # mounted here. Pinned by digest for the reason the base image is.
+  cedar-engine:
+    image: permitio/cedar-agent:0.2.2@sha256:2a7713bce95220eb2ad870ba311f1ae8a4d6e607d13720747d75b96cb0c551ca
+    profiles: ["cedar"]
+    network_mode: "service:app"
+    environment:
+      - CEDAR_AGENT_ADDR=127.0.0.1
+      - CEDAR_AGENT_PORT=8180
+      # To require a token on every call, set it on both sides:
+      #   CEDAR_AGENT_AUTHENTICATION here, CEDAR_AUTHENTICATION on the app.

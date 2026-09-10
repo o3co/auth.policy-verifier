@@ -19,7 +19,8 @@ network); importing it is all it takes. See [Engines](#engines).
 This decouples policy language from PDP topology. Native logic stays
 TypeScript — no DSL is ever required — and a deployment that adopts Cedar here
 is not binding itself to this verifier: the same `.cedar` files load unchanged
-into an embedded evaluator or a Cedar agent later. Design: [#185](https://github.com/o3co/auth.policy-verifier/issues/185).
+into an embedded evaluator later, or into a cedar-agent when laid out one
+policy per file (see [Running out of process](#running-out-of-process)). Design: [#185](https://github.com/o3co/auth.policy-verifier/issues/185).
 
 ## Usage
 
@@ -191,12 +192,97 @@ The engines that ship today:
 
 | engine | package | runs | when |
 | --- | --- | --- | --- |
-| `wasm` | [`@o3co/auth.policy-verifier.cedar-wasm`](../cedar-wasm/README.md) | in-process, synchronous, ~15µs per decision; ~12 MB of wasm instantiated at import | the policy set is cheaper to evaluate than a loopback hop — most of them |
+| `wasm` | [`@o3co/auth.policy-verifier.cedar-wasm`](../cedar-wasm/README.md) | in-process, synchronous, tens of µs per decision on a small set; ~12 MB of wasm instantiated at import | the policy set is cheaper to evaluate than a loopback hop — most of them; see [Sizing](#sizing-which-engine) |
+| `http` | this package (`cedarHttpEngine`, registered by importing it) | out of process: a [cedar-agent](https://github.com/permitio/cedar-agent) over HTTP, asynchronous, one loopback hop per decision | the policy set is large enough that evaluating it in-process competes with request handling, or the evaluator should scale and upgrade apart from the verifier |
 
-A deployment that wants Cedar evaluated out of process — the policy set is
-large enough to compete with request handling, or the evaluator should scale
-and upgrade apart from the verifier — registers an asynchronous engine behind
-the same port and leaves the wasm package out; #225 tracks the HTTP one.
+Both engines see the same request — principal, action, resource, context and
+the synthesized entities, inline — and answer through the same table. What
+differs is where the evaluator runs and what the deployment carries: the wasm
+package, or a second process.
+
+## Running out of process
+
+`engine = "http"` (or simply not importing the wasm package) sends every
+decision to a cedar-agent. The standalone template ships it as a compose
+profile that shares the verifier's network namespace, so the agent listens on
+loopback and nothing outside the container pair can reach it — the same trust
+boundary the verifier's own bind address draws:
+
+```sh
+docker compose --profile cedar up --build
+```
+
+- **Where the agent is.** `endpoint` in the collector's config entry, else the
+  `CEDAR_ENDPOINT` environment variable, else `http://127.0.0.1:8180` — the
+  compose service's address, so the profile needs no configuration at all. A
+  base URL: the agent's `/v1/policies` and `/v1/is_authorized` are appended.
+  Plain `http://` is accepted for loopback hosts only; a routable agent must be
+  `https://` (the rule `jwksUri` follows, and for the same reason: the request
+  carries the subject's attributes and the answer is an authorization).
+  `authentication` in config, else `CEDAR_AUTHENTICATION`, is sent verbatim as
+  the `Authorization` header when the agent was started with one.
+- **The verifier owns the policies.** At boot the engine `PUT`s the policy set
+  to the agent, one entry per `.cedar` file with the file's name as the policy
+  id, so the agent holds exactly `config/policies` and nothing is converted or
+  mounted twice. Boot retries an unreachable agent for 10 s (a compose sibling
+  may be a few hundred milliseconds behind) and then refuses to start; a set
+  the agent refuses fails boot at once, with the agent's message.
+- **One policy per file.** cedar-agent stores policies one by one, so each
+  `.cedar` file — and an inline `policies` string — must hold exactly one
+  policy; a file with two is refused at boot. The wasm engine concatenates and
+  does not care, so a corpus laid out one policy per file runs under both, and
+  reads better under this one: `diagnostics.reason` then names files
+  (`10-permit-eng`) rather than `policy0`.
+- **One collector per agent.** `PUT /v1/policies` replaces the agent's whole
+  set, so a second `CedarPolicyRuleCollector` pointed at the same endpoint is
+  refused at boot rather than silently overwriting the first.
+- **Failure after boot is a deny.** An agent that is unreachable, answers
+  non-2xx, or answers something that is not a decision makes the rule fail
+  and log (`cedar authorization call failed`); it never abstains, whatever
+  `onNoDeterminingPolicy` says. Each call runs under the server's
+  `verify.ruleTimeoutMs` (default 2000 ms), answering `rule_timeout` when the
+  agent is slower than that.
+- **Two Cedar versions.** cedar-agent 0.2.2 evaluates with cedar-policy 2.4;
+  the wasm package with Cedar 4.12. Policies written to the older grammar run
+  under both; a policy using a newer construct will be refused by the agent at
+  boot, which is the right place to find out.
+
+## Sizing: which engine
+
+Measured, not guessed: one request of the shape the collector sends (two
+entities inline, one context field), against policy sets in which every
+policy has to be considered, 2000 decisions each. Apple M3, Node 26,
+`@cedar-policy/cedar-wasm` 4.12.0 in-process; `permitio/cedar-agent:0.2.2`
+in Docker Desktop on the same machine, reached through a published loopback
+port. Microseconds per decision:
+
+| policies | wasm p50 | wasm p99 | agent p50 | agent p99 |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 34 | 90 | 346 | 1281 |
+| 10 | 45 | 78 | 328 | 1897 |
+| 100 | 134 | 238 | 395 | 791 |
+| 1000 | 1111 | 1409 | 969 | 1595 |
+
+How to read it:
+
+- The wasm figure is time the verifier's event loop is **blocked**; the agent
+  figure is mostly waiting, and costs the loop only the `fetch` overhead (on
+  the order of 100 µs of it).
+- On this setup the hop costs roughly 300 µs, so in-process wins outright up
+  to a few hundred policies, and the two cross near a thousand policies of
+  this shape — where the agent's native evaluator is already faster than the
+  wasm one and the verifier stops paying for evaluation on its own loop.
+- Docker Desktop on macOS routes the published port through a virtual
+  machine; a Linux host with the compose profile's shared network namespace
+  pays less for the hop, which moves the crossover down. Policies with heavier
+  conditions or larger entity sets move it down too. Measure your own corpus
+  before deciding: the script is three `fetch` calls and one
+  `statefulIsAuthorized` loop.
+- Below the crossover, choose the agent anyway when the evaluator should
+  scale or upgrade apart from the verifier, or when the 12 MB wasm should not
+  be in the image. Above it, choose wasm anyway when a second process is not
+  worth operating. The switch is a dependency change — config, mapping and
+  policies stay put.
 
 ## Version pinning
 

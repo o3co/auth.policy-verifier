@@ -293,6 +293,23 @@ make dev
 `.env`. It does **not** supply the credential — put `HTTP_CALLER_AUTH_TOKEN` in
 that `.env`.
 
+### Out-of-process Cedar: `--profile cedar`
+
+A deployment that evaluates [Cedar](../../packages/cedar/README.md) policies
+out of process starts the agent beside the app:
+
+```sh
+docker compose --profile cedar up --build
+```
+
+The `cedar-engine` service shares the app container's network namespace, so
+the verifier's `http` engine finds it at its default endpoint
+(`http://127.0.0.1:8180`) with no configuration, pushes `config/policies` into
+it at boot, and nothing outside the container pair can reach it. The profile
+does nothing until the app composes `cedarPolicyModule`; see cedar's README
+for the packages, the module and the config entry — and its sizing table for
+when this shape beats the in-process one.
+
 ### `pnpm-lock.yaml` is a build input
 
 `pnpm install --frozen-lockfile` is what keeps two builds of the same source

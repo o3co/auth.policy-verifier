@@ -30,8 +30,10 @@ The cost is paid at import: the wasm module is about 12 MB on disk and is
 instantiated when the bindings load, on the verifier's own event loop. A
 deployment whose policy set is large enough that evaluation competes with
 request handling — or that wants Cedar's evaluator scaled and upgraded apart
-from the verifier — runs an out-of-process engine instead and leaves this
-package out (#225). That is a dependency change, not a config change.
+from the verifier — runs cedar's `http` engine against a cedar-agent instead and leaves this
+package out — see [Running out of process](../cedar/README.md#running-out-of-process)
+and the measured [sizing table](../cedar/README.md#sizing-which-engine). That is
+a dependency change, not a config change.
 
 ## Version pinning
 

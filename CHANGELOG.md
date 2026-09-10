@@ -49,6 +49,28 @@ and version sections follow the release labeling policy in
   awaits it, and core's `RuleCollectorFactory` may now return a `Promise`,
   which `createApp` awaits (`@o3co/auth.policy-verifier.core`, `.server`).
 
+- **The `http` Cedar engine and the compose profile** (`@o3co/auth.policy-verifier.cedar`,
+  `templates/standalone`, [#225](https://github.com/o3co/auth.policy-verifier/issues/225)).
+  `cedar` now registers an out-of-process engine on import: a
+  [cedar-agent](https://github.com/permitio/cedar-agent) over HTTP, selected
+  by `engine = "http"` or by default when the wasm package is not imported.
+  At boot it pushes the policy set to the agent (`PUT /v1/policies`, one
+  entry per file, the file name as the policy id — so `diagnostics.reason`
+  names files), retrying an unreachable agent for 10 s and refusing to start
+  on a set the agent rejects; per decision it `POST`s the same request the
+  wasm engine evaluates, entities inline, as an `AsyncRule` under
+  `verify.ruleTimeoutMs`. The agent is found at `endpoint` in config, else
+  `CEDAR_ENDPOINT`, else `http://127.0.0.1:8180`; plain `http://` only to
+  loopback; `authentication` / `CEDAR_AUTHENTICATION` for an agent that
+  enforces a token. One policy per file, one collector per agent. The
+  standalone template gains a `cedar-engine` compose service under
+  `--profile cedar` that shares the app's network namespace, so the default
+  endpoint needs no configuration. `CedarEngine.load` now receives the
+  collector's config entry and a logger; the collector logs which engine it
+  selected at boot. cedar's README carries a measured sizing table: on the
+  test machine in-process wins outright to a few hundred policies and the
+  two cross near a thousand.
+
 ### Changed
 
 - **BREAKING: `evaluate()` is asynchronous** (`@o3co/auth.policy-verifier.core`,

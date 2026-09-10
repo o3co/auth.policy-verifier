@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { Logger } from "@o3co/auth.policy-verifier.core";
 import type { CedarRequest } from "./mapping.mjs";
 import type { PolicySource } from "./policySource.mjs";
 
@@ -85,7 +86,23 @@ export interface CedarEngine {
 	 * set: a broken policy set refuses to start, it does not serve denials, and
 	 * the collector's factory awaits this so that holds for a remote engine too.
 	 */
-	load(source: PolicySource): LoadedCedarPolicySet | Promise<LoadedCedarPolicySet>;
+	load(
+		source: PolicySource,
+		context: CedarEngineLoadContext,
+	): LoadedCedarPolicySet | Promise<LoadedCedarPolicySet>;
+}
+
+/** What the collector hands an engine at `load`, beside the policy set. */
+export interface CedarEngineLoadContext {
+	/**
+	 * The collector's whole config entry, as written. An engine reads the keys
+	 * that are its own (`endpoint`, `authentication` for the HTTP engine) and
+	 * validates them here, at boot — the second boundary of two-boundary
+	 * validation, since the config schema cannot know every engine's keys.
+	 */
+	readonly config: Readonly<Record<string, unknown>>;
+	/** For what an operator should see at boot: which engine, where, how many policies. */
+	readonly logger: Logger;
 }
 
 const engines = new Map<string, CedarEngine>();
