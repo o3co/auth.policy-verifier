@@ -78,8 +78,11 @@ const reservedKeys = new Set<string>();
  *
  * `RequestContextAttributeCollector` (builtins) consults this for every key;
  * `PayloadClaimAttributeCollector` (builtins) consults it for the keys other
- * packages own, and lets a verified claim land on core's five — its source is
- * the signature-verified token, the trust those keys are written from.
+ * packages own, and lets a verified claim land on core's five. The line is
+ * the trust boundary, not the source: core's five are written from what the
+ * deployment established — the issuer's signature-verified claims, or its own
+ * configuration — and never from the caller's request, and a verified claim
+ * is on the deployment's side of that line.
  */
 export const RESERVED_ATTRIBUTE_KEYS: ReadonlySet<string> = reservedKeys;
 
