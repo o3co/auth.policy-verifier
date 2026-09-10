@@ -11,11 +11,18 @@ export {
 	DEFAULT_COLLECT_DEADLINE_MS,
 	DEFAULT_COLLECTOR_CONCURRENCY,
 	DEFAULT_COLLECTOR_TIMEOUT_MS,
+	DEFAULT_RULE_TIMEOUT_MS,
 	MAX_TIMER_MS,
 	resolveCollectorLimits,
+	resolveRuleTimeoutMs,
 } from "./collectorLimits.mjs";
 export type { CollectorTimeoutDetail, CollectorTimeoutLimit } from "./errors.mjs";
-export { AttributeConflictError, CollectorTimeoutError, ResourceParseError } from "./errors.mjs";
+export {
+	AttributeConflictError,
+	CollectorTimeoutError,
+	ResourceParseError,
+	RuleTimeoutError,
+} from "./errors.mjs";
 export type { EvaluateOptions } from "./evaluate.mjs";
 export { evaluate } from "./evaluate.mjs";
 export type {
@@ -48,6 +55,8 @@ export type {
 export { Registry } from "./modules/index.mjs";
 export { RulePipeline } from "./RulePipeline.mjs";
 export type {
+	AnyRule,
+	AsyncRule,
 	AttributeCollector,
 	Attributes,
 	CollectorContext,
@@ -64,5 +73,6 @@ export type {
 	RuleOutcome,
 	SubjectAttributes,
 } from "./types.mjs";
+export { isAsyncRule } from "./types.mjs";
 export type { UntrustedRequestContext } from "./untrusted.mjs";
 export { markUntrustedRequestContext, readUntrustedRequestContext } from "./untrusted.mjs";

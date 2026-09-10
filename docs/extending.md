@@ -193,6 +193,26 @@ Notes:
 - Validate the shape inside the collector. `readUntrustedRequestContext` hands back a `Record<string, unknown> | undefined`; the collector that consumes it is the right place to narrow, and the only place that knows what the field is allowed to be.
 - This particular example is a good illustration of the trust question rather than a recommendation: a client IP the *caller* declares is worth an audit annotation, not an access decision. An IP a policy relies on must come from the transport (a proxy header the deployment trusts, promoted by a collector reading `context.headers`), not from the body.
 
+## Writing an asynchronous rule
+
+`Rule.verify` is synchronous and does no I/O — that is what makes rules testable in isolation and decisions cacheable. An out-of-process policy engine (Cedar over HTTP, #225) cannot be asked that way, so core has a second kind:
+
+```ts
+interface AsyncRule {
+  ruleType: string;
+  code: string;
+  message: string;
+  decide(attrs: ReadonlyAttributes, signal: AbortSignal): Promise<boolean>;
+}
+```
+
+A rule collector may return either kind, or both, in one list; `evaluate()` groups and reports them identically, and is asynchronous for exactly this reason. What changes for the author:
+
+- **The only relaxation is I/O.** The answer must still be a function of `attrs` alone — copy what you need out of the `CollectorContext` at collect time, never keep it — and the purity conformance suite (`describeRulePurityConformance`) asks `decide` after revoking the request exactly as it asks `verify`.
+- **Pass `signal` to `fetch`.** It aborts when the rule's budget or the caller ends. The budget is `EvaluateOptions.ruleTimeoutMs` (default 2000 ms) — the server reads it from its `verify.ruleTimeoutMs` config and hands it to `evaluate()`; a library consumer passes it directly. A rule that ignores it is still bounded — the evaluator races it — but keeps a socket open for an answer nobody will read.
+- **Own your engine's outage.** A rule that rejects is reporting a fault, and the request answers 500. If the engine being unreachable should be a deny — it usually should — catch, log, and return `false`. A rule that overruns its budget is a deny of its own (`rule_timeout`), never a pass.
+- **Asked one at a time.** Alternatives within a `ruleType` group run in order and stop at the first pass, so an expensive async rule placed after a cheap synchronous one in the same group is only consulted when the cheap one refused.
+
 ## RuleCollector: when to write one
 
 `RuleCollector` is the factory that turns a `CollectorContext` into a `Rule[]`. Built-in examples are `ResourceActionPermissionRuleCollector` and `ResourceActionScopeRuleCollector` under [`packages/builtins/src/rules/collectors/`](../packages/builtins/src/rules/collectors/). They construct a `HasPermission` / `HasScope` rule from the request's resource and action.

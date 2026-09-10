@@ -1691,3 +1691,94 @@ describe("createVerifyRouter — an already-built authenticator (#219)", () => {
 		}
 	});
 });
+
+describe("POST /verify — asynchronous rules (#225)", () => {
+	const pipelines = (rules: RuleCollector[]) => ({
+		jwt: {
+			validate: true as const,
+			key: hs256Key.key,
+			algorithms: hs256Key.algorithms,
+			issuer: ISSUER,
+			audience: AUDIENCE,
+			tokenType: "at+jwt",
+		},
+		resourceParser: new DotNotationResourceParser(),
+		attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
+		rulePipeline: new RulePipeline(rules),
+	});
+	/** A rule collector whose rule answers from "I/O": an out-of-process engine, stubbed. */
+	const engine = (answer: () => Promise<boolean>): RuleCollector => ({
+		async collect() {
+			return [
+				{
+					ruleType: "cedar",
+					code: "cedar_deny",
+					message: "Denied by Cedar policy",
+					decide: answer,
+				},
+			];
+		},
+	});
+
+	it("allows when the async rule passes, and names it in the reason", async () => {
+		const app = express();
+		app.use(createVerifyRouter(pipelines([engine(async () => true)])));
+		const token = await signHS256Token({ scope: "read:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+		expect(res.status).toBe(200);
+		expect(res.body.decision).toBe("allow");
+		expect(res.body.reason.groups[0]).toMatchObject({ ruleType: "cedar", passed: true });
+	});
+
+	it("denies with the async rule's code when it fails", async () => {
+		const app = express();
+		app.use(createVerifyRouter(pipelines([engine(async () => false)])));
+		const token = await signHS256Token({ scope: "read:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+		expect(res.status).toBe(403);
+		expect(res.body).toMatchObject({ decision: "deny", code: "cedar_deny" });
+	});
+
+	it("denies with rule_timeout when the async rule does not answer within verify.ruleTimeoutMs, and logs it", async () => {
+		const events: string[] = [];
+		const logger = {
+			info() {},
+			warn() {},
+			error(_ctx: unknown, event: string) {
+				events.push(event);
+			},
+		};
+		const app = express();
+		app.use(
+			createVerifyRouter({
+				...pipelines([engine(() => new Promise<boolean>(() => {}))]),
+				ruleTimeoutMs: "30",
+				logger,
+			}),
+		);
+		const token = await signHS256Token({ scope: "read:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+		expect(res.status).toBe(403);
+		expect(res.body).toMatchObject({
+			decision: "deny",
+			code: "rule_timeout",
+			message: "Authorization could not be decided in time",
+		});
+		expect(events).toContain("rule_timeout");
+	});
+
+	it("refuses an unusable ruleTimeoutMs at construction, in the schema's words", () => {
+		expect(() => createVerifyRouter({ ...pipelines([]), ruleTimeoutMs: 0 })).toThrow(
+			/verify\.ruleTimeoutMs/,
+		);
+	});
+});

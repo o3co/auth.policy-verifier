@@ -76,7 +76,7 @@ describe("Rule.verify contract", () => {
 		expect(rule.verify(attrs)).toBe(true);
 	});
 
-	it("leaves the attributes it was judged against untouched", () => {
+	it("leaves the attributes it was judged against untouched", async () => {
 		// The evaluator hands the same live map to every rule in every group
 		// (`evaluate.mts` Phase 3). A rule that wrote into it would change the
 		// inputs of every group after it, which is what the read-only view above
@@ -85,7 +85,7 @@ describe("Rule.verify contract", () => {
 		const attrs: Attributes = new Map([["scopes", ["read:project"]]]);
 		const before = [...attrs];
 
-		evaluate(attrs, [rule, requiresScope("write:project")]);
+		await evaluate(attrs, [rule, requiresScope("write:project")]);
 
 		expect([...attrs]).toEqual(before);
 	});

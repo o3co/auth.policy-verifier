@@ -35,7 +35,7 @@ describe("evaluate with AttrLiteralEqual + AttrPairNotEqual + AttrLiteralCompare
 
 	const rules: Rule[] = [ruleEqual, rulePairNotEqual, ruleCompare];
 
-	it("Scenario A: all three rules satisfied → allow", () => {
+	it("Scenario A: all three rules satisfied → allow", async () => {
 		// Explicit type arguments: these entry lists mix string and number values,
 		// so without them the Map constructor's overload resolution narrows to
 		// Map<string, string> from the first entry and rejects `level`. The
@@ -47,12 +47,12 @@ describe("evaluate with AttrLiteralEqual + AttrPairNotEqual + AttrLiteralCompare
 			["level", 5],
 		]);
 
-		const result = evaluate(attrs, rules);
+		const result = await evaluate(attrs, rules);
 
 		expect(result.decision).toBe("allow");
 	});
 
-	it("Scenario B: AttrPairNotEqual fails (userId === ownerId) → deny with attr_match", () => {
+	it("Scenario B: AttrPairNotEqual fails (userId === ownerId) → deny with attr_match", async () => {
 		// Break AttrPairNotEqual: userId equals ownerId.
 		const attrs: Attributes = new Map<string, unknown>([
 			["role", "admin"],
@@ -61,7 +61,7 @@ describe("evaluate with AttrLiteralEqual + AttrPairNotEqual + AttrLiteralCompare
 			["level", 5],
 		]);
 
-		const result = evaluate(attrs, rules);
+		const result = await evaluate(attrs, rules);
 
 		expect(result).toMatchObject({
 			decision: "deny",
@@ -70,7 +70,7 @@ describe("evaluate with AttrLiteralEqual + AttrPairNotEqual + AttrLiteralCompare
 		});
 	});
 
-	it("Scenario C: AttrLiteralEqual and AttrPairNotEqual both fail → deny with first failing group (attr_not_equal)", () => {
+	it("Scenario C: AttrLiteralEqual and AttrPairNotEqual both fail → deny with first failing group (attr_not_equal)", async () => {
 		// Break AttrLiteralEqual: role is not "admin".
 		// Break AttrPairNotEqual: userId equals ownerId.
 		// AttrLiteralCompare still passes.
@@ -83,7 +83,7 @@ describe("evaluate with AttrLiteralEqual + AttrPairNotEqual + AttrLiteralCompare
 			["level", 5],
 		]);
 
-		const result = evaluate(attrs, rules);
+		const result = await evaluate(attrs, rules);
 
 		expect(result).toMatchObject({
 			decision: "deny",

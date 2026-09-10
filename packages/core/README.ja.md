@@ -18,14 +18,20 @@ npm install @o3co/auth.policy-verifier.core
 interface EvaluateOptions {
   /** Decision for an empty rule set. Defaults to "deny". */
   onEmptyRuleSet?: "deny" | "allow"
+  /** Milliseconds one asynchronous rule may take. Defaults to DEFAULT_RULE_TIMEOUT_MS (2000). */
+  ruleTimeoutMs?: number
+  /** The caller's signal; aborting it aborts the asynchronous rule in flight with its reason. */
+  signal?: AbortSignal
 }
 
-function evaluate(attrs: Attributes, rules: Rule[], options?: EvaluateOptions): Decision
+function evaluate(attrs: Attributes, rules: AnyRule[], options?: EvaluateOptions): Promise<Decision>
 ```
 
 収集した属性をルールセットに対して評価します。ルールは `ruleType` でグループ化され、グループ内はいずれかのルールが通れば満足（OR）、すべてのグループが満たされた場合に許可（グループ間 AND）となります。戻り値は `{ decision: "allow"; reason }` または `{ decision: "deny"; code: string; message: string; reason }` です。
 
 **ルールが 1 つも集まらなかった場合は deny** (`code: "no_applicable_rule"`) です。どのルールも適用されなかったリクエストは認可されていないためです。第 3 引数に `{ onEmptyRuleSet: "allow" }` を渡すと、この既定を deployment 単位で opt-out できます。
+
+ルールのリストにはどちらの種類のルールも混在できます (#225)。同期の `Rule` は `verify` で、`AsyncRule` は `ruleTimeoutMs` の制限下で `decide` を await して問い合わせます。どちらも収集順に 1 つずつ問い、グループ内で最初に通ったルール以降の代替ルールは種類を問わず実行されません。`evaluate` が非同期なのはそのためだけで、同期ルールだけのリストは同じターン内で答えが出ます。非同期ルールが制限時間を超えると `RuleTimeoutError` で reject（transport にとっては deny であり、pass にはなりません）、`signal` が abort されればその理由で、ルールが throw / reject すればその値で reject します。
 
 すべての決定は構造化された `reason` を伴います。`reason.groups` は評価順に各ルールグループを並べ、`passed` と、
 そのグループで実際に走ったルールを評価順に列挙した `evaluated` を持ちます。失敗グループは全代替ルールを
@@ -195,7 +201,7 @@ const context = { subject: verifiedClaims, resource, action: 'read' }
 
 const attrs = await new AttributePipeline([new PayloadScopeCollector()]).collect(context)
 const rules = await new RulePipeline([new ResourceActionScopeRuleCollector()]).collect(context)
-const decision = evaluate(attrs, rules)
+const decision = await evaluate(attrs, rules)
 ```
 
 ## カスタムコレクターの書き方

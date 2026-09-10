@@ -77,6 +77,15 @@ export const DEFAULT_COLLECT_DEADLINE_MS = 5_000;
 export const DEFAULT_COLLECTOR_CONCURRENCY = 8;
 
 /**
+ * How long one asynchronous rule may take to answer (#225) — the same budget
+ * as one collector, for the same reason: it is one call to a dependency the
+ * deployment runs (a policy engine), a healthy one answers in milliseconds,
+ * and the verifier is the layer that can say *which* rule stalled. Defined in
+ * terms of the collector's so the two cannot drift apart.
+ */
+export const DEFAULT_RULE_TIMEOUT_MS: number = DEFAULT_COLLECTOR_TIMEOUT_MS;
+
+/**
  * The largest delay a timer can actually hold: 2^31 - 1 milliseconds, about
  * 24.8 days. Node stores a `setTimeout` delay in a signed 32-bit integer and
  * silently clamps anything above to ~1 ms — so a bigger "budget" is not a
@@ -146,6 +155,16 @@ export function resolveCollectorLimits(limits?: CollectorLimits): ResolvedCollec
 		deadlineMs: timer(limits?.deadlineMs, DEFAULT_COLLECT_DEADLINE_MS, "deadlineMs"),
 		concurrency: positive(limits?.concurrency, DEFAULT_COLLECTOR_CONCURRENCY, "concurrency"),
 	};
+}
+
+/**
+ * The budget one asynchronous rule runs under. Fills in the default and
+ * refuses what {@link resolveCollectorLimits} refuses, naming `ruleTimeoutMs`.
+ * The server package holds `verify.ruleTimeoutMs` to the same bound at both
+ * of its config boundaries and hands the resolved number to `evaluate()`.
+ */
+export function resolveRuleTimeoutMs(value?: number): number {
+	return timer(value, DEFAULT_RULE_TIMEOUT_MS, "ruleTimeoutMs");
 }
 
 function positive(value: number | undefined, fallback: number, field: string): number {
@@ -330,7 +349,10 @@ async function runOne<T>(
  * this one would not be. A future caller that cannot honour the precondition
  * should reject before calling rather than adding an untested path here.
  */
-function rejectOnAbort(signal: AbortSignal): { promise: Promise<never>; dispose: () => void } {
+export function rejectOnAbort(signal: AbortSignal): {
+	promise: Promise<never>;
+	dispose: () => void;
+} {
 	// `reject` is captured rather than the whole body being written inside the
 	// executor, so there is no placeholder `dispose` waiting to be overwritten.
 	// The executor runs synchronously, so it is assigned before the next line.

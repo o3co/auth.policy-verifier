@@ -119,3 +119,28 @@ export class AttributeConflictError extends Error {
 		this.key = key;
 	}
 }
+
+/**
+ * Raised by `evaluate()` when an `AsyncRule` does not answer within its
+ * budget (#225). **A deny, not a degradation**, for the reason
+ * {@link CollectorTimeoutError} is: a rule that has not answered has not
+ * passed, and there is no partial answer to an authorization question.
+ *
+ * Names the rule by `ruleType` and `code` — the two things an operator can find
+ * it by in config — and never carries the attributes.
+ */
+export class RuleTimeoutError extends Error {
+	readonly ruleType: string;
+	readonly code: string;
+	readonly timeoutMs: number;
+
+	constructor(detail: { ruleType: string; code: string; timeoutMs: number }) {
+		super(
+			`rule ${detail.ruleType}/${detail.code} did not answer within its ${detail.timeoutMs} ms budget`,
+		);
+		this.name = "RuleTimeoutError";
+		this.ruleType = detail.ruleType;
+		this.code = detail.code;
+		this.timeoutMs = detail.timeoutMs;
+	}
+}

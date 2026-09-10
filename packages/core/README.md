@@ -18,9 +18,13 @@ npm install @o3co/auth.policy-verifier.core
 interface EvaluateOptions {
   /** Decision for an empty rule set. Defaults to "deny". */
   onEmptyRuleSet?: "deny" | "allow"
+  /** Milliseconds one asynchronous rule may take. Defaults to DEFAULT_RULE_TIMEOUT_MS (2000). */
+  ruleTimeoutMs?: number
+  /** The caller's signal; aborting it aborts the asynchronous rule in flight with its reason. */
+  signal?: AbortSignal
 }
 
-function evaluate(attrs: Attributes, rules: Rule[], options?: EvaluateOptions): Decision
+function evaluate(attrs: Attributes, rules: AnyRule[], options?: EvaluateOptions): Promise<Decision>
 ```
 
 Evaluates collected attributes against a set of rules. Rules are grouped by `ruleType`; within a group, any passing rule satisfies the group (OR); all groups must be satisfied for an allow decision (AND across groups). Returns `{ decision: "allow"; reason }` or `{ decision: "deny"; code: string; message: string; reason }`.
@@ -29,7 +33,7 @@ An **empty rule set is denied** (`code: "no_applicable_rule"`): a request no rul
 
 Every decision carries a structured `reason`: `reason.groups` lists each rule group in evaluation order with `passed` and `evaluated` — the rules that group actually ran, in order. A failing group ran every alternative, so `evaluated` lists them all; a passing group is an OR and stops at its first passing rule, so `evaluated` holds the alternatives that were tried and failed followed by that rule, and `satisfiedBy` (present only on a passing group) names it as the one that decided. All groups are evaluated, including groups after the first failing one, because stopping early cannot report which of the rest would also have failed. The `code` / `message` on a deny still come from the first failing group.
 
-An **empty rule set is denied** (`code: "no_applicable_rule"`): a request no rule spoke to was never authorized. Pass `{ onEmptyRuleSet: "allow" }` as the third argument to opt a deployment out of that default.
+The rule list may carry either kind of rule (#225): a synchronous `Rule` is asked through `verify`, an `AsyncRule` is awaited through `decide` under `ruleTimeoutMs`, one at a time in collection order, and alternatives after a pass never run whichever kind they are. `evaluate` is asynchronous for that reason alone — a list of synchronous rules answers in the same turn. It rejects with `RuleTimeoutError` when an asynchronous rule overruns its budget (a deny for the transport, never a pass), with the caller's abort reason when `signal` aborts, and with whatever a rule threw or rejected with.
 
 ### AttributePipeline
 
@@ -49,11 +53,11 @@ The fan-out is bounded — see [Collector limits](#collector-limits). `collect` 
 ```typescript
 class RulePipeline {
   constructor(collectors: RuleCollector[], limits?: CollectorLimits)
-  collect(request: CollectorRequest): Promise<Rule[]>
+  collect(request: CollectorRequest): Promise<AnyRule[]>
 }
 ```
 
-Runs all collectors in parallel and flattens their results into a single array, under the same bounds as `AttributePipeline`.
+Runs all collectors in parallel and flattens their results into a single array, under the same bounds as `AttributePipeline`. A collector may return synchronous `Rule`s, asynchronous `AsyncRule`s, or both.
 
 ### Collector limits
 
@@ -197,7 +201,7 @@ const context = { subject: verifiedClaims, resource, action: 'read' }
 
 const attrs = await new AttributePipeline([new PayloadScopeCollector()]).collect(context)
 const rules = await new RulePipeline([new ResourceActionScopeRuleCollector()]).collect(context)
-const decision = evaluate(attrs, rules)
+const decision = await evaluate(attrs, rules)
 ```
 
 ## Writing Custom Collectors

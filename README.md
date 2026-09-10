@@ -344,6 +344,10 @@ verify {
   # returned. See "Collector deadlines" below.
   collectorTimeoutMs   = 2000   # one collector's own budget
   collectorTimeoutMs   = ${?VERIFY_COLLECTOR_TIMEOUT_MS}
+  # How long one asynchronous rule (an out-of-process policy engine, #225) may
+  # take to answer. Same budget and ceiling as one collector; overrun = deny.
+  ruleTimeoutMs = 2000
+  ruleTimeoutMs = ${?VERIFY_RULE_TIMEOUT_MS}
   collectorDeadlineMs  = 5000   # the whole fan-out, per pipeline
   collectorDeadlineMs  = ${?VERIFY_COLLECTOR_DEADLINE_MS}
   collectorConcurrency = 8      # collectors in flight at once

@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
+## [Unreleased]
+
+### Added
+
+- **Asynchronous rules** (`@o3co/auth.policy-verifier.core`, `.server`,
+  [#225](https://github.com/o3co/auth.policy-verifier/issues/225)). An
+  out-of-process policy engine cannot be a `Rule`: `verify` is synchronous and,
+  by contract, does no I/O. `AsyncRule` — `decide(attrs, signal):
+  Promise<boolean>` — is the additive form: the same `ruleType` grouping, the
+  same `code` / `message`, the same report in the decision's `reason`, and the
+  same rule that the answer be a function of `attrs` alone (the purity
+  conformance suite asks `decide` exactly as it asks `verify`). What it may do
+  is I/O, under a deadline. Core gains `RuleTimeoutError`,
+  `DEFAULT_RULE_TIMEOUT_MS` and `resolveRuleTimeoutMs`; `RuleCollector.collect`
+  and `RulePipeline.collect` return `AnyRule[]`. The server gains
+  `verify.ruleTimeoutMs` (default 2000 ms, one reader at both boundaries),
+  answering `403 rule_timeout` when a rule overruns it. Every existing rule and
+  config reads as before. Written up in `docs/extending.md`, "Writing an
+  asynchronous rule". The Cedar HTTP engine that motivates it follows in a
+  separate change.
+
+### Changed
+
+- **BREAKING: `evaluate()` is asynchronous** (`@o3co/auth.policy-verifier.core`,
+  [#225](https://github.com/o3co/auth.policy-verifier/issues/225)). It takes
+  `AnyRule[]` and returns `Promise<Decision>`; `EvaluateOptions` gains
+  `ruleTimeoutMs` and `signal`. A synchronous rule is asked through `verify` as
+  before, an `AsyncRule` is awaited through `decide` under `ruleTimeoutMs`, one
+  at a time in collection order, and the alternatives after a group's first
+  pass never run whichever kind they are. There is one evaluator rather than a
+  synchronous one beside an asynchronous one: a synchronous evaluator proved
+  only that its input held no asynchronous rule, which nothing needed proving,
+  and the pair cost a second code path and a "wrong function" failure mode.
+  Callers `await` the result; nothing else changes.
+
 ## [0.9.0] - 2026-09-10
 
 ### Added

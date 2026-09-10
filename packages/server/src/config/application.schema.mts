@@ -20,6 +20,7 @@ import {
 	DEFAULT_MAX_CONTEXT_ENTRIES,
 	DEFAULT_MAX_CONTEXT_VALUE_LENGTH,
 	DEFAULT_MAX_RESOURCE_LENGTH,
+	DEFAULT_RULE_TIMEOUT_MS,
 } from "./defaults.mjs";
 import {
 	checkTokenAuthenticatorSelection,
@@ -564,6 +565,8 @@ export const AppConfigSchema = z.object({
 			 * core for why a partial answer is never the safe one.
 			 */
 			collectorTimeoutMs: boundedNumber(NUMERIC_BOUNDS.collectorTimeoutMs, "verify"),
+			/** How long one asynchronous rule may take to answer (#225); same bound as a collector. */
+			ruleTimeoutMs: boundedNumber(NUMERIC_BOUNDS.ruleTimeoutMs, "verify"),
 			collectorDeadlineMs: boundedNumber(NUMERIC_BOUNDS.collectorDeadlineMs, "verify"),
 			collectorConcurrency: boundedNumber(NUMERIC_BOUNDS.collectorConcurrency, "verify"),
 			/**
@@ -610,6 +613,7 @@ export const AppConfigSchema = z.object({
 			maxContextEntries: DEFAULT_MAX_CONTEXT_ENTRIES,
 			maxContextValueLength: DEFAULT_MAX_CONTEXT_VALUE_LENGTH,
 			collectorTimeoutMs: DEFAULT_COLLECTOR_TIMEOUT_MS,
+			ruleTimeoutMs: DEFAULT_RULE_TIMEOUT_MS,
 			collectorDeadlineMs: DEFAULT_COLLECT_DEADLINE_MS,
 			collectorConcurrency: DEFAULT_COLLECTOR_CONCURRENCY,
 			batchConcurrency: DEFAULT_BATCH_CONCURRENCY,
