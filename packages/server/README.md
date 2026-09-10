@@ -79,7 +79,8 @@ type VerifyRouterJwtConfig =
       algorithms: string[];
       issuer: string | string[];    // RFC 9068 §4 iss
       audience: string | string[];  // RFC 9068 §4 aud
-      tokenType: string;            // accepted typ header, e.g. "at+jwt"
+      audienceClaim?: string;       // claim the audience is read from; default "aud" (#219)
+      tokenType: string;            // accepted typ header, e.g. "at+jwt"; "*" pins nothing
     })
   | (JwtTimeClaimConfig & { validate: false; allowInsecureDecode: true });
 
@@ -91,7 +92,7 @@ Returns an Express Router that handles `POST /verify` and `POST /verify/batch`. 
 Request flow:
 
 1. Hand the `Authorization` header to the authenticator. The built-in one (`jwt`) extracts `Bearer <token>` and returns 401 if it is missing or the scheme is not Bearer; an `authenticator` supplied directly answers with its own `code` / `message`, and steps 2–4 are its business.
-2. If `validate` is `true`: verify the signature **and** the RFC 9068 §4 claims — `iss` against `issuer`, `aud` against `audience`, and the `typ` header against `tokenType` (an `application/` prefix is ignored). Returns 401 on failure. `createVerifyRouter` throws if any of the three is missing.
+2. If `validate` is `true`: verify the signature **and** the RFC 9068 §4 claims — `iss` against `issuer`, the audience claim (`aud`, or the claim `audienceClaim` names) against `audience`, and the `typ` header against `tokenType` (an `application/` prefix is ignored; `"*"` pins nothing). Returns 401 on failure. `createVerifyRouter` throws if any of the three is missing.
 3. If `validate` is `false`: decode the JWT without verification. Returns 401 if the token is malformed.
 4. Either way, enforce the token's own lifetime: `exp` and `iat` are **required** (a token that never states an expiry never expires), `nbf` is honoured when present, `exp` must be in the future, and `now - iat` must not exceed `maxTokenAgeSeconds` — which is what refuses a token whose issuer set `exp` years out. `clockToleranceSeconds` widens every one of those comparisons. Returns 401 on failure. The decode-only path restates these checks by hand rather than skipping them, so both modes answer the same for the same token.
 5. Parse `req.body.resource` with `resourceParser`; read `req.body.action` and `req.body.context`.

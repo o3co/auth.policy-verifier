@@ -200,6 +200,18 @@ collector writing `permissions` / `roles` in the same edit.
 | `StaticPermissionCollector` / `StaticRoleCollector` | config constants | `permissions` / `roles` |
 | `RequestContextAttributeCollector` | declared fields of the request `context` | the operator's own keys |
 
+## Accepting tokens from an external IdP
+
+The built-in bearer-JWT path is pinned to RFC 9068 as [auth.provider](https://github.com/o3co/auth.provider) emits it — `iss`, `aud`, an `at+jwt` header — and most external IdPs deviate from one of those. Two knobs cover the common shapes without a custom authenticator; when they do not, register one (see [docs/extending.md — Writing a token authenticator](docs/extending.md#writing-a-token-authenticator)).
+
+| IdP token | what differs | `oauth.jwt` |
+| --- | --- | --- |
+| Clerk session token | no `aud`; the app is bound in `azp`; `typ: JWT` | `algorithm = RS256`, `jwksUri = https://<frontend-api>/.well-known/jwks.json`, `issuer = https://<frontend-api>`, `audienceClaim = "azp"`, `audience = "https://app.example"`, `tokenType = "JWT"` |
+| Okta custom authorization server | `typ` is `JWT`; scopes are the `scp` array | `algorithm = RS256`, `jwksUri = https://<org>.okta.com/oauth2/<as>/v1/keys`, `issuer` / `audience` as configured on the server, `tokenType = "JWT"`; read scopes from `scp` (see the collectors below) |
+| Cognito access token | no `typ` header; the app is bound in `client_id`, not `aud` | `algorithm = RS256`, `jwksUri = https://cognito-idp.<region>.amazonaws.com/<pool>/.well-known/jwks.json`, `audienceClaim = "client_id"`, `audience = "<app client id>"`, `tokenType = "*"` |
+
+`audienceClaim` moves the audience check to the named claim; it never removes it, and `audience` stays required, so a token minted for another app is still refused. `tokenType = "*"` is the explicit opt-out of pinning the `typ` header — with it set, the audience is the only thing telling an access token from an id_token signed with the same key, so pair it with an `audienceClaim` the other kind does not carry (Cognito's id_token carries `aud`, not `client_id`). Opaque tokens — Okta's org authorization server, Auth0 without an `audience` — cannot be verified locally at all and need an introspection authenticator.
+
 ## Configuration
 
 The `oauth` namespace (env prefix `OAUTH_JWT_*`) is this module's credential layer: how the verifier authenticates the subject before any rule runs. The verifier implements no OAuth flow — the name is a mapping, not a claim of ownership: the keys are deliberately symmetric with [auth.provider](https://github.com/o3co/auth.provider)'s `oauth { jwt { … } }`, so one deployment addresses both sides of the token boundary with one vocabulary. The claim-level half of that boundary is specified in the umbrella's [claims-contract](https://github.com/o3co/auth/blob/develop/docs/claims-contract.md); the keys here are the key-distribution half.
@@ -247,6 +259,9 @@ oauth {
     audience = ${?OAUTH_JWT_AUDIENCE}       # required when mode = "verify" — RFC 9068 §4 aud
     tokenType = "at+jwt"                     # accepted typ header
     tokenType = ${?OAUTH_JWT_TOKEN_TYPE}
+    # `tokenType = "*"` pins nothing — any typ, or none — for issuers whose tokens carry no typ header
+    audienceClaim = "aud"                    # claim the audience is read from: "azp" (Clerk), "client_id" (Cognito)
+    audienceClaim = ${?OAUTH_JWT_AUDIENCE_CLAIM}
     maxTokenAgeSeconds = 86400               # ceiling on now - iat; makes iat required
     clockToleranceSeconds = 0                # skew allowance, 0–300; 60 matches the provider
     mode = "verify"                          # "verify" (default) | "insecure-decode" (test-only)
