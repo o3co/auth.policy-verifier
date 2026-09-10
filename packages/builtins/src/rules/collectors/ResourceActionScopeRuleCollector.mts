@@ -5,7 +5,7 @@ import type { CollectorContext, Rule, RuleCollector } from "@o3co/auth.policy-ve
 import { DEFAULT_SCOPE_CLAIM, resolveClaimName } from "../../collectors/_claims.mjs";
 import { HasScope } from "../HasScope.mjs";
 
-/** How the collector treats a token that carries no `scope` claim. */
+/** How the collector treats a token that carries no scope claim (`scope`, or the configured `claim`). */
 export type ScopelessPolicy = "deny" | "skip";
 
 const SCOPELESS_POLICIES: readonly ScopelessPolicy[] = ["deny", "skip"];

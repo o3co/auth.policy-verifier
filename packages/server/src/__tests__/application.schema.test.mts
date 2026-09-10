@@ -1423,3 +1423,26 @@ describe("AppConfigSchema — audienceClaim and an unpinned typ (#219)", () => {
 		expect(config.oauth.jwt?.tokenType).toBe("*");
 	});
 });
+
+describe("AppConfigSchema — oauth.jwt is validated only for the built-in authenticator (#219 release audit)", () => {
+	it("carries a jwt block untouched when another authenticator is selected", () => {
+		const raw = { algorithm: "RS256", mode: "verify", note: "for the stub to read" };
+		const config = AppConfigSchema.parse({
+			oauth: { authenticator: "introspection", jwt: raw },
+			...baseBody,
+		});
+		expect(config.oauth.jwt).toEqual(raw);
+	});
+
+	it("still refuses a malformed audienceClaim in insecure-decode mode when jwt is selected", () => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: { mode: "insecure-decode", audienceClaim: 42 } },
+			...baseBody,
+		});
+		expect(result.success).toBe(false);
+		if (result.success) return;
+		expect(result.error.issues).toContainEqual(
+			expect.objectContaining({ path: ["oauth", "jwt", "audienceClaim"] }),
+		);
+	});
+});

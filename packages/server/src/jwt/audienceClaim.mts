@@ -49,10 +49,11 @@ export function checkAudienceClaim(value: unknown): AudienceClaimCheck {
 }
 
 /**
- * Whether a claim value satisfies the configured audience, by jose's own rule
- * for `aud` (RFC 7519 §4.1.3): a string equal to an accepted value, or an
- * array of strings containing one. Anything else — absent, a number, an array
- * with a non-string in it — does not.
+ * Whether a claim value satisfies the configured audience, at least as strict
+ * as jose's rule for `aud` (RFC 7519 §4.1.3): a string equal to an accepted
+ * value, or an array of strings containing one. Anything else — absent, a
+ * number, an array with a non-string in it (which jose would tolerate) — does
+ * not.
  */
 export function audienceMatches(value: unknown, accepted: string | readonly string[]): boolean {
 	const acceptedList = typeof accepted === "string" ? [accepted] : accepted;

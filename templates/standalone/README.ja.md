@@ -43,7 +43,9 @@ OAUTH_JWT_SECRET=$(openssl rand -hex 32) \
 | `OAUTH_JWT_JWKS_TIMEOUT_MS` | `5000` | JWKS 取得をこの時間で打ち切る |
 | `OAUTH_JWT_JWKS_COOLDOWN_MS` | `30000` | JWKS 再取得の最小間隔 |
 | `OAUTH_JWT_JWKS_CACHE_MAX_AGE_MS` | `600000` | 取得した JWKS をキャッシュから返す期間 |
-| `OAUTH_JWT_TOKEN_TYPE` | `at+jwt` | 受け入れる `typ` ヘッダ。同じ鍵で署名された id/refresh/logout token を拒否する |
+| `OAUTH_JWT_TOKEN_TYPE` | `at+jwt` | 受け入れる `typ` ヘッダ。同じ鍵で署名された id/refresh/logout token を拒否する。`*` で pin しない（その場合 `audience` を OIDC client id にしてはいけない） |
+| `OAUTH_JWT_AUDIENCE_CLAIM` | `aud` | audience を読む claim。`azp`（Clerk）、`client_id`（Cognito）。`aud` 以外を指定すると `aud` は一切見ない |
+| `OAUTH_AUTHENTICATOR` | `jwt` | subject を確立する token authenticator。他の名前は `main.mts` で module が登録したもの |
 | `OAUTH_JWT_MODE` | `verify` | `verify` はトークンを完全検証。明示的な `insecure-decode`（テスト専用）は署名検証なしでデコードする — `exp`/`nbf` は引き続き強制される |
 | `RULE_ON_EMPTY_RULE_SET` | `deny` | ルールが 1 つも集まらなかったときの決定（`deny` \| `allow`） |
 | `VERIFY_MAX_BATCH_SIZE` | `50` | `POST /verify/batch` の件数上限 |

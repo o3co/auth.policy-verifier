@@ -330,3 +330,25 @@ describe("RequestContextAttributeCollector — vocabulary another package reserv
 		expect(attrs.get("callerSuppliedResourceId")).toBe("someone-elses-doc");
 	});
 });
+
+describe("RequestContextAttributeCollector — an exact key wins over a dot path (#219 release audit)", () => {
+	it("reads a field whose name itself carries a dot", async () => {
+		const collector = new RequestContextAttributeCollector({
+			attributes: [{ from: "tenant.id", to: "tenantId" }],
+		});
+		const attrs = await collector.collect(makeContext({ "tenant.id": "flat" }));
+		expect(attrs.get("tenantId")).toBe("flat");
+	});
+
+	it("prefers the literal key when both spellings are present", async () => {
+		// Both spellings are the caller's, so nothing crosses a trust line; the
+		// precedence is pinned because it is a change on a shipped collector.
+		const collector = new RequestContextAttributeCollector({
+			attributes: [{ from: "tenant.id", to: "tenantId" }],
+		});
+		const attrs = await collector.collect(
+			makeContext({ "tenant.id": "flat", tenant: { id: "nested" } }),
+		);
+		expect(attrs.get("tenantId")).toBe("flat");
+	});
+});

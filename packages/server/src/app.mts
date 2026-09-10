@@ -173,7 +173,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 
 	// 6. Resolve the token authenticator (#219). `oauth.authenticator` names an
 	// entry in the registry the modules just filled — the built-in `"jwt"` was
-	// registered ahead of them in step 2 — and the selected factory is handed
+	// registered ahead of them in step 1 — and the selected factory is handed
 	// the whole `oauth` block plus the host's plumbing. Selection is read
 	// through the one function `AppConfigSchema` also uses, so a hand-built
 	// config gets the schema's verdict in the schema's words — see AGENTS.md,

@@ -1575,3 +1575,62 @@ describe("createApp — tokens shaped by external IdPs (#219)", () => {
 		expect(res.status).toBe(401);
 	});
 });
+
+describe("createApp — the audit's two-boundary rows (#219 release audit)", () => {
+	const decideConfig = {
+		attribute: { collectors: [{ collector: "TestScopeCollector" }] },
+		rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
+		resource: { parser: "SimpleParser" },
+	};
+
+	it("refuses a malformed audienceClaim in insecure-decode mode through the factory, as the schema does", async () => {
+		// The schema checks `audienceClaim` in every mode; the factory used to
+		// reach the guard only on the verify branch, so a decode-only config the
+		// schema refused booted through createApp — a second, undocumented
+		// carve-out of "Two-Boundary Config Validation".
+		const wire = { mode: "insecure-decode", audienceClaim: "" };
+		expect(AppConfigSchema.safeParse({ oauth: { jwt: wire }, ...decideConfig }).success).toBe(
+			false,
+		);
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: { ...testConfig, oauth: { jwt: wire } } as never,
+				modules: [testModule, builtinKeyResolversModule],
+			}),
+		).rejects.toThrow("createApp: oauth.jwt.audienceClaim must be a non-empty string");
+	});
+
+	it("boots another authenticator with a jwt block the built-in path would refuse — both boundaries carry it", async () => {
+		// A factory registered under another name may reuse `oauth.jwt` for
+		// its own, narrower needs; the built-in's iss/aud/typ invariants are
+		// not imposed on it. The schema now agrees with createApp about that.
+		const stub: Module<ServerModuleContext> = {
+			name: "stub-authenticator",
+			async init(context) {
+				context.tokenAuthenticatorRegistry.register("stub", async () => ({
+					async authenticate(header) {
+						const sub = header?.startsWith("Stub ") ? header.slice("Stub ".length) : "";
+						if (!sub) return { ok: false, code: "missing_token", message: "no stub credential" };
+						return { ok: true, subject: { sub, scope: "read:project" }, credential: sub };
+					},
+				}));
+			},
+		};
+		const config = AppConfigSchema.parse({
+			oauth: { authenticator: "stub", jwt: { algorithm: "RS256", mode: "verify" } },
+			...decideConfig,
+		});
+		expect(config.oauth.jwt).toEqual({ algorithm: "RS256", mode: "verify" });
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config,
+			modules: [testModule, builtinKeyResolversModule, stub],
+		});
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", "Stub user-1")
+			.send({ resource: "project", action: "read" });
+		expect(res.status).toBe(200);
+	});
+});

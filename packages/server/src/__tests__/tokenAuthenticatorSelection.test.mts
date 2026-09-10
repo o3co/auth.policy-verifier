@@ -115,6 +115,12 @@ describe("token authenticator selection — one reader at both boundaries (#219)
 			},
 		],
 		["an empty name", { authenticator: "", jwt: JWT_BLOCK }],
+		// A jwt block the built-in path would refuse is not the schema's business
+		// when another authenticator is selected: its factory reads it, or not.
+		[
+			"another authenticator, with a jwt block missing its secret",
+			{ authenticator: "introspection", jwt: { algorithm: "HS256", mode: "verify" } },
+		],
 	])("%s", (_label, oauth) => {
 		expect(schemaVerdict(oauth)).toEqual(checkVerdict(oauth));
 	});
