@@ -1674,4 +1674,20 @@ describe("createVerifyRouter — an already-built authenticator (#219)", () => {
 			"createVerifyRouter: exactly one of jwt or authenticator must be supplied",
 		);
 	});
+
+	it("refuses null for either, rather than reading it as absent", () => {
+		// The rule the `previousSecrets` `null` contract set (#147): a `null` in a
+		// hand-built config was produced rather than written, and reading it as
+		// "omitted" would let `{ jwt: null, authenticator }` mean something the
+		// caller never said. Refused by name, not as a TypeError off `.validate`.
+		for (const config of [
+			{ jwt: null, authenticator: stub, ...pipelines },
+			{ jwt, authenticator: null, ...pipelines },
+			{ jwt: null, ...pipelines },
+		]) {
+			expect(() => createVerifyRouter(config as unknown as VerifyRouterConfig)).toThrow(
+				"createVerifyRouter: jwt and authenticator are omitted rather than null",
+			);
+		}
+	});
 });
