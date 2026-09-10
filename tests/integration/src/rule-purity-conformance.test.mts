@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+// Registers the in-process Cedar engine; the collector refuses to start without one.
+import "@o3co/auth.policy-verifier.cedar-wasm";
+
 import {
 	ResourceActionPermissionRuleCollector,
 	ResourceActionScopeRuleCollector,
@@ -353,7 +356,7 @@ const cedarContext: CollectorRequest = {
 	action: "read",
 };
 
-const cedarCollector = new CedarPolicyRuleCollector({
+const cedarCollector = await CedarPolicyRuleCollector.create({
 	policies: `
 		permit(principal, action == Action::"read", resource) when { principal.dept == "eng" };
 		forbid(principal, action, resource) when { context.suspended == true };

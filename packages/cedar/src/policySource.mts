@@ -3,13 +3,22 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { checkParsePolicySet } from "@cedar-policy/cedar-wasm/nodejs";
 
-/** Where a policy set came from, for boot-time error messages. */
-export interface PolicySource {
-	/** Concatenated Cedar policy text, ready for `preparsePolicySet`. */
+/** One policy file as read, with where it came from for error messages. */
+export interface PolicyFile {
+	/** The resolved path, or `policies (inline)`. */
+	source: string;
+	/** The file's Cedar text, unmodified. */
 	text: string;
-	/** Human description of the source (`inline` or the resolved directory). */
+}
+
+/** A policy set as loaded, ready for a `CedarEngine` to parse and compile. */
+export interface PolicySource {
+	/** Every file, in the order `text` concatenates them. */
+	files: readonly PolicyFile[];
+	/** The concatenated Cedar policy text. */
+	text: string;
+	/** Human description of the source (`inline policies` or the resolved directory). */
 	description: string;
 }
 
@@ -23,13 +32,14 @@ export interface PolicySource {
  * validate the same files in CI. `policies` inlines a small set directly in
  * config.
  *
- * Every file is parse-checked individually before the set is accepted, so a
- * syntax error is reported against the file that contains it rather than
- * against an offset into an invisible concatenation. All of this runs at boot,
- * inside the collector factory: a broken policy set refuses to start, it does
- * not serve denials (two-boundary validation — config is checked before the
- * first request, here because file contents cannot be checked by the config
- * schema).
+ * Reading is this function's whole job; parsing is the engine's. The files
+ * are handed over individually (`files`) as well as concatenated (`text`) so
+ * that `CedarEngine.load` can parse-check each one and report a syntax error
+ * against the file that contains it rather than against an offset into an
+ * invisible concatenation. All of this runs at boot, inside the collector
+ * factory: a broken policy set refuses to start, it does not serve denials
+ * (two-boundary validation — config is checked before the first request, here
+ * because file contents cannot be checked by the config schema).
  *
  * A directory with zero `.cedar` files is allowed and yields the empty policy
  * set: that is migration step one — the collector mounted, abstaining on every
@@ -55,8 +65,11 @@ export function loadPolicySource(config: {
 				`CedarPolicyRuleCollector: policies must be a string, got ${typeof policies}`,
 			);
 		}
-		assertParses(policies, "policies (inline)");
-		return { text: policies, description: "inline policies" };
+		return {
+			files: [{ source: "policies (inline)", text: policies }],
+			text: policies,
+			description: "inline policies",
+		};
 	}
 
 	if (policyDir === undefined) {
@@ -76,30 +89,17 @@ export function loadPolicySource(config: {
 		throw new Error(`CedarPolicyRuleCollector: cannot read policyDir "${dir}": ${message(cause)}`);
 	}
 
-	const files = names.filter((name) => name.endsWith(".cedar")).sort();
-	const parts: string[] = [];
-	for (const name of files) {
+	const files: PolicyFile[] = [];
+	for (const name of names.filter((name) => name.endsWith(".cedar")).sort()) {
 		const path = resolve(dir, name);
-		let text: string;
 		try {
-			text = readFileSync(path, "utf8");
+			files.push({ source: path, text: readFileSync(path, "utf8") });
 		} catch (cause) {
 			throw new Error(`CedarPolicyRuleCollector: cannot read "${path}": ${message(cause)}`);
 		}
-		assertParses(text, path);
-		parts.push(text);
 	}
 
-	return { text: parts.join("\n"), description: dir };
-}
-
-/** Parse-checks one policy text, naming its source on failure. */
-function assertParses(text: string, source: string): void {
-	const answer = checkParsePolicySet({ staticPolicies: text });
-	if (answer.type === "failure") {
-		const details = answer.errors.map((error) => error.message).join("; ");
-		throw new Error(`CedarPolicyRuleCollector: ${source} failed to parse: ${details}`);
-	}
+	return { files, text: files.map((file) => file.text).join("\n"), description: dir };
 }
 
 function message(cause: unknown): string {

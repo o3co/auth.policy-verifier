@@ -11,6 +11,7 @@ import {
 	type PathResolver,
 	Registry,
 	type ResourceParserFactory,
+	type RuleCollector,
 	type RuleCollectorFactory,
 	RulePipeline,
 } from "@o3co/auth.policy-verifier.core";
@@ -162,10 +163,25 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	if (config.rule.collectors.length === 0) {
 		throw new Error("createApp: at least one rule collector must be configured (rule.collectors)");
 	}
-	const ruleCollectors = config.rule.collectors.map((entry) => {
-		const factory = ruleCollectorRegistry.get(entry.collector);
-		return factory(entry);
-	});
+	// A rule collector factory may be asynchronous (#225): a collector whose
+	// boot needs I/O — a policy set handed to an out-of-process engine —
+	// refuses to start here rather than deny every request. One at a time, in
+	// config order, so a boot failure names the entry that caused it.
+	const ruleCollectors: RuleCollector[] = [];
+	for (const [index, entry] of config.rule.collectors.entries()) {
+		try {
+			// The lookup is inside too: an unregistered name and a factory that
+			// refuses are the same event to an operator — this entry does not start.
+			const factory = ruleCollectorRegistry.get(entry.collector);
+			ruleCollectors.push(await factory(entry));
+		} catch (cause) {
+			const reason = cause instanceof Error ? cause.message : String(cause);
+			throw new Error(
+				`createApp: rule.collectors[${index}] (${entry.collector}) failed to start: ${reason}`,
+				{ cause },
+			);
+		}
+	}
 
 	// 5. Resolve resource parser from config
 	const resourceParserFactory = resourceParserRegistry.get(config.resource.parser);

@@ -130,7 +130,7 @@ A module registers attribute-collector, rule-collector, and resource-parser fact
 | `SubjectAttributes` | `{ readonly [key: string]: unknown }` — verified attributes of the subject, populated by the transport. Core names no field; under the default server the keys are the verified JWT's claims (`sub`, `azp`, `scope`, …) plus `authScheme` (the `Authorization` scheme the token arrived under, not a claim) |
 | `PathResolver` | `(specifier: string) => string` — resolves module-relative paths |
 | `AttributeCollectorFactory` | Factory function that produces an `AttributeCollector` from config |
-| `RuleCollectorFactory` | Factory function that produces a `RuleCollector` from config |
+| `RuleCollectorFactory` | Factory function that produces a `RuleCollector` from config — may return a `Promise`, for a collector whose boot needs I/O (#225); `createApp` awaits it |
 | `ResourceParserFactory` | Factory function that produces a `ResourceParser` from config |
 
 `KeyResolver` / `KeyResolverFactory` are not core types: they are token-credential plumbing and live in `@o3co/auth.policy-verifier.server` (#170).

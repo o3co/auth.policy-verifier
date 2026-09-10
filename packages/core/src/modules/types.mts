@@ -17,9 +17,14 @@ export type PathResolver = (specifier: string) => string;
 /** Produces an `AttributeCollector` from its HOCON config entry. */
 // biome-ignore lint/suspicious/noExplicitAny: collector constructors accept varied config shapes
 export type AttributeCollectorFactory = (config: any) => AttributeCollector;
-/** Produces a `RuleCollector` from its HOCON config entry. */
+/**
+ * Produces a `RuleCollector` from its HOCON config entry. May be asynchronous
+ * (#225): a collector whose boot needs I/O — a policy set handed to an
+ * out-of-process engine — refuses to start from inside the factory, which is
+ * where two-boundary validation puts it; `createApp` awaits every factory.
+ */
 // biome-ignore lint/suspicious/noExplicitAny: rule collector constructors accept varied config shapes
-export type RuleCollectorFactory = (config: any) => RuleCollector;
+export type RuleCollectorFactory = (config: any) => RuleCollector | Promise<RuleCollector>;
 /** Produces a `ResourceParser` from its HOCON config entry. */
 // biome-ignore lint/suspicious/noExplicitAny: resource parser constructors accept varied config shapes
 export type ResourceParserFactory = (config: any) => ResourceParser;

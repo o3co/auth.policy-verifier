@@ -27,6 +27,28 @@ and version sections follow the release labeling policy in
   asynchronous rule". The Cedar HTTP engine that motivates it follows in a
   separate change.
 
+- **`CedarEngine` port and the `cedar-wasm` package**
+  (`@o3co/auth.policy-verifier.cedar`, new `@o3co/auth.policy-verifier.cedar-wasm`,
+  [#225](https://github.com/o3co/auth.policy-verifier/issues/225)). Which
+  evaluator runs a Cedar policy set is a deployment decision, and it is now
+  made by dependency: `cedar` owns policy loading, the attribute-to-entity
+  mapping and the rule, and hands the request to whichever `CedarEngine` is
+  registered (`registerCedarEngine`, called at module scope by the package
+  that ships the engine; `resolveCedarEngine` and the collector's optional
+  `engine` key select one — absent, the first registered of `wasm`, `http`).
+  A synchronous policy set becomes a `Rule`, an asynchronous one an
+  `AsyncRule`; config, mapping and the answer table are identical across
+  engines. `@o3co/auth.policy-verifier.cedar-wasm` is the in-process engine
+  (`@cedar-policy/cedar-wasm`, unchanged behaviour), registered as `"wasm"`
+  by being imported; naming `engine = "wasm"` without the import refuses to
+  start, naming the package. `cedar` also exports the Cedar JSON vocabulary
+  (`CedarRequest`, `CedarEntity`, …) and `PolicySource` an engine receives.
+  An engine's `load` may be asynchronous — a remote engine takes the policy
+  set over the network — and a set that cannot be loaded still refuses to
+  start rather than deny every request: `CedarPolicyRuleCollector.create()`
+  awaits it, and core's `RuleCollectorFactory` may now return a `Promise`,
+  which `createApp` awaits (`@o3co/auth.policy-verifier.core`, `.server`).
+
 ### Changed
 
 - **BREAKING: `evaluate()` is asynchronous** (`@o3co/auth.policy-verifier.core`,
@@ -40,6 +62,17 @@ and version sections follow the release labeling policy in
   only that its input held no asynchronous rule, which nothing needed proving,
   and the pair cost a second code path and a "wrong function" failure mode.
   Callers `await` the result; nothing else changes.
+- **BREAKING: `@o3co/auth.policy-verifier.cedar` no longer bundles the
+  evaluator** ([#225](https://github.com/o3co/auth.policy-verifier/issues/225)).
+  It depends on no `@cedar-policy/cedar-wasm`; a deployment that evaluates
+  in-process adds `@o3co/auth.policy-verifier.cedar-wasm` and imports it —
+  `import "@o3co/auth.policy-verifier.cedar-wasm"` beside `cedarPolicyModule`
+  — and everything else reads as before. A `CedarPolicyRuleCollector`
+  constructed with no engine registered refuses to start, naming that package.
+  `CedarPolicyRuleCollector` is built with `await CedarPolicyRuleCollector.create(config)`
+  — the constructor is no longer public, because loading a policy set may be
+  asynchronous. `loadPolicySource` no longer parse-checks (the engine does, per
+  file, with the same messages) and returns `files` beside `text`.
 
 ## [0.9.0] - 2026-09-10
 

@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { CedarValueJson, Context, Entities, EntityUid } from "@cedar-policy/cedar-wasm/nodejs";
 import type { ReadonlyAttributes } from "@o3co/auth.policy-verifier.core";
 import { ATTR_USER_ID } from "@o3co/auth.policy-verifier.core";
+import type { CedarContext, CedarEntity, CedarEntityUid, CedarValue } from "./cedarJson.mjs";
 import {
 	ATTR_REQUEST_ACTION,
 	ATTR_REQUEST_RESOURCE_ID,
@@ -50,13 +50,18 @@ export interface ResolvedMapping {
 	context: Record<string, string>;
 }
 
-/** The request shape `statefulIsAuthorized` accepts, minus the preparsed id. */
+/**
+ * One authorization request in Cedar's JSON form, entities inline: what an
+ * engine's `isAuthorized` receives. Built per request from the attribute map
+ * by {@link buildCedarRequest}; the evaluator, wasm or remote, adds nothing
+ * but the policy set it was loaded with.
+ */
 export interface CedarRequest {
-	principal: EntityUid;
-	action: EntityUid;
-	resource: EntityUid;
-	context: Context;
-	entities: Entities;
+	principal: CedarEntityUid;
+	action: CedarEntityUid;
+	resource: CedarEntityUid;
+	context: CedarContext;
+	entities: CedarEntity[];
 }
 
 /**
@@ -120,8 +125,8 @@ export function buildCedarRequest(
 		optionalAttrString(attrs, mapping.resourceIdAttribute, "resource id") ??
 		mapping.resourceIdWhenAbsent;
 
-	const principal: EntityUid = { type: mapping.principalType, id: principalId };
-	const resource: EntityUid = { type: resourceType, id: resourceId };
+	const principal: CedarEntityUid = { type: mapping.principalType, id: principalId };
+	const resource: CedarEntityUid = { type: resourceType, id: resourceId };
 
 	return {
 		principal,
@@ -145,16 +150,25 @@ export function buildCedarRequest(
 
 /**
  * Converts one attribute value to a Cedar value. `undefined` means "cannot be
- * represented": non-integer numbers (Cedar `long` is integral), functions,
- * objects, arrays with an unrepresentable element. Callers omit such values —
- * see `buildCedarRequest` for why omission is the safe direction for
- * attributes.
+ * represented": `null` (Cedar has no null, and its JSON formats fail the whole
+ * request on one — see `CedarValue`), non-integer numbers (Cedar `long` is
+ * integral), functions, objects, arrays with an unrepresentable element.
+ * Callers omit such values — see `buildCedarRequest` for why omission is the
+ * safe direction for attributes.
+ *
+ * Objects are refused on purpose, although `CedarValue` can carry a record: in
+ * Cedar's JSON form an object is also where the `__entity` and `__extn`
+ * escapes live, so an attribute that arrived as an object — a caller-supplied
+ * `requestContext` field promoted by a collector — could name an entity
+ * reference the deployment never mapped, and `principal in Group::"admins"`
+ * would then be decided by the request body. Entity references are built by
+ * the mapping alone, from the `{ attribute, entityType }` form and a string.
  */
-function toCedarValue(value: unknown): CedarValueJson | undefined {
+function toCedarValue(value: unknown): CedarValue | undefined {
 	if (typeof value === "string" || typeof value === "boolean") return value;
 	if (typeof value === "number") return Number.isSafeInteger(value) ? value : undefined;
 	if (Array.isArray(value)) {
-		const out: CedarValueJson[] = [];
+		const out: CedarValue[] = [];
 		for (const item of value) {
 			const converted = toCedarValue(item);
 			if (converted === undefined) return undefined;
@@ -168,8 +182,8 @@ function toCedarValue(value: unknown): CedarValueJson | undefined {
 function buildEntityAttrs(
 	mappings: Record<string, AttributeMapping> | undefined,
 	attrs: ReadonlyAttributes,
-): Record<string, CedarValueJson> {
-	const out: Record<string, CedarValueJson> = {};
+): Record<string, CedarValue> {
+	const out: Record<string, CedarValue> = {};
 	if (mappings === undefined) return out;
 	for (const [cedarName, mapping] of Object.entries(mappings)) {
 		if (typeof mapping === "string") {
@@ -188,8 +202,8 @@ function buildEntityAttrs(
 function buildParents(
 	mappings: Record<string, string> | undefined,
 	attrs: ReadonlyAttributes,
-): EntityUid[] {
-	const parents: EntityUid[] = [];
+): CedarEntityUid[] {
+	const parents: CedarEntityUid[] = [];
 	if (mappings === undefined) return parents;
 	for (const [entityType, attrKey] of Object.entries(mappings)) {
 		const raw = attrs.get(attrKey);
@@ -207,8 +221,8 @@ function buildParents(
 	return parents;
 }
 
-function buildContext(mappings: Record<string, string>, attrs: ReadonlyAttributes): Context {
-	const context: Context = {};
+function buildContext(mappings: Record<string, string>, attrs: ReadonlyAttributes): CedarContext {
+	const context: CedarContext = {};
 	for (const [cedarKey, attrKey] of Object.entries(mappings)) {
 		const value = toCedarValue(attrs.get(attrKey));
 		if (value !== undefined) context[cedarKey] = value;

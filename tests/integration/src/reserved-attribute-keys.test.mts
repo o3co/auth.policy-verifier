@@ -12,6 +12,9 @@
  * situation a deployment is in.
  */
 
+// Registers the in-process Cedar engine; the collector refuses to start without one.
+import "@o3co/auth.policy-verifier.cedar-wasm";
+
 import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
 import {
 	ATTR_REQUEST_RESOURCE_ID,

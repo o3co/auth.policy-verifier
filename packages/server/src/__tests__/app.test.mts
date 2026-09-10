@@ -347,6 +347,56 @@ describe("createApp", () => {
 		).rejects.toThrow(/at least one rule collector/);
 	});
 
+	it("names the rule.collectors entry whose factory failed to start", async () => {
+		// A factory may be asynchronous (#225) and may refuse at boot — a policy
+		// set an out-of-process engine would not take. The refusal must say
+		// which entry, because the factory's own message need not.
+		const bootFailingModule: Module = {
+			name: "boot-failing-module",
+			async init(context) {
+				context.ruleCollectorRegistry.register("BootFailingRuleCollector", async () => {
+					throw new Error("policy engine refused the set");
+				});
+			},
+		};
+		const config = AppConfigSchema.parse({
+			oauth: { jwt: { secret: JWT_SECRET, mode: "verify", issuer: ISSUER, audience: AUDIENCE } },
+			attribute: { collectors: [{ collector: "TestScopeCollector" }] },
+			rule: {
+				collectors: [
+					{ collector: "TestScopeRuleCollector" },
+					{ collector: "BootFailingRuleCollector" },
+				],
+			},
+			resource: { parser: "SimpleParser" },
+		});
+
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config,
+				modules: [testModule, bootFailingModule, builtinKeyResolversModule],
+			}),
+		).rejects.toThrow(
+			/createApp: rule\.collectors\[1\] \(BootFailingRuleCollector\) failed to start: policy engine refused the set/,
+		);
+
+		// An unregistered name is the same event, in the same words.
+		const unregistered = AppConfigSchema.parse({
+			oauth: { jwt: { secret: JWT_SECRET, mode: "verify", issuer: ISSUER, audience: AUDIENCE } },
+			attribute: { collectors: [{ collector: "TestScopeCollector" }] },
+			rule: { collectors: [{ collector: "NoSuchRuleCollector" }] },
+			resource: { parser: "SimpleParser" },
+		});
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: unregistered,
+				modules: [testModule, builtinKeyResolversModule],
+			}),
+		).rejects.toThrow(/createApp: rule\.collectors\[0\] \(NoSuchRuleCollector\) failed to start: /);
+	});
+
 	it("denies with no_applicable_rule when the pipeline collects no rules", async () => {
 		const emptyRuleConfig = AppConfigSchema.parse({
 			oauth: { jwt: { secret: JWT_SECRET, mode: "verify", issuer: ISSUER, audience: AUDIENCE } },

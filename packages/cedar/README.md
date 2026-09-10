@@ -4,11 +4,17 @@ Co-resident [Cedar](https://www.cedarpolicy.com/) policy evaluation for
 [auth.policy-verifier](https://github.com/o3co/auth.policy-verifier), as an
 optional plugin package.
 
-The whole Cedar policy set is evaluated in-process (official
-`@cedar-policy/cedar-wasm`, ~15µs per decision, no network) and enters the
-engine's AND-evaluation as **one rule in one group**. TypeScript rule groups
-keep working beside it: TS collectors gather the facts, Cedar policies write
-judgment over them — **no entity store to build or sync**.
+The whole Cedar policy set is evaluated by a real Cedar evaluator and enters
+the engine's AND-evaluation as **one rule in one group**. TypeScript rule
+groups keep working beside it: TS collectors gather the facts, Cedar policies
+write judgment over them — **no entity store to build or sync**.
+
+Which evaluator is a deployment decision, made by dependency rather than by
+config: this package owns policy loading, the attribute-to-entity mapping and
+the rule, and hands the request to whichever `CedarEngine` is registered.
+[`@o3co/auth.policy-verifier.cedar-wasm`](../cedar-wasm/README.md) is the
+in-process one (official `@cedar-policy/cedar-wasm`, ~15µs per decision, no
+network); importing it is all it takes. See [Engines](#engines).
 
 This decouples policy language from PDP topology. Native logic stays
 TypeScript — no DSL is ever required — and a deployment that adopts Cedar here
@@ -20,6 +26,7 @@ into an embedded evaluator or a Cedar agent later. Design: [#185](https://github
 ```ts
 import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
 import { cedarPolicyModule } from "@o3co/auth.policy-verifier.cedar";
+import "@o3co/auth.policy-verifier.cedar-wasm"; // registers the in-process engine
 import { builtinKeyResolversModule, createApp } from "@o3co/auth.policy-verifier.server";
 
 const app = await createApp({
@@ -48,6 +55,10 @@ rule {
       # What the group answers when no policy determined the request.
       # "deny" is the default; see "No determining policy" below.
       onNoDeterminingPolicy = "deny"
+
+      # Which registered engine evaluates the set. Optional: absent, the
+      # preferred registered one — "wasm" whenever cedar-wasm is imported.
+      # engine = "wasm"
 
       principal {
         # type = "User"          # default
@@ -137,8 +148,59 @@ same way — see [docs/extending.md](../../docs/extending.md#the-trust-boundary-
   need an entity store; needing them is the signal to move to a full Cedar
   deployment, which the same `.cedar` files already fit.
 
+## Engines
+
+This package has no evaluator of its own. `CedarPolicyRuleCollector` loads the
+policy set, builds the Cedar request — principal, action, resource, context
+and the synthesized entities, inline — from the merged attributes, and hands
+both to a `CedarEngine`:
+
+```ts
+interface CedarEngine {
+  readonly name: string;                 // "wasm", "http", …
+  load(source: PolicySource): LoadedCedarPolicySet | Promise<LoadedCedarPolicySet>; // boot: parse-check and compile, or hand over
+}
+// A loaded set answers either synchronously (in-process) or asynchronously (over I/O):
+//   { async: false; isAuthorized(request): CedarDecision }
+//   { async: true;  isAuthorized(request, signal): Promise<CedarDecision> }
+```
+
+`load` may be asynchronous — a remote engine takes the policy set over the
+network — and a set that cannot be loaded still refuses to start: the
+collector's factory (`CedarPolicyRuleCollector.create`, what the module
+registers) awaits it, and `createApp` awaits the factory.
+
+The kind of policy set the engine returns decides the kind of rule the
+collector builds — a `Rule` asked through `verify`, or an `AsyncRule` asked
+through `decide` under the server's `verify.ruleTimeoutMs` — and nothing else
+changes: config, mapping, the answer table above and the `cedar_deny` the
+decision reports are identical across engines. Switching engines is a
+dependency change, not a config change (#225).
+
+An engine package registers itself when imported (`registerCedarEngine`, at
+module scope), and the collector picks one by its config `engine` key:
+
+| config `engine` | result |
+| --- | --- |
+| absent | the first registered of `wasm`, `http` — so `wasm` whenever `@o3co/auth.policy-verifier.cedar-wasm` is imported |
+| a registered name | that engine; an explicit choice wins over the preference |
+| `"wasm"`, package not imported | refuses to start, naming `@o3co/auth.policy-verifier.cedar-wasm` |
+| anything else | refuses to start, listing what is registered |
+
+The engines that ship today:
+
+| engine | package | runs | when |
+| --- | --- | --- | --- |
+| `wasm` | [`@o3co/auth.policy-verifier.cedar-wasm`](../cedar-wasm/README.md) | in-process, synchronous, ~15µs per decision; ~12 MB of wasm instantiated at import | the policy set is cheaper to evaluate than a loopback hop — most of them |
+
+A deployment that wants Cedar evaluated out of process — the policy set is
+large enough to compete with request handling, or the evaluator should scale
+and upgrade apart from the verifier — registers an asynchronous engine behind
+the same port and leaves the wasm package out; #225 tracks the HTTP one.
+
 ## Version pinning
 
-`@cedar-policy/cedar-wasm` is pinned exactly: Cedar minor releases can carry
-policy-language changes, so upgrades should be deliberate and re-validated,
-not fall out of a range resolution.
+The Cedar evaluator's version is the engine package's concern:
+`@o3co/auth.policy-verifier.cedar-wasm` pins `@cedar-policy/cedar-wasm`
+exactly, because Cedar minor releases can carry policy-language changes and
+upgrades should be deliberate. This package depends on no evaluator.
