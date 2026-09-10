@@ -152,7 +152,9 @@ describe("CedarPolicyRuleCollector — config validation", () => {
 		await expect(
 			CedarPolicyRuleCollector.create({ policies: PERMIT_ALL, engine: "opa" }),
 		).rejects.toThrow(
-			/CedarPolicyRuleCollector: engine "opa" is not a registered Cedar engine \(registered: wasm, fake-async\)/,
+			// "http" is registered by cedar's own entry point, which the scripted
+			// engine helper imports; the two fakes follow in registration order.
+			/CedarPolicyRuleCollector: engine "opa" is not a registered Cedar engine \(registered: http, wasm, fake-async\)/,
 		);
 	});
 });

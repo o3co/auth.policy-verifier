@@ -45,6 +45,14 @@ export interface CedarPolicyRuleCollectorConfig {
 	 * package that would register it. See `resolveCedarEngine`.
 	 */
 	engine?: string;
+	/**
+	 * HTTP engine only: the agent's base URL. Absent, `CEDAR_ENDPOINT`, else the
+	 * loopback default the template's compose service answers on. Plain
+	 * `http://` is accepted for loopback hosts only. See `cedarHttpEngine`.
+	 */
+	endpoint?: string;
+	/** HTTP engine only: the agent's `Authorization` value. Absent, `CEDAR_AUTHENTICATION`. */
+	authentication?: string;
 	/** Rule group the Cedar decision joins AND-evaluation as. Default `"cedar"`. */
 	ruleType?: string;
 	/**
@@ -197,19 +205,27 @@ export class CedarPolicyRuleCollector implements RuleCollector {
 		const engine = selectEngine(raw.engine);
 		const mapping: ResolvedMapping = resolveMapping(raw);
 		const source = loadPolicySource(raw);
+		const logger =
+			options?.logger ?? createConsoleLogger({ collector: "CedarPolicyRuleCollector" });
+
+		// Said out loud, once, at boot: which engine decides is a dependency
+		// choice rather than a config line, so an operator reading the config
+		// cannot see it — the log is where it shows.
+		logger.info(
+			{ engine: engine.name, policySet: source.description, files: source.files.length },
+			raw.engine === undefined
+				? "cedar engine selected by default"
+				: "cedar engine selected by config",
+		);
 
 		// Boot-time compile, by the engine: a set it cannot parse refuses to
 		// start here, with the engine's message naming the offending file.
 		let policySet: LoadedCedarPolicySet;
 		try {
-			policySet = await engine.load(source);
+			policySet = await engine.load(source, { config: raw, logger });
 		} catch (cause) {
 			throw new Error(`CedarPolicyRuleCollector: ${errorMessage(cause)}`);
 		}
-
-		const logger = logEvaluationErrors
-			? (options?.logger ?? createConsoleLogger({ collector: "CedarPolicyRuleCollector" }))
-			: undefined;
 
 		return new CedarPolicyRuleCollector(
 			buildRule({
@@ -219,7 +235,7 @@ export class CedarPolicyRuleCollector implements RuleCollector {
 				policySet,
 				policySource: source.description,
 				mapping,
-				logger,
+				logger: logEvaluationErrors ? logger : undefined,
 			}),
 		);
 	}

@@ -18,7 +18,9 @@ describe("the wasm engine is registered by loading the package", () => {
 		// visible here.
 		const cedar = await import("@o3co/auth.policy-verifier.cedar");
 		expect(cedar.registeredCedarEngines()).not.toContain("wasm");
-		expect(() => cedar.resolveCedarEngine()).toThrow(/@o3co\/auth\.policy-verifier\.cedar-wasm/);
+		// Without this package, the default is the out-of-process engine cedar
+		// itself registers; naming "wasm" refuses, naming this package.
+		expect(cedar.resolveCedarEngine()).toBe(cedar.cedarHttpEngine);
 		expect(() => cedar.resolveCedarEngine("wasm")).toThrow(
 			/@o3co\/auth\.policy-verifier\.cedar-wasm/,
 		);
@@ -26,7 +28,9 @@ describe("the wasm engine is registered by loading the package", () => {
 		const wasm = await import("../index.mjs");
 
 		expect(cedar.registeredCedarEngines()).toContain("wasm");
+		// Imported, the in-process engine wins the default; "http" stays selectable by name.
 		expect(cedar.resolveCedarEngine()).toBe(wasm.cedarWasmEngine);
+		expect(cedar.resolveCedarEngine("http")).toBe(cedar.cedarHttpEngine);
 		expect(cedar.resolveCedarEngine("wasm")).toBe(wasm.cedarWasmEngine);
 		expect(wasm.cedarWasmEngine.name).toBe(wasm.CEDAR_WASM_ENGINE_NAME);
 	});
