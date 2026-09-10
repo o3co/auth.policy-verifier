@@ -213,6 +213,12 @@ http {
 }
 
 oauth {
+  # Which token authenticator establishes the subject. "jwt" (the default)
+  # is the built-in bearer-JWT path configured by the block below; any other
+  # name must have been registered by a module — see docs/extending.md,
+  # "Writing a token authenticator". With another name, `jwt` may be omitted.
+  authenticator = "jwt"
+  authenticator = ${?OAUTH_AUTHENTICATOR}
   jwt {
     algorithm = "HS256"           # HS256 | RS256 | ES256 | EdDSA
     algorithm = ${?OAUTH_JWT_ALGORITHM}

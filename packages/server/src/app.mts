@@ -15,20 +15,21 @@ import {
 	RulePipeline,
 } from "@o3co/auth.policy-verifier.core";
 import express from "express";
-import {
-	type AppConfig,
-	JWT_MODE_MIGRATION_MESSAGE,
-	JWT_MODE_REMOVED_KEYS,
-} from "./config/application.schema.mjs";
+import type { AppConfig } from "./config/application.schema.mjs";
+import { assertConfigObject } from "./config/assertConfigObject.mjs";
 import { NUMERIC_BOUNDS, resolveBound } from "./config/bounds.mjs";
 import { CALLER_AUTH_REQUIRED } from "./config/defaults.mjs";
-import { createCallerAuthMiddleware, resolveCallerAuth } from "./http/callerAuth.mjs";
-import type { KeyResolverFactory, ServerModuleContext } from "./jwt/keyResolver.mjs";
 import {
-	assertVerifyRouterJwtConfig,
-	resolveJwtTimeClaimBounds,
-	type VerifyRouterJwtConfig,
-} from "./jwt/tokenAuthenticator.mjs";
+	checkTokenAuthenticatorSelection,
+	JWT_TOKEN_AUTHENTICATOR,
+} from "./config/tokenAuthenticatorSelection.mjs";
+import { createCallerAuthMiddleware, resolveCallerAuth } from "./http/callerAuth.mjs";
+import { JwtTokenAuthenticatorFactory } from "./jwt/jwtTokenAuthenticatorFactory.mjs";
+import type {
+	KeyResolverFactory,
+	ServerModuleContext,
+	TokenAuthenticatorFactory,
+} from "./jwt/keyResolver.mjs";
 import { isLoopbackBindAddress } from "./net/loopback.mjs";
 import { createMetrics } from "./observability/metrics.mjs";
 import { createHealthcheckRouter } from "./routes/healthcheck.mjs";
@@ -54,23 +55,6 @@ export interface CreateAppOptions {
 }
 
 /**
- * Asserts that a config block a hand-built config supplies is actually an
- * object, so the checks that follow can index into it. `createApp` accepts
- * config objects that never went through `AppConfigSchema`, and a JavaScript
- * caller can put anything at a given path; without this the first `in` test or
- * object spread throws a bare `TypeError` naming neither the boundary nor the
- * path the operator wrote. Arrays are rejected too: indexable, but never a
- * valid config block.
- */
-function assertConfigObject(value: unknown, path: string): asserts value is object {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) {
-		throw new Error(
-			`createApp: ${path} must be a config object, got ${value === null ? "null" : Array.isArray(value) ? "array" : typeof value}`,
-		);
-	}
-}
-
-/**
  * Where the liveness probe answers, under `config.http.pathPrefix`.
  *
  * `/_healthcheck` is the canonical path: the one every component of the stack
@@ -87,7 +71,7 @@ const LIVENESS_PATHS = ["/_healthcheck", "/healthcheck"] as const;
  *
  * Flow: (1) create registries, (2) run `mod.init` sequentially so later modules
  * can see earlier ones' registrations, (3) resolve concrete collectors /
- * resource parser / key resolver from config, (4) mount the liveness probe
+ * resource parser / token authenticator from config, (4) mount the liveness probe
  * (`LIVENESS_PATHS`), the optional caller-auth gate and the `/verify` router
  * under the configured path prefix.
  *
@@ -95,6 +79,10 @@ const LIVENESS_PATHS = ["/_healthcheck", "/healthcheck"] as const;
  * decision work runs (#108). It is optional in this release; the liveness probe
  * is never gated. See `CALLER_AUTH_REQUIRED` in `config/defaults` for the
  * one-line change that makes it mandatory.
+ *
+ * `config.oauth.authenticator` selects how the subject is authenticated (#219):
+ * `"jwt"` (the default) is the built-in bearer-JWT path below; any other name
+ * must have been registered by a module on `tokenAuthenticatorRegistry`.
  *
  * `config.oauth.jwt.mode = "insecure-decode"` disables signature verification
  * and only decodes the token (the time claims are still enforced in full —
@@ -113,6 +101,13 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	const ruleCollectorRegistry = new Registry<RuleCollectorFactory>();
 	const resourceParserRegistry = new Registry<ResourceParserFactory>();
 	const keyResolverRegistry = new Registry<KeyResolverFactory>();
+	const tokenAuthenticatorRegistry = new Registry<TokenAuthenticatorFactory>();
+	// The built-in authenticator is the host's, not a module's (#219): registered
+	// before any module runs, so it is always selectable, and — the registry
+	// refusing a second registration — never silently replaced. A deployment
+	// that authenticates another way registers under another name and selects
+	// it with `oauth.authenticator`.
+	tokenAuthenticatorRegistry.register(JWT_TOKEN_AUTHENTICATOR, JwtTokenAuthenticatorFactory);
 
 	// 2. Initialize modules — each registers factory functions
 	const context: ServerModuleContext = {
@@ -122,6 +117,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 		ruleCollectorRegistry,
 		resourceParserRegistry,
 		keyResolverRegistry,
+		tokenAuthenticatorRegistry,
 	};
 
 	for (const mod of modules) {
@@ -175,69 +171,29 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	const resourceParserFactory = resourceParserRegistry.get(config.resource.parser);
 	const resourceParser = resourceParserFactory(config.resource);
 
-	// 6. Map the wire `oauth.jwt.mode` onto the router's internal discriminated
-	// union (#134). AppConfigSchema already enforces the wire invariants (the
-	// mode enum, iss/aud/typ presence, rejection of the removed keys) for
-	// schema-validated configs; everything is re-checked here (#106) — see
-	// AGENTS.md, "Two-Boundary Config Validation" — with this boundary's field
-	// paths, so the operator is pointed at the oauth.jwt.* key they actually
-	// wrote.
-	//
-	// Shape first: a hand-built config can carry anything at these paths, and
-	// the key checks below reach into the block with `in` and object spread,
-	// which throw a bare TypeError on a primitive. Report a malformed block like
-	// every other boundary failure instead of leaking that TypeError.
+	// 6. Resolve the token authenticator (#219). `oauth.authenticator` names an
+	// entry in the registry the modules just filled — the built-in `"jwt"` was
+	// registered ahead of them in step 2 — and the selected factory is handed
+	// the whole `oauth` block plus the host's plumbing. Selection is read
+	// through the one function `AppConfigSchema` also uses, so a hand-built
+	// config gets the schema's verdict in the schema's words — see AGENTS.md,
+	// "Two-Boundary Config Validation". Shape-checked first for the reason
+	// `http` is below: `createApp` accepts configs that never met the schema.
 	assertConfigObject(config.oauth, "oauth");
-	assertConfigObject(config.oauth.jwt, "oauth.jwt");
-	const jwtWire = config.oauth.jwt;
-	for (const staleKey of JWT_MODE_REMOVED_KEYS) {
-		if (staleKey in jwtWire) {
-			// A pre-#134 config must not be silently reinterpreted: a defaulted
-			// mode would mean verify even where the operator had opted into
-			// decode-only. Fail with the same migration message the schema emits.
-			throw new Error(`createApp: ${JWT_MODE_MIGRATION_MESSAGE}`);
-		}
+	const selection = checkTokenAuthenticatorSelection(config.oauth);
+	if (!selection.ok) {
+		throw new Error(`createApp: ${selection.message}`);
 	}
-	// Hand-built configs may omit `mode`; they get the schema's default (verify).
-	const mode: unknown = (jwtWire as { mode?: unknown }).mode ?? "verify";
-	// Ahead of the mode split, because the token lifetime bounds (#110) apply in
-	// both modes — the decode path restates them by hand rather than skipping
-	// them — and resolving here is what lets a bad value be reported against the
-	// `oauth.jwt.*` key the operator actually wrote.
-	const timeClaims = resolveJwtTimeClaimBounds(jwtWire, "oauth.jwt");
-	const bounds = {
-		maxTokenAgeSeconds: timeClaims.maxTokenAge,
-		clockToleranceSeconds: timeClaims.clockTolerance,
-	};
-	let jwt: VerifyRouterJwtConfig;
-	if (mode === "verify") {
-		const verifying = { ...jwtWire, validate: true as const };
-		assertVerifyRouterJwtConfig(verifying, {
-			caller: "createApp",
-			path: "oauth.jwt",
-			verifyCondition: 'oauth.jwt.mode is "verify"',
-		});
-		const keyResolver = await keyResolverRegistry.get(jwtWire.algorithm)(jwtWire);
-		jwt = {
-			validate: true,
-			key: keyResolver.key,
-			algorithms: keyResolver.algorithms,
-			issuer: verifying.issuer,
-			audience: verifying.audience,
-			tokenType: verifying.tokenType,
-			...bounds,
-		};
-	} else if (mode === "insecure-decode") {
-		// The mode string is the consent — see the schema's `mode` doc comment.
-		jwt = { validate: false, allowInsecureDecode: true, ...bounds };
-		// error, not warn: a deployment that reaches this line accepts unsigned
-		// tokens, and a fleet filtering at level=error must still see it (#106).
-		logger.error({ mode: "insecure-decode" }, "jwt_validation_disabled");
-	} else {
+	if (!tokenAuthenticatorRegistry.has(selection.name)) {
 		throw new Error(
-			`createApp: oauth.jwt.mode must be "verify" or "insecure-decode", got ${JSON.stringify(mode)}`,
+			`createApp: oauth.authenticator names ${JSON.stringify(selection.name)}, but no module ` +
+				"registered a token authenticator under that name",
 		);
 	}
+	const authenticator = await tokenAuthenticatorRegistry.get(selection.name)(config.oauth, {
+		logger,
+		keyResolverRegistry,
+	});
 
 	// 7. Resolve caller authentication (#108). The bearer token establishes the
 	// subject a decision is about; it never establishes which service supplied
@@ -325,7 +281,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	app.use(
 		prefix,
 		createVerifyRouter({
-			jwt,
+			authenticator,
 			logger,
 			metrics: metrics.decisions,
 			resourceParser,

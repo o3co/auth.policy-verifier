@@ -15,6 +15,8 @@ import {
 	builtinKeyResolversModule,
 	createApp,
 	JWT_MODE_MIGRATION_MESSAGE,
+	type ServerModuleContext,
+	type TokenAuthenticatorDependencies,
 } from "#/index.mjs";
 
 /** 64 hex characters — 32 decoded bytes, the entropy floor #114 enforces. */
@@ -229,7 +231,10 @@ describe("createApp", () => {
 		// A consumer that omits `mode` gets the schema's default (verify) at this
 		// boundary too, and the guard's message names the wire key the operator
 		// would have to write — not the internal `validate` discriminant (#134).
-		const { mode: _mode, ...noMode } = testConfig.oauth.jwt;
+		// `oauth.jwt` is optional on the parsed type since #219; this fixture has it.
+		const { mode: _mode, ...noMode } = testConfig.oauth.jwt as NonNullable<
+			typeof testConfig.oauth.jwt
+		>;
 		const handBuilt = {
 			...testConfig,
 			oauth: { jwt: { ...noMode, issuer: undefined } },
@@ -576,7 +581,9 @@ describe("createApp insecure decode mode (#106, #134)", () => {
 	// reported like every other boundary error, naming the config path.
 	it.each([
 		["null", null],
-		["undefined", undefined],
+		// An absent block is no longer a malformed one: with `oauth.authenticator`
+		// defaulting to "jwt" it is a required key, refused by the selection check
+		// (#219) — pinned under "token authenticator registry" below.
 		["a string", "verify"],
 		["a number", 1],
 		["a boolean", true],
@@ -1257,5 +1264,186 @@ describe("createApp — collector bounds, one reader at both boundaries (#115)",
 
 	it("defaults when the bounds are absent", async () => {
 		expect(await refusal(() => buildApp({}))).toBeUndefined();
+	});
+});
+
+describe("createApp — token authenticator registry (#219)", () => {
+	const decideConfig = {
+		attribute: { collectors: [{ collector: "TestScopeCollector" }] },
+		rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
+		resource: { parser: "SimpleParser" },
+	};
+
+	/** What a factory was handed, captured so the test can see the host's side of the port. */
+	interface Seen {
+		oauth?: unknown;
+		deps?: TokenAuthenticatorDependencies;
+	}
+
+	/**
+	 * A module contributing an authenticator that has nothing to do with JWTs:
+	 * `Authorization: Stub <sub>` becomes a subject bag. It is the shape an
+	 * RFC 7662 introspection or IdP-SDK authenticator would take — the port is
+	 * the same `TokenAuthenticator` the built-in JWT path implements.
+	 */
+	const stubAuthenticatorModule = (seen: Seen): Module<ServerModuleContext> => ({
+		name: "stub-authenticator",
+		async init(context) {
+			context.tokenAuthenticatorRegistry.register("stub", async (oauth, deps) => {
+				seen.oauth = oauth;
+				seen.deps = deps;
+				return {
+					async authenticate(header) {
+						const sub = header?.startsWith("Stub ") ? header.slice("Stub ".length) : "";
+						if (!sub) {
+							return { ok: false, code: "missing_token", message: "no stub credential" };
+						}
+						return { ok: true, subject: { sub, scope: "read:project" }, credential: sub };
+					},
+				};
+			});
+		},
+	});
+
+	it("resolves oauth.authenticator through the registry and boots with no oauth.jwt block", async () => {
+		const seen: Seen = {};
+		const config = AppConfigSchema.parse({
+			oauth: { authenticator: "stub", stub: { upstream: "https://idp.test" } },
+			...decideConfig,
+		});
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config,
+			modules: [testModule, builtinKeyResolversModule, stubAuthenticatorModule(seen)],
+		});
+
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", "Stub user-1")
+			.send({ resource: "project", action: "read" });
+
+		expect(res.status).toBe(200);
+		expect(res.body.decision).toBe("allow");
+		expect(res.body.subject).toBe("user-1");
+		// The factory sees the whole `oauth` block — its own sub-block included —
+		// and the host's plumbing, so an authenticator that verifies JWTs of its
+		// own can reuse the configured key resolvers rather than re-implement them.
+		expect(seen.oauth).toMatchObject({
+			authenticator: "stub",
+			stub: { upstream: "https://idp.test" },
+		});
+		expect(seen.deps?.keyResolverRegistry.has("HS256")).toBe(true);
+		expect(typeof seen.deps?.logger.warn).toBe("function");
+	});
+
+	it("answers 401 with the authenticator's own refusal, on both endpoints", async () => {
+		const config = AppConfigSchema.parse({ oauth: { authenticator: "stub" }, ...decideConfig });
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config,
+			modules: [testModule, builtinKeyResolversModule, stubAuthenticatorModule({})],
+		});
+		for (const [path, body] of [
+			["/verify", { resource: "project", action: "read" }],
+			["/verify/batch", { decisions: [{ resource: "project", action: "read" }] }],
+		] as const) {
+			const res = await request(app).post(path).send(body);
+			expect(res.status).toBe(401);
+			expect(res.body.code).toBe("missing_token");
+			expect(res.body.message).toBe("no stub credential");
+		}
+	});
+
+	it("keeps jwt as the default when a hand-built config omits oauth.authenticator", async () => {
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: { ...testConfig, oauth: { jwt: testConfig.oauth.jwt } } as never,
+			modules: [testModule, builtinKeyResolversModule],
+		});
+		const token = await signToken({ scope: "read:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project", action: "read" });
+		expect(res.status).toBe(200);
+	});
+
+	it('refuses oauth.authenticator = "jwt" without an oauth.jwt block, naming the key', async () => {
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: { ...testConfig, oauth: { authenticator: "jwt" } } as never,
+				modules: [testModule, builtinKeyResolversModule],
+			}),
+		).rejects.toThrow('createApp: oauth.jwt is required when oauth.authenticator is "jwt"');
+	});
+
+	it("refuses an empty oauth.authenticator", async () => {
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: { ...testConfig, oauth: { authenticator: "", jwt: testConfig.oauth.jwt } } as never,
+				modules: [testModule, builtinKeyResolversModule],
+			}),
+		).rejects.toThrow("createApp: oauth.authenticator must be a non-empty string");
+	});
+
+	it("refuses at boot an authenticator no module registered, naming the key and the value", async () => {
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: { ...testConfig, oauth: { authenticator: "introspection" } } as never,
+				modules: [testModule, builtinKeyResolversModule],
+			}),
+		).rejects.toThrow(
+			'createApp: oauth.authenticator names "introspection", but no module registered a token authenticator under that name',
+		);
+	});
+
+	it("registers the built-in jwt authenticator before any module runs, so a module cannot replace it", async () => {
+		const replacing: Module<ServerModuleContext> = {
+			name: "replacing",
+			async init(context) {
+				context.tokenAuthenticatorRegistry.register("jwt", async () => ({
+					async authenticate() {
+						return { ok: true, subject: {}, credential: "" };
+					},
+				}));
+			},
+		};
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: testConfig,
+				modules: [testModule, builtinKeyResolversModule, replacing],
+			}),
+		).rejects.toThrow(/"jwt" is already registered/);
+	});
+
+	it("still refuses the removed wire keys and an unknown mode through the built-in jwt factory", async () => {
+		// The step that mapped `oauth.jwt` onto the router moved behind the
+		// factory; its refusals must read exactly as before (#134).
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: {
+					...testConfig,
+					oauth: { jwt: { ...testConfig.oauth.jwt, [JWT_MODE_REMOVED_KEYS[0]]: false } },
+				} as never,
+				modules: [testModule, builtinKeyResolversModule],
+			}),
+		).rejects.toThrow(`createApp: ${JWT_MODE_MIGRATION_MESSAGE}`);
+		await expect(
+			createApp({
+				pathResolver: (s: string) => s,
+				config: {
+					...testConfig,
+					oauth: { jwt: { ...testConfig.oauth.jwt, mode: "maybe" } },
+				} as never,
+				modules: [testModule, builtinKeyResolversModule],
+			}),
+		).rejects.toThrow(
+			'createApp: oauth.jwt.mode must be "verify" or "insecure-decode", got "maybe"',
+		);
 	});
 });

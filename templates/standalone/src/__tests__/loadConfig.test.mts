@@ -89,12 +89,12 @@ describe("loadAppConfig", () => {
 				pathPrefix: "",
 				callerAuth: { header: "x-caller-token" },
 			});
-			expect(config.oauth.jwt.algorithm).toBe("HS256");
-			expect(config.oauth.jwt.secret).toBe(TEST_SECRET);
-			expect(config.oauth.jwt.mode).toBe("verify");
-			expect(config.oauth.jwt.issuer).toBe("https://issuer.test");
-			expect(config.oauth.jwt.audience).toBe("https://api.test");
-			expect(config.oauth.jwt.tokenType).toBe("at+jwt");
+			expect(config.oauth.jwt?.algorithm).toBe("HS256");
+			expect(config.oauth.jwt?.secret).toBe(TEST_SECRET);
+			expect(config.oauth.jwt?.mode).toBe("verify");
+			expect(config.oauth.jwt?.issuer).toBe("https://issuer.test");
+			expect(config.oauth.jwt?.audience).toBe("https://api.test");
+			expect(config.oauth.jwt?.tokenType).toBe("at+jwt");
 			expect(config.verify.maxBatchSize).toBe(50);
 		},
 	);
@@ -170,7 +170,7 @@ describe("loadAppConfig", () => {
 
 		const config = loadAppConfig(configDirPath, "development");
 
-		expect(config.oauth.jwt.mode).toBe("insecure-decode");
+		expect(config.oauth.jwt?.mode).toBe("insecure-decode");
 	});
 
 	it("rejects a boolean-ish OAUTH_JWT_MODE left over from the removed OAUTH_JWT_VALIDATE", () => {
@@ -237,11 +237,11 @@ describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#1
 		const config = loadAppConfig(configDirPath, "development");
 
 		expect(config.http.port).toBe(3000);
-		expect(config.oauth.jwt.jwksTimeoutMs).toBe(5000);
-		expect(config.oauth.jwt.jwksCooldownMs).toBe(30_000);
-		expect(config.oauth.jwt.jwksCacheMaxAgeMs).toBe(600_000);
-		expect(config.oauth.jwt.maxTokenAgeSeconds).toBe(86_400);
-		expect(config.oauth.jwt.clockToleranceSeconds).toBe(0);
+		expect(config.oauth.jwt?.jwksTimeoutMs).toBe(5000);
+		expect(config.oauth.jwt?.jwksCooldownMs).toBe(30_000);
+		expect(config.oauth.jwt?.jwksCacheMaxAgeMs).toBe(600_000);
+		expect(config.oauth.jwt?.maxTokenAgeSeconds).toBe(86_400);
+		expect(config.oauth.jwt?.clockToleranceSeconds).toBe(0);
 		expect(config.verify.maxBatchSize).toBe(50);
 		// The request limits (#118) travel the same path.
 		expect(config.verify.maxBodyBytes).toBe(65_536);
@@ -272,11 +272,11 @@ describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#1
 		const config = loadAppConfig(configDirPath, "development");
 
 		expect(config.http.port).toBe(8080);
-		expect(config.oauth.jwt.jwksTimeoutMs).toBe(2500);
-		expect(config.oauth.jwt.jwksCooldownMs).toBe(0);
-		expect(config.oauth.jwt.jwksCacheMaxAgeMs).toBe(120_000);
-		expect(config.oauth.jwt.maxTokenAgeSeconds).toBe(600);
-		expect(config.oauth.jwt.clockToleranceSeconds).toBe(60);
+		expect(config.oauth.jwt?.jwksTimeoutMs).toBe(2500);
+		expect(config.oauth.jwt?.jwksCooldownMs).toBe(0);
+		expect(config.oauth.jwt?.jwksCacheMaxAgeMs).toBe(120_000);
+		expect(config.oauth.jwt?.maxTokenAgeSeconds).toBe(600);
+		expect(config.oauth.jwt?.clockToleranceSeconds).toBe(60);
 		expect(config.verify.maxBatchSize).toBe(25);
 		expect(config.verify.maxBodyBytes).toBe(16_384);
 		expect(config.verify.maxResourceLength).toBe(128);

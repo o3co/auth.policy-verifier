@@ -26,6 +26,7 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { HS256KeyResolverFactory, RS256KeyResolverFactory } from "#/jwt/index.mjs";
+import type { TokenAuthenticator } from "#/jwt/tokenAuthenticator.mjs";
 import { createVerifyRouter, type VerifyRouterConfig } from "#/routes/verify.mjs";
 
 const generateKeyPairAsync = promisify(generateKeyPair);
@@ -1610,5 +1611,67 @@ describe("POST /verify/batch — decisions in flight are bounded (#183)", () => 
 			? undefined
 			: result.error.issues.find((issue) => issue.path.at(-1) === "batchConcurrency")?.message;
 		expect(fromSchema).toBe(fromRouter);
+	});
+});
+
+describe("createVerifyRouter — an already-built authenticator (#219)", () => {
+	/** `Authorization: Stub <sub>` → a subject bag; no JWT anywhere. */
+	const stub: TokenAuthenticator = {
+		async authenticate(header) {
+			const sub = header?.startsWith("Stub ") ? header.slice("Stub ".length) : "";
+			if (!sub) return { ok: false, code: "missing_token", message: "no stub credential" };
+			return { ok: true, subject: { sub, scope: "read:project" }, credential: sub };
+		},
+	};
+	const pipelines = {
+		resourceParser: new DotNotationResourceParser(),
+		attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
+		rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
+	};
+	const jwt = {
+		validate: true as const,
+		key: hs256Key.key,
+		algorithms: hs256Key.algorithms,
+		issuer: ISSUER,
+		audience: AUDIENCE,
+		tokenType: "at+jwt",
+	};
+
+	it("decides from the subject the authenticator returns, with no jwt config at all", async () => {
+		const app = express();
+		app.use(createVerifyRouter({ authenticator: stub, ...pipelines }));
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", "Stub alice")
+			.send({ resource: "project:1", action: "read" });
+		expect(res.status).toBe(200);
+		expect(res.body.decision).toBe("allow");
+		expect(res.body.subject).toBe("alice");
+	});
+
+	it("answers 401 with the authenticator's own code and message", async () => {
+		const app = express();
+		app.use(createVerifyRouter({ authenticator: stub, ...pipelines }));
+		const res = await request(app).post("/verify").send({ resource: "project:1", action: "read" });
+		expect(res.status).toBe(401);
+		// The deny envelope every non-decision answer wears (#118), carrying the
+		// authenticator's own code and message rather than the JWT path's.
+		expect(res.body).toEqual({
+			decision: "deny",
+			code: "missing_token",
+			message: "no stub credential",
+		});
+	});
+
+	it("refuses a config carrying both jwt and authenticator", () => {
+		expect(() =>
+			createVerifyRouter({ jwt, authenticator: stub, ...pipelines } as VerifyRouterConfig),
+		).toThrow("createVerifyRouter: exactly one of jwt or authenticator must be supplied");
+	});
+
+	it("refuses a config carrying neither", () => {
+		expect(() => createVerifyRouter({ ...pipelines } as VerifyRouterConfig)).toThrow(
+			"createVerifyRouter: exactly one of jwt or authenticator must be supplied",
+		);
 	});
 });

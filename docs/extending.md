@@ -211,6 +211,81 @@ The property that has to hold is that `verify(attrs)` is a deterministic, side-e
 
 The fix for a rule that has baked its answer in: the value being tested comes from `attrs.get(...)`, while the value it is tested against may still be captured from the request — as a copied value, not as a live reference into the context.
 
+## Writing a token authenticator
+
+The server authenticates the subject of a decision through one port, `TokenAuthenticator` in `@o3co/auth.policy-verifier.server`:
+
+```ts
+interface TokenAuthenticator {
+  authenticate(authorizationHeader: string | undefined): Promise<AuthenticationResult>;
+}
+
+type AuthenticationResult =
+  | { ok: true; subject: SubjectAttributes; credential: string }
+  | { ok: false; code: "missing_token" | "unsupported_scheme" | "invalid_token"; message: string };
+```
+
+The built-in implementation verifies a bearer JWT against `oauth.jwt` and spreads the verified claims into `subject`. It is what `oauth.authenticator = "jwt"` — the default — selects. A deployment whose subject is established some other way registers its own factory under its own name and selects that:
+
+- an RFC 7662 introspection client, for an IdP that issues opaque tokens (Okta's org authorization server, Auth0 without an `audience`);
+- an IdP SDK's session verification;
+- a gateway that already authenticated the caller and forwards an attestation.
+
+```ts
+import type { Module } from "@o3co/auth.policy-verifier.core";
+import type {
+  ServerModuleContext,
+  TokenAuthenticator,
+} from "@o3co/auth.policy-verifier.server";
+
+export const introspectionAuthenticatorModule: Module<ServerModuleContext> = {
+  name: "introspection-authenticator",
+  async init(context) {
+    context.tokenAuthenticatorRegistry.register("introspection", async (oauth, deps) => {
+      // `oauth` is the whole block; read the sub-block you document for yourself.
+      const { endpoint, clientId, clientSecret } = oauth.introspection;
+      const authenticator: TokenAuthenticator = {
+        async authenticate(header) {
+          const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
+          if (!token) return { ok: false, code: "missing_token", message: "Authorization header is missing" };
+          const res = await fetch(endpoint, { method: "POST", /* Basic clientId:clientSecret, token=... */ });
+          const body = await res.json();
+          if (!res.ok || body.active !== true) {
+            deps.logger.warn({ status: res.status }, "introspection_rejected");
+            return { ok: false, code: "invalid_token", message: "Invalid token" };
+          }
+          // What you put in `subject` is what the collectors read: the builtins
+          // expect `sub`, `azp` and `scope` where the token carries them.
+          return { ok: true, subject: { ...body, authScheme: "Bearer" }, credential: token };
+        },
+      };
+      return authenticator;
+    });
+  },
+};
+```
+
+```hocon
+oauth {
+  authenticator = "introspection"
+  introspection {
+    endpoint = "https://idp.example/oauth2/v1/introspect"
+    clientId = ${?INTROSPECTION_CLIENT_ID}
+    clientSecret = ${?INTROSPECTION_CLIENT_SECRET}
+  }
+}
+```
+
+Notes:
+
+- The factory receives the whole `oauth` block plus `{ logger, keyResolverRegistry }`. `keyResolverRegistry` carries whatever `builtinKeyResolversModule` (and your own modules) registered, so an authenticator that verifies JWTs of its own — an IdP's session token, say — can reuse `oauth.jwt.algorithm`'s key plumbing rather than re-implement it.
+- `oauth.jwt` is required only while `oauth.authenticator` is `"jwt"`. With another name it may be omitted, and your own sub-block rides along on the parsed config for your factory to read.
+- `"jwt"` is registered by `createApp` before any module runs and cannot be replaced; register under your own name. An `oauth.authenticator` that no module registered fails at boot, naming the key and the value.
+- `subject` is the neutral attribute bag core evaluates (see [AGENTS.md — Core Vocabulary Scope](../AGENTS.md#core-vocabulary-scope)). Anything you put there is trusted as the verified identity, so put in it only what you verified; the request body never reaches it.
+- A refusal is a 401 wearing the deny envelope, with your `code` and `message`. Log the reason yourself (the built-in path emits `jwt_token_rejected` / `jwt_verification_unavailable`) — the router logs nothing about *why* an authenticator refused.
+- Sender-constrained tokens (`cnf`) stay refused on the built-in path (#209); an authenticator that can verify possession is free to accept them.
+- `createVerifyRouter` takes an already-built `authenticator` in place of `jwt` for a library consumer that composes without `createApp`.
+
 ## Further reading
 
 - [`@o3co/auth.policy-verifier.core` README](../packages/core/README.md) — interfaces, evaluator, pipelines.

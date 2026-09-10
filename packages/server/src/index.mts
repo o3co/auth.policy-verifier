@@ -27,6 +27,11 @@ export {
 // second opinion about what a 32-character hex string is worth.
 export { describeWeakSecret, measureSecretEntropyBytes } from "./config/secretEntropy.mjs";
 export {
+	checkTokenAuthenticatorSelection,
+	type TokenAuthenticatorSelectionCheck,
+	type TokenAuthenticatorSelectionInput,
+} from "./config/tokenAuthenticatorSelection.mjs";
+export {
 	type CallerAuthConfig,
 	type CallerAuthErrorContext,
 	createCallerAuthMiddleware,
@@ -34,10 +39,12 @@ export {
 } from "./http/callerAuth.mjs";
 export {
 	type AssertedJwtConfig,
+	type AuthenticationResult,
 	assertVerifyRouterJwtConfig,
 	builtinKeyResolversModule,
 	checkHs256Rotation,
 	checkJwksUri,
+	createTokenAuthenticator,
 	type DecodingJwtConfig,
 	EdDSAKeyResolverFactory,
 	ES256KeyResolverFactory,
@@ -47,12 +54,14 @@ export {
 	type Hs256RotationCheck,
 	type Hs256RotationConfig,
 	type Hs256RotationIssue,
+	JWT_TOKEN_AUTHENTICATOR,
 	type JwksFetchBounds,
 	type JwksFetchConfig,
 	type JwksUriCheck,
 	type JwtConfigErrorContext,
 	type JwtTimeClaimBounds,
 	type JwtTimeClaimConfig,
+	JwtTokenAuthenticatorFactory,
 	type KeyResolver,
 	type KeyResolverFactory,
 	parseHs256Rotation,
@@ -61,6 +70,9 @@ export {
 	resolveJwksFetchBounds,
 	resolveJwtTimeClaimBounds,
 	type ServerModuleContext,
+	type TokenAuthenticator,
+	type TokenAuthenticatorDependencies,
+	type TokenAuthenticatorFactory,
 	type UncheckedJwtConfig,
 	type VerifyingJwtConfig,
 	type VerifyRouterJwtConfig,
