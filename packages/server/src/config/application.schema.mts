@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from "zod";
+import { checkAudienceClaim, DEFAULT_AUDIENCE_CLAIM } from "../jwt/audienceClaim.mjs";
 import { checkHs256Rotation } from "../jwt/hs256Rotation.mjs";
 import { checkJwksUri } from "../jwt/jwks.mjs";
 import { type BoundSpec, NUMERIC_BOUNDS, resolveBound } from "./bounds.mjs";
@@ -275,7 +276,18 @@ export const AppConfigSchema = z.object({
 					audience: z.union([z.string(), z.array(z.string())]).optional(),
 					// Accepted `typ` header. `at+jwt` is the RFC 9068 access-token type; pinning
 					// it rejects id_tokens, refresh tokens and logout tokens signed with the same key.
+					// The literal `"*"` pins nothing — any `typ`, or none — for issuers whose
+					// tokens carry no `typ` header (#219, `UNPINNED_TOKEN_TYPE`).
 					tokenType: z.string().default("at+jwt"),
+					/**
+					 * The claim the audience is read from (#219). `aud` (the default) is
+					 * jose's own check; `azp` binds a Clerk session token, `client_id` a
+					 * Cognito access token — the check moves, `audience` stays required.
+					 * Read as `unknown` so the one shared function decides what a
+					 * well-formed name is at both boundaries; the `transform` below
+					 * writes the resolved name back.
+					 */
+					audienceClaim: z.unknown().optional(),
 					/**
 					 * Bounds on a presented token's own lifetime (#110). Both apply in
 					 * every mode: `insecure-decode` restates them by hand, so a
@@ -322,6 +334,16 @@ export const AppConfigSchema = z.object({
 					}
 					if (hasStaleKey) {
 						return; // the operator's intended mode is unknowable; stop here
+					}
+					// #219: a config-shape check, so it applies in every mode — the
+					// guard reads it in both branches too.
+					const audienceClaim = checkAudienceClaim(data.audienceClaim);
+					if (!audienceClaim.ok) {
+						ctx.addIssue({
+							code: z.ZodIssueCode.custom,
+							message: audienceClaim.message,
+							path: ["audienceClaim"],
+						});
 					}
 					if (data.mode === "insecure-decode") {
 						// Decode-only mode: no signature check (exp/nbf are still enforced
@@ -417,6 +439,16 @@ export const AppConfigSchema = z.object({
 							});
 						}
 					}
+				})
+				.transform((data) => {
+					// Write the resolved claim back (#219), so the parsed config carries
+					// the default the operator relied on. The refinement above already
+					// refused a malformed value; the fallback only keeps the type honest.
+					const audienceClaim = checkAudienceClaim(data.audienceClaim);
+					return {
+						...data,
+						audienceClaim: audienceClaim.ok ? audienceClaim.claim : DEFAULT_AUDIENCE_CLAIM,
+					};
 				})
 				/**
 				 * Required only when the built-in authenticator is selected — see the

@@ -26,6 +26,12 @@
 import type { EventLogger, SubjectAttributes } from "@o3co/auth.policy-verifier.core";
 import { decodeJwt, errors, type JWTPayload, jwtVerify } from "jose";
 import { NUMERIC_BOUNDS, resolveBound } from "../config/bounds.mjs";
+import {
+	audienceMatches,
+	checkAudienceClaim,
+	DEFAULT_AUDIENCE_CLAIM,
+	UNPINNED_TOKEN_TYPE,
+} from "./audienceClaim.mjs";
 
 /**
  * Bounds on a presented token's own lifetime (#110), settable in either mode
@@ -119,9 +125,22 @@ export interface VerifyingJwtConfig extends JwtTimeClaimConfig {
 	/** Audience identifying this resource server. A token minted for another service is rejected. */
 	audience: string | string[];
 	/**
+	 * The claim the audience is read from (#219). Absent means `aud`, jose's
+	 * own check. Any other name — `azp` for a Clerk session token, `client_id`
+	 * for a Cognito access token — is compared against `audience` by the same
+	 * rule (a string equal to an accepted value, or an array containing one)
+	 * once the signature has verified, and `aud` is then not consulted. The
+	 * check moves; it never goes away.
+	 */
+	audienceClaim?: string;
+	/**
 	 * Accepted `typ` header — `"at+jwt"` for RFC 9068 access tokens. An `application/`
 	 * prefix on either side is ignored when comparing. Pinning it is what keeps an
 	 * `id_token`, refresh token or logout token signed with the same key from passing.
+	 *
+	 * The literal `"*"` ({@link UNPINNED_TOKEN_TYPE}) pins nothing — any `typ`,
+	 * or none — for issuers whose tokens carry no `typ` header (#219). The
+	 * audience is then the only thing telling token kinds apart.
 	 */
 	tokenType: string;
 }
@@ -154,6 +173,7 @@ export interface UncheckedJwtConfig {
 	validate: boolean;
 	issuer?: string | string[];
 	audience?: string | string[];
+	audienceClaim?: string;
 	tokenType?: string;
 	allowInsecureDecode?: boolean;
 }
@@ -271,6 +291,43 @@ export function assertVerifyRouterJwtConfig<T extends UncheckedJwtConfig>(
 		throw new Error(
 			`${caller}: ${path}.validate=false disables ALL signature verification (test-only); ` +
 				`set ${path}.allowInsecureDecode=true to acknowledge, or use a verifying config`,
+		);
+	}
+	// #219: in both modes, through the one shared function the schema also
+	// calls — so this is not a second departure, only the guard's rendering of
+	// the same verdict with its own path in front.
+	const audienceClaim = checkAudienceClaim(jwt.audienceClaim);
+	if (!audienceClaim.ok) {
+		throw new Error(`${caller}: ${path}.${audienceClaim.message}`);
+	}
+}
+
+/**
+ * The audience check for a claim other than `aud` (#219), in the words jose
+ * uses for `aud` so the `jwt_token_rejected` line reads the same either way.
+ * Thrown as a `JWTClaimValidationFailed`, which `isVerificationUnavailable`
+ * judges token-side: a token bound to the wrong app is a bad token, not an
+ * outage.
+ */
+function assertAudienceClaim(
+	payload: JWTPayload,
+	claim: string,
+	accepted: string | string[],
+): void {
+	if (!Object.hasOwn(payload, claim)) {
+		throw new errors.JWTClaimValidationFailed(
+			`missing required "${claim}" claim`,
+			payload,
+			claim,
+			"missing",
+		);
+	}
+	if (!audienceMatches(payload[claim], accepted)) {
+		throw new errors.JWTClaimValidationFailed(
+			`unexpected "${claim}" claim value`,
+			payload,
+			claim,
+			"check_failed",
 		);
 	}
 }
@@ -469,6 +526,12 @@ export function createTokenAuthenticator(
 	// than per request, and both branches below read the same resolved values —
 	// which is the only reason the two paths cannot drift on them.
 	const { maxTokenAge, clockTolerance } = resolveJwtTimeClaimBounds(jwt);
+	// #219, resolved once like the bounds: which claim carries the audience,
+	// and whether `typ` is pinned at all. Both are verify-mode questions — the
+	// decode path never checked the audience or the header, and still does not.
+	const audienceClaim = checkAudienceClaim(jwt.validate ? jwt.audienceClaim : undefined);
+	const audienceFrom = audienceClaim.ok ? audienceClaim.claim : DEFAULT_AUDIENCE_CLAIM;
+	const pinTokenType = jwt.validate && jwt.tokenType !== UNPINNED_TOKEN_TYPE;
 
 	return {
 		async authenticate(authorizationHeader: string | undefined): Promise<AuthenticationResult> {
@@ -511,8 +574,11 @@ export function createTokenAuthenticator(
 					const result = await jwtVerify(token, jwt.key as Parameters<typeof jwtVerify>[1], {
 						algorithms: jwt.algorithms,
 						issuer: jwt.issuer,
-						audience: jwt.audience,
-						typ: jwt.tokenType,
+						// #219: jose checks `aud`; another claim is checked below,
+						// after the signature, by the same rule. Absent `typ` is
+						// not pinned at all — see UNPINNED_TOKEN_TYPE.
+						...(audienceFrom === DEFAULT_AUDIENCE_CLAIM ? { audience: jwt.audience } : {}),
+						...(pinTokenType ? { typ: jwt.tokenType } : {}),
 						// #110. `requiredClaims` is what turns exp from "checked when
 						// present" into "checked"; `maxTokenAge` bounds a token whose
 						// issuer chose a distant exp, and requires `iat` as a side
@@ -522,6 +588,9 @@ export function createTokenAuthenticator(
 						clockTolerance,
 					});
 					decoded = result.payload;
+					if (audienceFrom !== DEFAULT_AUDIENCE_CLAIM) {
+						assertAudienceClaim(decoded, audienceFrom, jwt.audience);
+					}
 				} else {
 					decoded = decodeJwt(token);
 					assertTimeClaims(decoded, { maxTokenAge, clockTolerance });

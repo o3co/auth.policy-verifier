@@ -429,3 +429,165 @@ describe("assertTimeClaims — decode-path parity with jwtVerify", () => {
 		expect(() => assertTimeClaims({ iat: now() - 90, exp: now() + 3600 }, tolerant)).not.toThrow();
 	});
 });
+
+describe("createTokenAuthenticator — audienceClaim (#219)", () => {
+	const silentLogger = { info() {}, warn() {}, error() {} };
+	const APP = "https://app.test";
+
+	/** Signs with this deployment's key and issuer; header and audience-like claims are the case's. */
+	async function sign(header: { typ?: string }, claims: Record<string, unknown>): Promise<string> {
+		return new SignJWT({ sub: "user-1", ...claims })
+			.setProtectedHeader({
+				alg: "HS256",
+				...(header.typ === undefined ? {} : { typ: header.typ }),
+			})
+			.setIssuedAt()
+			.setExpirationTime("1h")
+			.setIssuer(VALID_VERIFYING.issuer)
+			.sign(SIGNING_KEY);
+	}
+	const azpConfig = { ...SIGNING_CONFIG, audience: APP, audienceClaim: "azp" };
+	const bearer = (token: string) => `Bearer ${token}`;
+
+	it("reads the audience from the named claim, and never from aud", async () => {
+		const authenticator = createTokenAuthenticator(azpConfig, silentLogger);
+		// A Clerk-shaped token: the binding is `azp`, there is no `aud` at all.
+		expect(
+			await authenticator.authenticate(bearer(await sign({ typ: "at+jwt" }, { azp: APP }))),
+		).toMatchObject({ ok: true, subject: { azp: APP } });
+		// A matching `aud` does not rescue a mismatched `azp`: the check moved.
+		expect(
+			await authenticator.authenticate(
+				bearer(await sign({ typ: "at+jwt" }, { azp: "https://other.test", aud: APP })),
+			),
+		).toMatchObject({ ok: false, code: "invalid_token" });
+	});
+
+	it("refuses a token whose named claim is absent", async () => {
+		const authenticator = createTokenAuthenticator(azpConfig, silentLogger);
+		expect(
+			await authenticator.authenticate(bearer(await sign({ typ: "at+jwt" }, { aud: APP }))),
+		).toMatchObject({ ok: false, code: "invalid_token" });
+	});
+
+	it("refuses a token whose named claim is neither a string nor a string array", async () => {
+		const authenticator = createTokenAuthenticator(azpConfig, silentLogger);
+		for (const azp of [42, { url: APP }, [APP, 7]]) {
+			expect(
+				await authenticator.authenticate(bearer(await sign({ typ: "at+jwt" }, { azp }))),
+			).toMatchObject({ ok: false, code: "invalid_token" });
+		}
+	});
+
+	it("accepts a string-array claim containing an accepted value, as jose does for aud", async () => {
+		const authenticator = createTokenAuthenticator(
+			{ ...azpConfig, audience: ["https://a.test", APP] },
+			silentLogger,
+		);
+		expect(
+			await authenticator.authenticate(
+				bearer(await sign({ typ: "at+jwt" }, { azp: ["https://x.test", APP] })),
+			),
+		).toMatchObject({ ok: true });
+		expect(
+			await authenticator.authenticate(
+				bearer(await sign({ typ: "at+jwt" }, { azp: ["https://x.test", "https://y.test"] })),
+			),
+		).toMatchObject({ ok: false, code: "invalid_token" });
+	});
+
+	it("keeps aud as the default claim — a token binding only azp is refused", async () => {
+		const authenticator = createTokenAuthenticator(SIGNING_CONFIG, silentLogger);
+		expect(
+			await authenticator.authenticate(
+				bearer(await sign({ typ: "at+jwt" }, { azp: VALID_VERIFYING.audience })),
+			),
+		).toMatchObject({ ok: false, code: "invalid_token" });
+	});
+
+	it("logs the refusal as a rejected token, never as an outage", async () => {
+		const events: string[] = [];
+		const logger = {
+			info() {},
+			warn(_ctx: unknown, event: string) {
+				events.push(`warn:${event}`);
+			},
+			error(_ctx: unknown, event: string) {
+				events.push(`error:${event}`);
+			},
+		};
+		const authenticator = createTokenAuthenticator(azpConfig, logger);
+		await authenticator.authenticate(
+			bearer(await sign({ typ: "at+jwt" }, { azp: "https://other.test" })),
+		);
+		expect(events).toEqual(["warn:jwt_token_rejected"]);
+	});
+
+	it("refuses an empty or non-string audienceClaim at construction, naming the key", () => {
+		expect(() =>
+			createTokenAuthenticator(
+				{ ...SIGNING_CONFIG, audienceClaim: "" } as unknown as VerifyRouterJwtConfig,
+				silentLogger,
+			),
+		).toThrow(/jwt\.audienceClaim must be a non-empty string/);
+		expect(() =>
+			assertVerifyRouterJwtConfig({ ...VALID_VERIFYING, audienceClaim: 42 } as never, {
+				caller: "createApp",
+				path: "oauth.jwt",
+			}),
+		).toThrow("createApp: oauth.jwt.audienceClaim must be a non-empty string");
+	});
+});
+
+describe('createTokenAuthenticator — tokenType "*" (#219)', () => {
+	const silentLogger = { info() {}, warn() {}, error() {} };
+
+	async function sign(
+		header: { typ?: string },
+		claims: Record<string, unknown> = {},
+	): Promise<string> {
+		return new SignJWT({ sub: "user-1", ...claims })
+			.setProtectedHeader({
+				alg: "HS256",
+				...(header.typ === undefined ? {} : { typ: header.typ }),
+			})
+			.setIssuedAt()
+			.setExpirationTime("1h")
+			.setIssuer(VALID_VERIFYING.issuer)
+			.setAudience(VALID_VERIFYING.audience)
+			.sign(SIGNING_KEY);
+	}
+	const unpinned = { ...SIGNING_CONFIG, tokenType: "*" };
+
+	it("accepts a token with no typ header, and one with any typ", async () => {
+		const authenticator = createTokenAuthenticator(unpinned, silentLogger);
+		for (const header of [{}, { typ: "JWT" }, { typ: "at+jwt" }]) {
+			expect(await authenticator.authenticate(`Bearer ${await sign(header)}`)).toMatchObject({
+				ok: true,
+			});
+		}
+	});
+
+	it("keeps refusing a missing typ under a pinned tokenType", async () => {
+		const authenticator = createTokenAuthenticator(SIGNING_CONFIG, silentLogger);
+		expect(await authenticator.authenticate(`Bearer ${await sign({})}`)).toMatchObject({
+			ok: false,
+			code: "invalid_token",
+		});
+	});
+
+	it("still pins the issuer, the audience and the time claims with typ unpinned", async () => {
+		const authenticator = createTokenAuthenticator(unpinned, silentLogger);
+		const wrongAudience = await new SignJWT({ sub: "user-1" })
+			.setProtectedHeader({ alg: "HS256" })
+			.setIssuedAt()
+			.setExpirationTime("1h")
+			.setIssuer(VALID_VERIFYING.issuer)
+			.setAudience("https://other.test")
+			.sign(SIGNING_KEY);
+		expect(await authenticator.authenticate(`Bearer ${wrongAudience}`)).toMatchObject({
+			ok: false,
+			code: "invalid_token",
+		});
+	});
+});

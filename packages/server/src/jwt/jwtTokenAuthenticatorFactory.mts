@@ -83,6 +83,8 @@ export const JwtTokenAuthenticatorFactory: TokenAuthenticatorFactory = async (
 			algorithms: keyResolver.algorithms,
 			issuer: verifying.issuer,
 			audience: verifying.audience,
+			// #219: validated by the guard above; `undefined` means `aud`.
+			audienceClaim: jwtWire.audienceClaim as string | undefined,
 			tokenType: verifying.tokenType,
 			...bounds,
 		};

@@ -1447,3 +1447,131 @@ describe("createApp — token authenticator registry (#219)", () => {
 		);
 	});
 });
+
+describe("createApp — tokens shaped by external IdPs (#219)", () => {
+	const decideConfig = {
+		attribute: { collectors: [{ collector: "TestScopeCollector" }] },
+		rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
+		resource: { parser: "SimpleParser" },
+	};
+	const APP_ORIGIN = "https://app.test";
+
+	/** Signs `claims` as this deployment's issuer would, with whatever header the IdP uses. */
+	async function signAs(
+		header: { typ?: string },
+		claims: Record<string, unknown>,
+	): Promise<string> {
+		return new SignJWT(claims)
+			.setProtectedHeader({
+				alg: "HS256",
+				...(header.typ === undefined ? {} : { typ: header.typ }),
+			})
+			.setIssuedAt()
+			.setExpirationTime("1h")
+			.setIssuer(ISSUER)
+			.sign(secretKey);
+	}
+
+	async function decide(config: unknown, token: string) {
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: config as never,
+			modules: [testModule, builtinKeyResolversModule],
+		});
+		return request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project", action: "read" });
+	}
+
+	it("decides a Clerk-shaped session token: typ JWT, no aud, the binding is azp", async () => {
+		const config = AppConfigSchema.parse({
+			oauth: {
+				jwt: {
+					secret: JWT_SECRET,
+					mode: "verify",
+					issuer: ISSUER,
+					audience: APP_ORIGIN,
+					audienceClaim: "azp",
+					tokenType: "JWT",
+				},
+			},
+			...decideConfig,
+		});
+		const token = await signAs(
+			{ typ: "JWT" },
+			{ sub: "user_2abc", azp: APP_ORIGIN, sid: "sess_1", scope: "read:project" },
+		);
+		const res = await decide(config, token);
+		expect(res.status).toBe(200);
+		expect(res.body.decision).toBe("allow");
+		expect(res.body.subject).toBe("user_2abc");
+	});
+
+	it("still refuses that token for another app — the audience check moved, it did not go away", async () => {
+		const config = AppConfigSchema.parse({
+			oauth: {
+				jwt: {
+					secret: JWT_SECRET,
+					mode: "verify",
+					issuer: ISSUER,
+					audience: APP_ORIGIN,
+					audienceClaim: "azp",
+					tokenType: "JWT",
+				},
+			},
+			...decideConfig,
+		});
+		const token = await signAs(
+			{ typ: "JWT" },
+			{ sub: "user_2abc", azp: "https://other.test", scope: "read:project" },
+		);
+		const res = await decide(config, token);
+		expect(res.status).toBe(401);
+		expect(res.body.code).toBe("invalid_token");
+	});
+
+	it('decides a Cognito-shaped access token: no typ header, the binding is client_id, with tokenType = "*"', async () => {
+		const config = AppConfigSchema.parse({
+			oauth: {
+				jwt: {
+					secret: JWT_SECRET,
+					mode: "verify",
+					issuer: ISSUER,
+					audience: "1example23456789",
+					audienceClaim: "client_id",
+					tokenType: "*",
+				},
+			},
+			...decideConfig,
+		});
+		const token = await signAs(
+			{},
+			{ sub: "user-9", client_id: "1example23456789", token_use: "access", scope: "read:project" },
+		);
+		const res = await decide(config, token);
+		expect(res.status).toBe(200);
+		expect(res.body.decision).toBe("allow");
+	});
+
+	it("keeps refusing a token with no typ header under the default tokenType", async () => {
+		const config = AppConfigSchema.parse({
+			oauth: {
+				jwt: {
+					secret: JWT_SECRET,
+					mode: "verify",
+					issuer: ISSUER,
+					audience: "1example23456789",
+					audienceClaim: "client_id",
+				},
+			},
+			...decideConfig,
+		});
+		const token = await signAs(
+			{},
+			{ sub: "user-9", client_id: "1example23456789", scope: "read:project" },
+		);
+		const res = await decide(config, token);
+		expect(res.status).toBe(401);
+	});
+});

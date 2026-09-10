@@ -229,6 +229,36 @@ const PARITY_CASES: ParityCase[] = [
 		expect: { both: "refuse", key: "tokenType" },
 	},
 	{
+		// #219: the claim the audience is read from. Absent means `aud`; any
+		// other non-empty string names a claim to compare against `audience`
+		// (`azp` for a Clerk session token, `client_id` for a Cognito access
+		// token). Both boundaries read it through `checkAudienceClaim`.
+		name: "a verifying config reading the audience from azp",
+		wire: { ...WIRE_VERIFYING, audienceClaim: "azp" },
+		guard: { ...GUARD_VERIFYING, audienceClaim: "azp" },
+		expect: { both: "accept" },
+	},
+	{
+		name: "a verifying config whose audienceClaim is an empty string",
+		wire: { ...WIRE_VERIFYING, audienceClaim: "" },
+		guard: { ...GUARD_VERIFYING, audienceClaim: "" },
+		expect: { both: "refuse", key: "audienceClaim" },
+	},
+	{
+		name: "a verifying config whose audienceClaim is not a string",
+		wire: { ...WIRE_VERIFYING, audienceClaim: 42 },
+		guard: { ...GUARD_VERIFYING, audienceClaim: 42 as unknown as string },
+		expect: { both: "refuse", key: "audienceClaim" },
+	},
+	{
+		// `"*"` is the one tokenType that pins nothing (#219); it is still a
+		// non-empty string to both boundaries, so it is accepted like any other.
+		name: 'a verifying config whose tokenType is "*"',
+		wire: { ...WIRE_VERIFYING, tokenType: "*" },
+		guard: { ...GUARD_VERIFYING, tokenType: "*" },
+		expect: { both: "accept" },
+	},
+	{
 		name: "a verifying config whose tokenType is an empty array",
 		wire: { ...WIRE_VERIFYING, tokenType: [] },
 		guard: { ...GUARD_VERIFYING, tokenType: [] as unknown as string },

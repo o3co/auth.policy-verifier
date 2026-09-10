@@ -36,6 +36,22 @@ and version sections follow the release labeling policy in
   config with `oauth.jwt` absent is now refused as *required when
   `oauth.authenticator` is "jwt"* rather than as *not a config object*.
 
+- **The built-in JWT path accepts an external IdP's token shape**
+  (`@o3co/auth.policy-verifier.server`,
+  [#219](https://github.com/o3co/auth.policy-verifier/issues/219)).
+  `oauth.jwt.audienceClaim` (default `aud`) names the claim the audience is
+  read from — `azp` for a Clerk session token, which carries no `aud` at all,
+  `client_id` for a Cognito access token — and is compared against `audience`
+  by jose's own rule for `aud` once the signature has verified. The check
+  moves, it never goes away: `audience` stays required and a token bound to
+  another app is still refused, logged as `jwt_token_rejected`. `tokenType =
+  "*"` is the explicit opt-out of pinning the `typ` header, for issuers whose
+  tokens carry none; the audience is then the only thing telling token kinds
+  apart, which the README says how to pair it with. Both knobs are read
+  through one shared function at both boundaries (`checkAudienceClaim`), with
+  rows in the two-boundary parity table. The README gains "Accepting tokens
+  from an external IdP" with the Clerk / Okta / Cognito shapes.
+
 ## [0.8.1] - 2026-09-06
 
 ### Fixed

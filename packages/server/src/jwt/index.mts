@@ -2,6 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export {
+	type AudienceClaimCheck,
+	audienceMatches,
+	checkAudienceClaim,
+	DEFAULT_AUDIENCE_CLAIM,
+	UNPINNED_TOKEN_TYPE,
+} from "./audienceClaim.mjs";
+export {
 	builtinKeyResolversModule,
 	EdDSAKeyResolverFactory,
 	ES256KeyResolverFactory,

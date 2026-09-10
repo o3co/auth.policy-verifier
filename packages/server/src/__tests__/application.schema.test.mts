@@ -1380,3 +1380,46 @@ describe("AppConfigSchema — token authenticator selection (#219)", () => {
 		expect(result.error.issues.map((i) => i.message)).toContain("secret is required for HS256");
 	});
 });
+
+describe("AppConfigSchema — audienceClaim and an unpinned typ (#219)", () => {
+	const jwt = { secret: SECRET, mode: "verify", ...rfc9068 };
+
+	it("defaults oauth.jwt.audienceClaim to aud", () => {
+		const config = AppConfigSchema.parse({ oauth: { jwt }, ...baseBody });
+		expect(config.oauth.jwt?.audienceClaim).toBe("aud");
+	});
+
+	it("takes another claim name — azp for a Clerk session token, client_id for a Cognito access token", () => {
+		const config = AppConfigSchema.parse({
+			oauth: { jwt: { ...jwt, audienceClaim: "azp" } },
+			...baseBody,
+		});
+		expect(config.oauth.jwt?.audienceClaim).toBe("azp");
+	});
+
+	it.each([
+		["an empty string", ""],
+		["a number", 42],
+	])("refuses %s as audienceClaim, at oauth.jwt.audienceClaim", (_label, audienceClaim) => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: { ...jwt, audienceClaim } },
+			...baseBody,
+		});
+		expect(result.success).toBe(false);
+		if (result.success) return;
+		expect(result.error.issues).toContainEqual(
+			expect.objectContaining({
+				path: ["oauth", "jwt", "audienceClaim"],
+				message: "audienceClaim must be a non-empty string",
+			}),
+		);
+	});
+
+	it('accepts tokenType = "*", the explicit opt-out of pinning the typ header', () => {
+		const config = AppConfigSchema.parse({
+			oauth: { jwt: { ...jwt, tokenType: "*" } },
+			...baseBody,
+		});
+		expect(config.oauth.jwt?.tokenType).toBe("*");
+	});
+});
