@@ -16,6 +16,7 @@ import {
 	ResourceParseError,
 	type ResourceParser,
 	type RulePipeline,
+	RuleTimeoutError,
 	type SubjectAttributes,
 } from "@o3co/auth.policy-verifier.core";
 import express from "express";
@@ -74,6 +75,13 @@ export interface VerifyRouterConfig {
 	 * flight — see the lane loop in the batch route.
 	 */
 	batchConcurrency?: number | string;
+	/**
+	 * How long one asynchronous rule may take to answer (#225). Defaults to
+	 * `DEFAULT_RULE_TIMEOUT_MS` and is held to the same bound `AppConfigSchema`
+	 * holds `verify.ruleTimeoutMs` to; admits the string form for the reason
+	 * `maxBatchSize` does. A rule that overruns it denies with `rule_timeout`.
+	 */
+	ruleTimeoutMs?: number | string;
 	/**
 	 * Ceiling on the JSON body, in bytes — the `limit` handed to
 	 * `express.json()`. Defaults to 64 KiB (`DEFAULT_MAX_BODY_BYTES`), below
@@ -200,7 +208,16 @@ const errorBody = (code: string, message: string): ErrorBody => ({
  * act on it.
  */
 const COLLECTOR_TIMEOUT_CODE = "collector_timeout";
+/** An asynchronous rule that did not answer in time (#225): the same deny, its own code. */
+const RULE_TIMEOUT_CODE = "rule_timeout";
 const COLLECTOR_TIMEOUT_MESSAGE = "Authorization could not be decided in time";
+/**
+ * Deliberately the collector timeout's wording: to the caller a rule that did
+ * not answer in time is the same event as a collector that did not — a
+ * deadline elapsed — and which internal stage stalled is the log's business,
+ * not the response's. The alias exists so the reuse reads as intent.
+ */
+const RULE_TIMEOUT_MESSAGE = COLLECTOR_TIMEOUT_MESSAGE;
 const ATTRIBUTE_CONFLICT_CODE = "attribute_conflict";
 const ATTRIBUTE_CONFLICT_MESSAGE = "Authorization inputs conflicted";
 
@@ -492,6 +509,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	);
 	// The request limits (#118), read the same way and at the same boundary.
 	const maxBodyBytes = resolveBound(config.maxBodyBytes, NUMERIC_BOUNDS.maxBodyBytes, "verify");
+	const ruleTimeoutMs = resolveBound(config.ruleTimeoutMs, NUMERIC_BOUNDS.ruleTimeoutMs, "verify");
 	const limits: RequestLimits = {
 		maxResourceLength: resolveBound(
 			config.maxResourceLength,
@@ -571,7 +589,10 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				config.attributePipeline.collect(context),
 				config.rulePipeline.collect(context),
 			]);
-			decision = evaluate(attrs, rules, config.evaluateOptions);
+			// #225: the rule list may carry asynchronous rules — an out-of-process
+			// engine answers here, after both collects, where the evaluator
+			// always ran. `ruleTimeoutMs` bounds each of them.
+			decision = await evaluate(attrs, rules, { ...config.evaluateOptions, ruleTimeoutMs });
 		} catch (cause) {
 			// Two collect failures are denies of their own (#115 timeouts, #174
 			// attribute conflicts); anything else is a genuine fault and keeps
@@ -579,9 +600,11 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			const denial =
 				cause instanceof CollectorTimeoutError
 					? { code: COLLECTOR_TIMEOUT_CODE, message: COLLECTOR_TIMEOUT_MESSAGE }
-					: cause instanceof AttributeConflictError
-						? { code: ATTRIBUTE_CONFLICT_CODE, message: ATTRIBUTE_CONFLICT_MESSAGE }
-						: null;
+					: cause instanceof RuleTimeoutError
+						? { code: RULE_TIMEOUT_CODE, message: RULE_TIMEOUT_MESSAGE }
+						: cause instanceof AttributeConflictError
+							? { code: ATTRIBUTE_CONFLICT_CODE, message: ATTRIBUTE_CONFLICT_MESSAGE }
+							: null;
 			if (denial === null) throw cause;
 			// The evaluator is deliberately never reached: it is the one place a
 			// short rule list could still be read as a policy, and `onEmptyRuleSet:

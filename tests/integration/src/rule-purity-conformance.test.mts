@@ -397,3 +397,68 @@ describeRulePurityConformance({
 		},
 	],
 });
+
+/*
+ * #225: an asynchronous rule is held to the same property as a synchronous
+ * one, through the same harness. The collector below is the shape a Cedar
+ * HTTP rule takes — what it looks for is copied out at collect time, the
+ * answer comes from `attrs` (here without the network, which is not what the
+ * property is about).
+ */
+const asyncContext: CollectorRequest = {
+	subject: { sub: "user-1" },
+	resource: { raw: "document:public", resourceType: "document", resourceId: "public" },
+	action: "read",
+};
+
+describeRulePurityConformance({
+	name: "an asynchronous rule that copies what it needs at collect time",
+	collect: async (context) => {
+		const resourceType = context.resource.resourceType;
+		return [
+			{
+				ruleType: "engine",
+				code: "engine_deny",
+				message: "Denied by the engine",
+				async decide(attrs) {
+					// A real yield, so the answer is produced asynchronously — a
+					// microtask is enough for that and keeps timers out of the suite.
+					await Promise.resolve();
+					const readable = attrs.get("readableTypes");
+					return Array.isArray(readable) && readable.includes(resourceType);
+				},
+			},
+		];
+	},
+	cases: [
+		{
+			name: "attributes the rule allows",
+			context: asyncContext,
+			attrs: new Map<string, unknown>([["readableTypes", ["document"]]]),
+		},
+		{
+			name: "attributes the rule denies",
+			context: asyncContext,
+			attrs: new Map<string, unknown>([["readableTypes", ["invoice"]]]),
+		},
+	],
+});
+
+describe("rule purity conformance — an asynchronous rule that keeps the request is caught too (#225)", () => {
+	it("reports a decide that reads the collector's context after it is gone", async () => {
+		const collect = async (context: CollectorContext) => [
+			{
+				ruleType: "engine",
+				code: "engine_deny",
+				message: "Denied by the engine",
+				// The violation: `context` is retained and read inside `decide`.
+				async decide() {
+					return context.resource.resourceType === "document";
+				},
+			},
+		];
+		await expect(
+			assertRuleIndependentOfContext(collect, asyncContext, new Map<string, unknown>()),
+		).rejects.toThrow(/read its collector's context at decide time/);
+	});
+});

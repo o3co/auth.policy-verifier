@@ -294,6 +294,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 			// through the same `resolveBound` the schema used, so a hand-built config
 			// reaching `createApp` gets the schema's verdict either way.
 			maxBodyBytes: config.verify.maxBodyBytes,
+			ruleTimeoutMs: config.verify.ruleTimeoutMs,
 			maxResourceLength: config.verify.maxResourceLength,
 			maxActionLength: config.verify.maxActionLength,
 			maxContextEntries: config.verify.maxContextEntries,

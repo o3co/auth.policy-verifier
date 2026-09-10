@@ -1,17 +1,18 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import type {
-	Attributes,
-	CollectorContext,
-	CollectorRequest,
-	ReadonlyAttributes,
-	Rule,
+import {
+	type AnyRule,
+	type Attributes,
+	type CollectorContext,
+	type CollectorRequest,
+	isAsyncRule,
+	type ReadonlyAttributes,
 } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 
 /** The collect half of a `RuleCollector`, which is all this suite needs. */
-export type CollectRules = (context: CollectorContext) => Promise<Rule[]>;
+export type CollectRules = (context: CollectorContext) => Promise<AnyRule[]>;
 
 /** One request, and the attributes the rules collected from it are judged against. */
 export interface RulePurityCase {
@@ -183,8 +184,25 @@ function isRevokedProxyError(error: unknown): boolean {
 	return error instanceof TypeError && /revoked/.test(error.message);
 }
 
+/**
+ * Asks one rule, whichever kind it is (#225). An asynchronous rule is asked
+ * through `decide` with a signal that never aborts — this suite checks what a
+ * rule answers, not what it does when cancelled — and is held to the same
+ * property as `verify`: the answer must come from `attrs` alone.
+ */
+async function ask(rule: AnyRule, attrs: ReadonlyAttributes): Promise<boolean> {
+	return isAsyncRule(rule) ? rule.decide(attrs, new AbortController().signal) : rule.verify(attrs);
+}
+
+/** {@link ask} for a whole list, in order. */
+async function askAll(rules: AnyRule[], attrs: ReadonlyAttributes): Promise<boolean[]> {
+	const answers: boolean[] = [];
+	for (const rule of rules) answers.push(await ask(rule, attrs));
+	return answers;
+}
+
 /** Names a rule in an assertion message the way a reader would look for it. */
-function describeRule(rule: Rule, index: number): string {
+function describeRule(rule: AnyRule, index: number): string {
 	return `rule[${String(index)}] (ruleType="${rule.ruleType}", code="${rule.code}")`;
 }
 
@@ -206,7 +224,7 @@ function describeRule(rule: Rule, index: number): string {
  *
  * @returns each rule's answer, in collection order, so a caller can assert the
  *   collector decides something rather than passing vacuously.
- * @throws if any rule reads the request at verify time, mutates `attrs`, or
+ * @throws if any rule reads the request when asked (`verify` or `decide` time), mutates `attrs`, or
  *   answers inconsistently.
  */
 export async function assertRuleIndependentOfContext(
@@ -218,7 +236,7 @@ export async function assertRuleIndependentOfContext(
 	const rules = await collect(proxy);
 
 	const snapshot = JSON.stringify([...attrs]);
-	const withContext = rules.map((rule) => rule.verify(attrs));
+	const withContext = await askAll(rules, attrs);
 
 	if (JSON.stringify([...attrs]) !== snapshot) {
 		throw new Error(
@@ -229,7 +247,7 @@ export async function assertRuleIndependentOfContext(
 
 	// Same map, same question, before anything else changes: an answer that
 	// moves on its own is not a function of `attrs` at all.
-	const repeated = rules.map((rule) => rule.verify(attrs));
+	const repeated = await askAll(rules, attrs);
 	for (const [index, answer] of repeated.entries()) {
 		if (answer !== withContext[index]) {
 			throw new Error(
@@ -241,20 +259,22 @@ export async function assertRuleIndependentOfContext(
 
 	revoke();
 
-	const withoutContext = rules.map((rule, index) => {
+	const withoutContext: boolean[] = [];
+	for (const [index, rule] of rules.entries()) {
 		try {
-			return rule.verify(attrs);
+			withoutContext.push(await ask(rule, attrs));
 		} catch (error) {
 			if (isRevokedProxyError(error)) {
+				const asked = isAsyncRule(rule) ? "decide" : "verify";
 				throw new Error(
-					`${describeRule(rules[index], index)} read its collector's context at verify time. ` +
+					`${describeRule(rules[index], index)} read its collector's context at ${asked} time. ` +
 						"A rule may fix what it looks for at collect time, but its answer must come from " +
 						'`attrs` alone — see AGENTS.md "Collector / Rule / Attribute Contract".',
 				);
 			}
 			throw error;
 		}
-	});
+	}
 
 	for (const [index, answer] of withoutContext.entries()) {
 		if (answer !== withContext[index]) {
@@ -315,9 +335,7 @@ export function describeRulePurityConformance(adapter: RulePurityAdapter): void 
 					const rules = await adapter.collect(asContext(testCase));
 					const copy: Attributes = new Map(testCase.attrs);
 
-					expect(rules.map((rule) => rule.verify(copy))).toEqual(
-						rules.map((rule) => rule.verify(testCase.attrs)),
-					);
+					expect(await askAll(rules, copy)).toEqual(await askAll(rules, testCase.attrs));
 				});
 
 				it("only reads the attributes it is handed", async () => {
@@ -327,7 +345,7 @@ export function describeRulePurityConformance(adapter: RulePurityAdapter): void 
 					const readOnly: ReadonlyAttributes = new Map(testCase.attrs);
 					const before = JSON.stringify([...readOnly]);
 
-					for (const rule of rules) rule.verify(readOnly);
+					for (const rule of rules) await ask(rule, readOnly);
 
 					expect(JSON.stringify([...readOnly])).toBe(before);
 				});

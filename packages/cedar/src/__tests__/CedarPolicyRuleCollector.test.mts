@@ -277,11 +277,11 @@ describe("CedarPolicyRuleCollector — layered PDP through core evaluate", () =>
 			verify: (attrs: Parameters<typeof cedarRule.verify>[0]) => attrs.get("scopeOk") === true,
 		};
 
-		const both = evaluate(attrsWith([["scopeOk", true]]), [cedarRule, tsRule]);
+		const both = await evaluate(attrsWith([["scopeOk", true]]), [cedarRule, tsRule]);
 		expect(both.decision).toBe("allow");
 
 		// Cedar permits, the TS group refuses: AND composes toward strictness.
-		const tsDenies = evaluate(attrsWith([["scopeOk", false]]), [cedarRule, tsRule]);
+		const tsDenies = await evaluate(attrsWith([["scopeOk", false]]), [cedarRule, tsRule]);
 		expect(tsDenies.decision).toBe("deny");
 	});
 });

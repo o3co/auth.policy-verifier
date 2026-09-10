@@ -63,6 +63,8 @@ interface VerifyRouterConfig {
   maxBatchSize?: number | string;
   /** How many of a batch's entries are decided at once (#183). Defaults to 8. */
   batchConcurrency?: number | string;
+  /** How long one asynchronous rule may take to answer (#225). Defaults to 2000 ms. */
+  ruleTimeoutMs?: number | string;
 }
 
 // Discriminated on `validate`: verification parameters exist only when verifying.
@@ -100,7 +102,8 @@ Request flow:
 7. Run `attributePipeline.collect` and `rulePipeline.collect` in parallel, under the collector bounds (`verify.collectorTimeoutMs`, `verify.collectorDeadlineMs`, `verify.collectorConcurrency` — each collector is handed an `AbortSignal` on `CollectorContext.signal`); call `evaluate`.
 8. Return `200 { decision: "allow" }` or `403 { decision: "deny", code, message }`.
 9. Return `403 { decision: "deny", code: "collector_timeout" }` when a collector or the fan-out ran out of time (#115). The evaluator is never reached — collecting *some* of the rules is a weaker policy, and none of them is an allow under `rule.onEmptyRuleSet = "allow"` — so a timeout can only ever deny. Details go to the `collector_timeout` log line, not to the caller.
-10. Return `500 { decision: "deny", code: "internal_error" }` on unexpected errors.
+10. Return `403 { decision: "deny", code: "rule_timeout" }` when an asynchronous rule did not answer within `verify.ruleTimeoutMs` (#225) — the same deny, its own code, so an operator can tell a stalled engine from a stalled collector.
+11. Return `500 { decision: "deny", code: "internal_error" }` on unexpected errors.
 
 ### AppConfigSchema / AppConfig
 

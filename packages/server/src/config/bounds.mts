@@ -50,6 +50,7 @@ import {
 	DEFAULT_MAX_CONTEXT_VALUE_LENGTH,
 	DEFAULT_MAX_RESOURCE_LENGTH,
 	DEFAULT_MAX_TOKEN_AGE_SECONDS,
+	DEFAULT_RULE_TIMEOUT_MS,
 	MAX_CLOCK_TOLERANCE_SECONDS,
 	MAX_TCP_PORT,
 	MAX_TIMER_MS,
@@ -222,6 +223,17 @@ export const NUMERIC_BOUNDS = {
 	collectorDeadlineMs: {
 		field: "collectorDeadlineMs",
 		fallback: DEFAULT_COLLECT_DEADLINE_MS,
+		minimum: 1,
+		maximum: MAX_TIMER_MS,
+		unit: "milliseconds",
+	},
+	/**
+	 * How long one asynchronous rule may take to answer (#225) — the same
+	 * budget, and the same timer ceiling, as one collector.
+	 */
+	ruleTimeoutMs: {
+		field: "ruleTimeoutMs",
+		fallback: DEFAULT_RULE_TIMEOUT_MS,
 		minimum: 1,
 		maximum: MAX_TIMER_MS,
 		unit: "milliseconds",

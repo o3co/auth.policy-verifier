@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+import { DEFAULT_RULE_TIMEOUT_MS, MAX_TIMER_MS } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 import {
 	AppConfigSchema,
@@ -1212,6 +1213,7 @@ describe("AppConfigSchema — the verify block's default names every knob", () =
 			maxContextEntries: DEFAULT_MAX_CONTEXT_ENTRIES,
 			maxContextValueLength: DEFAULT_MAX_CONTEXT_VALUE_LENGTH,
 			collectorTimeoutMs: DEFAULT_COLLECTOR_TIMEOUT_MS,
+			ruleTimeoutMs: DEFAULT_RULE_TIMEOUT_MS,
 			collectorDeadlineMs: DEFAULT_COLLECT_DEADLINE_MS,
 			collectorConcurrency: DEFAULT_COLLECTOR_CONCURRENCY,
 			batchConcurrency: DEFAULT_BATCH_CONCURRENCY,
@@ -1454,5 +1456,34 @@ describe("AppConfigSchema — oauth.jwt is validated only for the built-in authe
 		expect(result.error.issues).toContainEqual(
 			expect.objectContaining({ path: ["oauth", "jwt", "audienceClaim"] }),
 		);
+	});
+});
+
+describe("AppConfigSchema — verify.ruleTimeoutMs (#225)", () => {
+	const jwt = { secret: SECRET, mode: "verify", ...rfc9068 };
+
+	it("defaults to the collector timeout's value", () => {
+		const config = AppConfigSchema.parse({ oauth: { jwt }, ...baseBody });
+		expect(config.verify.ruleTimeoutMs).toBe(DEFAULT_RULE_TIMEOUT_MS);
+	});
+
+	it("coerces the string a HOCON env substitution produces", () => {
+		const config = AppConfigSchema.parse({
+			oauth: { jwt },
+			verify: { ruleTimeoutMs: "250" },
+			...baseBody,
+		});
+		expect(config.verify.ruleTimeoutMs).toBe(250);
+	});
+
+	it("refuses zero and a budget past what a timer can hold", () => {
+		for (const ruleTimeoutMs of [0, MAX_TIMER_MS + 1]) {
+			const result = AppConfigSchema.safeParse({
+				oauth: { jwt },
+				verify: { ruleTimeoutMs },
+				...baseBody,
+			});
+			expect(result.success).toBe(false);
+		}
 	});
 });

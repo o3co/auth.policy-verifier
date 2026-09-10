@@ -7,7 +7,7 @@ import {
 	resolveCollectorLimits,
 	runCollectors,
 } from "./collectorLimits.mjs";
-import type { CollectorRequest, Rule, RuleCollector } from "./types.mjs";
+import type { AnyRule, CollectorRequest, RuleCollector } from "./types.mjs";
 
 /**
  * Fan-out aggregator that runs every `RuleCollector` in parallel and flattens
@@ -31,7 +31,7 @@ export class RulePipeline {
 	}
 
 	/** Runs every collector under the pipeline's bounds and returns the flattened rule list. */
-	async collect(request: CollectorRequest): Promise<Rule[]> {
+	async collect(request: CollectorRequest): Promise<AnyRule[]> {
 		return (await runCollectors(this.collectors, request, this.limits, "rule")).flat();
 	}
 }

@@ -135,11 +135,42 @@ export interface Rule {
 }
 
 /**
+ * A rule whose answer comes from I/O — an out-of-process policy engine such as
+ * Cedar over HTTP (#225). It cannot be a {@link Rule}: `verify` is synchronous
+ * and, by contract, does no I/O. This is the additive form: the same
+ * `ruleType` grouping, the same `code` / `message` on deny, the same reporting
+ * in the decision's `reason`, and the same rule that the answer be a function
+ * of `attrs` alone — a `CollectorContext` retained from collect time may no more
+ * be read here than in `verify`, and the purity conformance suite checks
+ * `decide` exactly as it checks `verify`.
+ *
+ * What differs is permitted cost: `decide` may do I/O, so it runs under a
+ * deadline (`evaluate()`'s `ruleTimeoutMs`) and is handed a `signal` that aborts
+ * when that budget — or the caller — ends. Pass the signal to `fetch`. A rule
+ * that does not answer in time fails the decision as a deny of its own,
+ * `RuleTimeoutError`, never as a pass.
+ */
+export interface AsyncRule {
+	ruleType: string;
+	code: string;
+	message: string;
+	decide(attrs: ReadonlyAttributes, signal: AbortSignal): Promise<boolean>;
+}
+
+/** Either kind of rule. A collector may return both in one list. */
+export type AnyRule = Rule | AsyncRule;
+
+/** Tells the two kinds apart by the presence of `decide`. */
+export function isAsyncRule(rule: AnyRule): rule is AsyncRule {
+	return typeof (rule as Partial<AsyncRule>).decide === "function";
+}
+
+/**
  * Produces rules for a request. A rule collector may return zero or more rules;
  * the `RulePipeline` flattens results from all collectors before evaluation.
  */
 export interface RuleCollector {
-	collect(context: CollectorContext): Promise<Rule[]>;
+	collect(context: CollectorContext): Promise<AnyRule[]>;
 }
 
 /** How one rule inside a group came out. */
