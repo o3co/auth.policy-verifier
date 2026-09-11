@@ -20,8 +20,9 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
-      # docs/release-policy.md R2/R6: a release is cut by renaming
-      # `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and tagging that commit.
+      # docs/release-policy.md R2/R6: a release is cut by writing the
+      # `## [X.Y.Z] - YYYY-MM-DD` section from the commit log and tagging that
+      # commit.
       # Checked here, before anything is built or published, so a tag pushed at
       # an unstamped CHANGELOG fails while it is still free to delete the tag.
       - name: Verify tag and CHANGELOG
@@ -55,7 +56,7 @@ jobs:
 
           VERSION="${TAG#v}"
           if ! grep -qF -- "## [${VERSION}]" CHANGELOG.md; then
-            echo "::error::CHANGELOG.md has no '## [${VERSION}]' section. Per docs/release-policy.md R2, rename '## [Unreleased]' to '## [${VERSION}] - YYYY-MM-DD', commit, and tag that commit."
+            echo "::error::CHANGELOG.md has no '## [${VERSION}]' section. Per docs/release-policy.md R2, write the '## [${VERSION}] - YYYY-MM-DD' section from the commit log, commit, and tag that commit."
             exit 1
           fi
 

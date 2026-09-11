@@ -148,7 +148,7 @@ Releases are triggered by pushing a `v*` tag to GitHub. There is no manual publi
 
 ### Flow
 
-1. Cut the CHANGELOG: rename `## [Unreleased]` to `## [0.2.1] - YYYY-MM-DD` and commit (see `docs/release-policy.md` R2/R6 for the full pre-tag audit)
+1. Cut the CHANGELOG: write the `## [0.2.1] - YYYY-MM-DD` section from `git log <lastTag>..HEAD` and commit (see `docs/release-policy.md` R2/R6 for the full pre-tag audit; there is no standing `## [Unreleased]` section to rename)
 2. Create and push a version tag on that commit: `git tag v0.2.1 && git push origin v0.2.1`
 3. GitHub Actions (`release.yml`) is triggered by the `v*` tag push
 4. The workflow checks the tag shape and that `CHANGELOG.md` has a section for it, rewrites every package's `package.json` `version` to match the tag (via `pnpm -r exec pnpm version`), builds, typechecks, tests, then runs `pnpm -r publish --access public --provenance` across the monorepo
@@ -169,7 +169,7 @@ When asked to "release 0.2.1" or similar:
 
 1. Ensure all changes are merged to `main` (releases are cut from `main`, not feature branches)
 2. Verify the change set warrants the requested version bump (breaking change → major, feature → minor, fix → patch)
-3. Run the release-cut audit in `docs/release-policy.md` R6 and land the CHANGELOG rename (`## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD`) first — the workflow refuses a tag whose version has no CHANGELOG section
+3. Run the release-cut audit in `docs/release-policy.md` R6 and land the CHANGELOG section (`## [X.Y.Z] - YYYY-MM-DD`, written from `git log <lastTag>..HEAD`) first — the workflow refuses a tag whose version has no CHANGELOG section
 4. Propose the tag command to the user; do not push tags without explicit user approval (tag push is irreversible from an npm-publish perspective once the workflow succeeds)
 5. After the tag is pushed, watch the Actions run: `gh run watch` or `gh run list --workflow=release.yml`
 
