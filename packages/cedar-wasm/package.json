@@ -37,7 +37,7 @@
 	},
 	"devDependencies": {
 		"@o3co/auth.policy-verifier.core": "workspace:*",
-		"@types/node": "^26.2.0",
+		"@types/node": "^26.4.1",
 		"@vitest/coverage-v8": "^4.1.10",
 		"vitest": "^4.1.10"
 	}
