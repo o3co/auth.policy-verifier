@@ -16,13 +16,31 @@ npm install @o3co/auth.policy-verifier.builtins
 
 | 名前 | 読み取り元 | 出力 | コンストラクタ引数 |
 | --- | --- | --- | --- |
-| `PayloadScopeCollector` | `subject.scope`（スペース区切り文字列） | `ATTR_SCOPES: string[]` | なし |
+| `PayloadScopeCollector` | scope クレーム — 既定は `subject.scope`。スペース区切り文字列または文字列の配列 | `ATTR_SCOPES: string[]` | `{ claim?: string }`（#219: Okta なら `"scp"`、Auth0 なら `"permissions"`） |
 | `PayloadSubjectIdCollector` | `subject.sub`、`subject.azp` | `ATTR_USER_ID`、`ATTR_CLIENT_ID` | なし |
 | `StaticPermissionCollector` | — | `ATTR_PERMISSIONS: string[]` | `{ permissions: string[] }` |
 | `StaticRoleCollector` | — | `ATTR_ROLES: Role[]` | `{ roles: Role[] }` |
 | `RequestContextAttributeCollector` | `requestContext` の宣言済みフィールド | 運用者が決めたキー | `{ attributes: Mapping[] }` |
+| `PayloadClaimAttributeCollector` | 検証済み `subject` の宣言済みクレーム | 運用者が決めたキー、または core の 5 キー | `{ attributes: Mapping[] }` (#219) |
 
 `StaticPermissionCollector` と `StaticRoleCollector` は、リクエストのコンテキストに関わらず、コンストラクタに渡した値を常に出力します。
+
+### PayloadClaimAttributeCollector
+
+**検証済み subject** の宣言済みクレームを attribute に昇格させます (#219) — 専用のコレクターを書かずに、外部 IdP のクレームを Rule が読む形へ変える、運用者が宣言する方法です:
+
+```hocon
+{ collector = "PayloadClaimAttributeCollector"
+  attributes = [
+    { from = "o.rol", to = "roles", type = "string[]" }                      # Clerk: org のロール。dot path で指定
+    { from = "https://example.com/roles", to = "roles", type = "string[]" }  # Auth0: 名前空間付きクレームはパスではなく 1 つのキー
+    { from = "tid", to = "tenantId" }
+  ] }
+```
+
+マッピングの形は `RequestContextAttributeCollector` と同じです（`{ from, to?, type? }`、完全一致するキーが dot path より優先、own property のみ）。違うのは読み取り元であり、したがって信頼度です: subject バッグは authenticator が検証したものなので、request-context コレクターが拒否する core の 5 キー — `scopes`、`permissions`、`roles`、`userId`、`clientId` — にもマッピングを着地させて**かまいません**。2 つのコレクターが 1 つのリストキーに書けば union されます。それはデプロイが issuer 由来の 2 つのソースを合成しているということであり、config にそう書かれています。一方、2 つのコレクターが異なる値で書いた*スカラー*キーは `AttributeConflictError` を投げ、すべてのリクエストを deny します — `PayloadSubjectIdCollector` も `userId` / `clientId` を書いている間は、そこへマッピングしないでください。別のパッケージが予約したキー（cedar の `request*`）は引き続き拒否されます。それらは subject ではなくリクエストから導出されるものだからです。そして、マッピングするのは IdP が自身の登録データや管理データから埋めるクレームだけにしてください: ユーザーが編集できるメタデータ（Clerk の `unsafe_metadata`、Auth0 の `user_metadata`）から発行されたクレームは、署名されてはいても信頼できるものではありません。
+
+scope クレームについては `PayloadScopeCollector { claim = "scp" }` を優先してください。こちらはスペース区切り文字列の形も読み、`ResourceActionScopeRuleCollector { claim = "scp" }` と組にすることで、どのトークンが scopeless かについて両者の判断が一致します。
 
 ### RequestContextAttributeCollector
 
@@ -36,7 +54,7 @@ npm install @o3co/auth.policy-verifier.builtins
   ] }
 ```
 
-各マッピングは `{ from: string; to?: string; type?: "string" | "number" | "boolean" | "string[]" }` で、`type` の既定は `"string"` です。マッピング定義が不正ならコンストラクタで throw しますが、*値* が使えない場合は throw しません — `requestContext` は呼び出し側が渡すリクエストデータなので、欠落・空文字・宣言した型に合わない値は単に昇格されません。
+各マッピングは `{ from: string; to?: string; type?: "string" | "number" | "boolean" | "string[]" }` で、`type` の既定は `"string"` です。`context` 上で完全一致するキーは dot path の走査より優先されます: `"tenant.id"` という文字どおりのフィールドは、`tenant` → `id` より先に読まれます。マッピング定義が不正ならコンストラクタで throw しますが、*値* が使えない場合は throw しません — `requestContext` は呼び出し側が渡すリクエストデータなので、欠落・空文字・宣言した型に合わない値は単に昇格されません。
 
 この宣言が信頼境界です — [docs/extending.ja.md](../../docs/extending.ja.md#信頼境界-requestcontext-は呼び出し側のもの) が説明する境界の、既製の守り方がこのコレクターです。`requestContext` は自由形式かつ未検証なので、**宣言していないフィールドは attribute になりません**。dot path は own property のみを辿るため `constructor.name` のような指定は何も読みません。このコレクター自身は語彙を持ち込みません — フィールド名もキー名も運用者が決めるため、[AGENTS.md — Core Vocabulary Scope](../../AGENTS.md#core-vocabulary-scope) の方針を崩さずに実用的なものを提供できます。read-check-write を超える処理（値の導出、外部ストア参照など）が必要な場合は、同節が説明するプロジェクト側の `AttributeCollector` を書いてください。
 
@@ -75,11 +93,13 @@ new HasPermission(permission: string)
 
 - `ruleType`: `"permission"`、`code`: `"no_permission"`
 - `ATTR_PERMISSIONS`（直接）と `ATTR_ROLES[].permissions`（ロール経由）を確認します。
-- ワイルドカードマッチ（大文字・小文字を区別しない）:
+- 比較は**大文字・小文字を区別する完全一致**です — `HasScope` が scope に、`DotNotationResourceParser` がリソースに適用しているのと同じ規律で、書かれたものをそのまま比較し、意図を正規化して推測しません。パーサーは大文字・小文字を保持するため、scope ルールにとって `Project:1` と `project:1` が別のリソースであるのとまったく同じく、`Project:1.perm:read` と `project:1.perm:read` は別の permission です。
+- **付与された** permission 内のワイルドカードは尊重されます — 正規化ではなく、書かれたマッチ構造だからです。`*` の前後のリテラル部分は引き続き完全一致で比較されます:
   - `"*"` はすべての permission に一致。
   - `"foo*"` はプレフィックスが `foo` の permission に一致。
   - `"*bar"` はサフィックスが `bar` の permission に一致。
   - `"foo*bar"` は `foo` で始まり `bar` で終わる permission に一致。
+  - 付与された permission に `*` が 2 つ以上含まれる場合は決して一致しません（黙って過剰付与するより拒否する方がよいため）。
 
 ### HasScope
 
@@ -212,9 +232,9 @@ new AttrPairCompare({ a: string, op: "lt" | "le" | "gt" | "ge", b: string, group
 | `ResourceActionScopeRuleCollector` | `"<action>:<resource.resourceType>"` | `[HasScope(...)]` |
 
 `ResourceActionPermissionRuleCollector` にコンストラクタ引数はありません。
-`ResourceActionScopeRuleCollector` は `{ scopeless?: "deny" | "skip", allowBareScopeRewrite?: boolean }` を受け取ります。
+`ResourceActionScopeRuleCollector` は `{ scopeless?: "deny" | "skip", allowBareScopeRewrite?: boolean, claim?: string }` を受け取ります — `claim` はトークンが scope を主張していることを示す claim の名前です（既定 `scope`。`PayloadScopeCollector` が読むもの、例えば `scp` に合わせる）。
 
-- `scopeless`（既定 `"deny"`）: 既定ではリクエストごとに必ず `HasScope` ルールを生成するため、`scope` claim を持たない
+- `scopeless`（既定 `"deny"`）: 既定ではリクエストごとに必ず `HasScope` ルールを生成するため、scope claim（`scope`、または `claim` が指す claim）を持たない
   トークンはこのルールに落ちます。`"skip"` は scopeless トークンに対してルールを生成しませんが、ルールが 1 つも集まらない
   リクエストは deny されるため、別のルールグループが認可を担うパイプラインでのみ使ってください。
 - `allowBareScopeRewrite`（既定 `false`）: [`HasScope`](#hasscope) へそのまま渡されます。issuer が `{action}:{resourceType}`
@@ -281,11 +301,12 @@ import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
 
 | レジストリ | 名前 | ファクトリ |
 | --- | --- | --- |
-| `attributeCollector` | `"PayloadScopeCollector"` | `() => new PayloadScopeCollector()` |
+| `attributeCollector` | `"PayloadScopeCollector"` | `(config) => new PayloadScopeCollector(config)` |
 | `attributeCollector` | `"PayloadSubjectIdCollector"` | `() => new PayloadSubjectIdCollector()` |
 | `attributeCollector` | `"StaticPermissionCollector"` | `(config) => new StaticPermissionCollector(config)` |
 | `attributeCollector` | `"StaticRoleCollector"` | `(config) => new StaticRoleCollector(config)` |
 | `attributeCollector` | `"RequestContextAttributeCollector"` | `(config) => new RequestContextAttributeCollector(config)` |
+| `attributeCollector` | `"PayloadClaimAttributeCollector"` | `(config) => new PayloadClaimAttributeCollector(config)` |
 | `ruleCollector` | `"ResourceActionScopeRuleCollector"` | `(config) => new ResourceActionScopeRuleCollector(config)` |
 | `ruleCollector` | `"ResourceActionPermissionRuleCollector"` | `() => new ResourceActionPermissionRuleCollector()` |
 | `resourceParser` | `"DotNotationResourceParser"` | `() => new DotNotationResourceParser()` |

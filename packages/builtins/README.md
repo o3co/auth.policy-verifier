@@ -232,10 +232,10 @@ All attribute comparison rules follow the same grouping semantics described for 
 | `ResourceActionScopeRuleCollector` | `"<action>:<resource.resourceType>"` | `[HasScope(...)]` |
 
 `ResourceActionPermissionRuleCollector` takes no constructor arguments.
-`ResourceActionScopeRuleCollector` accepts `{ scopeless?: "deny" | "skip", allowBareScopeRewrite?: boolean }`.
+`ResourceActionScopeRuleCollector` accepts `{ scopeless?: "deny" | "skip", allowBareScopeRewrite?: boolean, claim?: string }` — `claim` names the claim whose presence says the token asserted scopes (default `scope`; set it to what `PayloadScopeCollector` reads, e.g. `scp`).
 
-- `scopeless` (default `"deny"`): it emits the `HasScope` rule for every request, so a token carrying no `scope`
-  claim fails it. `"skip"` emits no rule for a scopeless token — only use it in a pipeline where another rule
+- `scopeless` (default `"deny"`): it emits the `HasScope` rule for every request, so a token carrying no scope
+  claim (`scope`, or the claim `claim` names) fails it. `"skip"` emits no rule for a scopeless token — only use it in a pipeline where another rule
   group authorizes the request, since a request that collects no rule at all is denied.
 - `allowBareScopeRewrite` (default `false`): forwarded to [`HasScope`](#hasscope). Set it to `true` only if your
   issuer emits bare resource names (`project`) rather than `{action}:{resourceType}` scopes (`read:project`).

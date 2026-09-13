@@ -267,9 +267,19 @@ export const introspectionAuthenticatorModule: Module<ServerModuleContext> = {
       const { endpoint, clientId, clientSecret } = oauth.introspection;
       const authenticator: TokenAuthenticator = {
         async authenticate(header) {
-          const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
-          if (!token) return { ok: false, code: "missing_token", message: "Authorization header is missing" };
-          const res = await fetch(endpoint, { method: "POST", /* Basic clientId:clientSecret, token=... */ });
+          // The scheme is case-insensitive (RFC 9110 §11.1).
+          const [scheme, token] = header?.trim().split(/\s+/, 2) ?? [];
+          if (scheme?.toLowerCase() !== "bearer") return { ok: false, code: "unsupported_scheme", message: "Bearer scheme required" };
+          if (!token) return { ok: false, code: "missing_token", message: "Bearer token is missing" };
+          const res = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+              // RFC 6749 §2.3.1: each half form-encoded before the pair is base64-encoded.
+              authorization: `Basic ${Buffer.from(`${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`).toString("base64")}`,
+              "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({ token, token_type_hint: "access_token" }),
+          });
           const body = await res.json();
           if (!res.ok || body.active !== true) {
             deps.logger.warn({ status: res.status }, "introspection_rejected");
@@ -305,7 +315,7 @@ Notes:
 - `subject` is the neutral attribute bag core evaluates (see [AGENTS.md — Core Vocabulary Scope](../AGENTS.md#core-vocabulary-scope)). Anything you put there is trusted as the verified identity, so put in it only what you verified; the request body never reaches it.
 - **Everything the built-in path enforces is now yours to enforce.** The JWT path verifies the signature, pins `iss`, the audience and `typ`, requires `exp` and `iat`, applies `maxTokenAgeSeconds` / `clockToleranceSeconds` and `nbf`, refuses `cnf`-bound tokens, and records `authScheme`. None of that runs for an authenticator you register: do what applies before returning `ok: true`. The `credential` you return is whatever you choose, and it reaches collectors under `credentialToCollectors = "expose"`.
 - A refusal is a 401 wearing the deny envelope, with your `code` and `message`. Log the reason yourself (the built-in path emits `jwt_token_rejected` / `jwt_verification_unavailable`) — the router logs nothing about *why* an authenticator refused.
-- Sender-constrained tokens (`cnf`) stay refused on the built-in path (#209); an authenticator that can verify possession is free to accept them.
+- Sender-constrained tokens (`cnf`) stay refused on the built-in path (#209). A registered authenticator is handed only the `Authorization` header — no proof, no client certificate, not the original request — so it cannot verify possession itself. Accept a bound token only when an authentication boundary upstream of this server has already verified possession for the original protected request, and you can trust that it did.
 - `createVerifyRouter` takes an already-built `authenticator` in place of `jwt` for a library consumer that composes without `createApp`.
 
 ## Further reading

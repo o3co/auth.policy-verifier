@@ -197,6 +197,46 @@ RuleCollector だけではポリシーになりません。ルールグループ
 | `PayloadSubjectIdCollector` | JWT `sub` クレーム | `userId` |
 | `StaticPermissionCollector` / `StaticRoleCollector` | config の定数 | `permissions` / `roles` |
 | `RequestContextAttributeCollector` | リクエスト `context` の宣言済みフィールド | 運用者が決めたキー |
+| `PayloadClaimAttributeCollector` | 検証済み subject の宣言済みクレーム（`o.rol`、`https://example.com/roles`、…） | 運用者が決めたキー、または core の 5 キー |
+
+## 外部 IdP のトークンを受け入れる
+
+組み込みの bearer-JWT 経路は、[auth.provider](https://github.com/o3co/auth.provider) が発行する形の RFC 9068 — `iss`、`aud`、`at+jwt` ヘッダ — に固定されており、外部 IdP の多くはそのいずれかから外れています。よくある形は 2 つのノブでカスタム authenticator なしに扱えます。扱えない場合は authenticator を登録してください（[docs/extending.ja.md — token authenticator の書き方](docs/extending.ja.md#token-authenticator-の書き方) を参照）。
+
+| IdP のトークン | 何が違うか | `oauth.jwt` |
+| --- | --- | --- |
+| Clerk のセッショントークン | `aud` がない。アプリは `azp` で束縛される。`typ: JWT` | `algorithm = RS256`, `jwksUri = https://<frontend-api>/.well-known/jwks.json`, `issuer = https://<frontend-api>`, `audienceClaim = "azp"`, `audience = "https://app.example"`, `tokenType = "JWT"` |
+| Okta のカスタム authorization server | `typ` が `JWT`。scope は `scp` 配列 | `algorithm = RS256`, `jwksUri = https://<org>.okta.com/oauth2/<as>/v1/keys`, `issuer` / `audience` はサーバー側の設定どおり, `tokenType = "JWT"`。scope は `scp` 配列で届く: `PayloadScopeCollector { claim = "scp" }` と `ResourceActionScopeRuleCollector { claim = "scp" }`（下記の collector を参照） |
+| Cognito のアクセストークン | `typ` ヘッダがない。アプリは `aud` ではなく `client_id` で束縛される | `algorithm = RS256`, `jwksUri = https://cognito-idp.<region>.amazonaws.com/<pool>/.well-known/jwks.json`, `audienceClaim = "client_id"`, `audience = "<app client id>"`, `tokenType = "*"` |
+
+署名が検証できたら、次は Rule が読むものを collector が見つけられなければなりません。builtins が読むのは `scope`（スペース区切りの文字列）、`sub`、`azp` ですが、外部 IdP は scope や role を別の場所に置きます:
+
+```hocon
+attribute {
+  collectors = [
+    { collector = "PayloadScopeCollector", claim = "scp" }          # Okta: scope は `scp` 配列
+    { collector = "PayloadSubjectIdCollector" }
+    { collector = "PayloadClaimAttributeCollector"
+      attributes = [
+        { from = "o.rol", to = "roles", type = "string[]" }         # Clerk: org のロール
+        { from = "https://example.com/roles", to = "roles", type = "string[]" }  # Auth0: 名前空間付きクレーム
+      ] }
+  ]
+}
+rule {
+  collectors = [ { collector = "ResourceActionScopeRuleCollector", claim = "scp" } ]
+}
+```
+
+`PayloadScopeCollector` と `ResourceActionScopeRuleCollector` の `claim` は同じ値にしてください: `scopeless = "skip"` の下で食い違うと、scope を持っているトークンを scopeless として扱い、scope ルールを落としてしまいます。
+
+`audienceClaim` は audience の検査を指定したクレームへ移すだけで、検査をなくすことはありません。`audience` も必須のままなので、別のアプリ向けに発行されたトークンは引き続き拒否されます。押さえるべき点は 3 つです:
+
+- **`audienceClaim` を `aud` 以外にすると、`aud` は一切参照されません。** `aud` が別のリソースサーバーを指すトークンでも、指定したクレームが一致すれば通ります — `azp` が指すのは*クライアント*であり、1 つのフロントエンドが話すバックエンドはすべてそれを共有します。`aud` を発行しない issuer（Clerk のセッショントークン、Cognito のアクセストークン）に限って使ってください。`aud` を発行する issuer — Okta、Auth0、`aud` を設定する Clerk の JWT テンプレート — では既定のままにし、`audience` を自分の API 識別子に pin してください。
+- **`tokenType = "*"` はちょうど `*` でなければなりません**（`application/*` はその文字列そのものを pin し、あらゆるトークンを拒否します）。`typ` を pin しないと、同じ鍵で署名されたアクセストークンと id_token / logout token を区別するものが何もなくなるため、**`audience` を OIDC の client id にしてはいけません** — その client 向けの id_token が条件を満たしてしまいます。別の API 識別子を使うか、id_token が持たない `audienceClaim` を使ってください（Cognito の id_token が持つのは `client_id` ではなく `aud` です）。
+- **束縛・マッピングするのは、IdP が自身の登録データや管理データから埋めるクレームだけにしてください。** ユーザーが書き込めるクレームは、署名されていても信頼できるものではありません: Clerk の `unsafe_metadata` や Auth0 の `user_metadata` はユーザーが編集でき、そこから発行されたクレームは `audienceClaim` にも `PayloadClaimAttributeCollector` のマッピングにも届いてはなりません。
+
+不透明トークン — Okta の org authorization server、`audience` なしの Auth0 — はそもそもローカルで検証できず、introspection authenticator が必要です。
 
 ## 設定
 
@@ -211,6 +251,13 @@ http {
 }
 
 oauth {
+  # subject を確立する token authenticator。"jwt"（デフォルト）は下のブロックで
+  # 設定する組み込みの bearer-JWT 経路。それ以外の名前はモジュールが登録したもので
+  # なければならない — docs/extending.ja.md の「token authenticator の書き方」を参照。
+  # 別の名前にする場合 `jwt` は省略すること — その authenticator の鍵は専用の
+  # サブブロック（oauth.<name> { … }）に置く。
+  authenticator = "jwt"
+  authenticator = ${?OAUTH_AUTHENTICATOR}
   jwt {
     algorithm = "HS256"           # HS256 | RS256 | ES256 | EdDSA
     algorithm = ${?OAUTH_JWT_ALGORITHM}
@@ -239,6 +286,9 @@ oauth {
     audience = ${?OAUTH_JWT_AUDIENCE}       # mode = "verify" のとき必須 — RFC 9068 §4 aud
     tokenType = "at+jwt"                     # 受け入れる typ ヘッダ
     tokenType = ${?OAUTH_JWT_TOKEN_TYPE}
+    # `tokenType = "*"` は何も pin しない — typ が何でも、無くてもよい。typ ヘッダを持たないトークンを発行する issuer 向け
+    audienceClaim = "aud"                    # audience を読むクレーム: "azp"（Clerk）、"client_id"（Cognito）
+    audienceClaim = ${?OAUTH_JWT_AUDIENCE_CLAIM}
     maxTokenAgeSeconds = 86400               # now - iat の上限。設定により iat が必須になる
     clockToleranceSeconds = 0                # クロックずれ許容幅 0–300。provider に合わせるなら 60
     mode = "verify"                          # "verify"（デフォルト）| "insecure-decode"（テスト専用）
@@ -295,6 +345,14 @@ verify {
   collectorDeadlineMs  = ${?VERIFY_COLLECTOR_DEADLINE_MS}
   collectorConcurrency = 8      # 同時に走らせるコレクター数
   collectorConcurrency = ${?VERIFY_COLLECTOR_CONCURRENCY}
+
+  # 非同期 Rule（プロセス外のポリシーエンジン、#225）の上限。両方の collect の後に
+  # 走る。超過した決定は rule_timeout で deny になる。下記「Rule のデッドライン」を参照。
+  ruleTimeoutMs        = 2000   # 非同期 Rule 1 つあたりの予算
+  ruleTimeoutMs        = ${?VERIFY_RULE_TIMEOUT_MS}
+  evaluateDeadlineMs   = 5000   # 1 決定の非同期 Rule すべての合計
+  evaluateDeadlineMs   = ${?VERIFY_EVALUATE_DEADLINE_MS}
+
   batchConcurrency     = 8      # バッチのうち同時に決定する entry 数 (#183)
   batchConcurrency     = ${?VERIFY_BATCH_CONCURRENCY}
 }
@@ -349,6 +407,17 @@ Attribute / Rule コレクターはデータベースや HTTP API を呼ぶ層�
 各コレクターには `CollectorContext.signal` で `AbortSignal` が渡されます。そのコレクターの予算切れ、pipeline のデッドライン超過、兄弟コレクターの失敗による決定の中止、呼び出し側の切断のいずれでも abort します。コレクターが待つ相手にそのまま渡してください — `fetch(url, { signal: context.signal })` — そうすれば外向きの処理も実際に取り消されます。
 
 **上限を超えた決定は deny です。** `403` と `code: "collector_timeout"`、`reason.groups` は空で応答し、詳細は呼び出し側ではなく `collector_timeout` ログ行に出ます。意図的に `5xx` にはせず、「時間内に集まったぶんで判定する」こともしません — ルールが少ないことは**ポリシーが弱いこと**であり、1 つも無ければ `rule.onEmptyRuleSet = "allow"` の deployment では **allow** になるからです。そのため評価器には到達させません。バッチでは上限は決定単位なので、1 エントリの超過はそのエントリだけを deny にし、残りは通常どおり判定されます。
+
+### Rule のデッドライン
+
+非同期 Rule（`AsyncRule`、#225）はプロセス外のポリシーエンジンに問い合わせるため、評価にも fan-out と同じ 2 種類の上限があります:
+
+| 設定キー | 既定値 | 何を制限するか |
+| --- | --- | --- |
+| `verify.ruleTimeoutMs` | `2000` | 非同期 Rule 1 つが応答までに使える時間 |
+| `verify.evaluateDeadlineMs` | `5000` | 1 決定の非同期 Rule すべてが合計で使える時間。Rule グループは順に実行されるため、Rule 単位の予算ではフェーズ全体を抑えられない。Rule は 2 つのうち先に尽きる方のもとで走り、フェーズが尽きた後はどの Rule も開始しない |
+
+超過すると `403`、`code: "rule_timeout"` で deny になります。同期 Rule は I/O をしないので時間制限を受けません。呼び出し側が接続を閉じたときにも、Rule の signal は abort します。
 
 ### リソース文字列形式 (DotNotation)
 

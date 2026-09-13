@@ -1,6 +1,16 @@
 # @o3co/auth.policy-verifier.server
 
-auth.policy-verifier 向けの Express HTTP サーバーです。モジュールと設定からアプリケーションを組み立てる `createApp` と、認可判定を行う `POST /verify` を提供します。
+auth.policy-verifier 向けの Express HTTP サーバーです。モジュールと設定からアプリケーションを組み立てる `createApp` と、認可判定を行う `POST /verify` / `POST /verify/batch` を提供します。
+
+## Bearer 認証の境界
+
+組み込みの authenticator が受け付けるのは、`Bearer` スキームで提示された、何にも束縛されていないアクセストークンです。
+それ以上にどのトークンを受け付けるかは `tokenType` が pin します（`"*"` は何も pin せず、テスト専用のデコードモードは署名を検証しません）。
+`cnf` クレームを持つトークンは、その中身が何であれ `401 invalid_token` で拒否します — DPoP、mTLS、
+不正な形の confirmation、未知の方式のいずれもです。これは `/verify` と `/verify/batch` の両方に適用され、
+テスト専用のデコードモードも例外ではありません。リクエストの context で「所持は検証済み」と主張することは
+できません。束縛トークンを使うデプロイには、元の保護対象リクエストについて所持を検証する認証境界が
+必要であり、このサーバーはそのプロトコルを提供しません。
 
 ## インストール
 
@@ -26,11 +36,11 @@ function createApp(options: CreateAppOptions): Promise<express.Express>
 
 実行ステップ:
 
-1. AttributeCollector・RuleCollector・ResourceParser のファクトリ用 `Registry` インスタンスを生成する。
+1. AttributeCollector・RuleCollector・ResourceParser・key resolver・token authenticator のファクトリ用 `Registry` インスタンスを生成し、どのモジュールよりも先に組み込みの `"jwt"` authenticator を登録する (#219)。
 2. `modules` の各モジュールに対して `mod.init(context)` を順に呼び出し、各モジュールがファクトリ関数を登録できるようにする。
 3. `config.attribute.collectors` と `config.rule.collectors` の各エントリについて、`collector` 名で登録済みファクトリを検索して AttributeCollector と RuleCollector を生成する。
-4. `config.resource.parser` から ResourceParser を生成する。
-5. `config.http.pathPrefix` 以下に liveness probe（`GET /_healthcheck` — スタックの全コンポーネントが応答するパス。`GET /healthcheck` は互換 alias として残す）・任意の caller 認証ゲート・`POST /verify` をこの順にマウントする。
+4. `config.resource.parser` から ResourceParser を、`config.oauth.authenticator` が指す token authenticator を生成する — 組み込みの authenticator は `config.oauth.jwt.algorithm` を key resolver 経由で解決する。
+5. `config.http.pathPrefix` 以下に liveness probe（`GET /_healthcheck` — スタックの全コンポーネントが応答するパス。`GET /healthcheck` は互換 alias として残す）・任意の caller 認証ゲート・`POST /verify` と `POST /verify/batch` をこの順にマウントする。
 6. 設定済みの `express.Express` インスタンスを返す。
 
 `pathResolver` には、コンポジションルート側の `import.meta.resolve`（または互換リゾルバー）を渡します。モジュール相対パスの解決が必要なモジュールに渡されます。
@@ -39,7 +49,11 @@ function createApp(options: CreateAppOptions): Promise<express.Express>
 
 ```typescript
 interface VerifyRouterConfig {
-  jwt: VerifyRouterJwtConfig;
+  // 2 つのうちちょうど一方 (#219): 組み込みの bearer-JWT 経路か、構築済みの
+  // TokenAuthenticator — `oauth.authenticator` を解決した後に createApp が
+  // 渡すのは後者。
+  jwt?: VerifyRouterJwtConfig;
+  authenticator?: TokenAuthenticator;
   resourceParser: ResourceParser;
   attributePipeline: AttributePipeline;
   rulePipeline: RulePipeline;
@@ -49,6 +63,10 @@ interface VerifyRouterConfig {
   maxBatchSize?: number | string;
   /** バッチのうち同時に決定する entry 数 (#183)。既定は 8。 */
   batchConcurrency?: number | string;
+  /** 非同期 Rule 1 つが応答までに使える時間 (#225)。既定は 2000 ms。 */
+  ruleTimeoutMs?: number | string;
+  /** 1 決定の非同期 Rule すべてが合計で使える時間。既定は 5000 ms。 */
+  evaluateDeadlineMs?: number | string;
 }
 
 // `validate` による判別可能ユニオン。検証パラメータは検証するときにだけ存在する。
@@ -65,27 +83,29 @@ type VerifyRouterJwtConfig =
       algorithms: string[];
       issuer: string | string[];    // RFC 9068 §4 iss
       audience: string | string[];  // RFC 9068 §4 aud
-      tokenType: string;            // 受け入れる typ ヘッダ（例: "at+jwt"）
+      audienceClaim?: string;       // audience を読む claim。既定は "aud" (#219)
+      tokenType: string;            // 受け入れる typ ヘッダ（例: "at+jwt"）。"*" は何も pin しない
     })
   | (JwtTimeClaimConfig & { validate: false; allowInsecureDecode: true });
 
 function createVerifyRouter(config: VerifyRouterConfig): express.Router
 ```
 
-`POST /verify` を処理する Express Router を返します。`createApp` が内部で呼び出すため、通常は直接使用する必要はありません。ルーターを独立してマウントしたい場合のみ直接利用してください。
+`POST /verify` と `POST /verify/batch` を処理する Express Router を返します。`createApp` が内部で呼び出すため、通常は直接使用する必要はありません。ルーターを独立してマウントしたい場合のみ直接利用してください。
 
 リクエスト処理フロー:
 
-1. `Authorization: <type> <token>` ヘッダーを取得する。存在しない場合は 401 を返す。
-2. `validate` が `true` の場合: 署名に加えて RFC 9068 §4 のクレームを検証する — `iss` を `issuer` と、`aud` を `audience` と、`typ` ヘッダを `tokenType` と照合する（`application/` プレフィックスは無視）。失敗時は 401 を返す。3 つのいずれかが欠けている場合、`createVerifyRouter` は例外を投げる。
-3. `validate` が `false` の場合: JWT を検証なしでデコードする。不正なトークンの場合は 401 を返す。
-4. どちらの経路でもトークン自身の寿命を検証する: `exp` と `iat` は**必須**（有効期限を宣言しないトークンは失効しない）、`nbf` は存在すれば検証、`exp` は未来でなければならず、`now - iat` は `maxTokenAgeSeconds` を超えてはならない — 発行者が何年も先の `exp` を付けたトークンを拒否するのはこれ。`clockToleranceSeconds` はこれら全ての比較に効く。失敗時は 401 を返す。デコード専用経路はこれらの検査を省略せず手書きで再現するので、同一トークンに対して両モードの答えは一致する。
-5. `req.body.resource` を `resourceParser` でパースし、`req.body.action` と `req.body.context` を読み取る。
+1. トークンを見る前にボディを検証する (#118): `resource` を `resourceParser` でパースし、`action` と `context` を読み取り、そのすべてをリクエストの上限に照らす。失敗時は `400 invalid_request` を返す — つまり不正なリクエストは、有効なトークンを持っていなくても 400 になる。
+2. `Authorization` ヘッダーを authenticator に渡す。組み込みの authenticator（`jwt`）は `Bearer <token>` を取り出し（スキームは大文字小文字を区別せずに照合）、ヘッダーが存在しないかスキームが Bearer でない場合は 401 を返す。直接渡された `authenticator` は自身の `code` / `message` で応答し、ステップ 3〜5 はその authenticator の責務になる。
+3. `validate` が `true` の場合: 署名に加えて RFC 9068 §4 のクレームを検証する — `iss` を `issuer` と、audience クレーム（`aud`、または `audienceClaim` が指すクレーム）を `audience` と、`typ` ヘッダを `tokenType` と照合する（`application/` プレフィックスは無視。`"*"` は何も pin しない）。失敗時は 401 を返す。3 つのいずれかが欠けている場合、`createVerifyRouter` は例外を投げる。
+4. `validate` が `false` の場合: JWT を検証なしでデコードする。不正なトークンの場合は 401 を返す。
+5. どちらの経路でもトークン自身の寿命を検証する: `exp` と `iat` は**必須**（有効期限を宣言しないトークンは失効しない）、`nbf` は存在すれば検証、`exp` は未来でなければならず、`now - iat` は `maxTokenAgeSeconds` を超えてはならない — 発行者が何年も先の `exp` を付けたトークンを拒否するのはこれ。`clockToleranceSeconds` はこれら全ての比較に効く。失敗時は 401 を返す。デコード専用経路はこれらの検査を省略せず手書きで再現するので、同一トークンに対して両モードの答えは一致する。
 6. `x-request-id` ヘッダーが存在する場合、`CollectorContext.headers` に含める（コレクターが上流呼び出し時に転送可能）。
 7. `attributePipeline.collect` と `rulePipeline.collect` を collector の上限（`verify.collectorTimeoutMs` / `verify.collectorDeadlineMs` / `verify.collectorConcurrency`。各 collector には `CollectorContext.signal` で `AbortSignal` が渡される）のもとで並列実行し、`evaluate` を呼び出す。
 8. `200 { decision: "allow" }` または `403 { decision: "deny", code, message }` を返す。
 9. collector または fan-out が時間切れになった場合は `403 { decision: "deny", code: "collector_timeout" }` を返す (#115)。評価器には到達させない — 一部の Rule しか集まらないことはポリシーが弱いことであり、1 つも集まらなければ `rule.onEmptyRuleSet = "allow"` では allow になるため。タイムアウトは deny にしかなり得ない。詳細は呼び出し側ではなく `collector_timeout` ログ行に出る。
-10. 予期しないエラーが発生した場合は `500 { decision: "deny", code: "internal_error" }` を返す。
+10. 非同期 Rule が `verify.ruleTimeoutMs` 以内に応答しなかった場合 (#225)、または非同期 Rule 全体で `verify.evaluateDeadlineMs` を超えた場合は `403 { decision: "deny", code: "rule_timeout" }` を返す — 同じ deny だが専用の code を持つので、運用者は停止したのがエンジンなのか collector なのかを区別できる。
+11. 予期しないエラーが発生した場合は `500 { decision: "deny", code: "internal_error" }` を返す。
 
 ### AppConfigSchema / AppConfig
 
@@ -101,16 +121,19 @@ const AppConfigSchema = z.object({
     }).optional(),
   }),
   oauth: z.object({
+    authenticator: z.string().default("jwt"),   // "jwt"、またはモジュールが登録した名前 (#219)
+    // authenticator が "jwt" のとき必須、それ以外の名前では拒否される。
     jwt: z.object({
       secret: z.string().optional(),                                   // HS256: デコード後 32 バイト以上
       mode: z.enum(["verify", "insecure-decode"]).default("verify"),
       issuer: z.union([z.string(), z.array(z.string())]).optional(),   // mode = "verify" のとき必須
       audience: z.union([z.string(), z.array(z.string())]).optional(), // mode = "verify" のとき必須
-      tokenType: z.string().default("at+jwt"),
+      audienceClaim: z.string().default("aud"),                        // audience を読む claim (#219)
+      tokenType: z.string().default("at+jwt"),                         // "*" は何もピンしない
       maxTokenAgeSeconds: boundedNumber(NUMERIC_BOUNDS.maxTokenAgeSeconds, "oauth.jwt"),
       clockToleranceSeconds: boundedNumber(NUMERIC_BOUNDS.clockToleranceSeconds, "oauth.jwt"),
-    }),
-  }),
+    }).optional(),
+  }).passthrough(),                             // 別の authenticator 自身のサブブロックはそのまま載る
   attribute: z.object({
     collectors: z.array(z.object({ collector: z.string() }).passthrough()),
   }),
@@ -132,6 +155,9 @@ const AppConfigSchema = z.object({
     // collector fan-out の上限 (#115)。超えた決定は deny になる。
     collectorTimeoutMs: boundedNumber(NUMERIC_BOUNDS.collectorTimeoutMs, "verify"),   // 既定 2000
     collectorDeadlineMs: boundedNumber(NUMERIC_BOUNDS.collectorDeadlineMs, "verify"), // 既定 5000
+    // 非同期 Rule (#225): Rule 1 つの予算と、Rule フェーズ全体の予算。
+    ruleTimeoutMs: boundedNumber(NUMERIC_BOUNDS.ruleTimeoutMs, "verify"),             // 既定 2000
+    evaluateDeadlineMs: boundedNumber(NUMERIC_BOUNDS.evaluateDeadlineMs, "verify"),   // 既定 5000
     collectorConcurrency:
       boundedNumber(NUMERIC_BOUNDS.collectorConcurrency, "verify"),               // 既定 8
     // バッチのうち同時に決定する entry 数 (#183)。collector の上限は decision 単位
@@ -177,7 +203,7 @@ caller 認証は**本リリースでは任意**です。未設定かつ bind が
 
 1. **bind をループバックのままにする。** サイドカー構成です。enforcement 層が同一ホスト（あるいは同一 Kubernetes Pod のネットワーク名前空間）に同居し、`127.0.0.1:3000` に到達します。設定も資格情報のローテーションも不要で、既定がすでにこの形です。
 2. **ループバック以外に bind せざるを得ない場合は、ネットワーク層でポートを制限する** — プライベートサブネット、セキュリティグループ、`NetworkPolicy` など。コンテナのポート publish はこれに**該当しません**: `HTTP_HOSTNAME=0.0.0.0` と `ports: ["3000:3000"]` の組み合わせは、そのホストに到達できるすべてに到達を許します。
-3. **併せて `http.callerAuth.token`（env `HTTP_CALLER_AUTH_TOKEN`）を設定する。** ポートに到達できるだけでは判定を要求できなくなります。3 つのうち、攻撃者が既にネットワーク境界の内側にいる場合でも有効なのはこれだけです。なお Go の enforcement 層（[protobuf.interceptors](https://github.com/o3co/protobuf.interceptors)）がこのヘッダを送るオプションを備えるのは**次のリリースから**です。それまでは、同ライブラリを使う呼び出し元は 1 か 2 を使ってください。
+3. **併せて `http.callerAuth.token`（env `HTTP_CALLER_AUTH_TOKEN`）を設定する。** ポートに到達できるだけでは判定を要求できなくなります。3 つのうち、攻撃者が既にネットワーク境界の内側にいる場合でも有効なのはこれだけです。なお Go の enforcement 層（[protobuf.interceptors](https://github.com/o3co/protobuf.interceptors)）は v0.3.0 以降、`endpoint.WithO3coHeaders` でこのヘッダを送れます。それより前のバージョンで作られた呼び出し元は 1 か 2 を使ってください。
 
 共有資格情報はネットワークポリシーや enforcement 層との mTLS の代替ではありません。下限であって上限ではありません。
 
@@ -360,6 +386,8 @@ const app = await createApp({
 ```
 
 `builtinKeyResolversModule` は HS256 / RS256 / ES256 / EdDSA のファクトリーを `keyResolverRegistry` に登録します。カスタムモジュールと並べて合成してください。独自の鍵解決モジュールを提供する場合のみ省略可能です。
+
+同じ context は `tokenAuthenticatorRegistry` も運びます (#219)。`createApp` はどのモジュールよりも先にそこへ組み込みの `"jwt"` authenticator を登録します。モジュールは自分の名前で `TokenAuthenticatorFactory` を登録し — introspection クライアント、IdP SDK、ゲートウェイの attestation など — `oauth.authenticator` でそれを選択します。その場合 `oauth.jwt` は省略できます。[docs/extending.ja.md — token authenticator の書き方](../../docs/extending.ja.md#token-authenticator-の書き方) を参照してください。
 
 ## 関連
 

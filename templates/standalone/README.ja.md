@@ -45,10 +45,11 @@ OAUTH_JWT_SECRET=$(openssl rand -hex 32) \
 | `OAUTH_JWT_JWKS_CACHE_MAX_AGE_MS` | `600000` | 取得した JWKS をキャッシュから返す期間 |
 | `OAUTH_JWT_TOKEN_TYPE` | `at+jwt` | 受け入れる `typ` ヘッダ。同じ鍵で署名された id/refresh/logout token を拒否する。`*` で pin しない（その場合 `audience` を OIDC client id にしてはいけない） |
 | `OAUTH_JWT_AUDIENCE_CLAIM` | `aud` | audience を読む claim。`azp`（Clerk）、`client_id`（Cognito）。`aud` 以外を指定すると `aud` は一切見ない |
-| `OAUTH_AUTHENTICATOR` | `jwt` | subject を確立する token authenticator。他の名前は `main.mts` で module が登録したもの |
+| `OAUTH_AUTHENTICATOR` | `jwt` | subject を確立する token authenticator。他の名前は `main.mts` で module が登録したものでなければならない |
 | `OAUTH_JWT_MODE` | `verify` | `verify` はトークンを完全検証。明示的な `insecure-decode`（テスト専用）は署名検証なしでデコードする — `exp`/`nbf` は引き続き強制される |
 | `RULE_ON_EMPTY_RULE_SET` | `deny` | ルールが 1 つも集まらなかったときの決定（`deny` \| `allow`） |
 | `VERIFY_MAX_BATCH_SIZE` | `50` | `POST /verify/batch` の件数上限 |
+| `VERIFY_CREDENTIAL_TO_COLLECTORS` | `never` | `expose` は生の資格情報を `context.credential` として collector に渡す — subject として下流 API を呼ぶ collector のためだけの設定。既定では collector は検証済みクレームだけを扱う。資格情報はリプレイ可能であり、context がログに出ればそれが漏れる |
 | `LOG_LEVEL` | `info` | 出力する最低レベル: `trace`\|`debug`\|`info`\|`warn`\|`error`\|`fatal`\|`silent`。decision ログのスイッチも兼ねる — [可観測性](#可観測性)を参照 |
 
 ## HS256 シークレットの強度
@@ -102,7 +103,7 @@ Authorization: Bearer <jwt>
 **このテンプレートは初期状態でまさにその組み合わせです。** `docker-compose.yml` が `HTTP_HOSTNAME=0.0.0.0` を設定する一方、`HTTP_CALLER_AUTH_TOKEN` はどこにも設定されていません。したがって publish したポートがホスト外から到達できる状態で `docker compose up` すると、未認証の判定エンドポイントが公開されます。ローカル開発では問題なく、だからこそ warn に留めています。実トラフィックを流す前に、次のいずれかを行ってください。
 
 - **ポートをプライベートネットワークに置く。** セキュリティグループ、プライベートサブネット、Kubernetes の `NetworkPolicy` など、誰が接続してよいかを決める仕組みです。compose の `3000:3000` の publish はこれに該当しません — そのホストに到達できるすべてに到達を許します。
-- **`.env` に `HTTP_CALLER_AUTH_TOKEN` を設定する。** ポートに到達できるだけでは判定を要求できなくなります。攻撃者が既にネットワーク境界の内側にいる場合でも有効なのは、2 つのうちこちらだけです。なお Go の enforcement 層（[protobuf.interceptors](https://github.com/o3co/protobuf.interceptors)）がこのヘッダを送るオプションを備えるのは**次のリリースから**です。それまで、同ライブラリを使う呼び出し元にはネットワーク側の制御が必要です。
+- **`.env` に `HTTP_CALLER_AUTH_TOKEN` を設定する。** ポートに到達できるだけでは判定を要求できなくなります。攻撃者が既にネットワーク境界の内側にいる場合でも有効なのは、2 つのうちこちらだけです。なお Go の enforcement 層（[protobuf.interceptors](https://github.com/o3co/protobuf.interceptors)）は v0.3.0 以降、`endpoint.WithO3coHeaders` でこのヘッダを送れます。それより前のバージョンで作られた呼び出し元にはネットワーク側の制御が必要です。
 - **あるいは `HTTP_HOSTNAME` を外し、verifier をサイドカーとして動かす。** enforcement 層とネットワーク名前空間を共有すれば、ループバックで足ります。
 
 `GET /metrics` も非ゲートです。理由と、ループバック以外に bind したときに何を意味するかは [`/metrics` への到達方法](#metrics-への到達方法)を参照してください。
@@ -288,6 +289,31 @@ make dev
 `docker-compose.yml` は `HTTP_HOSTNAME=0.0.0.0` を自身で設定し、任意の `.env`
 を読み込みます。資格情報は供給**しません** — `HTTP_CALLER_AUTH_TOKEN` はその
 `.env` に置いてください。
+
+### プロセス外の Cedar: `--profile cedar`
+
+[Cedar](../../packages/cedar/README.md) のポリシーをプロセス外で評価するデプロイは、
+アプリの隣でエージェントを起動します:
+
+```sh
+echo "CEDAR_AUTHENTICATION=$(openssl rand -hex 32)" >> .env
+docker compose --profile cedar up --build
+```
+
+`CEDAR_AUTHENTICATION` は必須です: エージェントはこれをトークンとして起動され、
+アプリはすべての呼び出しでこれを送ります。認証されていないエージェントは、
+到達できる何者にもポリシーセットの差し替えを許してしまうからです。未設定の
+ままだとエージェントはすべての呼び出しを拒否し、verifier は起動時にこれを
+設定するよう伝えます。profile を付けない素の `docker compose up` では不要です。
+
+`cedar-engine` サービスはアプリコンテナとネットワーク名前空間を共有するので、
+verifier の `http` engine は `http://127.0.0.1:8180` でそれを見つけます — engine
+には既定のアドレスがないため、これは compose ファイルがアプリに設定する
+`CEDAR_ENDPOINT` です。verifier は起動時に `config/policies` をそこへ push し、
+このコンテナの組の外からは誰も到達できません。この profile は、アプリが
+`cedarPolicyModule` を組み込むまで何もしません。パッケージ・モジュール・config
+エントリについては cedar の README を、どういうときにこの形が in-process の形に
+勝るかについてはその sizing 表を参照してください。
 
 ### `pnpm-lock.yaml` はビルド入力
 

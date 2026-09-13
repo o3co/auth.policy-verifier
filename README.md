@@ -345,18 +345,19 @@ verify {
   # returned. See "Collector deadlines" below.
   collectorTimeoutMs   = 2000   # one collector's own budget
   collectorTimeoutMs   = ${?VERIFY_COLLECTOR_TIMEOUT_MS}
-  # How long one asynchronous rule (an out-of-process policy engine, #225) may
-  # take to answer. Same budget and ceiling as one collector; overrun = deny.
-  ruleTimeoutMs = 2000
-  ruleTimeoutMs = ${?VERIFY_RULE_TIMEOUT_MS}
-  # How long all of a decision's asynchronous rules may take together — the
-  # rule phase's deadline, as collectorDeadlineMs is the fan-out's.
-  evaluateDeadlineMs = 5000
-  evaluateDeadlineMs = ${?VERIFY_EVALUATE_DEADLINE_MS}
   collectorDeadlineMs  = 5000   # the whole fan-out, per pipeline
   collectorDeadlineMs  = ${?VERIFY_COLLECTOR_DEADLINE_MS}
   collectorConcurrency = 8      # collectors in flight at once
   collectorConcurrency = ${?VERIFY_COLLECTOR_CONCURRENCY}
+
+  # Bounds on asynchronous rules (an out-of-process policy engine, #225), which
+  # run after both collects. Overrun DENIES with rule_timeout. See "Rule
+  # deadlines" below.
+  ruleTimeoutMs        = 2000   # one asynchronous rule's own budget
+  ruleTimeoutMs        = ${?VERIFY_RULE_TIMEOUT_MS}
+  evaluateDeadlineMs   = 5000   # all of a decision's asynchronous rules together
+  evaluateDeadlineMs   = ${?VERIFY_EVALUATE_DEADLINE_MS}
+
   batchConcurrency     = 8      # batch entries decided at once (#183)
   batchConcurrency     = ${?VERIFY_BATCH_CONCURRENCY}
 }
@@ -407,14 +408,23 @@ Attribute and rule collectors are the layer that talks to databases and HTTP API
 | --- | --- | --- |
 | `verify.collectorTimeoutMs` | `2000` | how long one collector may take. The budget starts when that collector starts, so queueing behind the concurrency cap does not spend it |
 | `verify.collectorDeadlineMs` | `5000` | how long a whole fan-out may take, per pipeline. Catches the case where nothing overran its own budget but the total still did |
-| `verify.ruleTimeoutMs` | `2000` | how long one asynchronous rule (an out-of-process policy engine, #225) may take to answer. Overrun denies with `rule_timeout` |
-| `verify.evaluateDeadlineMs` | `5000` | how long all of a decision's asynchronous rules may take together. Rule groups run one after another, so the per-rule budget cannot bound the phase; overrun denies with `rule_timeout` |
 | `verify.collectorConcurrency` | `8` | how many collectors run at once, per pipeline, per decision. More than any realistic collector set, so it changes nothing until a dependency slows down and work starts piling up |
 | `verify.batchConcurrency` | `8` | how many of a batch's entries are decided at once (#183). The three bounds above are per decision; this bounds their product with the batch, and it is what a deployment raises if a full batch's wall time matters more than its fan-out ceiling |
 
 Every collector is handed an `AbortSignal` on `CollectorContext.signal`; it aborts when that collector's budget runs out, when the pipeline's deadline does, when a sibling collector has already failed the decision, or when the caller went away. Pass it to whatever the collector waits on — `fetch(url, { signal: context.signal })` — so the outbound work is actually cancelled and not merely stopped being waited for.
 
 **Exceeding a bound denies.** The decision is answered `403` with `code: "collector_timeout"` and an empty `reason.groups`; the details go to the `collector_timeout` log line rather than to the caller. It is deliberately not a `5xx` and deliberately not "decide with what we collected in time": a short rule list is a *weaker policy*, and an empty one is an **allow** wherever `rule.onEmptyRuleSet = "allow"` is set — so the evaluator is never reached at all. In a batch the bound is per decision, so one entry timing out denies that entry and leaves the rest decided.
+
+### Rule deadlines
+
+An asynchronous rule (`AsyncRule`, #225) asks an out-of-process policy engine, so evaluation has the same two kinds of bound a fan-out has:
+
+| Knob | Default | What it bounds |
+| --- | --- | --- |
+| `verify.ruleTimeoutMs` | `2000` | how long one asynchronous rule may take to answer |
+| `verify.evaluateDeadlineMs` | `5000` | how long all of a decision's asynchronous rules may take together. Rule groups run one after another, so the per-rule budget cannot bound the phase; a rule runs under whichever of the two ends first, and none starts once the phase is spent |
+
+Overrun denies with `403` and `code: "rule_timeout"`. Synchronous rules do no I/O and are not timed. The rule's signal also aborts when the caller closes the connection.
 
 ### Resource String Format (DotNotation)
 
