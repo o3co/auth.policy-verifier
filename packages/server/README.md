@@ -59,8 +59,8 @@ interface VerifyRouterConfig {
   resourceParser: ResourceParser;
   attributePipeline: AttributePipeline;
   rulePipeline: RulePipeline;
-  /** Evaluator semantics overrides; omitted means deny on an empty rule set. */
-  evaluateOptions?: EvaluateOptions;
+  /** Evaluator semantics overrides; omitted means deny on an empty rule set. The rule deadlines are set below, and carrying them here is refused. */
+  evaluateOptions?: Omit<EvaluateOptions, "ruleTimeoutMs" | "evaluateDeadlineMs">;
   /** Most entries POST /verify/batch will decide in one request. Defaults to 50. */
   maxBatchSize?: number | string;
   /** How many of a batch's entries are decided at once (#183). Defaults to 8. */

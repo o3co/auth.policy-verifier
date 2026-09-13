@@ -57,8 +57,8 @@ interface VerifyRouterConfig {
   resourceParser: ResourceParser;
   attributePipeline: AttributePipeline;
   rulePipeline: RulePipeline;
-  /** 評価セマンティクスの上書き。省略時は空 rule set を deny。 */
-  evaluateOptions?: EvaluateOptions;
+  /** 評価セマンティクスの上書き。省略時は空 rule set を deny。Rule の期限は下のフィールドで設定し、ここに含めると拒否される。 */
+  evaluateOptions?: Omit<EvaluateOptions, "ruleTimeoutMs" | "evaluateDeadlineMs">;
   /** POST /verify/batch の 1 リクエストあたり件数上限。既定は 50。 */
   maxBatchSize?: number | string;
   /** バッチのうち同時に決定する entry 数 (#183)。既定は 8。 */

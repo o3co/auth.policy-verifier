@@ -55,8 +55,14 @@ export interface VerifyRouterConfig {
 	resourceParser: ResourceParser;
 	attributePipeline: AttributePipeline;
 	rulePipeline: RulePipeline;
-	/** Evaluator semantics overrides; omitted means engine defaults (deny on an empty rule set). */
-	evaluateOptions?: EvaluateOptions;
+	/**
+	 * Evaluator semantics overrides; omitted means engine defaults (deny on an
+	 * empty rule set). The rule deadlines are not among them: `ruleTimeoutMs` and
+	 * `evaluateDeadlineMs` are this config's own fields, and carrying either here
+	 * is refused at construction rather than silently overridden. A `signal` is
+	 * combined with the caller's, never replaced by it.
+	 */
+	evaluateOptions?: Omit<EvaluateOptions, "ruleTimeoutMs" | "evaluateDeadlineMs">;
 	/**
 	 * Most entries `POST /verify/batch` will decide in one request. Defaults to
 	 * 50, and is held to the same bound `AppConfigSchema` holds
@@ -530,6 +536,16 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	);
 	// The request limits (#118), read the same way and at the same boundary.
 	const maxBodyBytes = resolveBound(config.maxBodyBytes, NUMERIC_BOUNDS.maxBodyBytes, "verify");
+	// The evaluator reads its deadlines from here only. Spread under the
+	// resolved values below, a deadline in `evaluateOptions` would be overridden
+	// without a word — a consumer tightening it there would run on the default.
+	for (const key of ["ruleTimeoutMs", "evaluateDeadlineMs"] as const) {
+		if (config.evaluateOptions !== undefined && key in config.evaluateOptions) {
+			throw new Error(
+				`createVerifyRouter: evaluateOptions.${key} is not read — set ${key} on the router config instead`,
+			);
+		}
+	}
 	const ruleTimeoutMs = resolveBound(config.ruleTimeoutMs, NUMERIC_BOUNDS.ruleTimeoutMs, "verify");
 	const evaluateDeadlineMs = resolveBound(
 		config.evaluateDeadlineMs,
