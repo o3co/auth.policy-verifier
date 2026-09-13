@@ -440,7 +440,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 						diagnostics: { reason: [{ policyId: "10-permit" }], errors: [structured] },
 					}),
 				).doFetch,
-				env: {},
+				env: AGENT_ENV,
 			}),
 			inline(PERMIT_ALL),
 		);
