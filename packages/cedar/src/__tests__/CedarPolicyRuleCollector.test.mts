@@ -139,6 +139,16 @@ describe("CedarPolicyRuleCollector — config validation", () => {
 		).rejects.toThrow(
 			/onNoDeterminingPolicy = "abstain" cannot be used with the asynchronous "fake-async" engine/,
 		);
+		// The way out is named concretely. An upgrade from 0.9.0 that kept abstain
+		// and never imported cedar-wasm lands here with the http engine picked by
+		// default: "use deny" is the wrong fix for a missing import.
+		await expect(
+			CedarPolicyRuleCollector.create({
+				policies: PERMIT_ALL,
+				engine: "fake-async",
+				onNoDeterminingPolicy: "abstain",
+			}),
+		).rejects.toThrow(/import "@o3co\/auth\.policy-verifier\.cedar-wasm" and set engine = "wasm"/);
 		// Refused before the engine is asked to load anything (review): a remote
 		// load has side effects — the policy set is pushed, the agent reserved.
 		expect(async.loads).toHaveLength(0);

@@ -240,7 +240,7 @@ export class CedarPolicyRuleCollector implements RuleCollector {
 			// determining policy" is also what an engine that lost the set says.
 			// Refused before `load`, which pushes the set and reserves the agent.
 			throw new Error(
-				`CedarPolicyRuleCollector: onNoDeterminingPolicy = "abstain" cannot be used with the asynchronous "${engine.name}" engine — an engine that lost the policy set (a restarted agent comes back empty) answers "no determining policy" to every request, which abstain would pass. Use "deny", or evaluate in-process`,
+				`CedarPolicyRuleCollector: onNoDeterminingPolicy = "abstain" cannot be used with the asynchronous "${engine.name}" engine — an engine that lost the policy set (a restarted agent comes back empty) answers "no determining policy" to every request, which abstain would pass. Use "deny", or evaluate in-process: import "@o3co/auth.policy-verifier.cedar-wasm" and set engine = "wasm"`,
 			);
 		}
 

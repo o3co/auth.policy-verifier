@@ -1940,6 +1940,21 @@ describe("POST /verify — asynchronous rules (#225)", () => {
 		);
 	});
 
+	it("refuses rule deadlines carried in evaluateOptions — the router's own fields set them", () => {
+		// Spread under the router's resolved values, they would be silently
+		// overridden: a consumer tightening the deadline there gets the default.
+		for (const key of ["ruleTimeoutMs", "evaluateDeadlineMs"] as const) {
+			expect(() =>
+				createVerifyRouter({
+					...pipelines([]),
+					evaluateOptions: { [key]: 50 } as VerifyRouterConfig["evaluateOptions"],
+				}),
+			).toThrow(
+				`createVerifyRouter: evaluateOptions.${key} is not read — set ${key} on the router config instead`,
+			);
+		}
+	});
+
 	it("refuses an unusable ruleTimeoutMs at construction, in the schema's words", () => {
 		expect(() => createVerifyRouter({ ...pipelines([]), ruleTimeoutMs: 0 })).toThrow(
 			/verify\.ruleTimeoutMs/,

@@ -20,10 +20,12 @@ import { RequestFactsCollector } from "./RequestFactsCollector.mjs";
  * ]
  * ```
  *
- * This package holds no evaluator of its own. The policy set is evaluated by
- * whichever `CedarEngine` the deployment registered — importing
- * `@o3co/auth.policy-verifier.cedar-wasm` registers the in-process one — and
- * the collector refuses to start, naming that package, when none is. Nothing
+ * This package holds no evaluator of its own. The policy set is evaluated by a
+ * `CedarEngine`: importing `@o3co/auth.policy-verifier.cedar-wasm` registers the
+ * in-process one, and this package always registers `http`, which runs against
+ * a cedar-agent at `endpoint` (or `CEDAR_ENDPOINT`). With `engine` unset the
+ * in-process engine wins when it is imported; otherwise `http` is chosen, and
+ * with no endpoint configured it refuses to start, naming both ways out. Nothing
  * of Cedar loads unless a deployment imports these packages: neither core nor
  * the server depends on them.
  */
