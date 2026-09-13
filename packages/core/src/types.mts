@@ -154,15 +154,22 @@ export interface AsyncRule {
 	ruleType: string;
 	code: string;
 	message: string;
+	/**
+	 * The discriminant: what makes this an asynchronous rule. Explicit, as the
+	 * policy-set union in cedar is, rather than read off the presence of
+	 * `decide` — a synchronous rule that happens to carry an unrelated `decide`
+	 * method must not be sent down the asynchronous path (v0.10.0 audit).
+	 */
+	readonly async: true;
 	decide(attrs: ReadonlyAttributes, signal: AbortSignal): Promise<boolean>;
 }
 
 /** Either kind of rule. A collector may return both in one list. */
 export type AnyRule = Rule | AsyncRule;
 
-/** Tells the two kinds apart by the presence of `decide`. */
+/** Tells the two kinds apart by the `async` discriminant. */
 export function isAsyncRule(rule: AnyRule): rule is AsyncRule {
-	return typeof (rule as Partial<AsyncRule>).decide === "function";
+	return (rule as Partial<AsyncRule>).async === true;
 }
 
 /**

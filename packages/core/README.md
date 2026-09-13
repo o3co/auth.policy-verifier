@@ -123,7 +123,8 @@ A module registers attribute-collector, rule-collector, and resource-parser fact
 | `ReadonlyAttributes` | `ReadonlyMap<string, unknown>` — the view a rule is judged against. The evaluator hands the same live map to every rule, so a rule that wrote into it would change the inputs of every group after it |
 | `AttributeCollector` | `collect(context: CollectorContext): Promise<Attributes>` |
 | `Rule` | `{ ruleType: string; code: string; message: string; verify(attrs: ReadonlyAttributes): boolean }` — `verify` must be a deterministic, side-effect-free function of `attrs`. See [AGENTS.md — Collector / Rule / Attribute Contract](../../AGENTS.md#collector--rule--attribute-contract) |
-| `RuleCollector` | `collect(context: CollectorContext): Promise<Rule[]>` |
+| `AsyncRule` | `{ ruleType: string; code: string; message: string; readonly async: true; decide(attrs: ReadonlyAttributes, signal: AbortSignal): Promise<boolean> }` — the same contract as `Rule` but for I/O, under a deadline (#225). `isAsyncRule` reads the `async` discriminant |
+| `RuleCollector` | `collect(context: CollectorContext): Promise<AnyRule[]>` — `Rule`s, `AsyncRule`s, or both |
 | `Decision` | `{ decision: "allow"; reason: DecisionReason } \| { decision: "deny"; code: string; message: string; reason: DecisionReason }` |
 | `DecisionReason` | `{ groups: RuleGroupOutcome[] }` |
 | `RuleGroupOutcome` | `{ ruleType: string; passed: true; evaluated: RuleOutcome[]; satisfiedBy: RuleOutcome } \| { ruleType: string; passed: false; evaluated: RuleOutcome[] }` — `evaluated` is every rule that ran, in order; `satisfiedBy` names the rule that satisfied a passing group |

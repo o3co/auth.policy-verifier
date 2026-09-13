@@ -23,7 +23,7 @@ import {
 import express from "express";
 import { exportSPKI, SignJWT } from "jose";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { HS256KeyResolverFactory, RS256KeyResolverFactory } from "#/jwt/index.mjs";
 import type { TokenAuthenticator } from "#/jwt/tokenAuthenticator.mjs";
@@ -1714,6 +1714,7 @@ describe("POST /verify — asynchronous rules (#225)", () => {
 					ruleType: "cedar",
 					code: "cedar_deny",
 					message: "Denied by Cedar policy",
+					async: true,
 					decide: answer,
 				},
 			];
@@ -1786,6 +1787,7 @@ describe("POST /verify — asynchronous rules (#225)", () => {
 						ruleType,
 						code: `${ruleType}_deny`,
 						message: "Denied",
+						async: true,
 						decide: () => new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 40)),
 					},
 				];
@@ -1806,6 +1808,130 @@ describe("POST /verify — asynchronous rules (#225)", () => {
 			.send({ resource: "project:1", action: "read" });
 		expect(res.status).toBe(403);
 		expect(res.body).toMatchObject({ decision: "deny", code: "rule_timeout" });
+	});
+
+	it("aborts the rule in flight when the caller goes away (v0.10.0 audit)", async () => {
+		// Nothing fed a signal to evaluate() or the collectors, so a caller that
+		// timed out and retried left the out-of-process call running to its full
+		// budget — amplified under a retry storm.
+		let handed: AbortSignal | undefined;
+		const started = new Promise<void>((resolveStarted) => {
+			const app = express();
+			app.use(
+				createVerifyRouter({
+					...pipelines([
+						{
+							async collect() {
+								return [
+									{
+										ruleType: "cedar",
+										code: "cedar_deny",
+										message: "Denied",
+										async: true as const,
+										decide: (_attrs: unknown, signal: AbortSignal) => {
+											handed = signal;
+											resolveStarted();
+											return new Promise<boolean>(() => {});
+										},
+									},
+								];
+							},
+						},
+					]),
+					ruleTimeoutMs: 60_000,
+					evaluateDeadlineMs: 60_000,
+				}),
+			);
+			void signHS256Token({ scope: "read:project" }).then((token) =>
+				request(app)
+					.post("/verify")
+					.set("Authorization", `Bearer ${token}`)
+					.send({ resource: "project:1", action: "read" })
+					.timeout(80)
+					.catch(() => undefined),
+			);
+		});
+		await started;
+		await vi.waitFor(() => expect(handed?.aborted).toBe(true), { timeout: 2_000 });
+	});
+
+	it("still reports an internal fault that is not the caller's abort, even if the caller left (review)", async () => {
+		// The route used to downgrade any failure to `verify_caller_gone` once the
+		// caller's signal had aborted. An authenticator is handed no signal, so
+		// when it fails after the caller left, its failure is its own — and it is
+		// still an internal fault.
+		const events: string[] = [];
+		const logger = {
+			info(_ctx: unknown, event: string) {
+				events.push(event);
+			},
+			warn() {},
+			error(_ctx: unknown, event: string) {
+				events.push(event);
+			},
+		};
+		let failed: () => void = () => {};
+		const done = new Promise<void>((resolve) => {
+			failed = resolve;
+		});
+		const app = express();
+		const { jwt: _jwt, ...rest } = pipelines([]);
+		app.use(
+			createVerifyRouter({
+				...rest,
+				authenticator: {
+					async authenticate() {
+						await new Promise((resolve) => setTimeout(resolve, 150));
+						setTimeout(failed, 20);
+						throw new Error("identity provider unavailable");
+					},
+				},
+				logger,
+			}),
+		);
+		await request(app)
+			.post("/verify")
+			.set("Authorization", "Bearer anything")
+			.send({ resource: "project:1", action: "read" })
+			.timeout(60)
+			.catch(() => undefined);
+		await done;
+		expect(events).toContain("verify_internal_error");
+		expect(events).not.toContain("verify_caller_gone");
+	});
+
+	it("honours a library consumer's own evaluateOptions.signal beside the caller's (review)", async () => {
+		const decided = vi.fn(async () => true);
+		const consumer = new AbortController();
+		consumer.abort(new Error("the consumer's own deadline"));
+		const app = express();
+		app.use(
+			createVerifyRouter({
+				...pipelines([
+					{
+						async collect() {
+							return [
+								{
+									ruleType: "cedar",
+									code: "cedar_deny",
+									message: "Denied",
+									async: true as const,
+									decide: decided,
+								},
+							];
+						},
+					},
+				]),
+				evaluateOptions: { signal: consumer.signal },
+			}),
+		);
+		const token = await signHS256Token({ scope: "read:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+		expect(res.status).toBe(500);
+		expect(decided).not.toHaveBeenCalled();
 	});
 
 	it("refuses an unusable evaluateDeadlineMs at construction, in the schema's words", () => {

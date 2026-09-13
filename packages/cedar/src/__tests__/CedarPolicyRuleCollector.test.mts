@@ -22,7 +22,7 @@ import {
 	CedarPolicyRuleCollector,
 	type NoDeterminingPolicy,
 } from "../CedarPolicyRuleCollector.mjs";
-import { CedarEngineError, registerCedarEngine } from "../engine.mjs";
+import { type CedarDecision, CedarEngineError, registerCedarEngine } from "../engine.mjs";
 import { ALLOW, FORBIDDEN, scriptedEngine, UNDETERMINED } from "./scriptedEngine.mjs";
 
 // "wasm" so that the engine-less default resolves here, as it does in a
@@ -422,6 +422,26 @@ describe("CedarPolicyRuleCollector — an asynchronous engine yields an AsyncRul
 		expect(error).toHaveBeenCalledOnce();
 		expect(JSON.stringify(error.mock.calls[0])).toMatch(/engine unreachable/);
 		expect(JSON.stringify(error.mock.calls[0])).toMatch(/"engine":"fake-async"/);
+	});
+
+	it("rejects with the signal's reason when the call was aborted, rather than denying (review)", async () => {
+		// The evaluator's timeout and the caller's abort both arrive as the
+		// signal's reason. Folded into a logged deny, a timeout read as
+		// `cedar_deny` and a caller that left read as an engine outage.
+		const { logger, error } = fakeLogger();
+		// The async engine awaits what `answer` returns, so a pending promise is
+		// what a slow agent looks like from here.
+		async.answer = (_request, signal) =>
+			new Promise((_resolve, reject) => {
+				signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+			}) as unknown as CedarDecision;
+		const rule = await collectAsync({ policies: PERMIT_ALL }, logger);
+		const controller = new AbortController();
+		const reason = new Error("the caller closed the connection");
+		const pending = rule.decide(attrsWith(), controller.signal);
+		controller.abort(reason);
+		await expect(pending).rejects.toBe(reason);
+		expect(error).not.toHaveBeenCalled();
 	});
 
 	it("denies on attributes that cannot supply the request, without asking the engine", async () => {

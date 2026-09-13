@@ -202,6 +202,7 @@ interface AsyncRule {
   ruleType: string;
   code: string;
   message: string;
+  readonly async: true; // the discriminant — isAsyncRule reads this, not the presence of decide
   decide(attrs: ReadonlyAttributes, signal: AbortSignal): Promise<boolean>;
 }
 ```
@@ -209,13 +210,13 @@ interface AsyncRule {
 A rule collector may return either kind, or both, in one list; `evaluate()` groups and reports them identically, and is asynchronous for exactly this reason. What changes for the author:
 
 - **The only relaxation is I/O.** The answer must still be a function of `attrs` alone — copy what you need out of the `CollectorContext` at collect time, never keep it — and the purity conformance suite (`describeRulePurityConformance`) asks `decide` after revoking the request exactly as it asks `verify`.
-- **Pass `signal` to `fetch`.** It aborts when the rule's budget or the caller ends. The budget is `EvaluateOptions.ruleTimeoutMs` (default 2000 ms), or what is left of `EvaluateOptions.evaluateDeadlineMs` (default 5000 ms, all asynchronous rules of the decision together) if that is shorter — the server reads both from `verify.ruleTimeoutMs` / `verify.evaluateDeadlineMs` and hands them to `evaluate()`; a library consumer passes them directly. A rule that ignores it is still bounded — the evaluator races it — but keeps a socket open for an answer nobody will read.
+- **Pass `signal` to `fetch`.** It aborts when the rule's budget or the caller ends — under the server, the caller ending is the HTTP client closing the connection. The budget is `EvaluateOptions.ruleTimeoutMs` (default 2000 ms), or what is left of `EvaluateOptions.evaluateDeadlineMs` (default 5000 ms, all asynchronous rules of the decision together) if that is shorter — the server reads both from `verify.ruleTimeoutMs` / `verify.evaluateDeadlineMs` and hands them to `evaluate()`; a library consumer passes them directly. A rule that ignores it is still bounded — the evaluator races it — but keeps a socket open for an answer nobody will read.
 - **Own your engine's outage.** A rule that rejects is reporting a fault, and the request answers 500. If the engine being unreachable should be a deny — it usually should — catch, log, and return `false`. A rule that overruns its budget is a deny of its own (`rule_timeout`), never a pass.
 - **Asked one at a time.** Alternatives within a `ruleType` group run in order and stop at the first pass, so an expensive async rule placed after a cheap synchronous one in the same group is only consulted when the cheap one refused.
 
 ## RuleCollector: when to write one
 
-`RuleCollector` is the factory that turns a `CollectorContext` into a `Rule[]`. Built-in examples are `ResourceActionPermissionRuleCollector` and `ResourceActionScopeRuleCollector` under [`packages/builtins/src/rules/collectors/`](../packages/builtins/src/rules/collectors/). They construct a `HasPermission` / `HasScope` rule from the request's resource and action.
+`RuleCollector` is the factory that turns a `CollectorContext` into a list of rules (`AnyRule[]` — `Rule`s, `AsyncRule`s, or both). Built-in examples are `ResourceActionPermissionRuleCollector` and `ResourceActionScopeRuleCollector` under [`packages/builtins/src/rules/collectors/`](../packages/builtins/src/rules/collectors/). They construct a `HasPermission` / `HasScope` rule from the request's resource and action.
 
 Write a custom `RuleCollector` when your rule construction depends on request-time context (resource, action, headers). If your rule is constant across all requests, instantiate the `Rule` directly at composition time instead — no collector needed.
 
