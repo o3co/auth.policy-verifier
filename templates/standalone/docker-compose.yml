@@ -18,8 +18,10 @@ services:
       # Where the Cedar http engine finds the `cedar-engine` profile below — read
       # only when the app composes cedarPolicyModule without the wasm package.
       # The engine has no default address (a missing one refuses to start,
-      # naming this variable and the wasm package), so it is stated here.
-      - CEDAR_ENDPOINT=http://127.0.0.1:8180
+      # naming this variable and the wasm package), so it is stated here, as an
+      # interpolation default: an `environment` entry outranks `env_file`, so a
+      # literal value would ignore a CEDAR_ENDPOINT set in .env for another agent.
+      - CEDAR_ENDPOINT=${CEDAR_ENDPOINT:-http://127.0.0.1:8180}
     env_file:
       - path: .env
         required: false
