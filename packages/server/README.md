@@ -152,6 +152,9 @@ const AppConfigSchema = z.object({
     // Bounds on the collector fan-out (#115). Exceeding any of them denies.
     collectorTimeoutMs: boundedNumber(NUMERIC_BOUNDS.collectorTimeoutMs, "verify"),   // default 2000
     collectorDeadlineMs: boundedNumber(NUMERIC_BOUNDS.collectorDeadlineMs, "verify"), // default 5000
+    // Asynchronous rules (#225): one rule's budget, and the whole rule phase's.
+    ruleTimeoutMs: boundedNumber(NUMERIC_BOUNDS.ruleTimeoutMs, "verify"),             // default 2000
+    evaluateDeadlineMs: boundedNumber(NUMERIC_BOUNDS.evaluateDeadlineMs, "verify"),   // default 5000
     collectorConcurrency:
       boundedNumber(NUMERIC_BOUNDS.collectorConcurrency, "verify"),               // default 8
     // How many of a batch's entries are decided at once (#183). The collector

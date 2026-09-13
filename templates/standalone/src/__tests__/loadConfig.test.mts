@@ -55,6 +55,8 @@ const envKeys = [
 	"VERIFY_COLLECTOR_TIMEOUT_MS",
 	"VERIFY_COLLECTOR_DEADLINE_MS",
 	"VERIFY_COLLECTOR_CONCURRENCY",
+	"VERIFY_RULE_TIMEOUT_MS",
+	"VERIFY_EVALUATE_DEADLINE_MS",
 ] as const;
 
 /** application.conf leaves issuer/audience unset, so every load must supply them. */
@@ -268,6 +270,8 @@ describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#1
 		process.env.VERIFY_COLLECTOR_TIMEOUT_MS = "750";
 		process.env.VERIFY_COLLECTOR_DEADLINE_MS = "1500";
 		process.env.VERIFY_COLLECTOR_CONCURRENCY = "4";
+		process.env.VERIFY_RULE_TIMEOUT_MS = "900";
+		process.env.VERIFY_EVALUATE_DEADLINE_MS = "2500";
 
 		const config = loadAppConfig(configDirPath, "development");
 
@@ -286,6 +290,8 @@ describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#1
 		expect(config.verify.collectorTimeoutMs).toBe(750);
 		expect(config.verify.collectorDeadlineMs).toBe(1_500);
 		expect(config.verify.collectorConcurrency).toBe(4);
+		expect(config.verify.ruleTimeoutMs).toBe(900);
+		expect(config.verify.evaluateDeadlineMs).toBe(2_500);
 	});
 
 	it.each([
@@ -304,6 +310,8 @@ describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#1
 		["VERIFY_COLLECTOR_TIMEOUT_MS", "0"],
 		["VERIFY_COLLECTOR_DEADLINE_MS", "-1"],
 		["VERIFY_COLLECTOR_CONCURRENCY", "0"],
+		["VERIFY_RULE_TIMEOUT_MS", "0"],
+		["VERIFY_EVALUATE_DEADLINE_MS", "-1"],
 	])("refuses to boot on %s=%s", (key, value) => {
 		setRequiredEnv();
 		process.env[key] = value;

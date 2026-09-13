@@ -79,6 +79,18 @@ const testModule: Module = {
 				];
 			},
 		}));
+		// Two asynchronous rule groups, each answering after 40 ms — each well
+		// inside its own budget, together past a short phase deadline.
+		context.ruleCollectorRegistry.register("SlowAsyncRuleCollector", () => ({
+			async collect() {
+				return ["slow_a", "slow_b"].map((ruleType) => ({
+					ruleType,
+					code: `${ruleType}_deny`,
+					message: "Denied",
+					decide: () => new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 40)),
+				}));
+			},
+		}));
 		context.ruleCollectorRegistry.register("EmptyRuleCollector", () => ({
 			async collect() {
 				return [];
@@ -132,6 +144,34 @@ describe("createApp", () => {
 
 		expect(res.status).toBe(403);
 		expect(res.body.decision).toBe("deny");
+	});
+
+	it("hands verify.evaluateDeadlineMs to the router: rules that overrun it together deny with rule_timeout (review)", async () => {
+		const collectors = {
+			attribute: { collectors: [{ collector: "TestScopeCollector" }] },
+			rule: { collectors: [{ collector: "SlowAsyncRuleCollector" }] },
+			resource: { parser: "SimpleParser" },
+		};
+		const oauth = {
+			jwt: { secret: JWT_SECRET, mode: "verify", issuer: ISSUER, audience: AUDIENCE },
+		};
+		const token = await signToken({ sub: "u1", scope: "read:project" });
+		const decide = async (verify: Record<string, unknown>) => {
+			const app = await createApp({
+				config: AppConfigSchema.parse({ oauth, ...collectors, verify }),
+				modules: [builtinKeyResolversModule, testModule],
+				pathResolver: import.meta.resolve,
+			});
+			return request(app)
+				.post("/verify")
+				.set("Authorization", `Bearer ${token}`)
+				.send({ resource: "project", action: "read" });
+		};
+		const denied = await decide({ ruleTimeoutMs: 1_000, evaluateDeadlineMs: 60 });
+		expect(denied.status).toBe(403);
+		expect(denied.body).toMatchObject({ decision: "deny", code: "rule_timeout" });
+		// The default deadline leaves the same pair of rules alone.
+		expect((await decide({})).status).toBe(200);
 	});
 
 	it("throws if config references unregistered collector", async () => {

@@ -99,7 +99,13 @@ export async function evaluate(
 ): Promise<Decision> {
 	const ruleTimeoutMs = resolveRuleTimeoutMs(options?.ruleTimeoutMs);
 	const deadlineMs = resolveEvaluateDeadlineMs(options?.evaluateDeadlineMs);
-	const budget: RuleBudget = { ruleTimeoutMs, deadlineMs, deadlineAt: Date.now() + deadlineMs };
+	// A monotonic clock: a wall-clock step (an NTP correction) between groups
+	// must not stretch or shrink the phase.
+	const budget: RuleBudget = {
+		ruleTimeoutMs,
+		deadlineMs,
+		deadlineAt: performance.now() + deadlineMs,
+	};
 
 	// Phase 1: group rules by ruleType — rules within a group are alternatives (OR).
 	const groups = Map.groupBy(rules, (rule) => rule.ruleType);
@@ -155,7 +161,7 @@ function conclude(outcomes: RuleGroupOutcome[]): Decision {
 interface RuleBudget {
 	readonly ruleTimeoutMs: number;
 	readonly deadlineMs: number;
-	/** Epoch milliseconds at which the rule phase is spent. */
+	/** `performance.now()` milliseconds at which the rule phase is spent. */
 	readonly deadlineAt: number;
 }
 
@@ -194,15 +200,16 @@ async function runAsyncRule(
 	caller: AbortSignal | undefined,
 ): Promise<boolean> {
 	if (caller?.aborted) throw caller.reason;
-	const remaining = budget.deadlineAt - Date.now();
+	const remaining = budget.deadlineAt - performance.now();
 	const phaseBinds = remaining < budget.ruleTimeoutMs;
-	const expired = () =>
+	const expired = (started: boolean) =>
 		phaseBinds
 			? new RuleTimeoutError({
 					ruleType: rule.ruleType,
 					code: rule.code,
 					timeoutMs: budget.deadlineMs,
 					limit: "deadline",
+					started,
 				})
 			: new RuleTimeoutError({
 					ruleType: rule.ruleType,
@@ -210,12 +217,12 @@ async function runAsyncRule(
 					timeoutMs: budget.ruleTimeoutMs,
 				});
 	// The phase is spent: this rule is not started at all.
-	if (remaining <= 0) throw expired();
+	if (remaining <= 0) throw expired(false);
 	const own = new AbortController();
 	const onCallerAbort = () => own.abort(caller?.reason);
 	caller?.addEventListener("abort", onCallerAbort, { once: true });
 	const timeout = setTimeout(
-		() => own.abort(expired()),
+		() => own.abort(expired(true)),
 		phaseBinds ? remaining : budget.ruleTimeoutMs,
 	);
 	const cancelled = rejectOnAbort(own.signal);

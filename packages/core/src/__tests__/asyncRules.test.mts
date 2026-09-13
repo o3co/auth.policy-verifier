@@ -238,13 +238,54 @@ describe("evaluate — the rule phase has a deadline of its own (v0.10.0 audit)"
 		});
 	});
 
-	it("does not start an asynchronous rule once the phase is spent", async () => {
+	it("does not start an asynchronous rule once the phase is spent, and says it was not started (review)", async () => {
 		const late = vi.fn(async () => true);
-		const rules = [slow("a", 60), async("b", "b_deny", late)];
-		await expect(
-			evaluate(attrs, rules, { ruleTimeoutMs: 1_000, evaluateDeadlineMs: 50 }),
-		).rejects.toMatchObject({ limit: "deadline" });
+		// A synchronous rule that spends the phase: nothing was in flight when
+		// the deadline passed, and the error must not claim `b` was running.
+		const spend: Rule = {
+			ruleType: "a",
+			code: "a_deny",
+			message: "Failed: a",
+			verify: () => {
+				const until = performance.now() + 60;
+				while (performance.now() < until) {}
+				return true;
+			},
+		};
+		const failure = evaluate(attrs, [spend, async("b", "b_deny", late)], {
+			ruleTimeoutMs: 1_000,
+			evaluateDeadlineMs: 50,
+		});
+		await expect(failure).rejects.toMatchObject({
+			limit: "deadline",
+			started: false,
+			ruleType: "b",
+		});
+		await expect(failure).rejects.toThrow(/rule b\/b_deny was not started/);
 		expect(late).not.toHaveBeenCalled();
+	});
+
+	it("measures the phase on a monotonic clock, so a wall-clock step does not stretch it (review)", async () => {
+		// An NTP step backwards between groups would otherwise hand the later
+		// rules time the deployment never granted.
+		const realNow = Date.now;
+		let skew = 0;
+		vi.spyOn(Date, "now").mockImplementation(() => realNow() + skew);
+		try {
+			const stepBack: AsyncRule = async("a", "a_deny", async () => {
+				await new Promise((resolve) => setTimeout(resolve, 40));
+				skew -= 10_000;
+				return true;
+			});
+			await expect(
+				evaluate(attrs, [stepBack, slow("b", 40)], {
+					ruleTimeoutMs: 1_000,
+					evaluateDeadlineMs: 60,
+				}),
+			).rejects.toMatchObject({ limit: "deadline" });
+		} finally {
+			vi.restoreAllMocks();
+		}
 	});
 
 	it("does not time synchronous rules, which do no I/O", async () => {

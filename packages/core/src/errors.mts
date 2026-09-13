@@ -130,26 +130,32 @@ export class AttributeConflictError extends Error {
  * it by in config — and never carries the attributes. `limit` says which bound
  * tripped: the rule's own budget (`"rule"`, `verify.ruleTimeoutMs`), or the
  * deadline for the whole rule phase (`"deadline"`, `verify.evaluateDeadlineMs`),
- * in which case the rule named is the one that was in flight.
+ * in which case the rule named is the one that was in flight — or, with
+ * `started: false`, the next one, which the spent phase never started.
  */
 export class RuleTimeoutError extends Error {
 	readonly ruleType: string;
 	readonly code: string;
 	readonly timeoutMs: number;
 	readonly limit: "rule" | "deadline";
+	/** Whether the named rule had been started; `false` only for a phase spent before it could be. */
+	readonly started: boolean;
 
 	constructor(detail: {
 		ruleType: string;
 		code: string;
 		timeoutMs: number;
 		limit?: "rule" | "deadline";
+		started?: boolean;
 	}) {
 		const limit = detail.limit ?? "rule";
+		const started = detail.started ?? true;
 		super(
 			limit === "rule"
 				? `rule ${detail.ruleType}/${detail.code} did not answer within its ${detail.timeoutMs} ms budget`
-				: `the rule phase did not finish within its ${detail.timeoutMs} ms deadline (rule ${detail.ruleType}/${detail.code} was running)`,
+				: `the rule phase did not finish within its ${detail.timeoutMs} ms deadline (rule ${detail.ruleType}/${detail.code} was ${started ? "running" : "not started"})`,
 		);
+		this.started = started;
 		this.name = "RuleTimeoutError";
 		this.ruleType = detail.ruleType;
 		this.code = detail.code;
