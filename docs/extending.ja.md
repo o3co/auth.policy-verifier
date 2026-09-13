@@ -267,9 +267,19 @@ export const introspectionAuthenticatorModule: Module<ServerModuleContext> = {
       const { endpoint, clientId, clientSecret } = oauth.introspection;
       const authenticator: TokenAuthenticator = {
         async authenticate(header) {
-          const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
-          if (!token) return { ok: false, code: "missing_token", message: "Authorization header is missing" };
-          const res = await fetch(endpoint, { method: "POST", /* Basic clientId:clientSecret, token=... */ });
+          // スキームは大文字小文字を区別しない (RFC 9110 §11.1)。
+          const [scheme, token] = header?.trim().split(/\s+/, 2) ?? [];
+          if (scheme?.toLowerCase() !== "bearer") return { ok: false, code: "unsupported_scheme", message: "Bearer scheme required" };
+          if (!token) return { ok: false, code: "missing_token", message: "Bearer token is missing" };
+          const res = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+              // RFC 6749 §2.3.1: それぞれを form エンコードしてから、組を base64 エンコードする。
+              authorization: `Basic ${Buffer.from(`${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`).toString("base64")}`,
+              "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({ token, token_type_hint: "access_token" }),
+          });
           const body = await res.json();
           if (!res.ok || body.active !== true) {
             deps.logger.warn({ status: res.status }, "introspection_rejected");
@@ -305,7 +315,7 @@ oauth {
 - `subject` は core が評価する中立な属性バッグです（[AGENTS.md — Core Vocabulary Scope](../AGENTS.md#core-vocabulary-scope) を参照）。そこに入れたものはすべて検証済みの identity として信頼されるので、自分が検証したものだけを入れてください。リクエストボディがそこに届くことはありません。
 - **組み込み経路が強制していることは、すべて自分で強制する必要があります。** JWT 経路は署名を検証し、`iss`・audience・`typ` を pin し、`exp` と `iat` を必須とし、`maxTokenAgeSeconds` / `clockToleranceSeconds` と `nbf` を適用し、`cnf` に束縛されたトークンを拒否し、`authScheme` を記録します。登録した authenticator ではそのどれも実行されません: `ok: true` を返す前に、該当するものを行ってください。返す `credential` は何を選んでもよく、`credentialToCollectors = "expose"` の下では collector に届きます。
 - 拒否は deny エンベロープをまとった 401 で、`code` と `message` は自分が返したものになります。理由は自分でログに出してください（組み込み経路は `jwt_token_rejected` / `jwt_verification_unavailable` を出力します） — authenticator が*なぜ*拒否したかについて、router は何もログに出しません。
-- sender-constrained トークン（`cnf`）は組み込み経路では引き続き拒否されます (#209)。所持を検証できる authenticator なら、受け入れてかまいません。
+- sender-constrained トークン（`cnf`）は組み込み経路では引き続き拒否されます (#209)。登録した authenticator に渡されるのは `Authorization` ヘッダーだけで、proof もクライアント証明書も元のリクエストも届かないため、authenticator 自身は所持を検証できません。束縛トークンを受け入れてよいのは、このサーバーより上流の認証境界が元の保護対象リクエストについて所持をすでに検証しており、それを信頼できる場合だけです。
 - `createApp` を使わずに組み立てるライブラリ利用者向けに、`createVerifyRouter` は `jwt` の代わりに構築済みの `authenticator` を受け取ります。
 
 ## 関連資料

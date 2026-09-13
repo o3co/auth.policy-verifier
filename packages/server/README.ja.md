@@ -4,7 +4,8 @@ auth.policy-verifier 向けの Express HTTP サーバーです。モジュール
 
 ## Bearer 認証の境界
 
-組み込みの authenticator が受け付けるのは、何にも束縛されていない Bearer アクセストークンです。
+組み込みの authenticator が受け付けるのは、`Bearer` スキームで提示された、何にも束縛されていないアクセストークンです。
+それ以上にどのトークンを受け付けるかは `tokenType` が pin します（`"*"` は何も pin せず、テスト専用のデコードモードは署名を検証しません）。
 `cnf` クレームを持つトークンは、その中身が何であれ `401 invalid_token` で拒否します — DPoP、mTLS、
 不正な形の confirmation、未知の方式のいずれもです。これは `/verify` と `/verify/batch` の両方に適用され、
 テスト専用のデコードモードも例外ではありません。リクエストの context で「所持は検証済み」と主張することは
@@ -94,11 +95,11 @@ function createVerifyRouter(config: VerifyRouterConfig): express.Router
 
 リクエスト処理フロー:
 
-1. `Authorization` ヘッダーを authenticator に渡す。組み込みの authenticator（`jwt`）は `Bearer <token>` を取り出し、ヘッダーが存在しないかスキームが Bearer でない場合は 401 を返す。直接渡された `authenticator` は自身の `code` / `message` で応答し、ステップ 2〜4 はその authenticator の責務になる。
-2. `validate` が `true` の場合: 署名に加えて RFC 9068 §4 のクレームを検証する — `iss` を `issuer` と、audience クレーム（`aud`、または `audienceClaim` が指すクレーム）を `audience` と、`typ` ヘッダを `tokenType` と照合する（`application/` プレフィックスは無視。`"*"` は何も pin しない）。失敗時は 401 を返す。3 つのいずれかが欠けている場合、`createVerifyRouter` は例外を投げる。
-3. `validate` が `false` の場合: JWT を検証なしでデコードする。不正なトークンの場合は 401 を返す。
-4. どちらの経路でもトークン自身の寿命を検証する: `exp` と `iat` は**必須**（有効期限を宣言しないトークンは失効しない）、`nbf` は存在すれば検証、`exp` は未来でなければならず、`now - iat` は `maxTokenAgeSeconds` を超えてはならない — 発行者が何年も先の `exp` を付けたトークンを拒否するのはこれ。`clockToleranceSeconds` はこれら全ての比較に効く。失敗時は 401 を返す。デコード専用経路はこれらの検査を省略せず手書きで再現するので、同一トークンに対して両モードの答えは一致する。
-5. `req.body.resource` を `resourceParser` でパースし、`req.body.action` と `req.body.context` を読み取る。
+1. トークンを見る前にボディを検証する (#118): `resource` を `resourceParser` でパースし、`action` と `context` を読み取り、そのすべてをリクエストの上限に照らす。失敗時は `400 invalid_request` を返す — つまり不正なリクエストは、有効なトークンを持っていなくても 400 になる。
+2. `Authorization` ヘッダーを authenticator に渡す。組み込みの authenticator（`jwt`）は `Bearer <token>` を取り出し（スキームは大文字小文字を区別せずに照合）、ヘッダーが存在しないかスキームが Bearer でない場合は 401 を返す。直接渡された `authenticator` は自身の `code` / `message` で応答し、ステップ 3〜5 はその authenticator の責務になる。
+3. `validate` が `true` の場合: 署名に加えて RFC 9068 §4 のクレームを検証する — `iss` を `issuer` と、audience クレーム（`aud`、または `audienceClaim` が指すクレーム）を `audience` と、`typ` ヘッダを `tokenType` と照合する（`application/` プレフィックスは無視。`"*"` は何も pin しない）。失敗時は 401 を返す。3 つのいずれかが欠けている場合、`createVerifyRouter` は例外を投げる。
+4. `validate` が `false` の場合: JWT を検証なしでデコードする。不正なトークンの場合は 401 を返す。
+5. どちらの経路でもトークン自身の寿命を検証する: `exp` と `iat` は**必須**（有効期限を宣言しないトークンは失効しない）、`nbf` は存在すれば検証、`exp` は未来でなければならず、`now - iat` は `maxTokenAgeSeconds` を超えてはならない — 発行者が何年も先の `exp` を付けたトークンを拒否するのはこれ。`clockToleranceSeconds` はこれら全ての比較に効く。失敗時は 401 を返す。デコード専用経路はこれらの検査を省略せず手書きで再現するので、同一トークンに対して両モードの答えは一致する。
 6. `x-request-id` ヘッダーが存在する場合、`CollectorContext.headers` に含める（コレクターが上流呼び出し時に転送可能）。
 7. `attributePipeline.collect` と `rulePipeline.collect` を collector の上限（`verify.collectorTimeoutMs` / `verify.collectorDeadlineMs` / `verify.collectorConcurrency`。各 collector には `CollectorContext.signal` で `AbortSignal` が渡される）のもとで並列実行し、`evaluate` を呼び出す。
 8. `200 { decision: "allow" }` または `403 { decision: "deny", code, message }` を返す。
@@ -202,7 +203,7 @@ caller 認証は**本リリースでは任意**です。未設定かつ bind が
 
 1. **bind をループバックのままにする。** サイドカー構成です。enforcement 層が同一ホスト（あるいは同一 Kubernetes Pod のネットワーク名前空間）に同居し、`127.0.0.1:3000` に到達します。設定も資格情報のローテーションも不要で、既定がすでにこの形です。
 2. **ループバック以外に bind せざるを得ない場合は、ネットワーク層でポートを制限する** — プライベートサブネット、セキュリティグループ、`NetworkPolicy` など。コンテナのポート publish はこれに**該当しません**: `HTTP_HOSTNAME=0.0.0.0` と `ports: ["3000:3000"]` の組み合わせは、そのホストに到達できるすべてに到達を許します。
-3. **併せて `http.callerAuth.token`（env `HTTP_CALLER_AUTH_TOKEN`）を設定する。** ポートに到達できるだけでは判定を要求できなくなります。3 つのうち、攻撃者が既にネットワーク境界の内側にいる場合でも有効なのはこれだけです。なお Go の enforcement 層（[protobuf.interceptors](https://github.com/o3co/protobuf.interceptors)）がこのヘッダを送るオプションを備えるのは**次のリリースから**です。それまでは、同ライブラリを使う呼び出し元は 1 か 2 を使ってください。
+3. **併せて `http.callerAuth.token`（env `HTTP_CALLER_AUTH_TOKEN`）を設定する。** ポートに到達できるだけでは判定を要求できなくなります。3 つのうち、攻撃者が既にネットワーク境界の内側にいる場合でも有効なのはこれだけです。なお Go の enforcement 層（[protobuf.interceptors](https://github.com/o3co/protobuf.interceptors)）は v0.3.0 以降、`endpoint.WithO3coHeaders` でこのヘッダを送れます。それより前のバージョンで作られた呼び出し元は 1 か 2 を使ってください。
 
 共有資格情報はネットワークポリシーや enforcement 層との mTLS の代替ではありません。下限であって上限ではありません。
 

@@ -4,7 +4,9 @@ Express HTTP server for auth.policy-verifier. Provides `createApp` to assemble t
 
 ## Bearer authentication boundary
 
-The built-in authenticator accepts unbound Bearer access tokens. A token carrying
+The built-in authenticator accepts unbound access tokens presented with the `Bearer`
+scheme — which tokens, beyond that, is what `tokenType` pins (`"*"` pins nothing, and
+test-only decode mode verifies no signature). A token carrying
 any `cnf` claim is refused with `401 invalid_token`, including DPoP, mTLS,
 malformed confirmations, and unknown mechanisms. This applies to `/verify` and
 `/verify/batch`, including test-only decode mode. Request context cannot claim
@@ -95,11 +97,11 @@ Returns an Express Router that handles `POST /verify` and `POST /verify/batch`. 
 
 Request flow:
 
-1. Hand the `Authorization` header to the authenticator. The built-in one (`jwt`) extracts `Bearer <token>` and returns 401 if it is missing or the scheme is not Bearer; an `authenticator` supplied directly answers with its own `code` / `message`, and steps 2–4 are its business.
-2. If `validate` is `true`: verify the signature **and** the RFC 9068 §4 claims — `iss` against `issuer`, the audience claim (`aud`, or the claim `audienceClaim` names) against `audience`, and the `typ` header against `tokenType` (an `application/` prefix is ignored; `"*"` pins nothing). Returns 401 on failure. `createVerifyRouter` throws if any of the three is missing.
-3. If `validate` is `false`: decode the JWT without verification. Returns 401 if the token is malformed.
-4. Either way, enforce the token's own lifetime: `exp` and `iat` are **required** (a token that never states an expiry never expires), `nbf` is honoured when present, `exp` must be in the future, and `now - iat` must not exceed `maxTokenAgeSeconds` — which is what refuses a token whose issuer set `exp` years out. `clockToleranceSeconds` widens every one of those comparisons. Returns 401 on failure. The decode-only path restates these checks by hand rather than skipping them, so both modes answer the same for the same token.
-5. Parse `req.body.resource` with `resourceParser`; read `req.body.action` and `req.body.context`.
+1. Validate the body before the token is looked at (#118): `resource` parsed with `resourceParser`, `action` and `context` read, and all of it held to the request limits. Returns `400 invalid_request` on failure — so a malformed request is a 400 even when it carries no valid token.
+2. Hand the `Authorization` header to the authenticator. The built-in one (`jwt`) extracts `Bearer <token>` (the scheme matched case-insensitively) and returns 401 if it is missing or the scheme is not Bearer; an `authenticator` supplied directly answers with its own `code` / `message`, and steps 3–5 are its business.
+3. If `validate` is `true`: verify the signature **and** the RFC 9068 §4 claims — `iss` against `issuer`, the audience claim (`aud`, or the claim `audienceClaim` names) against `audience`, and the `typ` header against `tokenType` (an `application/` prefix is ignored; `"*"` pins nothing). Returns 401 on failure. `createVerifyRouter` throws if any of the three is missing.
+4. If `validate` is `false`: decode the JWT without verification. Returns 401 if the token is malformed.
+5. Either way, enforce the token's own lifetime: `exp` and `iat` are **required** (a token that never states an expiry never expires), `nbf` is honoured when present, `exp` must be in the future, and `now - iat` must not exceed `maxTokenAgeSeconds` — which is what refuses a token whose issuer set `exp` years out. `clockToleranceSeconds` widens every one of those comparisons. Returns 401 on failure. The decode-only path restates these checks by hand rather than skipping them, so both modes answer the same for the same token.
 6. Include `x-request-id` header in `CollectorContext.headers` if present (collectors can forward it to upstream calls they make).
 7. Run `attributePipeline.collect` and `rulePipeline.collect` in parallel, under the collector bounds (`verify.collectorTimeoutMs`, `verify.collectorDeadlineMs`, `verify.collectorConcurrency` — each collector is handed an `AbortSignal` on `CollectorContext.signal`); call `evaluate`.
 8. Return `200 { decision: "allow" }` or `403 { decision: "deny", code, message }`.
@@ -204,7 +206,7 @@ It warns rather than refusing. The network may legitimately be the control — a
 
 1. **Keep the bind loopback.** The sidecar shape: the enforcement layer shares the host (or the Kubernetes pod's network namespace) and reaches `127.0.0.1:3000`. Nothing to configure, nothing to rotate — the default already is this.
 2. **Where the bind must be non-loopback, restrict the port at the network layer** — a private subnet, a security group, a `NetworkPolicy`. A published container port is *not* this: `HTTP_HOSTNAME=0.0.0.0` plus `ports: ["3000:3000"]` reaches everything that can route to the host.
-3. **And/or set `http.callerAuth.token`** (env `HTTP_CALLER_AUTH_TOKEN`), so reaching the port is not enough to ask for a decision. This is the only one of the three that survives an attacker already inside the network boundary. Note that the Go enforcement layer ([protobuf.interceptors](https://github.com/o3co/protobuf.interceptors)) gains the option to send this header **from its next release** — until then, callers built on it must use options 1 or 2.
+3. **And/or set `http.callerAuth.token`** (env `HTTP_CALLER_AUTH_TOKEN`), so reaching the port is not enough to ask for a decision. This is the only one of the three that survives an attacker already inside the network boundary. Note that the Go enforcement layer ([protobuf.interceptors](https://github.com/o3co/protobuf.interceptors)) sends this header from v0.3.0 on, through `endpoint.WithO3coHeaders` — a caller built on an earlier version must use options 1 or 2.
 
 A shared credential is not a substitute for network policy or mTLS between the enforcement layer and this service. It is the floor, not the ceiling.
 

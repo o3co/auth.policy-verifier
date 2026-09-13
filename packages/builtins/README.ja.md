@@ -234,7 +234,7 @@ new AttrPairCompare({ a: string, op: "lt" | "le" | "gt" | "ge", b: string, group
 `ResourceActionPermissionRuleCollector` にコンストラクタ引数はありません。
 `ResourceActionScopeRuleCollector` は `{ scopeless?: "deny" | "skip", allowBareScopeRewrite?: boolean, claim?: string }` を受け取ります — `claim` はトークンが scope を主張していることを示す claim の名前です（既定 `scope`。`PayloadScopeCollector` が読むもの、例えば `scp` に合わせる）。
 
-- `scopeless`（既定 `"deny"`）: 既定ではリクエストごとに必ず `HasScope` ルールを生成するため、`scope` claim を持たない
+- `scopeless`（既定 `"deny"`）: 既定ではリクエストごとに必ず `HasScope` ルールを生成するため、scope claim（`scope`、または `claim` が指す claim）を持たない
   トークンはこのルールに落ちます。`"skip"` は scopeless トークンに対してルールを生成しませんが、ルールが 1 つも集まらない
   リクエストは deny されるため、別のルールグループが認可を担うパイプラインでのみ使ってください。
 - `allowBareScopeRewrite`（既定 `false`）: [`HasScope`](#hasscope) へそのまま渡されます。issuer が `{action}:{resourceType}`
