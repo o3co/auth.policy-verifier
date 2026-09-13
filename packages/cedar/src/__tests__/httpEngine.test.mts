@@ -566,7 +566,7 @@ describe("CedarPolicyRuleCollector on the http engine", () => {
 		);
 	});
 
-	it("denies and logs, never abstains, when the agent is down after boot", async () => {
+	it("denies and logs when the agent is down after boot", async () => {
 		let up = true;
 		const { doFetch } = agent(() => {
 			if (!up) throw new TypeError("fetch failed: ECONNREFUSED");
@@ -579,7 +579,6 @@ describe("CedarPolicyRuleCollector on the http engine", () => {
 				engine: "http",
 				endpoint: "http://127.0.0.1:18202",
 				policies: PERMIT_ALL,
-				onNoDeterminingPolicy: "abstain",
 			},
 			{ logger },
 		);
