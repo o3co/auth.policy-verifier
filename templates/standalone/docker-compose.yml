@@ -45,5 +45,11 @@ services:
     environment:
       - CEDAR_AGENT_ADDR=127.0.0.1
       - CEDAR_AGENT_PORT=8180
-      # To require a token on every call, set it on both sides:
-      #   CEDAR_AGENT_AUTHENTICATION here, CEDAR_AUTHENTICATION on the app.
+      # Required: an unauthenticated agent is a write oracle over the policy set
+      # — anything that reaches its port can PUT a `permit` for everyone. Set
+      # CEDAR_AUTHENTICATION in .env; the app reads the same variable and sends
+      # it. Unset, the agent starts with an empty token and refuses every call,
+      # and the verifier's boot says to set CEDAR_AUTHENTICATION. (Not compose's
+      # required-variable form: it is interpolated for every service, profile or
+      # not, and would refuse a plain `docker compose up` too.)
+      - CEDAR_AGENT_AUTHENTICATION=${CEDAR_AUTHENTICATION:-}

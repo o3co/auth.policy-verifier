@@ -151,6 +151,7 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 						loadTimeoutMs,
 						retryMs,
 					},
+					tokenSourceOf(context.config.authentication, env[CEDAR_AUTHENTICATION_ENV]),
 				);
 			} catch (cause) {
 				loaded.delete(endpoint);
@@ -208,6 +209,7 @@ async function pushPolicies(
 	description: string,
 	logger: Logger,
 	timing: { loadTimeoutMs: number; retryMs: number },
+	tokenSource: string | undefined,
 ): Promise<void> {
 	const { loadTimeoutMs, retryMs } = timing;
 	const deadline = Date.now() + loadTimeoutMs;
@@ -246,8 +248,19 @@ async function pushPolicies(
 			continue;
 		}
 		if (response.ok) return;
-		// The agent answered and said no: a policy it cannot parse (400), a
-		// token it does not accept (401). Not retried — nothing will change.
+		if (response.status === 401 || response.status === 403) {
+			// The agent's own body says only "requires user authentication"; the
+			// fix is on this side, so name it (v0.10.0 audit — the template starts
+			// the agent with CEDAR_AGENT_AUTHENTICATION from CEDAR_AUTHENTICATION).
+			await response.body?.cancel().catch(() => undefined);
+			throw new CedarEngineError(
+				headers.authorization === undefined
+					? `cedar engine at ${endpoint} requires a token and none was sent — set authentication (or ${CEDAR_AUTHENTICATION_ENV}) to the token the agent was started with (${response.status})`
+					: `cedar engine at ${endpoint} did not accept the token from ${tokenSource ?? "authentication"} (${response.status}) — it must equal the agent's --authentication / CEDAR_AGENT_AUTHENTICATION`,
+			);
+		}
+		// The agent answered and said no: a policy it cannot parse (400). Not
+		// retried — nothing will change.
 		// The agent's message does not say which policy, so the ids that were
 		// sent are listed; with one policy per file, that is the file list.
 		const ids = policies.map((policy) => policy.id).join(", ") || "none";
@@ -331,6 +344,12 @@ function resolveEndpoint(configured: unknown, fromEnv: string | undefined): stri
 	}
 	// A base URL: the agent's paths are appended, so a trailing slash would double up.
 	return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+}
+
+/** Where the token sent to the agent came from, for a refusal to name — or `undefined` when none is sent. */
+function tokenSourceOf(configured: unknown, fromEnv: string | undefined): string | undefined {
+	if (configured !== undefined) return "authentication";
+	return fromEnv !== undefined && fromEnv.length > 0 ? CEDAR_AUTHENTICATION_ENV : undefined;
 }
 
 function requestHeaders(configured: unknown, fromEnv: string | undefined): Record<string, string> {
