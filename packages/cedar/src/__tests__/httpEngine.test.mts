@@ -172,6 +172,33 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 		expect(headersOf(calls[1]).authorization).toBe("from-config");
 	});
 
+	it("names the token when the agent refuses the load as unauthenticated (v0.10.0 audit)", async () => {
+		// The template's agent is started with CEDAR_AGENT_AUTHENTICATION from
+		// CEDAR_AUTHENTICATION, so a deployment that forgot to set it gets a 401.
+		// The agent's own 401 body says nothing about which variable to set.
+		const unauthorized = vi.fn(async () =>
+			json(401, {
+				reason: "Unauthorized",
+				description: "The request requires user authentication.",
+				code: 401,
+			}),
+		) as unknown as typeof fetch;
+		await expect(
+			createCedarHttpEngine({ fetch: unauthorized, env: AGENT_ENV }).load(
+				inline(PERMIT_ALL),
+				loadContext(),
+			),
+		).rejects.toThrow(
+			/requires a token and none was sent — set authentication \(or CEDAR_AUTHENTICATION\) to the token the agent was started with/,
+		);
+		await expect(
+			createCedarHttpEngine({
+				fetch: unauthorized,
+				env: { ...AGENT_ENV, [CEDAR_AUTHENTICATION_ENV]: "wrong" },
+			}).load(inline(PERMIT_ALL), loadContext()),
+		).rejects.toThrow(/did not accept the token from CEDAR_AUTHENTICATION/);
+	});
+
 	it("refuses to start when the agent refuses the set, in the agent's words", async () => {
 		const doFetch = vi.fn(async () =>
 			json(400, {

@@ -299,8 +299,15 @@ A deployment that evaluates [Cedar](../../packages/cedar/README.md) policies
 out of process starts the agent beside the app:
 
 ```sh
+echo "CEDAR_AUTHENTICATION=$(openssl rand -hex 32)" >> .env
 docker compose --profile cedar up --build
 ```
+
+`CEDAR_AUTHENTICATION` is required: the agent is started with it as its token
+and the app sends it on every call, because an unauthenticated agent lets
+anything that reaches it replace the policy set. Left unset, the agent refuses
+every call and the verifier's boot says to set it; a plain `docker compose up`
+without the profile does not need it.
 
 The `cedar-engine` service shares the app container's network namespace, so
 the verifier's `http` engine finds it at `http://127.0.0.1:8180` — the

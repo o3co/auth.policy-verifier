@@ -216,6 +216,7 @@ loopback and nothing outside the container pair can reach it — the same trust
 boundary the verifier's own bind address draws:
 
 ```sh
+echo "CEDAR_AUTHENTICATION=$(openssl rand -hex 32)" >> .env   # the agent's token, required
 docker compose --profile cedar up --build
 ```
 
@@ -231,6 +232,15 @@ docker compose --profile cedar up --build
   carries the subject's attributes and the answer is an authorization).
   `authentication` in config, else `CEDAR_AUTHENTICATION`, is sent verbatim as
   the `Authorization` header when the agent was started with one.
+- **Authenticate the agent.** An agent without `--authentication` is a *write*
+  oracle over the policy set: anything that reaches its port can
+  `PUT /v1/policies` a `permit(principal, action, resource);` and every later
+  decision allows. Loopback in a shared network namespace narrows who can
+  reach it; it does not make the token optional, and outside a private
+  namespace it MUST be set. The template's compose profile starts the agent
+  with `CEDAR_AGENT_AUTHENTICATION` from the same `CEDAR_AUTHENTICATION` the app
+  sends. A load the agent refuses as unauthenticated fails boot naming
+  `CEDAR_AUTHENTICATION`.
 - **The verifier owns the policies.** At boot the engine `PUT`s the policy set
   to the agent, one entry per `.cedar` file with the file's name as the policy
   id, so the agent holds exactly `config/policies` and nothing is converted or
