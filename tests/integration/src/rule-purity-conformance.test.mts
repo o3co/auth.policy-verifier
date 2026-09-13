@@ -423,6 +423,7 @@ describeRulePurityConformance({
 				ruleType: "engine",
 				code: "engine_deny",
 				message: "Denied by the engine",
+				async: true as const,
 				async decide(attrs) {
 					// A real yield, so the answer is produced asynchronously — a
 					// microtask is enough for that and keeps timers out of the suite.
@@ -454,6 +455,7 @@ describe("rule purity conformance — an asynchronous rule that keeps the reques
 				ruleType: "engine",
 				code: "engine_deny",
 				message: "Denied by the engine",
+				async: true as const,
 				// The violation: `context` is retained and read inside `decide`.
 				async decide() {
 					return context.resource.resourceType === "document";

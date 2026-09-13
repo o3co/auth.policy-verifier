@@ -502,6 +502,20 @@ function parseDecisionRequest(
  * is. See `observability/decisionEvent.mts` for what the line does and does not
  * carry.
  */
+/**
+ * A signal that aborts when the response closes before it was finished — the
+ * caller went away (v0.10.0 audit). Handed to the collectors and the evaluator
+ * as the caller's signal, so a caller that timed out and retried does not leave
+ * an out-of-process engine call, or a collector's fetch, running to its budget.
+ */
+function callerSignal(res: express.Response): AbortSignal {
+	const controller = new AbortController();
+	res.on("close", () => {
+		if (!res.writableFinished) controller.abort(new Error("the caller closed the connection"));
+	});
+	return controller.signal;
+}
+
 export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	// Resolved rather than defaulted with `??` (#157): this is the boundary a
 	// hand-built config reaches, so it must refuse what `AppConfigSchema` refuses
@@ -569,6 +583,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 		req: express.Request,
 		auth: { subject: SubjectAttributes; credential: string },
 		{ request: entry, resource }: ValidatedDecisionRequest,
+		signal: AbortSignal,
 	): Promise<DecisionResponse> {
 		const subject = auth.subject;
 		const requestId = req.get("x-request-id");
@@ -588,6 +603,8 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			// config field's doc. Spread-conditional so the default context
 			// carries no `credential` key at all, not an undefined one.
 			...(exposeCredential ? { credential: auth.credential } : {}),
+			// The caller going away cancels the collectors in flight (v0.10.0 audit).
+			signal,
 		};
 
 		// Timed from here so the measurement is the decision itself — the two
@@ -609,6 +626,10 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				...config.evaluateOptions,
 				ruleTimeoutMs,
 				evaluateDeadlineMs,
+				// …and the asynchronous rule in flight, instead of leaving an
+				// out-of-process call running to its budget for an answer nobody
+				// will read — which a retrying caller multiplies.
+				signal,
 			});
 		} catch (cause) {
 			// Two collect failures are denies of their own (#115 timeouts, #174
@@ -682,6 +703,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	router.use(express.json({ limit: maxBodyBytes }));
 
 	router.post("/verify", async (req: express.Request, res: express.Response) => {
+		const signal = callerSignal(res);
 		try {
 			// Body first, token second (#118) — see the ordering paragraph on
 			// `createVerifyRouter`. This is what makes a malformed unauthenticated
@@ -698,15 +720,20 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				return;
 			}
 
-			const decision = await decide(req, auth, parsed.entry);
+			const decision = await decide(req, auth, parsed.entry, signal);
 			res.status(decision.decision === "deny" ? 403 : 200).json(decision);
 		} catch (cause) {
+			if (signal.aborted) {
+				logger.info({ endpoint: "/verify" }, "verify_caller_gone");
+				return;
+			}
 			logger.error({ err: cause, endpoint: "/verify" }, "verify_internal_error");
 			res.status(500).json(errorBody("internal_error", "Internal server error"));
 		}
 	});
 
 	router.post("/verify/batch", async (req: express.Request, res: express.Response) => {
+		const signal = callerSignal(res);
 		try {
 			// The whole body — envelope, cap and every entry — before the token, for
 			// the reason `/verify` does it: the batch is the shape that can make an
@@ -783,7 +810,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			const lane = async (): Promise<void> => {
 				while (!abandoned && next < entries.length) {
 					const index = next++;
-					decisions[index] = await decide(req, auth, entries[index]);
+					decisions[index] = await decide(req, auth, entries[index], signal);
 				}
 			};
 			try {
@@ -801,6 +828,10 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			}
 			res.status(200).json({ decisions });
 		} catch (cause) {
+			if (signal.aborted) {
+				logger.info({ endpoint: "/verify/batch" }, "verify_caller_gone");
+				return;
+			}
 			logger.error({ err: cause, endpoint: "/verify/batch" }, "verify_internal_error");
 			res.status(500).json(errorBody("internal_error", "Internal server error"));
 		}

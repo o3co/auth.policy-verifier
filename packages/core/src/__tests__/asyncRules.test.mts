@@ -42,15 +42,25 @@ const async = (
 	ruleType,
 	code,
 	message: `Failed: ${code}`,
+	async: true,
 	decide: typeof result === "function" ? result : async () => result,
 });
 
 const attrs: Attributes = new Map([["scopes", ["read:project"]]]);
 
 describe("isAsyncRule", () => {
-	it("tells the two kinds apart by the presence of decide", () => {
+	it("tells the two kinds apart by the async discriminant", () => {
 		expect(isAsyncRule(sync("scope", "a", true))).toBe(false);
 		expect(isAsyncRule(async("scope", "a", true))).toBe(true);
+	});
+
+	it("does not treat a synchronous rule that happens to carry a decide method as asynchronous (v0.10.0 audit)", async () => {
+		// Duck-typing on `decide` sent such a rule down the asynchronous path;
+		// the policy-set union beside it in cedar discriminates on an explicit
+		// `async` flag, which is the safer house style.
+		const incidental = { ...sync("scope", "a", true), decide: async () => false };
+		expect(isAsyncRule(incidental)).toBe(false);
+		expect((await evaluate(attrs, [incidental])).decision).toBe("allow");
 	});
 });
 

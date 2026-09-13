@@ -363,6 +363,7 @@ function buildRule(bound: BoundRule): AnyRule {
 
 	const rule: AsyncRule = {
 		...base,
+		async: true,
 		async decide(attrs, signal) {
 			const built = request(attrs);
 			if (built === undefined) return false;

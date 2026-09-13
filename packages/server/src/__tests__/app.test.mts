@@ -87,6 +87,7 @@ const testModule: Module = {
 					ruleType,
 					code: `${ruleType}_deny`,
 					message: "Denied",
+					async: true as const,
 					decide: () => new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 40)),
 				}));
 			},
