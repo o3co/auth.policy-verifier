@@ -18,7 +18,6 @@ import {
 	CEDAR_AUTHENTICATION_ENV,
 	CEDAR_ENDPOINT_ENV,
 	createCedarHttpEngine,
-	DEFAULT_CEDAR_ENDPOINT,
 	entityUidLiteral,
 } from "../httpEngine.mjs";
 import type { CedarRequest } from "../mapping.mjs";
@@ -27,6 +26,10 @@ import type { PolicySource } from "../policySource.mjs";
 import "../index.mjs";
 
 const PERMIT_ALL = "permit(principal, action, resource);";
+
+/** The agent the tests point at — through the environment, as the template's compose file does. */
+const AGENT = "http://127.0.0.1:8180";
+const AGENT_ENV = { [CEDAR_ENDPOINT_ENV]: AGENT };
 
 function silentLogger(): Logger {
 	const logger = {
@@ -112,7 +115,7 @@ function headersOf(call: { init: RequestInit }): Record<string, string> {
 describe("cedarHttpEngine — load pushes the policy set", () => {
 	it("PUTs one entry per file, named after the file, to the default endpoint", async () => {
 		const { doFetch, calls } = agent();
-		const engine = createCedarHttpEngine({ fetch: doFetch, env: {} });
+		const engine = createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV });
 		const forbid = "forbid(principal, action, resource) when { context.suspended == true };";
 		await loadAsync(
 			engine,
@@ -122,7 +125,7 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 			]),
 		);
 		expect(calls).toHaveLength(1);
-		expect(calls[0].url).toBe(`${DEFAULT_CEDAR_ENDPOINT}/v1/policies`);
+		expect(calls[0].url).toBe(`${AGENT}/v1/policies`);
 		expect(calls[0].init.method).toBe("PUT");
 		expect(JSON.parse(String(calls[0].init.body))).toEqual([
 			{ id: "10-permit", content: PERMIT_ALL },
@@ -134,13 +137,13 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 
 	it("names inline policies `policies` and skips blank files — the empty set is migration step one", async () => {
 		const { doFetch, calls } = agent();
-		await loadAsync(createCedarHttpEngine({ fetch: doFetch, env: {} }), inline(PERMIT_ALL));
+		await loadAsync(createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }), inline(PERMIT_ALL));
 		expect(JSON.parse(String(calls[0].init.body))).toEqual([
 			{ id: "policies", content: PERMIT_ALL },
 		]);
 
 		await loadAsync(
-			createCedarHttpEngine({ fetch: doFetch, env: {} }),
+			createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }),
 			dir([["blank.cedar", "  \n"]]),
 		);
 		expect(JSON.parse(String(calls[1].init.body))).toEqual([]);
@@ -148,7 +151,7 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 
 	it("refuses a file whose name yields an empty policy id, before sending anything", async () => {
 		const { doFetch, calls } = agent();
-		const engine = createCedarHttpEngine({ fetch: doFetch, env: {} });
+		const engine = createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV });
 		await expect(engine.load(dir([[".cedar", PERMIT_ALL]]), loadContext())).rejects.toThrow(
 			/"\/etc\/verifier\/policies\/\.cedar" yields an empty policy id/,
 		);
@@ -159,7 +162,7 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 
 	it("sends the agent's authorization token verbatim: config over environment", async () => {
 		const { doFetch, calls } = agent();
-		const env = { [CEDAR_AUTHENTICATION_ENV]: "from-env" };
+		const env = { ...AGENT_ENV, [CEDAR_AUTHENTICATION_ENV]: "from-env" };
 		await loadAsync(createCedarHttpEngine({ fetch: doFetch, env }), inline(PERMIT_ALL));
 		expect(headersOf(calls[0]).authorization).toBe("from-env");
 
@@ -178,7 +181,7 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 				code: 400,
 			}),
 		) as unknown as typeof fetch;
-		const engine = createCedarHttpEngine({ fetch: doFetch, env: {} });
+		const engine = createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV });
 		await expect(
 			engine.load(dir([["20-forbid.cedar", "forbid(when;"]]), loadContext()),
 		).rejects.toThrow(
@@ -194,13 +197,13 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 		}) as unknown as typeof fetch;
 		const engine = createCedarHttpEngine({
 			fetch: doFetch,
-			env: {},
+			env: AGENT_ENV,
 			loadTimeoutMs: 40,
 			retryMs: 10,
 		});
 		await expect(engine.load(inline(PERMIT_ALL), loadContext())).rejects.toThrow(
 			new RegExp(
-				`cedar engine at ${DEFAULT_CEDAR_ENDPOINT} is unreachable — could not load .* within 40 ms \\(\\d+ attempts\\): fetch failed`,
+				`cedar engine at ${AGENT} is unreachable — could not load .* within 40 ms \\(\\d+ attempts\\): fetch failed`,
 			),
 		);
 		expect(attempts).toBeGreaterThan(1);
@@ -214,7 +217,7 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 		}) as unknown as typeof fetch;
 		const engine = createCedarHttpEngine({
 			fetch: doFetch,
-			env: {},
+			env: AGENT_ENV,
 			loadTimeoutMs: 40,
 			retryMs: 10,
 		});
@@ -232,14 +235,19 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 			if (attempts < 3) throw new TypeError("fetch failed: ECONNREFUSED");
 			return doFetch(input, init);
 		}) as unknown as typeof fetch;
-		const engine = createCedarHttpEngine({ fetch: flaky, env: {}, loadTimeoutMs: 500, retryMs: 5 });
+		const engine = createCedarHttpEngine({
+			fetch: flaky,
+			env: AGENT_ENV,
+			loadTimeoutMs: 500,
+			retryMs: 5,
+		});
 		await loadAsync(engine, inline(PERMIT_ALL));
 		expect(attempts).toBe(3);
 	});
 
 	it("runs one policy set per agent — a second load against the same endpoint is refused", async () => {
 		const { doFetch } = agent();
-		const engine = createCedarHttpEngine({ fetch: doFetch, env: {} });
+		const engine = createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV });
 		await loadAsync(engine, inline(PERMIT_ALL));
 		await expect(engine.load(dir([["other.cedar", PERMIT_ALL]]), loadContext())).rejects.toThrow(
 			/already holds the policy set from inline policies — PUT \/v1\/policies replaces an agent's whole set/,
@@ -248,7 +256,7 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 
 	it("refuses the second of two concurrent loads too, and frees the endpoint when a load fails", async () => {
 		const { doFetch } = agent();
-		const engine = createCedarHttpEngine({ fetch: doFetch, env: {} });
+		const engine = createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV });
 		const results = await Promise.allSettled([
 			engine.load(inline(PERMIT_ALL), loadContext()),
 			engine.load(dir([["other.cedar", PERMIT_ALL]]), loadContext()),
@@ -258,7 +266,7 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 		const refusing = vi.fn(async () => json(400, { description: "no" })) as unknown as typeof fetch;
 		const failing = createCedarHttpEngine({
 			fetch: refusing,
-			env: {},
+			env: AGENT_ENV,
 			loadTimeoutMs: 40,
 			retryMs: 10,
 		});
@@ -269,24 +277,37 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 });
 
 describe("cedarHttpEngine — where the agent is", () => {
-	it("prefers the config endpoint, then CEDAR_ENDPOINT, then the loopback default", async () => {
+	it("prefers the config endpoint, then CEDAR_ENDPOINT", async () => {
 		const { doFetch, calls } = agent();
 		const env = { [CEDAR_ENDPOINT_ENV]: "http://localhost:9001" };
 		await loadAsync(createCedarHttpEngine({ fetch: doFetch, env }), inline(PERMIT_ALL), {
 			endpoint: "http://127.0.0.1:9002/cedar/",
 		});
 		await loadAsync(createCedarHttpEngine({ fetch: doFetch, env }), inline(PERMIT_ALL));
-		await loadAsync(createCedarHttpEngine({ fetch: doFetch, env: {} }), inline(PERMIT_ALL));
 		expect(calls.map((call) => call.url)).toEqual([
 			"http://127.0.0.1:9002/cedar/v1/policies",
 			"http://localhost:9001/v1/policies",
-			`${DEFAULT_CEDAR_ENDPOINT}/v1/policies`,
 		]);
+	});
+
+	it("refuses to start with no endpoint at all, naming both ways out, before any request (v0.10.0 audit)", async () => {
+		// A v0.9.0 deployment that upgrades without the wasm package is resolved
+		// to this engine. With a loopback default it spent ten seconds on
+		// "cedar engine at http://127.0.0.1:8180 is unreachable", which names
+		// neither the cause nor the fix — or, if something answered there, booted
+		// against an evaluator nobody chose. #225 specified a config error.
+		const { doFetch, calls } = agent();
+		await expect(
+			createCedarHttpEngine({ fetch: doFetch, env: {} }).load(inline(PERMIT_ALL), loadContext()),
+		).rejects.toThrow(
+			/no cedar engine endpoint is configured — set endpoint \(or CEDAR_ENDPOINT\) to run against a cedar-agent, or import "@o3co\/auth\.policy-verifier\.cedar-wasm" to evaluate in-process/,
+		);
+		expect(calls).toHaveLength(0);
 	});
 
 	it("accepts https to any host and plain http to loopback only", async () => {
 		const { doFetch, calls } = agent();
-		await loadAsync(createCedarHttpEngine({ fetch: doFetch, env: {} }), inline(PERMIT_ALL), {
+		await loadAsync(createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }), inline(PERMIT_ALL), {
 			endpoint: "https://cedar.internal:8443",
 		});
 		// Every loopback spelling: IPv6 (`URL.hostname` keeps its brackets), the
@@ -299,22 +320,26 @@ describe("cedarHttpEngine — where the agent is", () => {
 			"http://127.255.255.254:8180",
 		];
 		for (const endpoint of loopbacks) {
-			await loadAsync(createCedarHttpEngine({ fetch: doFetch, env: {} }), inline(PERMIT_ALL), {
-				endpoint,
-			});
+			await loadAsync(
+				createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }),
+				inline(PERMIT_ALL),
+				{
+					endpoint,
+				},
+			);
 		}
 		expect(calls.at(-5)?.url).toBe("http://[::1]:8180/v1/policies");
 		// Look-alikes are routable names and stay refused.
 		for (const endpoint of ["http://127.0.0.1.attacker.test", "http://localhost.attacker.test"]) {
 			await expect(
-				createCedarHttpEngine({ fetch: doFetch, env: {} }).load(
+				createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }).load(
 					inline(PERMIT_ALL),
 					loadContext({ endpoint }),
 				),
 			).rejects.toThrow(/plain http to a routable host/);
 		}
 		await expect(
-			createCedarHttpEngine({ fetch: doFetch, env: {} }).load(
+			createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }).load(
 				inline(PERMIT_ALL),
 				loadContext({ endpoint: "http://cedar.internal:8180" }),
 			),
@@ -347,7 +372,7 @@ describe("cedarHttpEngine — where the agent is", () => {
 	it("refuses a malformed authentication value", async () => {
 		const { doFetch } = agent();
 		await expect(
-			createCedarHttpEngine({ fetch: doFetch, env: {} }).load(
+			createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }).load(
 				inline(PERMIT_ALL),
 				loadContext({ authentication: 7 }),
 			),
@@ -359,7 +384,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 	it("POSTs cedar-agent's AuthorizationCall: entity references as literals, entities inline, the rule's signal", async () => {
 		const { doFetch, calls } = agent();
 		const loaded = await loadAsync(
-			createCedarHttpEngine({ fetch: doFetch, env: {} }),
+			createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }),
 			inline(PERMIT_ALL),
 		);
 		const controller = new AbortController();
@@ -367,7 +392,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		expect(answer).toEqual({ decision: "allow", reason: ["policies"], errors: [] });
 
 		const call = calls[1];
-		expect(call.url).toBe(`${DEFAULT_CEDAR_ENDPOINT}/v1/is_authorized`);
+		expect(call.url).toBe(`${AGENT}/v1/is_authorized`);
 		expect(call.init.method).toBe("POST");
 		expect(call.init.signal).toBe(controller.signal);
 		expect(JSON.parse(String(call.init.body))).toEqual({
@@ -390,7 +415,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 			}),
 		);
 		const loaded = await loadAsync(
-			createCedarHttpEngine({ fetch: doFetch, env: {} }),
+			createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }),
 			inline(PERMIT_ALL),
 		);
 		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toEqual({
@@ -426,7 +451,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		];
 		for (const [response, expected] of cases) {
 			const loaded = await loadAsync(
-				createCedarHttpEngine({ fetch: agent(response).doFetch, env: {} }),
+				createCedarHttpEngine({ fetch: agent(response).doFetch, env: AGENT_ENV }),
 				inline(PERMIT_ALL),
 			);
 			const failure = loaded.isAuthorized(request(), NEVER_ABORTS);
@@ -440,7 +465,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 			throw new TypeError("fetch failed: ECONNRESET");
 		});
 		const loaded = await loadAsync(
-			createCedarHttpEngine({ fetch: doFetch, env: {} }),
+			createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }),
 			inline(PERMIT_ALL),
 		);
 		await expect(loaded.isAuthorized(request(), NEVER_ABORTS)).rejects.toThrow(
@@ -452,7 +477,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 			throw new DOMException("The operation was aborted", "AbortError");
 		});
 		const set = await loadAsync(
-			createCedarHttpEngine({ fetch: aborting.doFetch, env: {} }),
+			createCedarHttpEngine({ fetch: aborting.doFetch, env: AGENT_ENV }),
 			inline(PERMIT_ALL),
 		);
 		const controller = new AbortController();

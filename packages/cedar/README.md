@@ -213,9 +213,12 @@ docker compose --profile cedar up --build
 ```
 
 - **Where the agent is.** `endpoint` in the collector's config entry, else the
-  `CEDAR_ENDPOINT` environment variable, else `http://127.0.0.1:8180` — the
-  compose service's address, so the profile needs no configuration at all. A
-  base URL: the agent's `/v1/policies` and `/v1/is_authorized` are appended.
+  `CEDAR_ENDPOINT` environment variable. Neither refuses to start with `no cedar
+  engine endpoint is configured`, naming both ways out — this engine is also
+  what a deployment gets when it has not imported the wasm package, and that
+  is the mistake worth naming. The template's compose file sets
+  `CEDAR_ENDPOINT=http://127.0.0.1:8180`, the profile's address. A base URL:
+  the agent's `/v1/policies` and `/v1/is_authorized` are appended.
   Plain `http://` is accepted for loopback hosts only; a routable agent must be
   `https://` (the rule `jwksUri` follows, and for the same reason: the request
   carries the subject's attributes and the answer is an authorization).

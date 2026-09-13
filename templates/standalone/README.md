@@ -303,8 +303,9 @@ docker compose --profile cedar up --build
 ```
 
 The `cedar-engine` service shares the app container's network namespace, so
-the verifier's `http` engine finds it at its default endpoint
-(`http://127.0.0.1:8180`) with no configuration, pushes `config/policies` into
+the verifier's `http` engine finds it at `http://127.0.0.1:8180` — the
+`CEDAR_ENDPOINT` the compose file sets on the app, since the engine has no
+default address — pushes `config/policies` into
 it at boot, and nothing outside the container pair can reach it. The profile
 does nothing until the app composes `cedarPolicyModule`; see cedar's README
 for the packages, the module and the config entry — and its sizing table for

@@ -17,15 +17,6 @@ import type { PolicySource } from "./policySource.mjs";
 /** The name this engine registers under, and the config value that selects it. */
 export const CEDAR_HTTP_ENGINE_NAME = "http" as const;
 
-/**
- * Where the engine looks when neither config nor environment says: the
- * loopback address and port the standalone template's `cedar-engine` compose
- * service listens on (cedar-agent's own default port). Shared network
- * namespace, so loopback is the whole trust boundary — the same one the
- * verifier's own bind address draws.
- */
-export const DEFAULT_CEDAR_ENDPOINT = "http://127.0.0.1:8180";
-
 /** Environment variable that overrides the endpoint when config does not set it. */
 export const CEDAR_ENDPOINT_ENV = "CEDAR_ENDPOINT";
 
@@ -80,10 +71,13 @@ interface AgentAuthorizationCall {
  *
  * ## Where the agent is
  *
- * `endpoint` in the collector's config entry, else `CEDAR_ENDPOINT`, else
- * {@link DEFAULT_CEDAR_ENDPOINT} — the loopback address the template's
- * `cedar-engine` compose service answers on. A base URL: the two paths above
- * are appended. Plain `http://` is accepted for loopback hosts only; anything
+ * `endpoint` in the collector's config entry, else `CEDAR_ENDPOINT`. Neither
+ * is a boot error that names both ways out — this engine is also what a
+ * deployment gets when it upgraded without importing the wasm package, and a
+ * default address would turn that into ten seconds of "unreachable", or a
+ * boot against whatever answered there (v0.10.0 audit; #225 specified the
+ * error). The standalone template's compose file sets `CEDAR_ENDPOINT` for
+ * its `cedar-engine` profile. A base URL: the two paths above are appended. Plain `http://` is accepted for loopback hosts only; anything
  * routable must be `https://`, the rule `jwksUri` follows, because the wire
  * carries the request's attributes and the agent's answer is an authorization.
  * `authentication` in config, else `CEDAR_AUTHENTICATION`, is sent verbatim as
@@ -304,8 +298,9 @@ function resolveEndpoint(configured: unknown, fromEnv: string | undefined): stri
 		raw = fromEnv;
 		origin = CEDAR_ENDPOINT_ENV;
 	} else {
-		raw = DEFAULT_CEDAR_ENDPOINT;
-		origin = "the default";
+		throw new CedarEngineError(
+			`no cedar engine endpoint is configured — set endpoint (or ${CEDAR_ENDPOINT_ENV}) to run against a cedar-agent, or import "@o3co/auth.policy-verifier.cedar-wasm" to evaluate in-process`,
+		);
 	}
 
 	let url: URL;
