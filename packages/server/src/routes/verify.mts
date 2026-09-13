@@ -628,8 +628,12 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				evaluateDeadlineMs,
 				// …and the asynchronous rule in flight, instead of leaving an
 				// out-of-process call running to its budget for an answer nobody
-				// will read — which a retrying caller multiplies.
-				signal,
+				// will read — which a retrying caller multiplies. Combined with a
+				// library consumer's own signal, never in place of it.
+				signal:
+					config.evaluateOptions?.signal === undefined
+						? signal
+						: AbortSignal.any([config.evaluateOptions.signal, signal]),
 			});
 		} catch (cause) {
 			// Two collect failures are denies of their own (#115 timeouts, #174
@@ -723,7 +727,9 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			const decision = await decide(req, auth, parsed.entry, signal);
 			res.status(decision.decision === "deny" ? 403 : 200).json(decision);
 		} catch (cause) {
-			if (signal.aborted) {
+			// Only the caller's own abort is downgraded: a fault that happened to
+			// land as the caller left is still a fault.
+			if (signal.aborted && cause === signal.reason) {
 				logger.info({ endpoint: "/verify" }, "verify_caller_gone");
 				return;
 			}
@@ -828,7 +834,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			}
 			res.status(200).json({ decisions });
 		} catch (cause) {
-			if (signal.aborted) {
+			if (signal.aborted && cause === signal.reason) {
 				logger.info({ endpoint: "/verify/batch" }, "verify_caller_gone");
 				return;
 			}

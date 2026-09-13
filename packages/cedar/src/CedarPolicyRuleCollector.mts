@@ -371,6 +371,11 @@ function buildRule(bound: BoundRule): AnyRule {
 			try {
 				answer = await policySet.isAuthorized(built, signal);
 			} catch (cause) {
+				// An aborted call is not an engine outage: the signal carries the
+				// evaluator's timeout or the caller's departure, and it has to reach
+				// the evaluator as such — folded into a deny, a timeout read as
+				// `cedar_deny` and a departed caller as a failing engine.
+				if (signal.aborted) throw signal.reason;
 				return callFailed(cause);
 			}
 			return interpret(answer);
