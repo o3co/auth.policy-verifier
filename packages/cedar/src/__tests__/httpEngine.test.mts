@@ -281,6 +281,29 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 		);
 	});
 
+	it("treats two spellings of one loopback agent as the same agent (v0.10.0 audit)", async () => {
+		// The guard was keyed on the endpoint string, so `127.0.0.1` and
+		// `localhost` were two keys for one agent, and the second collector
+		// replaced the first's policy set — the outcome the guard exists to stop.
+		const { doFetch } = agent();
+		const engine = createCedarHttpEngine({ fetch: doFetch, env: {} });
+		await loadAsync(engine, inline(PERMIT_ALL), { endpoint: "http://127.0.0.1:8180" });
+		for (const endpoint of [
+			"http://localhost:8180",
+			"http://[::1]:8180/",
+			"http://127.0.0.2:8180",
+		]) {
+			await expect(
+				engine.load(dir([["other.cedar", PERMIT_ALL]]), loadContext({ endpoint })),
+				endpoint,
+			).rejects.toThrow(/already holds the policy set from inline policies/);
+		}
+		// A different port is a different agent.
+		await expect(
+			loadAsync(engine, dir([["other.cedar", PERMIT_ALL]]), { endpoint: "http://127.0.0.1:8181" }),
+		).resolves.toBeDefined();
+	});
+
 	it("refuses the second of two concurrent loads too, and frees the endpoint when a load fails", async () => {
 		const { doFetch } = agent();
 		const engine = createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV });

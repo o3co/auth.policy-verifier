@@ -148,6 +148,24 @@ describe("CedarPolicyRuleCollector — config validation", () => {
 		).resolves.toBeDefined();
 	});
 
+	it("warns when no engine is named — which evaluator decides belongs in config (v0.10.0 audit)", async () => {
+		// With `engine` absent the choice is made by what happens to be imported:
+		// a transitive dependency pulling in cedar-wasm silently flips a
+		// deployment from out-of-process to in-process.
+		const warn = vi.fn();
+		const info = vi.fn();
+		const logger = { ...fakeLogger().logger, warn, info } as Logger;
+		await CedarPolicyRuleCollector.create({ policies: PERMIT_ALL }, { logger });
+		expect(warn).toHaveBeenCalledWith(
+			expect.objectContaining({ engine: "wasm" }),
+			expect.stringMatching(/cedar engine selected by default — set engine/),
+		);
+		warn.mockClear();
+		await CedarPolicyRuleCollector.create({ policies: PERMIT_ALL, engine: "wasm" }, { logger });
+		expect(warn).not.toHaveBeenCalled();
+		expect(info).toHaveBeenCalledWith(expect.anything(), "cedar engine selected by config");
+	});
+
 	it("refuses a non-boolean logEvaluationErrors", async () => {
 		await expect(
 			CedarPolicyRuleCollector.create({
