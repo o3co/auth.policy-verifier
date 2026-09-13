@@ -6,95 +6,266 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
-## [Unreleased]
+## [0.10.0] - 2026-09-14
 
 ### Added
 
 - **Asynchronous rules** (`@o3co/auth.policy-verifier.core`, `.server`,
-  [#225](https://github.com/o3co/auth.policy-verifier/issues/225)). An
+  [#225](https://github.com/o3co/auth.policy-verifier/issues/225),
+  [#236](https://github.com/o3co/auth.policy-verifier/pull/236)). An
   out-of-process policy engine cannot be a `Rule`: `verify` is synchronous and,
-  by contract, does no I/O. `AsyncRule` — `decide(attrs, signal):
-  Promise<boolean>` — is the additive form: the same `ruleType` grouping, the
-  same `code` / `message`, the same report in the decision's `reason`, and the
-  same rule that the answer be a function of `attrs` alone (the purity
-  conformance suite asks `decide` exactly as it asks `verify`). What it may do
-  is I/O, under a deadline. Core gains `RuleTimeoutError`,
-  `DEFAULT_RULE_TIMEOUT_MS` and `resolveRuleTimeoutMs`; `RuleCollector.collect`
-  and `RulePipeline.collect` return `AnyRule[]`. The server gains
-  `verify.ruleTimeoutMs` (default 2000 ms, one reader at both boundaries),
-  answering `403 rule_timeout` when a rule overruns it. Every existing rule and
-  config reads as before. Written up in `docs/extending.md`, "Writing an
-  asynchronous rule". The Cedar HTTP engine that motivates it follows in a
-  separate change.
+  by contract, does no I/O. `AsyncRule` — `readonly async: true` and
+  `decide(attrs, signal): Promise<boolean>` — is the additive form: the same
+  `ruleType` grouping, the same `code` / `message`, the same report in the
+  decision's `reason`, and the same rule that the answer be a function of
+  `attrs` alone (the purity conformance suite asks `decide` exactly as it asks
+  `verify`). What it may do is I/O, under a deadline. `isAsyncRule` reads the
+  `async` discriminant, so a `Rule` that happens to carry a `decide` method
+  stays synchronous. Core also exports `AnyRule`, `RuleTimeoutError` (with
+  `limit: "rule" | "deadline"` and `started`), `DEFAULT_RULE_TIMEOUT_MS`,
+  `DEFAULT_EVALUATE_DEADLINE_MS`, `resolveRuleTimeoutMs` and
+  `resolveEvaluateDeadlineMs`, and `EvaluateOptions` gains the optional
+  `ruleTimeoutMs`, `evaluateDeadlineMs` and `signal`. Written up in
+  `docs/extending.md`, "Writing an asynchronous rule". The type-level edges are
+  under Changed below.
 
-- **`CedarEngine` port and the `cedar-wasm` package**
-  (`@o3co/auth.policy-verifier.cedar`, new `@o3co/auth.policy-verifier.cedar-wasm`,
-  [#225](https://github.com/o3co/auth.policy-verifier/issues/225)). Which
-  evaluator runs a Cedar policy set is a deployment decision, and it is now
-  made by dependency: `cedar` owns policy loading, the attribute-to-entity
-  mapping and the rule, and hands the request to whichever `CedarEngine` is
-  registered (`registerCedarEngine`, called at module scope by the package
-  that ships the engine; `resolveCedarEngine` and the collector's optional
-  `engine` key select one — absent, the first registered of `wasm`, `http`).
-  A synchronous policy set becomes a `Rule`, an asynchronous one an
-  `AsyncRule`; config, mapping and the answer table are identical across
-  engines. `@o3co/auth.policy-verifier.cedar-wasm` is the in-process engine
-  (`@cedar-policy/cedar-wasm`, unchanged behaviour), registered as `"wasm"`
-  by being imported; naming `engine = "wasm"` without the import refuses to
-  start, naming the package. `cedar` also exports the Cedar JSON vocabulary
-  (`CedarRequest`, `CedarEntity`, …) and `PolicySource` an engine receives.
-  An engine's `load` may be asynchronous — a remote engine takes the policy
-  set over the network — and a set that cannot be loaded still refuses to
-  start rather than deny every request: `CedarPolicyRuleCollector.create()`
-  awaits it, and core's `RuleCollectorFactory` may now return a `Promise`,
-  which `createApp` awaits (`@o3co/auth.policy-verifier.core`, `.server`).
+- **Rule deadlines: `verify.ruleTimeoutMs` and `verify.evaluateDeadlineMs`**
+  (`.server`, `templates/standalone`,
+  [#225](https://github.com/o3co/auth.policy-verifier/issues/225),
+  [#234](https://github.com/o3co/auth.policy-verifier/pull/234)).
+  `ruleTimeoutMs` (default 2000, env `VERIFY_RULE_TIMEOUT_MS`) bounds one
+  asynchronous rule; `evaluateDeadlineMs` (default 5000, env
+  `VERIFY_EVALUATE_DEADLINE_MS`) bounds all of a decision's asynchronous rules
+  together, on a monotonic clock — groups run one after another, so a per-rule
+  budget cannot bound the phase, the same reason `collectorDeadlineMs` sits
+  beside `collectorTimeoutMs`. A rule runs under whichever ends first, and none
+  starts once the phase is spent. Both are bounded 1…`MAX_TIMER_MS`, read
+  through `NUMERIC_BOUNDS` at both config boundaries, and are also
+  `VerifyRouterConfig.ruleTimeoutMs` / `.evaluateDeadlineMs` for a library
+  consumer. A synchronous rule is not timed, so a deployment without
+  asynchronous rules decides exactly as before.
 
-- **The `http` Cedar engine and the compose profile** (`@o3co/auth.policy-verifier.cedar`,
-  `templates/standalone`, [#225](https://github.com/o3co/auth.policy-verifier/issues/225)).
-  `cedar` now registers an out-of-process engine on import: a
-  [cedar-agent](https://github.com/permitio/cedar-agent) over HTTP, selected
-  by `engine = "http"` or by default when the wasm package is not imported.
-  At boot it pushes the policy set to the agent (`PUT /v1/policies`, one
-  entry per file, the file name as the policy id — so `diagnostics.reason`
-  names files), retrying an unreachable agent for 10 s and refusing to start
-  on a set the agent rejects; per decision it `POST`s the same request the
-  wasm engine evaluates, entities inline, as an `AsyncRule` under
-  `verify.ruleTimeoutMs`. The agent is found at `endpoint` in config, else
-  `CEDAR_ENDPOINT`, else `http://127.0.0.1:8180`; plain `http://` only to
-  loopback; `authentication` / `CEDAR_AUTHENTICATION` for an agent that
-  enforces a token. One policy per file, one collector per agent. The
-  standalone template gains a `cedar-engine` compose service under
-  `--profile cedar` that shares the app's network namespace, so the default
-  endpoint needs no configuration. `CedarEngine.load` now receives the
-  collector's config entry and a logger; the collector logs which engine it
-  selected at boot. cedar's README carries a measured sizing table: on the
-  test machine in-process wins outright to a few hundred policies and the
-  two cross near a thousand.
+- **`403 { "decision": "deny", "code": "rule_timeout" }`** (`.server`,
+  [#225](https://github.com/o3co/auth.policy-verifier/issues/225),
+  [#234](https://github.com/o3co/auth.policy-verifier/pull/234)). An
+  asynchronous rule that overruns either deadline is a deny with its own code,
+  so an operator can tell a stalled engine from a stalled collector. The
+  message is the collector timeout's, `Authorization could not be decided in
+  time`. An enforcement layer that switches on `code` should handle it.
+
+- **The `CedarEngine` port** (`@o3co/auth.policy-verifier.cedar`,
+  [#225](https://github.com/o3co/auth.policy-verifier/issues/225),
+  [#231](https://github.com/o3co/auth.policy-verifier/pull/231),
+  [#235](https://github.com/o3co/auth.policy-verifier/pull/235)). Which
+  evaluator runs a Cedar policy set is now a dependency decision. `cedar` owns
+  policy loading, the attribute-to-entity mapping and the rule, and hands the
+  request to a registered engine: `registerCedarEngine` (called at module scope
+  by the package that ships the engine), `resolveCedarEngine`,
+  `registeredCedarEngines`, and the collector's optional `engine` key. Left
+  absent, the first registered of `wasm`, `http` is used and the collector logs
+  `cedar engine selected by default` at **warn**, listing the registered
+  engines — name the engine in config. A synchronous policy set becomes a
+  `Rule`, an asynchronous one an `AsyncRule`; config, mapping and the answer
+  table are identical across engines. The registry lives in a process-wide
+  `Symbol.for` slot, so two copies of `.cedar` in one dependency graph share
+  it. For engine authors: `CedarEngine` (`name`, `readonly async: boolean`,
+  `load(source, { config, logger })`), `CedarEngineLoadContext`,
+  `SyncCedarPolicySet` / `AsyncCedarPolicySet` / `LoadedCedarPolicySet`,
+  `CedarDecision` (diagnostics as rendered text), `CedarEngineError`, the Cedar
+  JSON vocabulary (`CedarRequest`, `CedarEntity`, `CedarEntityUid`,
+  `CedarValue`, `CedarContext`) and `PolicySource` / `PolicyFile`. An engine
+  whose loaded set contradicts its declared `async` is refused at boot.
+
+- **New package `@o3co/auth.policy-verifier.cedar-wasm`**
+  ([#225](https://github.com/o3co/auth.policy-verifier/issues/225)). The
+  in-process engine — `@cedar-policy/cedar-wasm` 4.12.0, with the per-file
+  parse check, boot-time compile and messages `.cedar` used through 0.9.0 —
+  registered as `"wasm"` by the side-effect import
+  `import "@o3co/auth.policy-verifier.cedar-wasm";`. Exports `cedarWasmEngine`,
+  `CEDAR_WASM_ENGINE_NAME` and `CedarWasmEngine`. The published set is now six
+  packages; `AGENTS.md` and the `ci.yml` publish-readiness comment had said
+  four, omitting `.cedar`, which has been published since 0.6.0.
+
+- **The `http` Cedar engine** (`.cedar`,
+  [#225](https://github.com/o3co/auth.policy-verifier/issues/225),
+  [#230](https://github.com/o3co/auth.policy-verifier/pull/230),
+  [#231](https://github.com/o3co/auth.policy-verifier/pull/231),
+  [#232](https://github.com/o3co/auth.policy-verifier/pull/232),
+  [#233](https://github.com/o3co/auth.policy-verifier/pull/233),
+  [#235](https://github.com/o3co/auth.policy-verifier/pull/235)). A
+  [cedar-agent](https://github.com/permitio/cedar-agent) over HTTP, registered
+  as `"http"` by importing `.cedar`. At boot it pushes the policy set
+  (`PUT /v1/policies`, one entry per file, the file name as the policy id, so
+  `diagnostics.reason` names files), retrying an unreachable agent for 10 s
+  (`CEDAR_LOAD_TIMEOUT_MS`) and refusing to start on a set the agent rejects;
+  per decision it `POST`s `/v1/is_authorized` with the entities inline, as an
+  `AsyncRule` under the rule deadlines. What it asks of a deployment:
+
+  - **An endpoint — there is no default address.** `endpoint` in the
+    collector's config, else `CEDAR_ENDPOINT`. With neither, boot fails with
+    `no cedar engine endpoint is configured — set endpoint (or CEDAR_ENDPOINT)
+    to run against a cedar-agent, or import
+    "@o3co/auth.policy-verifier.cedar-wasm" to evaluate in-process`, before any
+    request is sent. Plain `http://` is accepted for loopback hosts only.
+  - **A token, outside a private network namespace.** `authentication`, else
+    `CEDAR_AUTHENTICATION`, is sent verbatim as `Authorization`. An
+    unauthenticated agent lets anything that reaches its port replace the
+    policy set. A `401` / `403` on the push says to set `authentication` (or
+    `CEDAR_AUTHENTICATION`) when no token was sent, or names where the refused
+    token came from.
+  - **One policy per `.cedar` file** (cedar-agent stores policies one by one)
+    and **one collector per agent** (the push replaces the agent's whole set);
+    every loopback spelling of a host on one port counts as one agent.
+  - **`onNoDeterminingPolicy = "deny"`.** `"abstain"` is refused at boot over
+    an asynchronous engine: an agent that lost its set — a restarted agent comes
+    back empty — answers "no determining policy" to every request, exactly what
+    a covered request that matched nothing answers, and under `"abstain"` every
+    `forbid` would silently stop applying. In-process sets keep `"abstain"`.
+
+  An unreachable agent or an answer that is not a decision is a logged deny,
+  never an abstention. Diagnostics items that are not strings (Cedar 3.x+
+  reports structured errors) are rendered as JSON rather than the whole answer
+  being refused; a missing list is still refused. The response contract is
+  cedar-agent 0.2.x's, and inline entities were confirmed against the pinned
+  `permitio/cedar-agent:0.2.2`. Agent connections are not capped; cedar's
+  README says how to size for that and carries a measured sizing table — on
+  the test machine in-process wins outright up to a few hundred policies and
+  the two cross near a thousand. Exports `cedarHttpEngine`,
+  `createCedarHttpEngine`, `CedarHttpEngineOptions`, `CEDAR_HTTP_ENGINE_NAME`,
+  `CEDAR_ENDPOINT_ENV`, `CEDAR_AUTHENTICATION_ENV`, `CEDAR_LOAD_TIMEOUT_MS` and
+  `entityUidLiteral`.
+
+- **A `cedar` compose profile in the standalone template**
+  (`templates/standalone`,
+  [#225](https://github.com/o3co/auth.policy-verifier/issues/225),
+  [#230](https://github.com/o3co/auth.policy-verifier/pull/230),
+  [#233](https://github.com/o3co/auth.policy-verifier/pull/233)).
+  `docker compose --profile cedar up` starts `permitio/cedar-agent:0.2.2`,
+  pinned by digest, in the app container's network namespace and bound to
+  loopback, so nothing outside the pair can reach it. The compose file sets
+  `CEDAR_ENDPOINT=${CEDAR_ENDPOINT:-http://127.0.0.1:8180}` and
+  `CEDAR_AUTHENTICATION=${CEDAR_AUTHENTICATION:-}` on the app and starts the
+  agent with `CEDAR_AGENT_AUTHENTICATION` from the same variable.
+  **`CEDAR_AUTHENTICATION` is required under the profile** — for example
+  `echo "CEDAR_AUTHENTICATION=$(openssl rand -hex 32)" >> .env`. Left unset,
+  the agent refuses every call and the verifier's boot fails with `cedar
+  engine at http://127.0.0.1:8180 requires a token and none was sent — set
+  authentication (or CEDAR_AUTHENTICATION) to the token the agent was started
+  with (401)`; a plain `docker compose up` without the profile does not need
+  it. The profile does nothing until the app composes `cedarPolicyModule`.
 
 ### Changed
 
 - **BREAKING: `evaluate()` is asynchronous** (`@o3co/auth.policy-verifier.core`,
-  [#225](https://github.com/o3co/auth.policy-verifier/issues/225)). It takes
-  `AnyRule[]` and returns `Promise<Decision>`; `EvaluateOptions` gains
-  `ruleTimeoutMs` and `signal`. A synchronous rule is asked through `verify` as
-  before, an `AsyncRule` is awaited through `decide` under `ruleTimeoutMs`, one
-  at a time in collection order, and the alternatives after a group's first
-  pass never run whichever kind they are. There is one evaluator rather than a
-  synchronous one beside an asynchronous one: a synchronous evaluator proved
-  only that its input held no asynchronous rule, which nothing needed proving,
-  and the pair cost a second code path and a "wrong function" failure mode.
-  Callers `await` the result; nothing else changes.
-- **BREAKING: `@o3co/auth.policy-verifier.cedar` no longer bundles the
-  evaluator** ([#225](https://github.com/o3co/auth.policy-verifier/issues/225)).
-  It depends on no `@cedar-policy/cedar-wasm`; a deployment that evaluates
-  in-process adds `@o3co/auth.policy-verifier.cedar-wasm` and imports it —
-  `import "@o3co/auth.policy-verifier.cedar-wasm"` beside `cedarPolicyModule`
-  — and everything else reads as before. A `CedarPolicyRuleCollector`
-  constructed with no engine registered refuses to start, naming that package.
-  `CedarPolicyRuleCollector` is built with `await CedarPolicyRuleCollector.create(config)`
-  — the constructor is no longer public, because loading a policy set may be
-  asynchronous. `loadPolicySource` no longer parse-checks (the engine does, per
-  file, with the same messages) and returns `files` beside `text`.
+  #225). `evaluate(attrs, rules: AnyRule[], options?)` returns
+  `Promise<Decision>`. **Callers must `await` it**: TypeScript flags the old
+  call, but in JavaScript it silently yields a `Promise`, whose `.decision` is
+  `undefined`. Everything the decision depends on is unchanged — groups are
+  asked in collection order, a group stops at its first pass, every group runs,
+  and a deny names the first failing one — and a list of synchronous rules
+  awaits nothing but the promise itself. There is one evaluator rather than a
+  synchronous one beside an asynchronous one.
+
+- **BREAKING: `@o3co/auth.policy-verifier.cedar` no longer bundles an
+  evaluator** (#225, #230). Every `.cedar` deployment through 0.9.0 evaluated
+  in-process; to keep doing so, **add `@o3co/auth.policy-verifier.cedar-wasm`,
+  import it for its side effect beside `cedarPolicyModule`
+  (`import "@o3co/auth.policy-verifier.cedar-wasm";`), and set
+  `engine = "wasm"` on the collector entry**. An upgrade that skips this does
+  not silently change evaluators. The collector warns
+  `cedar engine selected by default` and boot fails with
+  `createApp: rule.collectors[<i>] (CedarPolicyRuleCollector) failed to start:
+  CedarPolicyRuleCollector: no cedar engine endpoint is configured — set
+  endpoint (or CEDAR_ENDPOINT) to run against a cedar-agent, or import
+  "@o3co/auth.policy-verifier.cedar-wasm" to evaluate in-process`. Two cases
+  read differently. With `onNoDeterminingPolicy = "abstain"`, boot fails on the
+  abstain refusal described under Added instead, which says to "evaluate
+  in-process" without naming the package — the fix is still the import, not
+  switching to `"deny"`. And where `CEDAR_ENDPOINT` is already set in the
+  environment (the standalone template's compose file sets it), the `http`
+  engine is selected against that address. The other way forward is to run a
+  cedar-agent and set `engine = "http"` (see Added).
+
+- **BREAKING: `CedarPolicyRuleCollector`'s constructor is private**
+  (`.cedar`, #225). **Use `await CedarPolicyRuleCollector.create(config,
+  options?)`**, because loading a policy set may be asynchronous.
+  `cedarPolicyModule` registers `create` as the factory, so a config-driven
+  deployment needs no change for this.
+
+- **BREAKING (types only)**: `RuleCollectorFactory` may return
+  `Promise<RuleCollector>` (`.core`, #225). Existing factories still conform;
+  **a composition root that calls a factory itself must `await` the result**.
+  `createApp` awaits each rule collector factory one at a time, in config
+  order, and a failure there — an unregistered name, or a factory that throws —
+  now reads `createApp: rule.collectors[<i>] (<collector>) failed to start:
+  <reason>`.
+
+- **BREAKING (types only)**: `RuleCollector.collect` and `RulePipeline.collect`
+  return `Promise<AnyRule[]>` (`.core`, #225). Implementations that return
+  `Rule[]` still conform; **code that holds the result as `Rule[]` must widen
+  it to `AnyRule[]`**, or narrow each entry with `isAsyncRule`.
+
+- **BREAKING (types only)**: `AppConfig["verify"]` gained required
+  `ruleTimeoutMs` and `evaluateDeadlineMs` on the parsed type (`.server`, #225,
+  #234). Configs parsed by `AppConfigSchema` get the defaults and are
+  unaffected; **a hand-built `AppConfig` literal must add both** (the defaults
+  are `2000` and `5000`).
+
+- **A caller that disconnects cancels its decision** (`.server`, #236).
+  `/verify` and `/verify/batch` abort a signal when the response closes
+  unfinished and hand it to both collector pipelines and to `evaluate()` —
+  combined with a library consumer's `evaluateOptions.signal`, never in place
+  of it. A collector or asynchronous rule that passes its `signal` to `fetch`
+  stops, instead of running to its budget for an answer nobody will read; an
+  attribute collector that honours `signal` therefore now sees it abort for
+  this reason too. A decision abandoned this way logs `verify_caller_gone` at
+  info, not `verify_internal_error`.
+
+- **The CHANGELOG section is written at cut time** (`docs/release-policy.md`,
+  `AGENTS.md`, `.github/workflows/release.yml`,
+  [#229](https://github.com/o3co/auth.policy-verifier/pull/229)). R2 no
+  longer has every PR append to a standing `## [Unreleased]` section: the
+  release-cut PR writes the whole `## [X.Y.Z] - YYYY-MM-DD` section from
+  `git log <lastTag>..HEAD` and lists that range so the reviewer can tick every
+  operator-visible commit against an entry. R2 is scoped to the
+  repository-level `CHANGELOG.md`, and the release workflow's error for a
+  missing section now says to write it. The same policy edit as
+  [o3co/auth.provider#475](https://github.com/o3co/auth.provider/issues/475).
+
+- **The standalone template's image runs Node 26** (`templates/standalone`,
+  #214). The `Dockerfile` base moves from `node:24-alpine` to
+  `node:26-alpine`, still pinned by digest; an image rebuilt from the template
+  runs the verifier on Node 26.
+
+- Dependencies (#215, #216, #237). `.server` now requires `jose ^6.2.12` and
+  `zod ^4.6.1`. Development moved to vitest and `@vitest/coverage-v8` 5.0.0
+  (with Biome 2.5.13, `@types/node` 26.5.1 and tsx 4.23.13). vitest 5 needs
+  Node 22.12, so the private workspace root, `tests/integration` and
+  `templates/standalone` — and with it an app scaffolded by
+  `@o3co/create-auth-policy-verifier` — declare `engines.node >= 22.12.0`;
+  the published packages keep `>= 22.0.0`.
+
+### Removed
+
+- **`@cedar-policy/cedar-wasm` is no longer a dependency of
+  `@o3co/auth.policy-verifier.cedar`** (#225). It moved to
+  `@o3co/auth.policy-verifier.cedar-wasm`, so a deployment that evaluates out
+  of process no longer installs the wasm module (about 12 MB) or instantiates
+  it at import. What an in-process deployment must do is under Changed.
+
+### Fixed
+
+- **The documentation says what the code does, in both languages**
+  ([#238](https://github.com/o3co/auth.policy-verifier/pull/238)). The Japanese
+  READMEs and `docs/extending.ja.md` lacked 0.9.0's token authenticator and
+  external-IdP material and 0.10.0's asynchronous rules, rule deadlines,
+  `403 rule_timeout` step and `--profile cedar` section, and
+  `packages/builtins/README.ja.md` still said `HasPermission` wildcard
+  matching ignores case (it is exact and case-sensitive). In English, the root
+  README gives the rule deadlines their own section instead of counting them
+  among the collector bounds, `ResourceActionScopeRuleCollector`'s options list
+  `claim`, and the server README's `AppConfigSchema` sketch shows
+  `oauth.authenticator`, with `oauth.jwt` required only under `"jwt"`.
 
 ## [0.9.0] - 2026-09-10
 
