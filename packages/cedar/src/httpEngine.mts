@@ -418,7 +418,9 @@ function readDecision(body: unknown, endpoint: string): CedarDecision {
  */
 function renderedList(value: unknown): string[] | undefined {
 	if (!Array.isArray(value)) return undefined;
-	return value.map((item) => (typeof item === "string" ? item : JSON.stringify(item)));
+	return value.map((item) =>
+		typeof item === "string" ? item : (JSON.stringify(item) ?? String(item)),
+	);
 }
 
 /** A Cedar entity type: an identifier path, `App::User` — nothing else may reach the wire. */
