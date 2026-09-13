@@ -12,6 +12,7 @@ import {
 	DEFAULT_COLLECT_DEADLINE_MS,
 	DEFAULT_COLLECTOR_CONCURRENCY,
 	DEFAULT_COLLECTOR_TIMEOUT_MS,
+	DEFAULT_EVALUATE_DEADLINE_MS,
 	DEFAULT_HOSTNAME,
 	DEFAULT_HTTP_PORT,
 	DEFAULT_MAX_ACTION_LENGTH,
@@ -567,6 +568,8 @@ export const AppConfigSchema = z.object({
 			collectorTimeoutMs: boundedNumber(NUMERIC_BOUNDS.collectorTimeoutMs, "verify"),
 			/** How long one asynchronous rule may take to answer (#225); same bound as a collector. */
 			ruleTimeoutMs: boundedNumber(NUMERIC_BOUNDS.ruleTimeoutMs, "verify"),
+			/** How long all of a decision's asynchronous rules may take together; the rule phase's deadline. */
+			evaluateDeadlineMs: boundedNumber(NUMERIC_BOUNDS.evaluateDeadlineMs, "verify"),
 			collectorDeadlineMs: boundedNumber(NUMERIC_BOUNDS.collectorDeadlineMs, "verify"),
 			collectorConcurrency: boundedNumber(NUMERIC_BOUNDS.collectorConcurrency, "verify"),
 			/**
@@ -614,6 +617,7 @@ export const AppConfigSchema = z.object({
 			maxContextValueLength: DEFAULT_MAX_CONTEXT_VALUE_LENGTH,
 			collectorTimeoutMs: DEFAULT_COLLECTOR_TIMEOUT_MS,
 			ruleTimeoutMs: DEFAULT_RULE_TIMEOUT_MS,
+			evaluateDeadlineMs: DEFAULT_EVALUATE_DEADLINE_MS,
 			collectorDeadlineMs: DEFAULT_COLLECT_DEADLINE_MS,
 			collectorConcurrency: DEFAULT_COLLECTOR_CONCURRENCY,
 			batchConcurrency: DEFAULT_BATCH_CONCURRENCY,

@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import { DEFAULT_RULE_TIMEOUT_MS, MAX_TIMER_MS } from "@o3co/auth.policy-verifier.core";
+import {
+	DEFAULT_EVALUATE_DEADLINE_MS,
+	DEFAULT_RULE_TIMEOUT_MS,
+	MAX_TIMER_MS,
+} from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 import {
 	AppConfigSchema,
@@ -1214,6 +1218,7 @@ describe("AppConfigSchema — the verify block's default names every knob", () =
 			maxContextValueLength: DEFAULT_MAX_CONTEXT_VALUE_LENGTH,
 			collectorTimeoutMs: DEFAULT_COLLECTOR_TIMEOUT_MS,
 			ruleTimeoutMs: DEFAULT_RULE_TIMEOUT_MS,
+			evaluateDeadlineMs: DEFAULT_EVALUATE_DEADLINE_MS,
 			collectorDeadlineMs: DEFAULT_COLLECT_DEADLINE_MS,
 			collectorConcurrency: DEFAULT_COLLECTOR_CONCURRENCY,
 			batchConcurrency: DEFAULT_BATCH_CONCURRENCY,
@@ -1456,6 +1461,35 @@ describe("AppConfigSchema — oauth.jwt is validated only for the built-in authe
 		expect(result.error.issues).toContainEqual(
 			expect.objectContaining({ path: ["oauth", "jwt", "audienceClaim"] }),
 		);
+	});
+});
+
+describe("AppConfigSchema — verify.evaluateDeadlineMs (v0.10.0 audit)", () => {
+	const jwt = { secret: SECRET, mode: "verify", ...rfc9068 };
+
+	it("defaults to the collect deadline's value", () => {
+		const config = AppConfigSchema.parse({ oauth: { jwt }, ...baseBody });
+		expect(config.verify.evaluateDeadlineMs).toBe(DEFAULT_EVALUATE_DEADLINE_MS);
+	});
+
+	it("coerces the string a HOCON env substitution produces", () => {
+		const config = AppConfigSchema.parse({
+			oauth: { jwt },
+			verify: { evaluateDeadlineMs: "900" },
+			...baseBody,
+		});
+		expect(config.verify.evaluateDeadlineMs).toBe(900);
+	});
+
+	it("refuses zero and a deadline past what a timer can hold", () => {
+		for (const evaluateDeadlineMs of [0, MAX_TIMER_MS + 1]) {
+			const result = AppConfigSchema.safeParse({
+				oauth: { jwt },
+				verify: { evaluateDeadlineMs },
+				...baseBody,
+			});
+			expect(result.success).toBe(false);
+		}
 	});
 });
 

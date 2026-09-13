@@ -86,6 +86,16 @@ export const DEFAULT_COLLECTOR_CONCURRENCY = 8;
 export const DEFAULT_RULE_TIMEOUT_MS: number = DEFAULT_COLLECTOR_TIMEOUT_MS;
 
 /**
+ * How long the whole rule phase may take — every asynchronous rule of one
+ * decision, together (v0.10.0 audit). The same five seconds as a collector
+ * fan-out, for the same reason: a per-rule budget cannot bound a set, and
+ * groups are evaluated one after another, so rules that each finish inside
+ * their own budget still add up. Defined in terms of the collect deadline so
+ * the two phases cannot drift apart.
+ */
+export const DEFAULT_EVALUATE_DEADLINE_MS: number = DEFAULT_COLLECT_DEADLINE_MS;
+
+/**
  * The largest delay a timer can actually hold: 2^31 - 1 milliseconds, about
  * 24.8 days. Node stores a `setTimeout` delay in a signed 32-bit integer and
  * silently clamps anything above to ~1 ms — so a bigger "budget" is not a
@@ -165,6 +175,14 @@ export function resolveCollectorLimits(limits?: CollectorLimits): ResolvedCollec
  */
 export function resolveRuleTimeoutMs(value?: number): number {
 	return timer(value, DEFAULT_RULE_TIMEOUT_MS, "ruleTimeoutMs");
+}
+
+/**
+ * The deadline the whole rule phase runs under. Fills in the default and
+ * refuses what {@link resolveRuleTimeoutMs} refuses, naming `evaluateDeadlineMs`.
+ */
+export function resolveEvaluateDeadlineMs(value?: number): number {
+	return timer(value, DEFAULT_EVALUATE_DEADLINE_MS, "evaluateDeadlineMs");
 }
 
 function positive(value: number | undefined, fallback: number, field: string): number {

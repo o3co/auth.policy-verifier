@@ -349,6 +349,10 @@ verify {
   # take to answer. Same budget and ceiling as one collector; overrun = deny.
   ruleTimeoutMs = 2000
   ruleTimeoutMs = ${?VERIFY_RULE_TIMEOUT_MS}
+  # How long all of a decision's asynchronous rules may take together — the
+  # rule phase's deadline, as collectorDeadlineMs is the fan-out's.
+  evaluateDeadlineMs = 5000
+  evaluateDeadlineMs = ${?VERIFY_EVALUATE_DEADLINE_MS}
   collectorDeadlineMs  = 5000   # the whole fan-out, per pipeline
   collectorDeadlineMs  = ${?VERIFY_COLLECTOR_DEADLINE_MS}
   collectorConcurrency = 8      # collectors in flight at once
@@ -403,6 +407,8 @@ Attribute and rule collectors are the layer that talks to databases and HTTP API
 | --- | --- | --- |
 | `verify.collectorTimeoutMs` | `2000` | how long one collector may take. The budget starts when that collector starts, so queueing behind the concurrency cap does not spend it |
 | `verify.collectorDeadlineMs` | `5000` | how long a whole fan-out may take, per pipeline. Catches the case where nothing overran its own budget but the total still did |
+| `verify.ruleTimeoutMs` | `2000` | how long one asynchronous rule (an out-of-process policy engine, #225) may take to answer. Overrun denies with `rule_timeout` |
+| `verify.evaluateDeadlineMs` | `5000` | how long all of a decision's asynchronous rules may take together. Rule groups run one after another, so the per-rule budget cannot bound the phase; overrun denies with `rule_timeout` |
 | `verify.collectorConcurrency` | `8` | how many collectors run at once, per pipeline, per decision. More than any realistic collector set, so it changes nothing until a dependency slows down and work starts piling up |
 | `verify.batchConcurrency` | `8` | how many of a batch's entries are decided at once (#183). The three bounds above are per decision; this bounds their product with the batch, and it is what a deployment raises if a full batch's wall time matters more than its fan-out ceiling |
 

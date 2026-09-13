@@ -83,6 +83,13 @@ export interface VerifyRouterConfig {
 	 */
 	ruleTimeoutMs?: number | string;
 	/**
+	 * How long all of a decision's asynchronous rules may take together.
+	 * Defaults to `DEFAULT_EVALUATE_DEADLINE_MS`, held to the bound
+	 * `AppConfigSchema` holds `verify.evaluateDeadlineMs` to. Overrun denies
+	 * with `rule_timeout`, as a single rule's does.
+	 */
+	evaluateDeadlineMs?: number | string;
+	/**
 	 * Ceiling on the JSON body, in bytes — the `limit` handed to
 	 * `express.json()`. Defaults to 64 KiB (`DEFAULT_MAX_BODY_BYTES`), below
 	 * Express's unstated 100 KB default, and is the outer envelope: it is what
@@ -510,6 +517,11 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	// The request limits (#118), read the same way and at the same boundary.
 	const maxBodyBytes = resolveBound(config.maxBodyBytes, NUMERIC_BOUNDS.maxBodyBytes, "verify");
 	const ruleTimeoutMs = resolveBound(config.ruleTimeoutMs, NUMERIC_BOUNDS.ruleTimeoutMs, "verify");
+	const evaluateDeadlineMs = resolveBound(
+		config.evaluateDeadlineMs,
+		NUMERIC_BOUNDS.evaluateDeadlineMs,
+		"verify",
+	);
 	const limits: RequestLimits = {
 		maxResourceLength: resolveBound(
 			config.maxResourceLength,
@@ -591,8 +603,13 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			]);
 			// #225: the rule list may carry asynchronous rules — an out-of-process
 			// engine answers here, after both collects, where the evaluator
-			// always ran. `ruleTimeoutMs` bounds each of them.
-			decision = await evaluate(attrs, rules, { ...config.evaluateOptions, ruleTimeoutMs });
+			// always ran. `ruleTimeoutMs` bounds each of them, `evaluateDeadlineMs`
+			// all of them together.
+			decision = await evaluate(attrs, rules, {
+				...config.evaluateOptions,
+				ruleTimeoutMs,
+				evaluateDeadlineMs,
+			});
 		} catch (cause) {
 			// Two collect failures are denies of their own (#115 timeouts, #174
 			// attribute conflicts); anything else is a genuine fault and keeps

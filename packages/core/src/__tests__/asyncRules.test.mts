@@ -11,7 +11,9 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import {
+	DEFAULT_COLLECT_DEADLINE_MS,
 	DEFAULT_COLLECTOR_TIMEOUT_MS,
+	DEFAULT_EVALUATE_DEADLINE_MS,
 	DEFAULT_RULE_TIMEOUT_MS,
 	MAX_TIMER_MS,
 } from "../collectorLimits.mjs";
@@ -197,6 +199,106 @@ describe("evaluate — the deadline (#225)", () => {
 			await expect(evaluate(attrs, [async("cedar", "x", ran)], { ruleTimeoutMs })).rejects.toThrow(
 				/ruleTimeoutMs/,
 			);
+		}
+		expect(ran).not.toHaveBeenCalled();
+	});
+});
+
+describe("evaluate — the rule phase has a deadline of its own (v0.10.0 audit)", () => {
+	// `ruleTimeoutMs` is per rule and groups run one after another, so N
+	// asynchronous rules could take N × the budget with nothing capping the
+	// phase — while the collect side has both a per-collector timeout and a
+	// deadline for the whole fan-out.
+	const slow = (ruleType: string, ms: number, result = true): AsyncRule =>
+		async(
+			ruleType,
+			`${ruleType}_deny`,
+			() => new Promise((resolve) => setTimeout(() => resolve(result), ms)),
+		);
+
+	it("defaults to the collect deadline", () => {
+		expect(DEFAULT_EVALUATE_DEADLINE_MS).toBe(DEFAULT_COLLECT_DEADLINE_MS);
+	});
+
+	it("rejects when rules that each fit their budget overrun the phase together", async () => {
+		const rules = [slow("a", 40), slow("b", 40), slow("c", 40)];
+		await expect(
+			evaluate(attrs, rules, { ruleTimeoutMs: 60, evaluateDeadlineMs: 90 }),
+		).rejects.toMatchObject({ name: "RuleTimeoutError", limit: "deadline", timeoutMs: 90 });
+	});
+
+	it("names the per-rule budget when that is the bound that tripped", async () => {
+		await expect(
+			evaluate(attrs, [slow("a", 200)], { ruleTimeoutMs: 20, evaluateDeadlineMs: 1_000 }),
+		).rejects.toMatchObject({
+			name: "RuleTimeoutError",
+			limit: "rule",
+			ruleType: "a",
+			timeoutMs: 20,
+		});
+	});
+
+	it("does not start an asynchronous rule once the phase is spent, and says it was not started (review)", async () => {
+		const late = vi.fn(async () => true);
+		// A synchronous rule that spends the phase: nothing was in flight when
+		// the deadline passed, and the error must not claim `b` was running.
+		const spend: Rule = {
+			ruleType: "a",
+			code: "a_deny",
+			message: "Failed: a",
+			verify: () => {
+				const until = performance.now() + 60;
+				while (performance.now() < until) {}
+				return true;
+			},
+		};
+		const failure = evaluate(attrs, [spend, async("b", "b_deny", late)], {
+			ruleTimeoutMs: 1_000,
+			evaluateDeadlineMs: 50,
+		});
+		await expect(failure).rejects.toMatchObject({
+			limit: "deadline",
+			started: false,
+			ruleType: "b",
+		});
+		await expect(failure).rejects.toThrow(/rule b\/b_deny was not started/);
+		expect(late).not.toHaveBeenCalled();
+	});
+
+	it("measures the phase on a monotonic clock, so a wall-clock step does not stretch it (review)", async () => {
+		// An NTP step backwards between groups would otherwise hand the later
+		// rules time the deployment never granted.
+		const realNow = Date.now;
+		let skew = 0;
+		vi.spyOn(Date, "now").mockImplementation(() => realNow() + skew);
+		try {
+			const stepBack: AsyncRule = async("a", "a_deny", async () => {
+				await new Promise((resolve) => setTimeout(resolve, 40));
+				skew -= 10_000;
+				return true;
+			});
+			await expect(
+				evaluate(attrs, [stepBack, slow("b", 40)], {
+					ruleTimeoutMs: 1_000,
+					evaluateDeadlineMs: 60,
+				}),
+			).rejects.toMatchObject({ limit: "deadline" });
+		} finally {
+			vi.restoreAllMocks();
+		}
+	});
+
+	it("does not time synchronous rules, which do no I/O", async () => {
+		const result = await evaluate(attrs, [sync("a", "a", true)], { evaluateDeadlineMs: 1 });
+		expect(result.decision).toBe("allow");
+	});
+
+	it("refuses an unusable deadline before running anything", async () => {
+		const ran = vi.fn(async () => true);
+		for (const evaluateDeadlineMs of [0, -1, 1.5, MAX_TIMER_MS + 1, Number.NaN]) {
+			await expect(
+				evaluate(attrs, [async("cedar", "x", ran)], { evaluateDeadlineMs }),
+			).rejects.toThrow(/evaluateDeadlineMs/);
 		}
 		expect(ran).not.toHaveBeenCalled();
 	});

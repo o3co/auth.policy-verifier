@@ -1776,6 +1776,44 @@ describe("POST /verify — asynchronous rules (#225)", () => {
 		expect(events).toContain("rule_timeout");
 	});
 
+	it("denies with rule_timeout when the rule phase overruns verify.evaluateDeadlineMs (v0.10.0 audit)", async () => {
+		// Two async groups, each well inside its own budget, together past the
+		// phase deadline — the case a per-rule budget cannot bound.
+		const slow = (ruleType: string): RuleCollector => ({
+			async collect() {
+				return [
+					{
+						ruleType,
+						code: `${ruleType}_deny`,
+						message: "Denied",
+						decide: () => new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 40)),
+					},
+				];
+			},
+		});
+		const app = express();
+		app.use(
+			createVerifyRouter({
+				...pipelines([slow("a"), slow("b")]),
+				ruleTimeoutMs: 1_000,
+				evaluateDeadlineMs: "60",
+			}),
+		);
+		const token = await signHS256Token({ scope: "read:project" });
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+		expect(res.status).toBe(403);
+		expect(res.body).toMatchObject({ decision: "deny", code: "rule_timeout" });
+	});
+
+	it("refuses an unusable evaluateDeadlineMs at construction, in the schema's words", () => {
+		expect(() => createVerifyRouter({ ...pipelines([]), evaluateDeadlineMs: 0 })).toThrow(
+			/verify\.evaluateDeadlineMs/,
+		);
+	});
+
 	it("refuses an unusable ruleTimeoutMs at construction, in the schema's words", () => {
 		expect(() => createVerifyRouter({ ...pipelines([]), ruleTimeoutMs: 0 })).toThrow(
 			/verify\.ruleTimeoutMs/,
