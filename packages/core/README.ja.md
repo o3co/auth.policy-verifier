@@ -20,6 +20,8 @@ interface EvaluateOptions {
   onEmptyRuleSet?: "deny" | "allow"
   /** Milliseconds one asynchronous rule may take. Defaults to DEFAULT_RULE_TIMEOUT_MS (2000). */
   ruleTimeoutMs?: number
+  /** Milliseconds all asynchronous rules may take together. Defaults to DEFAULT_EVALUATE_DEADLINE_MS (5000). */
+  evaluateDeadlineMs?: number
   /** The caller's signal; aborting it aborts the asynchronous rule in flight with its reason. */
   signal?: AbortSignal
 }
@@ -31,8 +33,6 @@ function evaluate(attrs: Attributes, rules: AnyRule[], options?: EvaluateOptions
 
 **ルールが 1 つも集まらなかった場合は deny** (`code: "no_applicable_rule"`) です。どのルールも適用されなかったリクエストは認可されていないためです。第 3 引数に `{ onEmptyRuleSet: "allow" }` を渡すと、この既定を deployment 単位で opt-out できます。
 
-ルールのリストにはどちらの種類のルールも混在できます (#225)。同期の `Rule` は `verify` で、`AsyncRule` は `ruleTimeoutMs` の制限下で `decide` を await して問い合わせます。どちらも収集順に 1 つずつ問い、グループ内で最初に通ったルール以降の代替ルールは種類を問わず実行されません。`evaluate` が非同期なのはそのためだけで、同期ルールだけのリストは同じターン内で答えが出ます。非同期ルールが制限時間を超えると `RuleTimeoutError` で reject（transport にとっては deny であり、pass にはなりません）、`signal` が abort されればその理由で、ルールが throw / reject すればその値で reject します。
-
 すべての決定は構造化された `reason` を伴います。`reason.groups` は評価順に各ルールグループを並べ、`passed` と、
 そのグループで実際に走ったルールを評価順に列挙した `evaluated` を持ちます。失敗グループは全代替ルールを
 走らせているのでそのすべてが並びます。通過グループは OR なので最初に通ったルールで打ち切り、`evaluated` には
@@ -41,7 +41,7 @@ function evaluate(attrs: Attributes, rules: AnyRule[], options?: EvaluateOptions
 「残りも失敗したのか」に答えられないためです。deny の `code` / `message` は従来どおり最初に失敗した
 グループから取ります。
 
-**ルールが 1 つも集まらなかった場合は deny** (`code: "no_applicable_rule"`) です。どのルールも適用されなかったリクエストは認可されていないためです。第 3 引数に `{ onEmptyRuleSet: "allow" }` を渡すと、この既定を deployment 単位で opt-out できます。
+ルールのリストにはどちらの種類のルールも混在できます (#225)。同期の `Rule` は `verify` で、`AsyncRule` は `ruleTimeoutMs` の制限下で `decide` を await して問い合わせます。どちらも収集順に 1 つずつ問い、グループ内で最初に通ったルール以降の代替ルールは種類を問わず実行されません。`evaluate` が非同期なのはそのためだけで、同期ルールだけのリストは同じターン内で答えが出ます。非同期ルールが予算を超えたとき、またはルール全体で `evaluateDeadlineMs` を超えたときは `RuleTimeoutError` で reject します（`limit: "rule"` または `"deadline"`。transport にとっては deny であり、pass にはなりません）。`signal` が abort されれば呼び出し側の abort 理由で、ルールが throw / reject すればその値で reject します。
 
 ### AttributePipeline
 
@@ -61,11 +61,11 @@ fan-out には上限があります — [コレクターの上限](#コレクタ
 ```typescript
 class RulePipeline {
   constructor(collectors: RuleCollector[], limits?: CollectorLimits)
-  collect(request: CollectorRequest): Promise<Rule[]>
+  collect(request: CollectorRequest): Promise<AnyRule[]>
 }
 ```
 
-すべてのコレクターを並列実行し、結果を単一の配列にフラット化します。上限は `AttributePipeline` と同じです。
+すべてのコレクターを並列実行し、結果を単一の配列にフラット化します。上限は `AttributePipeline` と同じです。コレクターは同期の `Rule`、非同期の `AsyncRule`、あるいはその両方を返せます。
 
 ### コレクターの上限
 

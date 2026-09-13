@@ -193,6 +193,26 @@ export class ClientIpCollector implements AttributeCollector {
 - 形の検証は Collector 内で行う。`readUntrustedRequestContext` が返すのは `Record<string, unknown> | undefined` であり、それを消費する Collector が narrowing の適切な場所です。そのフィールドが取りうる値を知っているのもそこだけです。
 - なお、この例は推奨実装ではなく信頼境界の問いを示すためのものです。*呼び出し側が申告した* client IP は監査注記の材料であってアクセス判断の材料ではありません。ポリシーが依拠する IP は、ボディではなくトランスポート（デプロイが信頼するプロキシヘッダを `context.headers` から読む Collector）から取得してください。
 
+## 非同期 Rule の書き方
+
+`Rule.verify` は同期的で、I/O を行いません — Rule を単独でテストでき、判定をキャッシュできるのはそのためです。プロセス外のポリシーエンジン（HTTP 越しの Cedar、#225）にはその形では問い合わせられないため、core には 2 つ目の種類があります:
+
+```ts
+interface AsyncRule {
+  ruleType: string;
+  code: string;
+  message: string;
+  decide(attrs: ReadonlyAttributes, signal: AbortSignal): Promise<boolean>;
+}
+```
+
+RuleCollector は 1 つのリストでどちらの種類を返しても、両方を混ぜて返してもかまいません。`evaluate()` は両者を同じようにグループ化して報告し、`evaluate()` が非同期なのはまさにこのためです。書き手にとって変わる点:
+
+- **緩和されるのは I/O だけです。** 答えは引き続き `attrs` だけの関数でなければなりません — `CollectorContext` から必要なものは collect 時にコピーし、保持しないこと。purity conformance suite（`describeRulePurityConformance`）は、`verify` に対するのとまったく同じように、リクエストを revoke した後で `decide` に問い合わせます。
+- **`signal` を `fetch` に渡してください。** この signal は Rule の予算が尽きたとき、または呼び出し側が終わったときに abort します。予算は `EvaluateOptions.ruleTimeoutMs`（既定 2000 ms）、あるいは `EvaluateOptions.evaluateDeadlineMs`（既定 5000 ms。1 決定の非同期 Rule すべての合計）の残りがそれより短ければその残りです — server は両方を `verify.ruleTimeoutMs` / `verify.evaluateDeadlineMs` から読んで `evaluate()` に渡し、ライブラリ利用者は直接渡します。signal を無視する Rule にも上限は効きます — 評価器がその Rule を race させるからです — が、誰も読まない答えのためにソケットを開いたままにしてしまいます。
+- **エンジンの障害は自分で引き受けてください。** reject する Rule は障害を報告しているのであり、そのリクエストは 500 で応答します。エンジンに到達できないことを deny にすべきなら — 通常はそうすべきです — catch してログを出し、`false` を返してください。予算を超えた Rule はそれ自体が deny（`rule_timeout`）であり、決して pass にはなりません。
+- **問い合わせは 1 つずつです。** 1 つの `ruleType` グループ内の代替 Rule は順に実行され、最初に通ったところで止まります。そのため同じグループ内で安価な同期 Rule の後ろに置いた高価な非同期 Rule は、安価な方が拒否したときにだけ問い合わせられます。
+
 ## RuleCollector を書くタイミング
 
 `RuleCollector` は `CollectorContext` を `Rule[]` に変換するファクトリです。組み込み例として [`packages/builtins/src/rules/collectors/`](../packages/builtins/src/rules/collectors/) の `ResourceActionPermissionRuleCollector` / `ResourceActionScopeRuleCollector` があります。リクエストの resource と action から `HasPermission` / `HasScope` を構築しています。
@@ -210,6 +230,82 @@ RuleCollector は `CollectorContext` 全体を見られるため、エンジン�
 **そしてこれは今や規約であるだけでなく検査でもあります。** 決め手となるテストは「Rule を collect し、context を捨て、`verify(attrs)` を呼ぶ — 答えが変わらないこと」です。[`tests/integration/src/conformance/rulePurity.mts`](../tests/integration/src/conformance/rulePurity.mts) の `describeRulePurityConformance` がまさにこれを実行します: revoke 可能な context ビュー経由で Rule を collect し、revoke してから再び問う。context を保持した Rule はアクセス時に throw し、値をコピーしただけの Rule は throw しません。自作の RuleCollector もこれに通してください。（CI も `verify` の本体に `ctx.` / `context.` がないか grep しますが、それは分かりやすい形に対する backstop であり、実際に判定するのは conformance suite です。）
 
 答えを焼き込んでしまった Rule の直し方は次のとおりです: *検査される側の値* は `attrs.get(...)` から取得し、*それが照合される相手の値* はリクエストから捕捉したままでよい — ただし context への live な参照ではなく、コピーされた値として。
+
+## token authenticator の書き方
+
+server は判定の subject を 1 つの port — `@o3co/auth.policy-verifier.server` の `TokenAuthenticator` — を通して認証します:
+
+```ts
+interface TokenAuthenticator {
+  authenticate(authorizationHeader: string | undefined): Promise<AuthenticationResult>;
+}
+
+type AuthenticationResult =
+  | { ok: true; subject: SubjectAttributes; credential: string }
+  | { ok: false; code: "missing_token" | "unsupported_scheme" | "invalid_token"; message: string };
+```
+
+組み込み実装は bearer JWT を `oauth.jwt` に照らして検証し、検証済みのクレームを `subject` に展開します。既定値である `oauth.authenticator = "jwt"` が選択するのがこれです。subject を別の方法で確立するデプロイは、自分の名前で自分のファクトリを登録し、それを選択します:
+
+- 不透明トークンを発行する IdP（Okta の org authorization server、`audience` なしの Auth0）向けの RFC 7662 introspection クライアント
+- IdP SDK のセッション検証
+- 呼び出し元をすでに認証し、attestation を転送するゲートウェイ
+
+```ts
+import type { Module } from "@o3co/auth.policy-verifier.core";
+import type {
+  ServerModuleContext,
+  TokenAuthenticator,
+} from "@o3co/auth.policy-verifier.server";
+
+export const introspectionAuthenticatorModule: Module<ServerModuleContext> = {
+  name: "introspection-authenticator",
+  async init(context) {
+    context.tokenAuthenticatorRegistry.register("introspection", async (oauth, deps) => {
+      // `oauth` はブロック全体。自分で文書化したサブブロックを読む。
+      const { endpoint, clientId, clientSecret } = oauth.introspection;
+      const authenticator: TokenAuthenticator = {
+        async authenticate(header) {
+          const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
+          if (!token) return { ok: false, code: "missing_token", message: "Authorization header is missing" };
+          const res = await fetch(endpoint, { method: "POST", /* Basic clientId:clientSecret, token=... */ });
+          const body = await res.json();
+          if (!res.ok || body.active !== true) {
+            deps.logger.warn({ status: res.status }, "introspection_rejected");
+            return { ok: false, code: "invalid_token", message: "Invalid token" };
+          }
+          // `subject` に入れたものが collector の読むもの。builtins は、トークンが
+          // 持っていれば `sub`・`azp`・`scope` を読むことを期待している。
+          return { ok: true, subject: { ...body, authScheme: "Bearer" }, credential: token };
+        },
+      };
+      return authenticator;
+    });
+  },
+};
+```
+
+```hocon
+oauth {
+  authenticator = "introspection"
+  introspection {
+    endpoint = "https://idp.example/oauth2/v1/introspect"
+    clientId = ${?INTROSPECTION_CLIENT_ID}
+    clientSecret = ${?INTROSPECTION_CLIENT_SECRET}
+  }
+}
+```
+
+要点:
+
+- ファクトリは `oauth` ブロック全体と `{ logger, keyResolverRegistry }` を受け取ります。`keyResolverRegistry` には `builtinKeyResolversModule`（と自分のモジュール）が登録したものがすべて入っているので、独自に JWT を検証する authenticator — たとえば IdP のセッショントークンを検証するもの — は、`oauth.jwt.algorithm` の鍵の配管を再実装せずに再利用できます。
+- `oauth.jwt` は `oauth.authenticator` が `"jwt"` の間は必須で、それ以外の名前では**拒否**されます — 誰も読まないからです。鍵は自分のサブブロック（`oauth.introspection { … }`）の下に置いてください。パース済みの config にそのまま載るので、ファクトリから読めます。
+- `"jwt"` はどのモジュールよりも先に `createApp` が登録し、置き換えることはできません。自分の名前で登録してください。どのモジュールも登録していない `oauth.authenticator` は、キーと値を示して起動時に失敗します。
+- `subject` は core が評価する中立な属性バッグです（[AGENTS.md — Core Vocabulary Scope](../AGENTS.md#core-vocabulary-scope) を参照）。そこに入れたものはすべて検証済みの identity として信頼されるので、自分が検証したものだけを入れてください。リクエストボディがそこに届くことはありません。
+- **組み込み経路が強制していることは、すべて自分で強制する必要があります。** JWT 経路は署名を検証し、`iss`・audience・`typ` を pin し、`exp` と `iat` を必須とし、`maxTokenAgeSeconds` / `clockToleranceSeconds` と `nbf` を適用し、`cnf` に束縛されたトークンを拒否し、`authScheme` を記録します。登録した authenticator ではそのどれも実行されません: `ok: true` を返す前に、該当するものを行ってください。返す `credential` は何を選んでもよく、`credentialToCollectors = "expose"` の下では collector に届きます。
+- 拒否は deny エンベロープをまとった 401 で、`code` と `message` は自分が返したものになります。理由は自分でログに出してください（組み込み経路は `jwt_token_rejected` / `jwt_verification_unavailable` を出力します） — authenticator が*なぜ*拒否したかについて、router は何もログに出しません。
+- sender-constrained トークン（`cnf`）は組み込み経路では引き続き拒否されます (#209)。所持を検証できる authenticator なら、受け入れてかまいません。
+- `createApp` を使わずに組み立てるライブラリ利用者向けに、`createVerifyRouter` は `jwt` の代わりに構築済みの `authenticator` を受け取ります。
 
 ## 関連資料
 
