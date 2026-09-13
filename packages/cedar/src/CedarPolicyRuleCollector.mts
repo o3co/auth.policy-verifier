@@ -46,9 +46,9 @@ export interface CedarPolicyRuleCollectorConfig {
 	 */
 	engine?: string;
 	/**
-	 * HTTP engine only: the agent's base URL. Absent, `CEDAR_ENDPOINT`, else the
-	 * loopback default the template's compose service answers on. Plain
-	 * `http://` is accepted for loopback hosts only. See `cedarHttpEngine`.
+	 * HTTP engine only: the agent's base URL. Absent, `CEDAR_ENDPOINT`; neither
+	 * refuses to start, naming this key and the wasm package. Plain `http://` is
+	 * accepted for loopback hosts only. See `cedarHttpEngine`.
 	 */
 	endpoint?: string;
 	/** HTTP engine only: the agent's `Authorization` value. Absent, `CEDAR_AUTHENTICATION`. */

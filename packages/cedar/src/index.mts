@@ -33,7 +33,6 @@ export {
 	CEDAR_LOAD_TIMEOUT_MS,
 	cedarHttpEngine,
 	createCedarHttpEngine,
-	DEFAULT_CEDAR_ENDPOINT,
 	entityUidLiteral,
 } from "./httpEngine.mjs";
 export {
