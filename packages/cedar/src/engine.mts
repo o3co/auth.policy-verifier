@@ -8,16 +8,23 @@ import type { PolicySource } from "./policySource.mjs";
 /**
  * What one authorization call answered — Cedar's own `Response`, engine-neutral.
  *
- * `errors` is rendered text (`policyId: message`) rather than an evaluator's
- * error object, because the rule only ever logs it; what the rule *decides* on
- * is whether the list is empty. A non-empty list is a deny whatever `decision`
- * reads — see the collector's answer table.
+ * `reason` and `errors` are rendered text rather than an evaluator's objects,
+ * because the rule only ever logs them; what the rule *decides* on is whether
+ * each list is empty. A non-empty `errors` is a deny whatever `decision` reads
+ * — see the collector's answer table.
  */
 export interface CedarDecision {
 	decision: "allow" | "deny";
-	/** Ids of the determining policies. Empty: no policy determined the request. */
+	/**
+	 * The determining policies, as text: normally their ids (`10-permit-eng`),
+	 * or the JSON of an item an engine reported in a structured form. Empty: no
+	 * policy determined the request.
+	 */
 	reason: readonly string[];
-	/** Evaluation errors, already rendered. */
+	/**
+	 * Evaluation errors, rendered: `policyId: message` from the wasm engine, the
+	 * agent's own string, or the JSON of a structured error.
+	 */
 	errors: readonly string[];
 }
 
