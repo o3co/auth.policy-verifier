@@ -202,6 +202,7 @@ interface AsyncRule {
   ruleType: string;
   code: string;
   message: string;
+  readonly async: true; // 判別子 — isAsyncRule は decide の有無ではなくこれを読む
   decide(attrs: ReadonlyAttributes, signal: AbortSignal): Promise<boolean>;
 }
 ```
@@ -209,13 +210,13 @@ interface AsyncRule {
 RuleCollector は 1 つのリストでどちらの種類を返しても、両方を混ぜて返してもかまいません。`evaluate()` は両者を同じようにグループ化して報告し、`evaluate()` が非同期なのはまさにこのためです。書き手にとって変わる点:
 
 - **緩和されるのは I/O だけです。** 答えは引き続き `attrs` だけの関数でなければなりません — `CollectorContext` から必要なものは collect 時にコピーし、保持しないこと。purity conformance suite（`describeRulePurityConformance`）は、`verify` に対するのとまったく同じように、リクエストを revoke した後で `decide` に問い合わせます。
-- **`signal` を `fetch` に渡してください。** この signal は Rule の予算が尽きたとき、または呼び出し側が終わったときに abort します。予算は `EvaluateOptions.ruleTimeoutMs`（既定 2000 ms）、あるいは `EvaluateOptions.evaluateDeadlineMs`（既定 5000 ms。1 決定の非同期 Rule すべての合計）の残りがそれより短ければその残りです — server は両方を `verify.ruleTimeoutMs` / `verify.evaluateDeadlineMs` から読んで `evaluate()` に渡し、ライブラリ利用者は直接渡します。signal を無視する Rule にも上限は効きます — 評価器がその Rule を race させるからです — が、誰も読まない答えのためにソケットを開いたままにしてしまいます。
+- **`signal` を `fetch` に渡してください。** この signal は Rule の予算が尽きたとき、または呼び出し側が終わったときに abort します — server のもとでは、呼び出し側が終わるとは HTTP クライアントが接続を閉じることです。予算は `EvaluateOptions.ruleTimeoutMs`（既定 2000 ms）、あるいは `EvaluateOptions.evaluateDeadlineMs`（既定 5000 ms。1 決定の非同期 Rule すべての合計）の残りがそれより短ければその残りです — server は両方を `verify.ruleTimeoutMs` / `verify.evaluateDeadlineMs` から読んで `evaluate()` に渡し、ライブラリ利用者は直接渡します。signal を無視する Rule にも上限は効きます — 評価器がその Rule を race させるからです — が、誰も読まない答えのためにソケットを開いたままにしてしまいます。
 - **エンジンの障害は自分で引き受けてください。** reject する Rule は障害を報告しているのであり、そのリクエストは 500 で応答します。エンジンに到達できないことを deny にすべきなら — 通常はそうすべきです — catch してログを出し、`false` を返してください。予算を超えた Rule はそれ自体が deny（`rule_timeout`）であり、決して pass にはなりません。
 - **問い合わせは 1 つずつです。** 1 つの `ruleType` グループ内の代替 Rule は順に実行され、最初に通ったところで止まります。そのため同じグループ内で安価な同期 Rule の後ろに置いた高価な非同期 Rule は、安価な方が拒否したときにだけ問い合わせられます。
 
 ## RuleCollector を書くタイミング
 
-`RuleCollector` は `CollectorContext` を `Rule[]` に変換するファクトリです。組み込み例として [`packages/builtins/src/rules/collectors/`](../packages/builtins/src/rules/collectors/) の `ResourceActionPermissionRuleCollector` / `ResourceActionScopeRuleCollector` があります。リクエストの resource と action から `HasPermission` / `HasScope` を構築しています。
+`RuleCollector` は `CollectorContext` を Rule のリスト（`AnyRule[]` — `Rule`、`AsyncRule`、またはその両方）に変換するファクトリです。組み込み例として [`packages/builtins/src/rules/collectors/`](../packages/builtins/src/rules/collectors/) の `ResourceActionPermissionRuleCollector` / `ResourceActionScopeRuleCollector` があります。リクエストの resource と action から `HasPermission` / `HasScope` を構築しています。
 
 Rule の構築がリクエスト時のコンテキスト（resource、action、ヘッダ）に依存する場合に、カスタム `RuleCollector` を書いてください。Rule が全リクエストで一定なら、compose 時に `Rule` を直接インスタンス化すれば十分で、Collector は不要です。
 

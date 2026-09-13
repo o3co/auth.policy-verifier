@@ -121,16 +121,19 @@ const AppConfigSchema = z.object({
     }).optional(),
   }),
   oauth: z.object({
+    authenticator: z.string().default("jwt"),   // "jwt", or a name a module registered (#219)
+    // Required under authenticator "jwt", refused under any other name.
     jwt: z.object({
       secret: z.string().optional(),                                   // HS256: >= 32 decoded bytes
       mode: z.enum(["verify", "insecure-decode"]).default("verify"),
       issuer: z.union([z.string(), z.array(z.string())]).optional(),   // required when mode is "verify"
       audience: z.union([z.string(), z.array(z.string())]).optional(), // required when mode is "verify"
-      tokenType: z.string().default("at+jwt"),
+      audienceClaim: z.string().default("aud"),                        // claim the audience is read from (#219)
+      tokenType: z.string().default("at+jwt"),                         // "*" pins nothing
       maxTokenAgeSeconds: boundedNumber(NUMERIC_BOUNDS.maxTokenAgeSeconds, "oauth.jwt"),
       clockToleranceSeconds: boundedNumber(NUMERIC_BOUNDS.clockToleranceSeconds, "oauth.jwt"),
-    }),
-  }),
+    }).optional(),
+  }).passthrough(),                             // another authenticator's own sub-block rides along
   attribute: z.object({
     collectors: z.array(z.object({ collector: z.string() }).passthrough()),
   }),

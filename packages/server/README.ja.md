@@ -120,16 +120,19 @@ const AppConfigSchema = z.object({
     }).optional(),
   }),
   oauth: z.object({
+    authenticator: z.string().default("jwt"),   // "jwt"、またはモジュールが登録した名前 (#219)
+    // authenticator が "jwt" のとき必須、それ以外の名前では拒否される。
     jwt: z.object({
       secret: z.string().optional(),                                   // HS256: デコード後 32 バイト以上
       mode: z.enum(["verify", "insecure-decode"]).default("verify"),
       issuer: z.union([z.string(), z.array(z.string())]).optional(),   // mode = "verify" のとき必須
       audience: z.union([z.string(), z.array(z.string())]).optional(), // mode = "verify" のとき必須
-      tokenType: z.string().default("at+jwt"),
+      audienceClaim: z.string().default("aud"),                        // audience を読む claim (#219)
+      tokenType: z.string().default("at+jwt"),                         // "*" は何もピンしない
       maxTokenAgeSeconds: boundedNumber(NUMERIC_BOUNDS.maxTokenAgeSeconds, "oauth.jwt"),
       clockToleranceSeconds: boundedNumber(NUMERIC_BOUNDS.clockToleranceSeconds, "oauth.jwt"),
-    }),
-  }),
+    }).optional(),
+  }).passthrough(),                             // 別の authenticator 自身のサブブロックはそのまま載る
   attribute: z.object({
     collectors: z.array(z.object({ collector: z.string() }).passthrough()),
   }),

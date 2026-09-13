@@ -341,18 +341,18 @@ verify {
   # 下記「コレクターのデッドライン」を参照。
   collectorTimeoutMs   = 2000   # コレクター 1 本あたりの予算
   collectorTimeoutMs   = ${?VERIFY_COLLECTOR_TIMEOUT_MS}
-  # 非同期 Rule（プロセス外のポリシーエンジン、#225）1 つが応答までに使える時間。
-  # 予算と上限はコレクター 1 本と同じ。超過 = deny。
-  ruleTimeoutMs = 2000
-  ruleTimeoutMs = ${?VERIFY_RULE_TIMEOUT_MS}
-  # 1 決定の非同期 Rule すべてが合計で使える時間 — collectorDeadlineMs が fan-out の
-  # デッドラインであるのと同様に、Rule フェーズのデッドライン。
-  evaluateDeadlineMs = 5000
-  evaluateDeadlineMs = ${?VERIFY_EVALUATE_DEADLINE_MS}
   collectorDeadlineMs  = 5000   # pipeline 単位の fan-out 全体
   collectorDeadlineMs  = ${?VERIFY_COLLECTOR_DEADLINE_MS}
   collectorConcurrency = 8      # 同時に走らせるコレクター数
   collectorConcurrency = ${?VERIFY_COLLECTOR_CONCURRENCY}
+
+  # 非同期 Rule（プロセス外のポリシーエンジン、#225）の上限。両方の collect の後に
+  # 走る。超過した決定は rule_timeout で deny になる。下記「Rule のデッドライン」を参照。
+  ruleTimeoutMs        = 2000   # 非同期 Rule 1 つあたりの予算
+  ruleTimeoutMs        = ${?VERIFY_RULE_TIMEOUT_MS}
+  evaluateDeadlineMs   = 5000   # 1 決定の非同期 Rule すべての合計
+  evaluateDeadlineMs   = ${?VERIFY_EVALUATE_DEADLINE_MS}
+
   batchConcurrency     = 8      # バッチのうち同時に決定する entry 数 (#183)
   batchConcurrency     = ${?VERIFY_BATCH_CONCURRENCY}
 }
@@ -401,14 +401,23 @@ Attribute / Rule コレクターはデータベースや HTTP API を呼ぶ層�
 | --- | --- | --- |
 | `verify.collectorTimeoutMs` | `2000` | コレクター 1 本の所要時間。予算はそのコレクターが**開始した時点**から数えるので、同時実行上限による順番待ちで消費されることはない |
 | `verify.collectorDeadlineMs` | `5000` | pipeline 単位の fan-out 全体の所要時間。個々の予算は超えていないのに合計では超えている、というケースを捕える |
-| `verify.ruleTimeoutMs` | `2000` | 非同期 Rule（プロセス外のポリシーエンジン、#225）1 つが応答までに使える時間。超過すると `rule_timeout` で deny |
-| `verify.evaluateDeadlineMs` | `5000` | 1 決定の非同期 Rule すべてが合計で使える時間。Rule グループは順に実行されるため、Rule 単位の予算ではフェーズ全体を抑えられない。超過すると `rule_timeout` で deny |
 | `verify.collectorConcurrency` | `8` | 1 決定・1 pipeline あたりの同時実行数。現実的なコレクター構成より大きいので通常は何も変わらず、依存先が遅くなって処理が積み上がり始めたときだけ効く |
 | `verify.batchConcurrency` | `8` | 1 バッチのうち同時に決定する entry 数 (#183)。上の 3 つの上限は decision 単位なので、バッチとの積を抑えるのがこの knob。fan-out の天井よりバッチ全体の所要時間を優先したい deployment が引き上げる |
 
 各コレクターには `CollectorContext.signal` で `AbortSignal` が渡されます。そのコレクターの予算切れ、pipeline のデッドライン超過、兄弟コレクターの失敗による決定の中止、呼び出し側の切断のいずれでも abort します。コレクターが待つ相手にそのまま渡してください — `fetch(url, { signal: context.signal })` — そうすれば外向きの処理も実際に取り消されます。
 
 **上限を超えた決定は deny です。** `403` と `code: "collector_timeout"`、`reason.groups` は空で応答し、詳細は呼び出し側ではなく `collector_timeout` ログ行に出ます。意図的に `5xx` にはせず、「時間内に集まったぶんで判定する」こともしません — ルールが少ないことは**ポリシーが弱いこと**であり、1 つも無ければ `rule.onEmptyRuleSet = "allow"` の deployment では **allow** になるからです。そのため評価器には到達させません。バッチでは上限は決定単位なので、1 エントリの超過はそのエントリだけを deny にし、残りは通常どおり判定されます。
+
+### Rule のデッドライン
+
+非同期 Rule（`AsyncRule`、#225）はプロセス外のポリシーエンジンに問い合わせるため、評価にも fan-out と同じ 2 種類の上限があります:
+
+| 設定キー | 既定値 | 何を制限するか |
+| --- | --- | --- |
+| `verify.ruleTimeoutMs` | `2000` | 非同期 Rule 1 つが応答までに使える時間 |
+| `verify.evaluateDeadlineMs` | `5000` | 1 決定の非同期 Rule すべてが合計で使える時間。Rule グループは順に実行されるため、Rule 単位の予算ではフェーズ全体を抑えられない。Rule は 2 つのうち先に尽きる方のもとで走り、フェーズが尽きた後はどの Rule も開始しない |
+
+超過すると `403`、`code: "rule_timeout"` で deny になります。同期 Rule は I/O をしないので時間制限を受けません。呼び出し側が接続を閉じたときにも、Rule の signal は abort します。
 
 ### リソース文字列形式 (DotNotation)
 

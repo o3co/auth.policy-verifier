@@ -129,7 +129,8 @@ interface ModuleContext {
 | `ReadonlyAttributes` | `ReadonlyMap<string, unknown>` — Rule が判定対象として受け取るビュー。評価器は同一の live map をすべての Rule に渡すため、書き込む Rule は以降の全グループの入力を書き換えてしまう |
 | `AttributeCollector` | `collect(context: CollectorContext): Promise<Attributes>` |
 | `Rule` | `{ ruleType: string; code: string; message: string; verify(attrs: ReadonlyAttributes): boolean }` — `verify` は `attrs` の決定的かつ副作用のない関数でなければならない。[AGENTS.md — Collector / Rule / Attribute Contract](../../AGENTS.md#collector--rule--attribute-contract) を参照 |
-| `RuleCollector` | `collect(context: CollectorContext): Promise<Rule[]>` |
+| `AsyncRule` | `{ ruleType: string; code: string; message: string; readonly async: true; decide(attrs: ReadonlyAttributes, signal: AbortSignal): Promise<boolean> }` — `Rule` と同じ契約で I/O を行うもの、デッドラインのもとで実行される (#225)。`isAsyncRule` は判別子 `async` を読む |
+| `RuleCollector` | `collect(context: CollectorContext): Promise<AnyRule[]>` — `Rule`、`AsyncRule`、またはその両方 |
 | `Decision` | `{ decision: "allow"; reason: DecisionReason } \| { decision: "deny"; code: string; message: string; reason: DecisionReason }` |
 | `DecisionReason` | `{ groups: RuleGroupOutcome[] }` |
 | `RuleGroupOutcome` | `{ ruleType: string; passed: true; evaluated: RuleOutcome[]; satisfiedBy: RuleOutcome } \| { ruleType: string; passed: false; evaluated: RuleOutcome[] }` — `evaluated` は実際に走ったルールを評価順に列挙し、`satisfiedBy` は通過グループを満たしたルールを指す |
