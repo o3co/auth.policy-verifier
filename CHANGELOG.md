@@ -42,8 +42,12 @@ and version sections follow the release labeling policy in
   starts once the phase is spent. Both are bounded 1…`MAX_TIMER_MS`, read
   through `NUMERIC_BOUNDS` at both config boundaries, and are also
   `VerifyRouterConfig.ruleTimeoutMs` / `.evaluateDeadlineMs` for a library
-  consumer. A synchronous rule is not timed, so a deployment without
-  asynchronous rules decides exactly as before.
+  consumer. They are that config's own fields: `VerifyRouterConfig.evaluateOptions`
+  does not carry them, and a router handed either key there refuses to build
+  rather than silently overriding it
+  ([#239](https://github.com/o3co/auth.policy-verifier/pull/239)). A
+  synchronous rule is not timed, so a deployment without asynchronous rules
+  decides exactly as before.
 
 - **`403 { "decision": "deny", "code": "rule_timeout" }`** (`.server`,
   [#225](https://github.com/o3co/auth.policy-verifier/issues/225),
@@ -168,22 +172,26 @@ and version sections follow the release labeling policy in
 
 - **BREAKING: `@o3co/auth.policy-verifier.cedar` no longer bundles an
   evaluator** (#225, #230). Every `.cedar` deployment through 0.9.0 evaluated
-  in-process; to keep doing so, **add `@o3co/auth.policy-verifier.cedar-wasm`,
-  import it for its side effect beside `cedarPolicyModule`
-  (`import "@o3co/auth.policy-verifier.cedar-wasm";`), and set
-  `engine = "wasm"` on the collector entry**. An upgrade that skips this does
-  not silently change evaluators. The collector warns
+  in-process; to keep doing so, **add `@o3co/auth.policy-verifier.cedar-wasm`
+  and import it for its side effect beside `cedarPolicyModule`
+  (`import "@o3co/auth.policy-verifier.cedar-wasm";`)**. That is sufficient —
+  with `engine` absent, the registered `wasm` engine is preferred — but also
+  set `engine = "wasm"` on the collector entry, so the config names the
+  evaluator and the collector does not warn `cedar engine selected by default`.
+  An upgrade that skips the import does not silently change evaluators. The collector warns
   `cedar engine selected by default` and boot fails with
   `createApp: rule.collectors[<i>] (CedarPolicyRuleCollector) failed to start:
   CedarPolicyRuleCollector: no cedar engine endpoint is configured — set
   endpoint (or CEDAR_ENDPOINT) to run against a cedar-agent, or import
   "@o3co/auth.policy-verifier.cedar-wasm" to evaluate in-process`. Two cases
   read differently. With `onNoDeterminingPolicy = "abstain"`, boot fails on the
-  abstain refusal described under Added instead, which says to "evaluate
-  in-process" without naming the package — the fix is still the import, not
-  switching to `"deny"`. And where `CEDAR_ENDPOINT` is already set in the
-  environment (the standalone template's compose file sets it), the `http`
-  engine is selected against that address. The other way forward is to run a
+  abstain refusal described under Added instead, which ends `Use "deny", or
+  evaluate in-process: import "@o3co/auth.policy-verifier.cedar-wasm" and set
+  engine = "wasm"` — for an upgrade the import is the fix, not switching to
+  `"deny"` ([#239](https://github.com/o3co/auth.policy-verifier/pull/239)).
+  And where `CEDAR_ENDPOINT` is already set in the environment (the standalone
+  template's compose file sets it), the `http` engine is selected against that
+  address. The other way forward is to run a
   cedar-agent and set `engine = "http"` (see Added).
 
 - **BREAKING: `CedarPolicyRuleCollector`'s constructor is private**
@@ -265,7 +273,15 @@ and version sections follow the release labeling policy in
   README gives the rule deadlines their own section instead of counting them
   among the collector bounds, `ResourceActionScopeRuleCollector`'s options list
   `claim`, and the server README's `AppConfigSchema` sketch shows
-  `oauth.authenticator`, with `oauth.jwt` required only under `"jwt"`.
+  `oauth.authenticator`, with `oauth.jwt` required only under `"jwt"`. The
+  router's request flow lists body validation first — a malformed request is a
+  `400` before the token is looked at, as it has been since #118 — and the
+  introspection authenticator example in `docs/extending.md` sends the token
+  with client authentication. A registered authenticator is handed only the
+  `Authorization` header, so the docs no longer suggest it can accept a
+  `cnf`-bound token by verifying possession itself. The caller-auth sections
+  name protobuf.interceptors v0.3.0 (`endpoint.WithO3coHeaders`) as the version
+  that sends the header, where they had said "its next release".
 
 ## [0.9.0] - 2026-09-10
 
