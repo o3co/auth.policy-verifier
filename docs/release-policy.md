@@ -55,7 +55,7 @@ The rule is about the repository-level `CHANGELOG.md` — the file the cut reads
 
 When writing the section, also grep it for forward-version references and either rewrite to the actual version or generalize. **Specifically**: any "removed in NEXT" / "deprecated will be removed in X" / "before X" forward-promise must be resolved to the actual release where it lands.
 
-The earlier wording of this rule had every PR append to a standing `## [Unreleased]` section. Practice in every repository that shares this policy had settled on cut-time authoring — HEAD never carried the section, and the cut PR wrote it from the log — so the rule now says what is done (#475). The cost is that a change merged mid-cycle has no CHANGELOG trace until the cut; the range listed in the cut PR is the compensating control, and a reviewer who cannot tick every operator-visible commit against an entry blocks the cut.
+The earlier wording of this rule had every PR append to a standing `## [Unreleased]` section. Practice in every repository that shares this policy had settled on cut-time authoring — HEAD never carried the section, and the cut PR wrote it from the log — so the rule now says what is done (o3co/auth.provider#475, #229). The cost is that a change merged mid-cycle has no CHANGELOG trace until the cut; the range listed in the cut PR is the compensating control, and a reviewer who cannot tick every operator-visible commit against an entry blocks the cut.
 
 ### R3. JSDoc `@deprecated` says "since" only
 
