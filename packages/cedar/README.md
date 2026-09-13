@@ -260,6 +260,20 @@ docker compose --profile cedar up --build
   the wasm package with Cedar 4.12. Policies written to the older grammar run
   under both; a policy using a newer construct will be refused by the agent at
   boot, which is the right place to find out.
+- **The response contract is cedar-agent 0.2.x's.** `POST /v1/is_authorized`
+  must answer `{ decision, diagnostics: { reason: [...], errors: [...] } }`;
+  an answer missing either list is refused, and the call denies. The items of
+  both lists are read as text — an agent on a newer Cedar that reports
+  structured errors still has its errors seen (and denied on), rather than
+  every answer refused as malformed.
+- **Entities travel inline, and the agent reads them.** Each call carries the
+  request's entities in `entities`; nothing is written to the agent's own
+  `/v1/data` store. #225 left open whether cedar-agent honours inline entities
+  rather than its store; the v0.10.0 release audit confirmed it against the
+  pinned `permitio/cedar-agent:0.2.2`: a policy reading an inline attribute
+  decides on it as the wasm engine does, and one reading an attribute the
+  entity lacks answers `Deny` with the error in `diagnostics.errors`, which the
+  rule denies on.
 
 ## Sizing: which engine
 

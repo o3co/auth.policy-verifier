@@ -391,8 +391,8 @@ function readDecision(body: unknown, endpoint: string): CedarDecision {
 	// Both lists are required, as cedar-agent always sends them: an answer
 	// without them is some other shape, and "no errors" must not be inferred
 	// from a field that is not there — that is the fail-open direction.
-	const reason = stringList((diagnostics as Record<string, unknown> | undefined)?.reason);
-	const errors = stringList((diagnostics as Record<string, unknown> | undefined)?.errors);
+	const reason = renderedList((diagnostics as Record<string, unknown> | undefined)?.reason);
+	const errors = renderedList((diagnostics as Record<string, unknown> | undefined)?.errors);
 	if (
 		typeof diagnostics !== "object" ||
 		diagnostics === null ||
@@ -406,11 +406,19 @@ function readDecision(body: unknown, endpoint: string): CedarDecision {
 	return { decision: normalized, reason, errors };
 }
 
-function stringList(value: unknown): string[] | undefined {
-	if (!Array.isArray(value) || !value.every((item): item is string => typeof item === "string")) {
-		return undefined;
-	}
-	return value;
+/**
+ * A diagnostics list as rendered text, or `undefined` when it is not a list.
+ *
+ * The items are strings from cedar-agent 0.2.x (cedar-policy 2.4); Cedar 3.x+
+ * serialises them as objects. `CedarDecision` keeps them as text because the
+ * rule only logs them and decides on whether the list is empty — which
+ * rendering cannot change — so a non-string item is rendered rather than the
+ * whole answer refused. Refusing it turned an agent image bump into every
+ * request denied (v0.10.0 audit). The list itself stays required.
+ */
+function renderedList(value: unknown): string[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	return value.map((item) => (typeof item === "string" ? item : JSON.stringify(item)));
 }
 
 /** A Cedar entity type: an identifier path, `App::User` — nothing else may reach the wire. */

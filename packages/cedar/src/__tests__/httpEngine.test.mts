@@ -425,6 +425,31 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		});
 	});
 
+	it("reads structured diagnostics as rendered text rather than refusing the answer (v0.10.0 audit)", async () => {
+		// cedar-agent 0.2.x rides cedar-policy 2.4, which reports errors as
+		// strings; Cedar 3.x+ serialises them as objects. Refusing every
+		// non-string turned an agent image bump into every request denied, with
+		// a message about "well-formed diagnostics". The rule only logs errors and
+		// decides on whether there are any, so the text is enough.
+		const structured = { policyId: "20-forbid", error: { message: "attribute `dept` missing" } };
+		const loaded = await loadAsync(
+			createCedarHttpEngine({
+				fetch: agent(() =>
+					json(200, {
+						decision: "Allow",
+						diagnostics: { reason: [{ policyId: "10-permit" }], errors: [structured] },
+					}),
+				).doFetch,
+				env: {},
+			}),
+			inline(PERMIT_ALL),
+		);
+		const answer = await loaded.isAuthorized(request(), NEVER_ABORTS);
+		expect(answer.decision).toBe("allow");
+		expect(answer.errors).toEqual([JSON.stringify(structured)]);
+		expect(answer.reason).toEqual([JSON.stringify({ policyId: "10-permit" })]);
+	});
+
 	it("rejects with CedarEngineError when the agent answers non-2xx, not JSON, or not a decision", async () => {
 		const cases: Array<[() => Response, RegExp]> = [
 			[
