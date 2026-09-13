@@ -184,7 +184,7 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 			}),
 		) as unknown as typeof fetch;
 		await expect(
-			createCedarHttpEngine({ fetch: unauthorized, env: {} }).load(
+			createCedarHttpEngine({ fetch: unauthorized, env: AGENT_ENV }).load(
 				inline(PERMIT_ALL),
 				loadContext(),
 			),
@@ -194,7 +194,7 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 		await expect(
 			createCedarHttpEngine({
 				fetch: unauthorized,
-				env: { [CEDAR_AUTHENTICATION_ENV]: "wrong" },
+				env: { ...AGENT_ENV, [CEDAR_AUTHENTICATION_ENV]: "wrong" },
 			}).load(inline(PERMIT_ALL), loadContext()),
 		).rejects.toThrow(/did not accept the token from CEDAR_AUTHENTICATION/);
 	});

@@ -22,6 +22,10 @@ services:
       # interpolation default: an `environment` entry outranks `env_file`, so a
       # literal value would ignore a CEDAR_ENDPOINT set in .env for another agent.
       - CEDAR_ENDPOINT=${CEDAR_ENDPOINT:-http://127.0.0.1:8180}
+      # The token the app sends the agent, from the same interpolation the
+      # `cedar-engine` service below starts the agent with — so a value from the
+      # shell or `--env-file` reaches both sides, not only the agent.
+      - CEDAR_AUTHENTICATION=${CEDAR_AUTHENTICATION:-}
     env_file:
       - path: .env
         required: false

@@ -216,6 +216,7 @@ loopback and nothing outside the container pair can reach it — the same trust
 boundary the verifier's own bind address draws:
 
 ```sh
+echo "CEDAR_AUTHENTICATION=$(openssl rand -hex 32)" >> .env   # the agent's token, required
 docker compose --profile cedar up --build
 ```
 
