@@ -40,6 +40,7 @@ const UNPARSEABLE = "permit(when;";
 export function scriptedEngine(name: string, async: boolean): ScriptedEngine {
 	const engine: ScriptedEngine = {
 		name,
+		async,
 		loads: [],
 		requests: [],
 		answer: () => ALLOW,

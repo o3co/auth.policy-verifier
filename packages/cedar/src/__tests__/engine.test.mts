@@ -13,6 +13,7 @@ async function fresh() {
 function engine(name: string): CedarEngine {
 	return {
 		name,
+		async: false,
 		load: () => ({
 			async: false,
 			isAuthorized: () => ({ decision: "deny", reason: [], errors: [] }),

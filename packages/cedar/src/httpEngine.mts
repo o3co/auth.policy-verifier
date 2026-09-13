@@ -112,6 +112,7 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 
 	return {
 		name: CEDAR_HTTP_ENGINE_NAME,
+		async: true,
 
 		async load(source: PolicySource, context: CedarEngineLoadContext) {
 			const endpoint = resolveEndpoint(context.config.endpoint, env[CEDAR_ENDPOINT_ENV]);

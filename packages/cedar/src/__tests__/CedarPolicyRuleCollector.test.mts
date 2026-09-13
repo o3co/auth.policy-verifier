@@ -139,6 +139,9 @@ describe("CedarPolicyRuleCollector — config validation", () => {
 		).rejects.toThrow(
 			/onNoDeterminingPolicy = "abstain" cannot be used with the asynchronous "fake-async" engine/,
 		);
+		// Refused before the engine is asked to load anything (review): a remote
+		// load has side effects — the policy set is pushed, the agent reserved.
+		expect(async.loads).toHaveLength(0);
 		// The same set in-process is fine: the evaluator cannot lose it.
 		await expect(
 			CedarPolicyRuleCollector.create({ policies: PERMIT_ALL, onNoDeterminingPolicy: "abstain" }),

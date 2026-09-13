@@ -225,6 +225,15 @@ export class CedarPolicyRuleCollector implements RuleCollector {
 				: "cedar engine selected by config",
 		);
 
+		if (engine.async && onNoDeterminingPolicy === "abstain") {
+			// See the config field's doc comment: over a remote engine, "no
+			// determining policy" is also what an engine that lost the set says.
+			// Refused before `load`, which pushes the set and reserves the agent.
+			throw new Error(
+				`CedarPolicyRuleCollector: onNoDeterminingPolicy = "abstain" cannot be used with the asynchronous "${engine.name}" engine — an engine that lost the policy set (a restarted agent comes back empty) answers "no determining policy" to every request, which abstain would pass. Use "deny", or evaluate in-process`,
+			);
+		}
+
 		// Boot-time compile, by the engine: a set it cannot parse refuses to
 		// start here, with the engine's message naming the offending file.
 		let policySet: LoadedCedarPolicySet;
@@ -234,11 +243,11 @@ export class CedarPolicyRuleCollector implements RuleCollector {
 			throw new Error(`CedarPolicyRuleCollector: ${errorMessage(cause)}`);
 		}
 
-		if (policySet.async && onNoDeterminingPolicy === "abstain") {
-			// See the config field's doc comment: over a remote engine, "no
-			// determining policy" is also what an engine that lost the set says.
+		if (policySet.async !== engine.async) {
+			// The declaration the check above trusted was wrong: an engine bug,
+			// refused rather than run with a guard that did not apply.
 			throw new Error(
-				`CedarPolicyRuleCollector: onNoDeterminingPolicy = "abstain" cannot be used with the asynchronous "${engine.name}" engine — an engine that lost the policy set (a restarted agent comes back empty) answers "no determining policy" to every request, which abstain would pass. Use "deny", or evaluate in-process`,
+				`CedarPolicyRuleCollector: the "${engine.name}" engine declares async = ${engine.async} but loaded a policy set with async = ${policySet.async}`,
 			);
 		}
 
