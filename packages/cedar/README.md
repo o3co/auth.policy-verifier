@@ -165,6 +165,7 @@ both to a `CedarEngine`:
 ```ts
 interface CedarEngine {
   readonly name: string;                 // "wasm", "http", …
+  readonly async: boolean;               // do its sets answer over I/O? declared before load
   load(source: PolicySource): LoadedCedarPolicySet | Promise<LoadedCedarPolicySet>; // boot: parse-check and compile, or hand over
 }
 // A loaded set answers either synchronously (in-process) or asynchronously (over I/O):
