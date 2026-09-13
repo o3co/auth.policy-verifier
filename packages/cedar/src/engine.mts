@@ -120,7 +120,20 @@ export interface CedarEngineLoadContext {
 	readonly logger: Logger;
 }
 
-const engines = new Map<string, CedarEngine>();
+/**
+ * The registry, in one process-wide slot rather than this module's own scope
+ * (v0.10.0 audit). `cedar-wasm` registers into whichever copy of this package
+ * it resolves; with two copies on the dependency graph, a module-scope map was
+ * two registries, and a collector reading the other one never saw wasm and
+ * fell through to the http engine — a different process deciding
+ * authorization, with nothing failing. `Symbol.for` names the same slot from
+ * every copy, so the refusal of a different engine under a taken name holds
+ * across copies too.
+ */
+const ENGINES_SLOT = Symbol.for("@o3co/auth.policy-verifier.cedar#engines");
+const slot = globalThis as unknown as Record<symbol, Map<string, CedarEngine> | undefined>;
+slot[ENGINES_SLOT] ??= new Map<string, CedarEngine>();
+const engines: Map<string, CedarEngine> = slot[ENGINES_SLOT];
 
 /**
  * When config names no engine, the first of these that is registered wins.

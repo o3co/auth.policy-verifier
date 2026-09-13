@@ -4,9 +4,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CedarEngine } from "../engine.mjs";
 
-/** A fresh registry per test: the module holds it at module scope, as production does. */
+/** The process-wide slot the registry lives in (v0.10.0 audit), cleared for a fresh one. */
+const ENGINES_SLOT = Symbol.for("@o3co/auth.policy-verifier.cedar#engines");
+
+/** A fresh registry per test: a fresh module, and the process-wide slot emptied. */
 async function fresh() {
 	vi.resetModules();
+	delete (globalThis as Record<symbol, unknown>)[ENGINES_SLOT];
 	return import("../engine.mjs");
 }
 
@@ -51,6 +55,23 @@ describe("registerCedarEngine", () => {
 		expect(() => registerCedarEngine(engine("wasm"))).toThrow(
 			/a different engine is already registered as "wasm"/,
 		);
+	});
+});
+
+describe("the registry is one per process, not one per copy of the package (v0.10.0 audit)", () => {
+	it("sees an engine another copy of the module registered", async () => {
+		// cedar-wasm registers into whichever copy of `.cedar` it resolves. With
+		// two versions on the graph, a module-scope map split the registry: the
+		// collector's copy never saw wasm and fell through to the http engine —
+		// a different process deciding authorization, silently.
+		const first = await fresh();
+		first.registerCedarEngine(engine("wasm"));
+		vi.resetModules();
+		const second = await import("../engine.mjs");
+		expect(second).not.toBe(first);
+		expect(second.registeredCedarEngines()).toEqual(["wasm"]);
+		// And a different object under the taken name is still refused across copies.
+		expect(() => second.registerCedarEngine(engine("wasm"))).toThrow(/already registered/);
 	});
 });
 

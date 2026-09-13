@@ -118,7 +118,8 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 			const endpoint = resolveEndpoint(context.config.endpoint, env[CEDAR_ENDPOINT_ENV]);
 			const headers = requestHeaders(context.config.authentication, env[CEDAR_AUTHENTICATION_ENV]);
 
-			const holder = loaded.get(endpoint);
+			const agent = agentKey(endpoint);
+			const holder = loaded.get(agent);
 			if (holder !== undefined) {
 				throw new CedarEngineError(
 					`cedar engine at ${endpoint} already holds the policy set from ${holder} — PUT /v1/policies replaces an agent's whole set, so run one CedarPolicyRuleCollector per agent`,
@@ -126,13 +127,13 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 			}
 			// Reserved before the first request, not after the last: two collectors
 			// loading concurrently must not both pass the check above.
-			loaded.set(endpoint, source.description);
+			loaded.set(agent, source.description);
 
 			const nonBlank = source.files.filter((file) => file.text.trim().length > 0);
 			const policies = nonBlank.map((file) => ({ id: policyId(file.source), content: file.text }));
 			for (const [index, policy] of policies.entries()) {
 				if (policy.id.length === 0) {
-					loaded.delete(endpoint);
+					loaded.delete(agent);
 					throw new CedarEngineError(
 						`"${nonBlank[index].source}" yields an empty policy id — the file needs a name before .cedar`,
 					);
@@ -154,7 +155,7 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 					tokenSourceOf(context.config.authentication, env[CEDAR_AUTHENTICATION_ENV]),
 				);
 			} catch (cause) {
-				loaded.delete(endpoint);
+				loaded.delete(agent);
 				throw cause;
 			}
 			context.logger.info(
@@ -295,6 +296,22 @@ function isLoopbackHost(hostname: string): boolean {
 		hostname === "::1" ||
 		LOOPBACK_IPV4.test(hostname)
 	);
+}
+
+/**
+ * What identifies an agent for "one collector per agent" (v0.10.0 audit): the
+ * endpoint with every loopback spelling — `localhost`, `127.0.0.0/8`, `[::1]` —
+ * read as one host and the default port made explicit. Keyed on the string,
+ * `http://127.0.0.1:8180` and `http://localhost:8180` were two agents, and the
+ * second collector silently replaced the first's policy set. Two loopback
+ * addresses could in principle be two agents on one port; treating them as
+ * one only ever refuses a boot, never overwrites a set.
+ */
+function agentKey(endpoint: string): string {
+	const url = new URL(endpoint);
+	const port = url.port || (url.protocol === "https:" ? "443" : "80");
+	const host = isLoopbackHost(url.hostname) ? "loopback" : url.hostname;
+	return `${url.protocol}//${host}:${port}${url.pathname}`;
 }
 
 function resolveEndpoint(configured: unknown, fromEnv: string | undefined): string {

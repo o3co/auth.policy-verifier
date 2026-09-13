@@ -15,6 +15,7 @@ import {
 	type CedarDecision,
 	type CedarEngine,
 	type LoadedCedarPolicySet,
+	registeredCedarEngines,
 	resolveCedarEngine,
 } from "./engine.mjs";
 import {
@@ -215,15 +216,24 @@ export class CedarPolicyRuleCollector implements RuleCollector {
 		const logger =
 			options?.logger ?? createConsoleLogger({ collector: "CedarPolicyRuleCollector" });
 
-		// Said out loud, once, at boot: which engine decides is a dependency
-		// choice rather than a config line, so an operator reading the config
-		// cannot see it — the log is where it shows.
-		logger.info(
-			{ engine: engine.name, policySet: source.description, files: source.files.length },
-			raw.engine === undefined
-				? "cedar engine selected by default"
-				: "cedar engine selected by config",
-		);
+		// Said out loud, once, at boot. Named in config, it is information. Left
+		// to the default, which evaluator decides is settled by what happens to
+		// be imported — a transitive dependency pulling in cedar-wasm flips a
+		// deployment from out-of-process to in-process — and an operator reading
+		// the config cannot see it, so it is a warning (v0.10.0 audit).
+		const selection = {
+			engine: engine.name,
+			policySet: source.description,
+			files: source.files.length,
+		};
+		if (raw.engine === undefined) {
+			logger.warn(
+				{ ...selection, registered: registeredCedarEngines() },
+				"cedar engine selected by default — set engine in the collector's config so the config says which evaluator decides",
+			);
+		} else {
+			logger.info(selection, "cedar engine selected by config");
+		}
 
 		if (engine.async && onNoDeterminingPolicy === "abstain") {
 			// See the config field's doc comment: over a remote engine, "no

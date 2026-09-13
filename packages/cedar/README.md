@@ -195,6 +195,15 @@ module scope), and the collector picks one by its config `engine` key:
 | `"wasm"`, package not imported | refuses to start, naming `@o3co/auth.policy-verifier.cedar-wasm` |
 | anything else | refuses to start, listing what is registered |
 
+**Name the engine.** Left absent, which process decides authorization is
+settled by what the dependency graph happens to import — a transitive
+dependency that pulls in the wasm package flips a deployment from
+out-of-process to in-process — and nothing in the config shows it. The
+collector therefore logs a warning at boot when `engine` is absent (`cedar
+engine selected by default — set engine …`), and states the engine at `info`
+when it is named. The registry is process-wide, not per copy of this package,
+so two copies on the graph still see one set of engines.
+
 The engines that ship today:
 
 | engine | package | runs | when |
@@ -254,8 +263,17 @@ docker compose --profile cedar up --build
   reads better under this one: `diagnostics.reason` then names files
   (`10-permit-eng`) rather than `policy0`.
 - **One collector per agent.** `PUT /v1/policies` replaces the agent's whole
-  set, so a second `CedarPolicyRuleCollector` pointed at the same endpoint is
-  refused at boot rather than silently overwriting the first.
+  set, so a second `CedarPolicyRuleCollector` pointed at the same agent is
+  refused at boot rather than silently overwriting the first. Every loopback
+  spelling of a host (`localhost`, `127.0.0.1`, `[::1]`) on one port counts as
+  the same agent.
+- **Connections are not capped.** The engine uses the process's global `fetch`
+  dispatcher with keep-alive, so concurrent decisions map one-to-one onto
+  concurrent agent connections. Each call is bounded by `verify.ruleTimeoutMs`
+  and the decision by `verify.evaluateDeadlineMs`, and a batch by
+  `verify.batchConcurrency`; a deployment expecting floods on the verifier
+  should size the agent for that concurrency, or put a connection-limiting
+  proxy in front of it.
 - **Failure after boot is a deny.** An agent that is unreachable, answers
   non-2xx, or answers something that is not a decision makes the rule fail
   and log (`cedar authorization call failed`). An agent that is up but has
