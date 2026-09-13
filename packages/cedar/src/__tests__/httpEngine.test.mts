@@ -566,7 +566,19 @@ describe("CedarPolicyRuleCollector on the http engine", () => {
 		);
 	});
 
-	it("denies and logs, never abstains, when the agent is down after boot", async () => {
+	it("leaves nothing behind when abstain is refused — the same process can start with deny (review)", async () => {
+		const { doFetch, calls } = agent();
+		vi.stubGlobal("fetch", doFetch);
+		const config = { engine: "http", endpoint: "http://127.0.0.1:18299", policies: PERMIT_ALL };
+		await expect(
+			CedarPolicyRuleCollector.create({ ...config, onNoDeterminingPolicy: "abstain" }),
+		).rejects.toThrow(/cannot be used with the asynchronous "http" engine/);
+		// Nothing was pushed, and the agent is not held for the refused collector.
+		expect(calls).toHaveLength(0);
+		await expect(CedarPolicyRuleCollector.create(config)).resolves.toBeDefined();
+	});
+
+	it("denies and logs when the agent is down after boot", async () => {
 		let up = true;
 		const { doFetch } = agent(() => {
 			if (!up) throw new TypeError("fetch failed: ECONNREFUSED");
@@ -579,7 +591,6 @@ describe("CedarPolicyRuleCollector on the http engine", () => {
 				engine: "http",
 				endpoint: "http://127.0.0.1:18202",
 				policies: PERMIT_ALL,
-				onNoDeterminingPolicy: "abstain",
 			},
 			{ logger },
 		);

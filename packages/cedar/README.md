@@ -136,6 +136,12 @@ same way — see [docs/extending.md](../../docs/extending.md#the-trust-boundary-
   cover it. Selecting it is a statement that another group will decide — so a
   pipeline whose only rule group is Cedar should not.
 
+  `"abstain"` is refused at boot with an out-of-process engine (`engine =
+  "http"`): an agent that restarted comes back with no policies and answers
+  every request "no determining policy" — exactly what a covered request that
+  matched nothing answers — so under `"abstain"` every `forbid` would silently
+  stop applying.
+
   Neither value affects an evaluation error, which always denies (below).
 - **Evaluation errors always deny, and log.** Cedar reports a policy that
   reads a missing attribute as `deny` with the cause only in diagnostics — and
@@ -159,6 +165,7 @@ both to a `CedarEngine`:
 ```ts
 interface CedarEngine {
   readonly name: string;                 // "wasm", "http", …
+  readonly async: boolean;               // do its sets answer over I/O? declared before load
   load(source: PolicySource): LoadedCedarPolicySet | Promise<LoadedCedarPolicySet>; // boot: parse-check and compile, or hand over
 }
 // A loaded set answers either synchronously (in-process) or asynchronously (over I/O):
@@ -241,8 +248,12 @@ docker compose --profile cedar up --build
   refused at boot rather than silently overwriting the first.
 - **Failure after boot is a deny.** An agent that is unreachable, answers
   non-2xx, or answers something that is not a decision makes the rule fail
-  and log (`cedar authorization call failed`); it never abstains, whatever
-  `onNoDeterminingPolicy` says. Each call runs under the server's
+  and log (`cedar authorization call failed`). An agent that is up but has
+  lost the policy set — restarted, or recreated by `docker compose up` — is
+  not a failure it can see: it answers "deny, no determining policy" to every
+  request, which is why `onNoDeterminingPolicy = "abstain"` is refused with
+  this engine; under the default it denies everything until the verifier is
+  restarted and pushes the set again. Each call runs under the server's
   `verify.ruleTimeoutMs` (default 2000 ms), answering `rule_timeout` when the
   agent is slower than that.
 - **Two Cedar versions.** cedar-agent 0.2.2 evaluates with cedar-policy 2.4;

@@ -79,6 +79,14 @@ export interface CedarEngine {
 	/** The registry key and the config value that selects it: `"wasm"`, `"http"`. */
 	readonly name: string;
 	/**
+	 * Whether the policy sets this engine loads answer asynchronously — over
+	 * I/O, out of process. Declared up front so the collector can refuse a
+	 * configuration that is unsafe with such an engine (`onNoDeterminingPolicy
+	 * = "abstain"`) before `load` has side effects; the set `load` returns must
+	 * agree (`LoadedCedarPolicySet.async`), or the collector refuses it.
+	 */
+	readonly async: boolean;
+	/**
 	 * Boot: parse-checks and compiles the policy set — or hands it to the
 	 * process that will, which is why the result may be a promise. `source.files`
 	 * carries each file separately so a syntax error can name the file that

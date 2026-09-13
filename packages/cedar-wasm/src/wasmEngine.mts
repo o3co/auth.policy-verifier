@@ -44,6 +44,7 @@ let policySetCounter = 0;
  */
 export const cedarWasmEngine: CedarWasmEngine = {
 	name: CEDAR_WASM_ENGINE_NAME,
+	async: false,
 
 	load(source: PolicySource): SyncCedarPolicySet {
 		for (const file of source.files) {

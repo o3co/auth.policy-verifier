@@ -124,6 +124,30 @@ describe("CedarPolicyRuleCollector — config validation", () => {
 		).rejects.toThrow(/onNoDeterminingPolicy must be one of abstain, deny/);
 	});
 
+	it("refuses abstain over an asynchronous policy set, at boot (v0.10.0 audit)", async () => {
+		// An out-of-process engine that restarted empty answers every request
+		// "deny, no determining policy" — byte-identical to a request the set
+		// covers and nothing matched. Under abstain every `forbid` then stops
+		// applying: a routine container recreate turns deny into allow. The port
+		// cannot tell the two apart, so the combination is refused.
+		await expect(
+			CedarPolicyRuleCollector.create({
+				policies: PERMIT_ALL,
+				engine: "fake-async",
+				onNoDeterminingPolicy: "abstain",
+			}),
+		).rejects.toThrow(
+			/onNoDeterminingPolicy = "abstain" cannot be used with the asynchronous "fake-async" engine/,
+		);
+		// Refused before the engine is asked to load anything (review): a remote
+		// load has side effects — the policy set is pushed, the agent reserved.
+		expect(async.loads).toHaveLength(0);
+		// The same set in-process is fine: the evaluator cannot lose it.
+		await expect(
+			CedarPolicyRuleCollector.create({ policies: PERMIT_ALL, onNoDeterminingPolicy: "abstain" }),
+		).resolves.toBeDefined();
+	});
+
 	it("refuses a non-boolean logEvaluationErrors", async () => {
 		await expect(
 			CedarPolicyRuleCollector.create({
@@ -375,10 +399,7 @@ describe("CedarPolicyRuleCollector — an asynchronous engine yields an AsyncRul
 		async.answer = () => {
 			throw new CedarEngineError("engine unreachable");
 		};
-		const rule = await collectAsync(
-			{ policies: PERMIT_ALL, onNoDeterminingPolicy: "abstain" },
-			logger,
-		);
+		const rule = await collectAsync({ policies: PERMIT_ALL }, logger);
 		expect(await rule.decide(attrsWith(), NEVER_ABORTS)).toBe(false);
 		expect(error).toHaveBeenCalledOnce();
 		expect(JSON.stringify(error.mock.calls[0])).toMatch(/engine unreachable/);
