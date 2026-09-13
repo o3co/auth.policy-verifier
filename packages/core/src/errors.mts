@@ -127,20 +127,33 @@ export class AttributeConflictError extends Error {
  * passed, and there is no partial answer to an authorization question.
  *
  * Names the rule by `ruleType` and `code` — the two things an operator can find
- * it by in config — and never carries the attributes.
+ * it by in config — and never carries the attributes. `limit` says which bound
+ * tripped: the rule's own budget (`"rule"`, `verify.ruleTimeoutMs`), or the
+ * deadline for the whole rule phase (`"deadline"`, `verify.evaluateDeadlineMs`),
+ * in which case the rule named is the one that was in flight.
  */
 export class RuleTimeoutError extends Error {
 	readonly ruleType: string;
 	readonly code: string;
 	readonly timeoutMs: number;
+	readonly limit: "rule" | "deadline";
 
-	constructor(detail: { ruleType: string; code: string; timeoutMs: number }) {
+	constructor(detail: {
+		ruleType: string;
+		code: string;
+		timeoutMs: number;
+		limit?: "rule" | "deadline";
+	}) {
+		const limit = detail.limit ?? "rule";
 		super(
-			`rule ${detail.ruleType}/${detail.code} did not answer within its ${detail.timeoutMs} ms budget`,
+			limit === "rule"
+				? `rule ${detail.ruleType}/${detail.code} did not answer within its ${detail.timeoutMs} ms budget`
+				: `the rule phase did not finish within its ${detail.timeoutMs} ms deadline (rule ${detail.ruleType}/${detail.code} was running)`,
 		);
 		this.name = "RuleTimeoutError";
 		this.ruleType = detail.ruleType;
 		this.code = detail.code;
 		this.timeoutMs = detail.timeoutMs;
+		this.limit = limit;
 	}
 }

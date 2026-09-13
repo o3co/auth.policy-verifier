@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import { rejectOnAbort, resolveRuleTimeoutMs } from "./collectorLimits.mjs";
+import {
+	rejectOnAbort,
+	resolveEvaluateDeadlineMs,
+	resolveRuleTimeoutMs,
+} from "./collectorLimits.mjs";
 import { RuleTimeoutError } from "./errors.mjs";
 import {
 	type AnyRule,
@@ -37,6 +41,13 @@ export interface EvaluateOptions {
 	 * timer can hold, before any rule runs. A synchronous rule is not timed.
 	 */
 	ruleTimeoutMs?: number;
+	/**
+	 * Milliseconds the whole rule phase may take — every asynchronous rule of
+	 * the decision together. Defaults to `DEFAULT_EVALUATE_DEADLINE_MS`; refused
+	 * like `ruleTimeoutMs`. An asynchronous rule runs under whichever of the two
+	 * ends first, and none starts once the phase is spent.
+	 */
+	evaluateDeadlineMs?: number;
 	/** The caller's signal; when it aborts, the asynchronous rule in flight is aborted with its reason. */
 	signal?: AbortSignal;
 }
@@ -78,7 +89,8 @@ export interface EvaluateOptions {
  * @throws whatever a rule threw or rejected with, or the caller's abort reason,
  *   unchanged: a rule that owns its engine's outage answers `false` and logs;
  *   one that throws is reporting a fault.
- * @throws {RangeError} for an unusable `ruleTimeoutMs`, before any rule runs.
+ * @throws {RangeError} for an unusable `ruleTimeoutMs` or `evaluateDeadlineMs`,
+ *   before any rule runs.
  */
 export async function evaluate(
 	attrs: Attributes,
@@ -86,6 +98,8 @@ export async function evaluate(
 	options?: EvaluateOptions,
 ): Promise<Decision> {
 	const ruleTimeoutMs = resolveRuleTimeoutMs(options?.ruleTimeoutMs);
+	const deadlineMs = resolveEvaluateDeadlineMs(options?.evaluateDeadlineMs);
+	const budget: RuleBudget = { ruleTimeoutMs, deadlineMs, deadlineAt: Date.now() + deadlineMs };
 
 	// Phase 1: group rules by ruleType — rules within a group are alternatives (OR).
 	const groups = Map.groupBy(rules, (rule) => rule.ruleType);
@@ -100,7 +114,7 @@ export async function evaluate(
 	// pure predicates over attributes by contract, so running them all is safe.
 	const outcomes: RuleGroupOutcome[] = [];
 	for (const [ruleType, groupRules] of groups) {
-		outcomes.push(await evaluateGroup(ruleType, groupRules, attrs, ruleTimeoutMs, options?.signal));
+		outcomes.push(await evaluateGroup(ruleType, groupRules, attrs, budget, options?.signal));
 	}
 
 	// Phase 4: deny names the FIRST failing group, as before; reason carries all.
@@ -137,17 +151,25 @@ function conclude(outcomes: RuleGroupOutcome[]): Decision {
  * order — on a pass that is every tried-and-failed alternative followed by the
  * passing rule (named again as `satisfiedBy`); on a fail, every alternative.
  */
+/** The two bounds an asynchronous rule runs under: its own, and the phase's. */
+interface RuleBudget {
+	readonly ruleTimeoutMs: number;
+	readonly deadlineMs: number;
+	/** Epoch milliseconds at which the rule phase is spent. */
+	readonly deadlineAt: number;
+}
+
 async function evaluateGroup(
 	ruleType: string,
 	rules: AnyRule[],
 	attrs: Attributes,
-	ruleTimeoutMs: number,
+	budget: RuleBudget,
 	caller: AbortSignal | undefined,
 ): Promise<RuleGroupOutcome> {
 	const evaluated: RuleOutcome[] = [];
 	for (const rule of rules) {
 		const passed = isAsyncRule(rule)
-			? await runAsyncRule(rule, attrs, ruleTimeoutMs, caller)
+			? await runAsyncRule(rule, attrs, budget, caller)
 			: rule.verify(attrs);
 		const outcome = { code: rule.code, message: rule.message, passed };
 		evaluated.push(outcome);
@@ -161,20 +183,41 @@ async function evaluateGroup(
  * either the budget or the caller does. Raced rather than awaited, for the
  * reason a collector is: a rule that ignores its signal would otherwise never
  * settle, and a bound only the cooperative respect is not a bound.
+ *
+ * The budget is the rule's own or what is left of the phase, whichever is
+ * shorter, and the error names the one that tripped.
  */
 async function runAsyncRule(
 	rule: AsyncRule,
 	attrs: Attributes,
-	timeoutMs: number,
+	budget: RuleBudget,
 	caller: AbortSignal | undefined,
 ): Promise<boolean> {
 	if (caller?.aborted) throw caller.reason;
+	const remaining = budget.deadlineAt - Date.now();
+	const phaseBinds = remaining < budget.ruleTimeoutMs;
+	const expired = () =>
+		phaseBinds
+			? new RuleTimeoutError({
+					ruleType: rule.ruleType,
+					code: rule.code,
+					timeoutMs: budget.deadlineMs,
+					limit: "deadline",
+				})
+			: new RuleTimeoutError({
+					ruleType: rule.ruleType,
+					code: rule.code,
+					timeoutMs: budget.ruleTimeoutMs,
+				});
+	// The phase is spent: this rule is not started at all.
+	if (remaining <= 0) throw expired();
 	const own = new AbortController();
 	const onCallerAbort = () => own.abort(caller?.reason);
 	caller?.addEventListener("abort", onCallerAbort, { once: true });
-	const timeout = setTimeout(() => {
-		own.abort(new RuleTimeoutError({ ruleType: rule.ruleType, code: rule.code, timeoutMs }));
-	}, timeoutMs);
+	const timeout = setTimeout(
+		() => own.abort(expired()),
+		phaseBinds ? remaining : budget.ruleTimeoutMs,
+	);
 	const cancelled = rejectOnAbort(own.signal);
 	try {
 		return await Promise.race([

@@ -393,6 +393,7 @@ rule { collectors = [ { collector = ResourceActionScopeRuleCollector } ] }
 			maxContextValueLength: 1_024,
 			collectorTimeoutMs: 2_000,
 			ruleTimeoutMs: 2_000,
+			evaluateDeadlineMs: 5_000,
 			collectorDeadlineMs: 5_000,
 			collectorConcurrency: 8,
 			batchConcurrency: 8,

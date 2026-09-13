@@ -20,6 +20,8 @@ interface EvaluateOptions {
   onEmptyRuleSet?: "deny" | "allow"
   /** Milliseconds one asynchronous rule may take. Defaults to DEFAULT_RULE_TIMEOUT_MS (2000). */
   ruleTimeoutMs?: number
+  /** Milliseconds all asynchronous rules may take together. Defaults to DEFAULT_EVALUATE_DEADLINE_MS (5000). */
+  evaluateDeadlineMs?: number
   /** The caller's signal; aborting it aborts the asynchronous rule in flight with its reason. */
   signal?: AbortSignal
 }
@@ -33,7 +35,7 @@ An **empty rule set is denied** (`code: "no_applicable_rule"`): a request no rul
 
 Every decision carries a structured `reason`: `reason.groups` lists each rule group in evaluation order with `passed` and `evaluated` — the rules that group actually ran, in order. A failing group ran every alternative, so `evaluated` lists them all; a passing group is an OR and stops at its first passing rule, so `evaluated` holds the alternatives that were tried and failed followed by that rule, and `satisfiedBy` (present only on a passing group) names it as the one that decided. All groups are evaluated, including groups after the first failing one, because stopping early cannot report which of the rest would also have failed. The `code` / `message` on a deny still come from the first failing group.
 
-The rule list may carry either kind of rule (#225): a synchronous `Rule` is asked through `verify`, an `AsyncRule` is awaited through `decide` under `ruleTimeoutMs`, one at a time in collection order, and alternatives after a pass never run whichever kind they are. `evaluate` is asynchronous for that reason alone — a list of synchronous rules answers in the same turn. It rejects with `RuleTimeoutError` when an asynchronous rule overruns its budget (a deny for the transport, never a pass), with the caller's abort reason when `signal` aborts, and with whatever a rule threw or rejected with.
+The rule list may carry either kind of rule (#225): a synchronous `Rule` is asked through `verify`, an `AsyncRule` is awaited through `decide` under `ruleTimeoutMs`, one at a time in collection order, and alternatives after a pass never run whichever kind they are. `evaluate` is asynchronous for that reason alone — a list of synchronous rules answers in the same turn. It rejects with `RuleTimeoutError` when an asynchronous rule overruns its budget, or the rules together overrun `evaluateDeadlineMs` (`limit: "rule"` or `"deadline"`; a deny for the transport, never a pass), with the caller's abort reason when `signal` aborts, and with whatever a rule threw or rejected with.
 
 ### AttributePipeline
 

@@ -11,7 +11,9 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import {
+	DEFAULT_COLLECT_DEADLINE_MS,
 	DEFAULT_COLLECTOR_TIMEOUT_MS,
+	DEFAULT_EVALUATE_DEADLINE_MS,
 	DEFAULT_RULE_TIMEOUT_MS,
 	MAX_TIMER_MS,
 } from "../collectorLimits.mjs";
@@ -197,6 +199,65 @@ describe("evaluate — the deadline (#225)", () => {
 			await expect(evaluate(attrs, [async("cedar", "x", ran)], { ruleTimeoutMs })).rejects.toThrow(
 				/ruleTimeoutMs/,
 			);
+		}
+		expect(ran).not.toHaveBeenCalled();
+	});
+});
+
+describe("evaluate — the rule phase has a deadline of its own (v0.10.0 audit)", () => {
+	// `ruleTimeoutMs` is per rule and groups run one after another, so N
+	// asynchronous rules could take N × the budget with nothing capping the
+	// phase — while the collect side has both a per-collector timeout and a
+	// deadline for the whole fan-out.
+	const slow = (ruleType: string, ms: number, result = true): AsyncRule =>
+		async(
+			ruleType,
+			`${ruleType}_deny`,
+			() => new Promise((resolve) => setTimeout(() => resolve(result), ms)),
+		);
+
+	it("defaults to the collect deadline", () => {
+		expect(DEFAULT_EVALUATE_DEADLINE_MS).toBe(DEFAULT_COLLECT_DEADLINE_MS);
+	});
+
+	it("rejects when rules that each fit their budget overrun the phase together", async () => {
+		const rules = [slow("a", 40), slow("b", 40), slow("c", 40)];
+		await expect(
+			evaluate(attrs, rules, { ruleTimeoutMs: 60, evaluateDeadlineMs: 90 }),
+		).rejects.toMatchObject({ name: "RuleTimeoutError", limit: "deadline", timeoutMs: 90 });
+	});
+
+	it("names the per-rule budget when that is the bound that tripped", async () => {
+		await expect(
+			evaluate(attrs, [slow("a", 200)], { ruleTimeoutMs: 20, evaluateDeadlineMs: 1_000 }),
+		).rejects.toMatchObject({
+			name: "RuleTimeoutError",
+			limit: "rule",
+			ruleType: "a",
+			timeoutMs: 20,
+		});
+	});
+
+	it("does not start an asynchronous rule once the phase is spent", async () => {
+		const late = vi.fn(async () => true);
+		const rules = [slow("a", 60), async("b", "b_deny", late)];
+		await expect(
+			evaluate(attrs, rules, { ruleTimeoutMs: 1_000, evaluateDeadlineMs: 50 }),
+		).rejects.toMatchObject({ limit: "deadline" });
+		expect(late).not.toHaveBeenCalled();
+	});
+
+	it("does not time synchronous rules, which do no I/O", async () => {
+		const result = await evaluate(attrs, [sync("a", "a", true)], { evaluateDeadlineMs: 1 });
+		expect(result.decision).toBe("allow");
+	});
+
+	it("refuses an unusable deadline before running anything", async () => {
+		const ran = vi.fn(async () => true);
+		for (const evaluateDeadlineMs of [0, -1, 1.5, MAX_TIMER_MS + 1, Number.NaN]) {
+			await expect(
+				evaluate(attrs, [async("cedar", "x", ran)], { evaluateDeadlineMs }),
+			).rejects.toThrow(/evaluateDeadlineMs/);
 		}
 		expect(ran).not.toHaveBeenCalled();
 	});

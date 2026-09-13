@@ -39,6 +39,7 @@ import {
 	DEFAULT_COLLECT_DEADLINE_MS,
 	DEFAULT_COLLECTOR_CONCURRENCY,
 	DEFAULT_COLLECTOR_TIMEOUT_MS,
+	DEFAULT_EVALUATE_DEADLINE_MS,
 	DEFAULT_HTTP_PORT,
 	DEFAULT_JWKS_CACHE_MAX_AGE_MS,
 	DEFAULT_JWKS_COOLDOWN_MS,
@@ -234,6 +235,19 @@ export const NUMERIC_BOUNDS = {
 	ruleTimeoutMs: {
 		field: "ruleTimeoutMs",
 		fallback: DEFAULT_RULE_TIMEOUT_MS,
+		minimum: 1,
+		maximum: MAX_TIMER_MS,
+		unit: "milliseconds",
+	},
+	/**
+	 * How long the whole rule phase may take — every asynchronous rule of one
+	 * decision together (v0.10.0 audit). Groups run one after another, so a
+	 * per-rule budget cannot bound the set; this is the rule side's twin of
+	 * `collectorDeadlineMs`.
+	 */
+	evaluateDeadlineMs: {
+		field: "evaluateDeadlineMs",
+		fallback: DEFAULT_EVALUATE_DEADLINE_MS,
 		minimum: 1,
 		maximum: MAX_TIMER_MS,
 		unit: "milliseconds",
