@@ -143,6 +143,13 @@ describe("acceptRequestId (#200)", () => {
 		["a percent-encoding", "req%0a1"],
 		["non-ASCII", "réq-1"],
 		["angle brackets", "<script>"],
+		// Without the `m` flag a JavaScript `$` matches only at the end of the
+		// input — unlike PCRE or Python, not before a final line terminator — so
+		// none of these slips past the anchor (PR #242 review).
+		["a trailing line feed", "req-1\n"],
+		["a trailing CRLF", "req-1\r\n"],
+		["a trailing LINE SEPARATOR", "req-1\u2028"],
+		["a trailing PARAGRAPH SEPARATOR", "req-1\u2029"],
 	])("refuses %s", (_what, id) => {
 		expect(acceptRequestId(id)).toBeUndefined();
 	});
