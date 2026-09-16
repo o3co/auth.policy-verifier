@@ -100,12 +100,12 @@ function createVerifyRouter(config: VerifyRouterConfig): express.Router
 3. `validate` が `true` の場合: 署名に加えて RFC 9068 §4 のクレームを検証する — `iss` を `issuer` と、audience クレーム（`aud`、または `audienceClaim` が指すクレーム）を `audience` と、`typ` ヘッダを `tokenType` と照合する（`application/` プレフィックスは無視。`"*"` は何も pin しない）。失敗時は 401 を返す。3 つのいずれかが欠けている場合、`createVerifyRouter` は例外を投げる。
 4. `validate` が `false` の場合: JWT を検証なしでデコードする。不正なトークンの場合は 401 を返す。
 5. どちらの経路でもトークン自身の寿命を検証する: `exp` と `iat` は**必須**（有効期限を宣言しないトークンは失効しない）、`nbf` は存在すれば検証、`exp` は未来でなければならず、`now - iat` は `maxTokenAgeSeconds` を超えてはならない — 発行者が何年も先の `exp` を付けたトークンを拒否するのはこれ。`clockToleranceSeconds` はこれら全ての比較に効く。失敗時は 401 を返す。デコード専用経路はこれらの検査を省略せず手書きで再現するので、同一トークンに対して両モードの答えは一致する。
-6. `x-request-id` ヘッダーが存在する場合、`CollectorContext.headers` に含める（コレクターが上流呼び出し時に転送可能）。
+6. `x-request-id` ヘッダーが存在し、受け入れられる形であれば `CollectorContext.headers` に含める（コレクターが上流呼び出し時に転送可能）。受け入れられるのは `A-Z a-z 0-9 - _ . : + / = #` からなる 1〜128 文字（`acceptRequestId`、#200）で、それ以外の値はここでもログ行でもレスポンスでも無かったものとして扱う。受け入れた ID は、手順 1〜5 の拒否を含め router が書くすべてのレスポンスに `x-request-id` レスポンスヘッダとして返し、呼び出し元が送らなかった場合に採番することはない。
 7. `attributePipeline.collect` と `rulePipeline.collect` を collector の上限（`verify.collectorTimeoutMs` / `verify.collectorDeadlineMs` / `verify.collectorConcurrency`。各 collector には `CollectorContext.signal` で `AbortSignal` が渡される）のもとで並列実行し、`evaluate` を呼び出す。
 8. `200 { decision: "allow" }` または `403 { decision: "deny", code, message }` を返す。
-9. collector または fan-out が時間切れになった場合は `403 { decision: "deny", code: "collector_timeout" }` を返す (#115)。評価器には到達させない — 一部の Rule しか集まらないことはポリシーが弱いことであり、1 つも集まらなければ `rule.onEmptyRuleSet = "allow"` では allow になるため。タイムアウトは deny にしかなり得ない。詳細は呼び出し側ではなく `collector_timeout` ログ行に出る。
-10. 非同期 Rule が `verify.ruleTimeoutMs` 以内に応答しなかった場合 (#225)、または非同期 Rule 全体で `verify.evaluateDeadlineMs` を超えた場合は `403 { decision: "deny", code: "rule_timeout" }` を返す — 同じ deny だが専用の code を持つので、運用者は停止したのがエンジンなのか collector なのかを区別できる。
-11. 予期しないエラーが発生した場合は `500 { decision: "deny", code: "internal_error" }` を返す。
+9. collector または fan-out が時間切れになった場合は `403 { decision: "deny", code: "collector_timeout" }` を返す (#115)。評価器には到達させない — 一部の Rule しか集まらないことはポリシーが弱いことであり、1 つも集まらなければ `rule.onEmptyRuleSet = "allow"` では allow になるため。タイムアウトは deny にしかなり得ない。詳細は呼び出し側ではなく `collector_timeout` ログ行に出る — `category: "collector_timeout"` と、予算を超えた `collector`（`attribute.collectors[1] (EntitlementStoreCollector)`）、pipeline のデッドラインを超えた場合はリストそのもの（`attribute.collectors`）(#200)。
+10. 非同期 Rule が `verify.ruleTimeoutMs` 以内に応答しなかった場合 (#225)、または非同期 Rule 全体で `verify.evaluateDeadlineMs` を超えた場合は `403 { decision: "deny", code: "rule_timeout" }` を返す — 同じ deny だが専用の code を持つので、運用者は停止したのがエンジンなのか collector なのかを区別できる。`rule_timeout` ログ行は `category` と `rule`（`{ ruleType, code }`）を持つ。
+11. 予期しないエラーが発生した場合は `500 { decision: "deny", code: "internal_error" }` を返し、`verify_internal_error` としてログに出す。行は `endpoint`、ID があれば `requestId`、そして `category` を持つ (#200): `collector` を名指しする `collector_threw`、`rule` を名指しする `rule_threw`、エンベロープが対応付けていない body parser の失敗の `body_rejected`、どこにも帰属しなかったものの `internal`。閉じた集合は `FAILURE_CATEGORIES` として export され、そのうちコレクターの失敗は `DecisionMetrics.observeCollectorFailure` で計上される（`createApp` では `auth_collector_failures_total{collector,category}`）。
 
 ### AppConfigSchema / AppConfig
 
@@ -295,6 +295,10 @@ HTTP/1.1 500 Internal Server Error
 
 { "decision": "deny", "code": "internal_error" }
 ```
+
+**レスポンスヘッダ — `x-request-id`**
+
+リクエストが `A-Z a-z 0-9 - _ . : + / = #` からなる 1〜128 文字の ID を送った場合、上記のすべてのレスポンスは `x-request-id: <送られた ID>` を持ち、それ以外の場合はこのヘッダを持ちません (#200)。ID は呼び出し元のもので、enforcement 層が判定（や `500`）を自分のログと突き合わせられるように返すものです。サーバーが採番することはありません。
 
 ### POST /verify/batch
 

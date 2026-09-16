@@ -128,7 +128,7 @@ Authorization: Bearer <jwt>
 | `code` | deny のみ — 呼び出し元がワイヤ上で受け取ったコードと同じ |
 | `satisfiedBy` | allow のみ — 各グループを満たしたルールの `{ruleType, code}` |
 | `deniedBy` | deny のみ — 最初に失敗したグループと、そこで拒否した全代替ルール |
-| `requestId` | 呼び出し元が送った `x-request-id`。無い場合は省略される |
+| `requestId` | 呼び出し元が送った `x-request-id`（サーバーが受け入れる形のもの。[失敗イベント](#失敗イベント) を参照）。無い場合は省略される |
 | `durationMs` | Collector パイプラインと evaluator に費やした時間。HTTP の往復時間ではない |
 
 判定 1 件につき 1 行なので、N 件の `POST /verify/batch` は同一 `requestId` を持つ N 行を出力します。アラートとインデックスはイベント名に対して張り、メッセージ本文には張らないでください。
@@ -141,6 +141,37 @@ Authorization: Bearer <jwt>
 - **呼び出し元の `context` オブジェクト。** 自由形式で collector にそのまま渡されるため、呼び出し側サービスのリクエストペイロードが行き着く場所そのものです。これを記録すると監査ストリームがそのペイロードの複製になります。
 - **ルールの `message` 文字列。** 既に行に載っている resource と action から導かれる内容です。
 
+### 失敗イベント
+
+判定できなかった decision は `error`（level 50）でログに出て、その行はどの種類の失敗がどこで起きたかを示します。
+
+```json
+{"level":50,"msg":"verify_internal_error","endpoint":"/verify","requestId":"6f1c…","category":"collector_threw","collector":"attribute.collectors[1] (EntitlementStoreCollector)","err":{"type":"Error","message":"entitlement store is down","stack":"…"}}
+```
+
+| イベント | 応答 | `category` | 併せて示すもの |
+|---|---|---|---|
+| `collector_timeout` | `403 collector_timeout` | `collector_timeout` | `collector`: `VERIFY_COLLECTOR_TIMEOUT_MS` を超えたエントリ、または pipeline が `VERIFY_COLLECTOR_DEADLINE_MS` を超えた場合はリストそのもの（`attribute.collectors`） |
+| `rule_timeout` | `403 rule_timeout` | `rule_timeout` | `rule`: `{ ruleType, code }` |
+| `attribute_conflict` | `403 attribute_conflict` | `attribute_conflict` | —（2 つのコレクターが食い違った。どちらか一方だけの責任ではない） |
+| `verify_internal_error` | `500 internal_error` | `collector_threw`、`rule_threw`、`body_rejected`、`internal` のいずれか | `collector_threw` なら `collector`、`rule_threw` なら `rule` |
+
+| `category` | 何が失敗したか |
+|---|---|
+| `collector_timeout` | コレクターが予算を、または pipeline がデッドラインを超えた |
+| `collector_threw` | コレクターが reject / throw した |
+| `attribute_conflict` | 2 つの attribute コレクターが同じスカラーキーに異なる値を書いた |
+| `rule_timeout` | 非同期ルールが予算を、またはルールフェーズがデッドラインを超えた |
+| `rule_threw` | ルールの `verify` が throw した、または `decide` が reject した |
+| `body_rejected` | JSON body parser が、deny エンベロープが 4xx に対応付けていない形で失敗した |
+| `internal` | どこにも帰属しなかったもの — throw した resource parser や authenticator、`Error` ではなく文字列などオブジェクトでない値で reject したコレクター |
+
+この集合は閉じています: アラートとフィルタは `err.message` ではなく `category` の等値に対して張ってください。`collector` は `config/application.conf` の `attribute.collectors` / `rule.collectors` 内のエントリ位置とクラス名です。JWKS に到達できないことは category ではありません — `401` で応答され、`jwt_verification_unavailable` としてログに出ます（後述）。
+
+サーバーがこれらの行に加えるものは、トークン・クレーム・`context` のいずれも含みません: category は列挙値、コレクター名とルール名は設定由来、リクエスト ID は検証済みです。`err` は throw されたエラーそのものなので、コレクターが自分のエラーメッセージに何を書くかはそのコレクターの責任です。
+
+**リクエストの相関.** 呼び出し元が送った `x-request-id` は、`/verify` と `/verify/batch` が返すすべての応答 — allow、deny、拒否、`500` — にレスポンスヘッダとしてそのまま返され、これらの行と `decision` 行に `requestId` として載ります。これで deny を enforcement 側サービス自身のログと突き合わせられます。載せるのは `A-Z a-z 0-9 - _ . : + / = #` からなる 1〜128 文字の場合だけで、UUID、ULID、16 進や W3C のトレース ID、base64、[protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) が採番する ID はすべて収まります。それ以外は送られなかったものとして扱い — 返さず、ログに出さず、コレクターにも渡しません — 呼び出し元が送らなかった場合にサーバーが採番することもありません。`HTTP_CALLER_AUTH_TOKEN` のゲートは decision エンドポイントより手前で応答するため、ID を返しません。
+
 ### メトリクス
 
 `GET /metrics` は Prometheus text exposition format を返します。
@@ -150,6 +181,7 @@ Authorization: Bearer <jwt>
 | `auth_decisions_total` | counter | `decision` | allow/deny 比率。系列はちょうど 2 本 |
 | `auth_denials_total` | counter | `code` | どのルールが deny しているか — ログ行の `deniedBy` の集計版 |
 | `auth_decision_duration_seconds` | histogram | `decision` | パイプラインと evaluator に費やした時間 |
+| `auth_collector_failures_total` | counter | `collector`, `category` | どのファクトソースがどう判定を失敗させているか — 失敗イベント行の `collector` フィールドの集計版。`category` は `collector_timeout` か `collector_threw` |
 | `http_request_duration_seconds` | histogram | `method`, `route`, `status` | リクエストレート・エラーレート・レイテンシ（RED メソッド） |
 | `auth_policy_verifier_*` | 各種 | — | Node プロセス既定メトリクス — event loop lag, heap, GC, handles |
 
@@ -165,6 +197,7 @@ deny はエラーではないので、書く価値のあるアラートは deny 
 - **`route`** は URL ではなく Express の route *パターン*で、マッチしなかったもの（ポートに到達できる何かからの 404 プローブ）はすべて `route="unmatched"` に潰れます。
 - **`method`** はこのサービスが実際に処理できる 9 メソッドの allowlist で、それ以外は `method="other"` です。Node のパーサは llhttp が知る全メソッド（`PURGE`, `MKCOL`, `PROPFIND` など）をサーバーに渡すため、`req.method` はパスと同程度に呼び出し元の制御下にあります。
 - **`code`** は deployment が設定したルールに由来するので運用者が有界にできます — ただし `code` は `Rule` インターフェースのフィールドであり、ルールはリクエストごとに構築されるため、カスタム rule collector が resource から code を導出するようになるまでは 1 回の編集です。異なる値 32 個で打ち止め、それ以降は `code="other"` に潰れます。`code="other"` が伸びていること自体が、リクエストごとに code を作っているルールがあるというシグナルです。
+- **`collector`** は設定されたエントリ — `attribute.collectors` / `rule.collectors` 内の位置とクラス名 — なので設定によって有界です。ただしコレクターは任意の名前を付けた `CollectorTimeoutError` を自分で throw できるため、同じく異なる値 32 個で打ち止め、それ以降は `collector="other"` に潰れます。**`category`** は閉じた列挙値です。
 
 #### `/metrics` への到達方法
 

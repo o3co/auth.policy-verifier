@@ -406,7 +406,7 @@ Attribute / Rule コレクターはデータベースや HTTP API を呼ぶ層�
 
 各コレクターには `CollectorContext.signal` で `AbortSignal` が渡されます。そのコレクターの予算切れ、pipeline のデッドライン超過、兄弟コレクターの失敗による決定の中止、呼び出し側の切断のいずれでも abort します。コレクターが待つ相手にそのまま渡してください — `fetch(url, { signal: context.signal })` — そうすれば外向きの処理も実際に取り消されます。
 
-**上限を超えた決定は deny です。** `403` と `code: "collector_timeout"`、`reason.groups` は空で応答し、詳細は呼び出し側ではなく `collector_timeout` ログ行に出ます。意図的に `5xx` にはせず、「時間内に集まったぶんで判定する」こともしません — ルールが少ないことは**ポリシーが弱いこと**であり、1 つも無ければ `rule.onEmptyRuleSet = "allow"` の deployment では **allow** になるからです。そのため評価器には到達させません。バッチでは上限は決定単位なので、1 エントリの超過はそのエントリだけを deny にし、残りは通常どおり判定されます。
+**上限を超えた決定は deny です。** `403` と `code: "collector_timeout"`、`reason.groups` は空で応答し、詳細は呼び出し側ではなく `collector_timeout` ログ行に出ます — この行はコレクターを名指しし、`auth_collector_failures_total` に計上されます（[失敗イベント](#失敗イベント) を参照）。意図的に `5xx` にはせず、「時間内に集まったぶんで判定する」こともしません — ルールが少ないことは**ポリシーが弱いこと**であり、1 つも無ければ `rule.onEmptyRuleSet = "allow"` の deployment では **allow** になるからです。そのため評価器には到達させません。バッチでは上限は決定単位なので、1 エントリの超過はそのエントリだけを deny にし、残りは通常どおり判定されます。
 
 ### Rule のデッドライン
 
@@ -531,6 +531,27 @@ allow のときは `deniedBy` の代わりに `satisfiedBy` が入り、各グ�
 
 **決してログに載らないもの:** 生の bearer トークン、`sub` を超えるクレーム集合、そして呼び出し元の `context` オブジェクト — 自由形式で collector にそのまま渡されるため、呼び出し側サービスのリクエストペイロードが行き着く場所そのものです。
 
+### 失敗イベント
+
+判定できなかった decision は `error` でログに出て、その行はどの種類の失敗がどこで起きたかを示します (#200):
+
+```json
+{"msg":"verify_internal_error","endpoint":"/verify","requestId":"6f1c…","category":"collector_threw","collector":"attribute.collectors[1] (EntitlementStoreCollector)","err":{"message":"entitlement store is down"}}
+```
+
+| イベント | 応答 | `category` | 併せて示すもの |
+|---|---|---|---|
+| `collector_timeout` | `403 collector_timeout` | `collector_timeout` | `collector`: `verify.collectorTimeoutMs` を超えたエントリ、または pipeline が `verify.collectorDeadlineMs` を超えた場合はリストそのもの（`attribute.collectors`） |
+| `rule_timeout` | `403 rule_timeout` | `rule_timeout` | `rule`: `{ ruleType, code }` |
+| `attribute_conflict` | `403 attribute_conflict` | `attribute_conflict` | —（2 つのコレクターが食い違った。どちらか一方だけの責任ではない） |
+| `verify_internal_error` | `500 internal_error` | `collector_threw`、`rule_threw`、`body_rejected`、`internal` のいずれか | `collector_threw` なら `collector`、`rule_threw` なら `rule` |
+
+`category` はこの 7 値の閉じた集合なので、`err.message` への正規表現ではなく等値でフィルタしてください。`collector` は `attribute.collectors` / `rule.collectors` 内のエントリ位置とクラス名で、どちらも設定で決まります。`body_rejected` は deny エンベロープが 4xx に対応付けていない body parser の失敗（router の手前の何かがストリームを読んでしまった等）、`internal` はどの pipeline にも帰属しなかったもの — throw した resource parser や authenticator、`Error` ではなく文字列などオブジェクトでない値で reject したコレクター — です。JWKS に到達できない場合はここに含まれません: それは `401` で応答され、`jwt_verification_unavailable` としてログに出ます。
+
+router がこれらの行に加えるものは、資格情報・クレーム・`context` のいずれも含みません: category は列挙値、コレクター名とルール名は設定由来、リクエスト ID は下記のとおり検証済みです。`err` は throw されたエラーそのもので、コレクターが自分のエラーメッセージに何を書くかはそのコレクターの責任です。
+
+**リクエストの相関.** 呼び出し元が送った `x-request-id` は、decision エンドポイントが返すすべての応答 — allow、deny、拒否、`500` — にレスポンスヘッダとしてそのまま返され、上記すべての行と `decision` 行に `requestId` として載ります。これで deny を enforcement 側サービス自身のログと突き合わせられます。載せるのは `A-Z a-z 0-9 - _ . : + / = #` からなる 1〜128 文字の場合だけです（UUID、ULID、16 進や W3C のトレース ID、base64、protobuf.interceptors 自身の ID はすべて収まります）。それ以外の値は送られなかったものとして扱い — 返さず、ログに出さず、コレクターにも渡しません — 呼び出し元が送らなかった場合にサーバー側で ID を採番することもありません。
+
 ### メトリクス
 
 `GET /metrics`、Prometheus text exposition format:
@@ -540,12 +561,13 @@ allow のときは `deniedBy` の代わりに `satisfiedBy` が入り、各グ�
 | `auth_decisions_total` | counter | `decision` |
 | `auth_denials_total` | counter | `code` |
 | `auth_decision_duration_seconds` | histogram | `decision` |
+| `auth_collector_failures_total` | counter | `collector`, `category` |
 | `http_request_duration_seconds` | histogram | `method`, `route`, `status` |
 | `auth_policy_verifier_*` | 各種 | Node プロセス既定メトリクス |
 
 `http_request_duration_seconds` は [auth.provider](https://github.com/o3co/auth.provider) と名前もラベル集合も一致するので、1 つの Prometheus job でスタックの両側を賄えます。
 
-**すべてのラベルは有界です。** 有界でないラベルは値ごとに新しい時系列を作り出し、それは監視すべき対象を監視する仕組みそのものをメトリクスエンドポイントが落とす経路だからです。`resource` / `action` / `sub` はそもそもラベルにしていません — これらはリクエスト（ボディまたはトークン）由来で、高カーディナリティが意味を持つログ行の側に属します。`route` は Express の route パターンでマッチしないものは `route="unmatched"` に潰れ、`method` は allowlist でそれ以外は `"other"`、`code` は異なる値 32 個で打ち止めです。
+**すべてのラベルは有界です。** 有界でないラベルは値ごとに新しい時系列を作り出し、それは監視すべき対象を監視する仕組みそのものをメトリクスエンドポイントが落とす経路だからです。`resource` / `action` / `sub` はそもそもラベルにしていません — これらはリクエスト（ボディまたはトークン）由来で、高カーディナリティが意味を持つログ行の側に属します。`route` は Express の route パターンでマッチしないものは `route="unmatched"` に潰れ、`method` は allowlist でそれ以外は `"other"`、`code` は異なる値 32 個で打ち止めです。`auth_collector_failures_total` の `collector` は設定されたエントリ（同じく 32 個で打ち止め）、`category` は `collector_timeout` か `collector_threw` です。
 
 **`/metrics` は `http.callerAuth` でゲートしていません。** Prometheus の scrape config が持つのは `authorization` / `basic_auth` / `oauth2` であって任意ヘッダではないため、`x-caller-token` でゲートすると標準の scraper から scrape 不能になり、*判定* を認可する資格情報を監視システムに渡す運用へ追い込むことになります。このエンドポイントが公開するのは有界ラベル上のカウントとレイテンシだけで、個々の判定に関する情報は含みません。境界となるのは bind アドレスで、既定はループバックです（#108）— scraper はホスト側に置き（同一 Kubernetes Pod のサイドカーはネットワーク名前空間を共有するので、既定のまま `127.0.0.1:3000/metrics` に到達できます）、`0.0.0.0` に bind せざるを得ない場合は `/verify` と同様にネットワーク層でポートを制限してください。
 
