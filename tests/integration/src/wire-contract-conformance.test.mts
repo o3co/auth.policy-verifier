@@ -208,6 +208,7 @@ const adapter: WireContractAdapter = {
 		let pending: Test = request(app).post(exchange.endpoint);
 		const header = await authorization(exchange.credential);
 		if (header !== undefined) pending = pending.set("Authorization", header);
+		if (exchange.requestId !== undefined) pending = pending.set("x-request-id", exchange.requestId);
 
 		// Always explicit: superagent's default for a string body is
 		// form-urlencoded, and a case that means to send JSON must not depend on
@@ -221,6 +222,7 @@ const adapter: WireContractAdapter = {
 			contentType: res.headers["content-type"] as string | undefined,
 			body: res.body,
 			text: res.text,
+			requestId: res.headers["x-request-id"] as string | undefined,
 		};
 	},
 
