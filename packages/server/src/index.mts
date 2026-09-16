@@ -38,6 +38,11 @@ export {
 	resolveCallerAuth,
 } from "./http/callerAuth.mjs";
 export {
+	acceptRequestId,
+	MAX_REQUEST_ID_LENGTH,
+	REQUEST_ID_HEADER,
+} from "./http/requestId.mjs";
+export {
 	type AssertedJwtConfig,
 	type AudienceClaimCheck,
 	type AuthenticationResult,

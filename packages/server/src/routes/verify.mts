@@ -18,6 +18,7 @@ import {
 } from "@o3co/auth.policy-verifier.core";
 import express from "express";
 import { NUMERIC_BOUNDS, resolveBound } from "../config/bounds.mjs";
+import { acceptRequestId, REQUEST_ID_HEADER } from "../http/requestId.mjs";
 import {
 	createTokenAuthenticator,
 	type TokenAuthenticator,
@@ -523,6 +524,12 @@ function parseDecisionRequest(
  * 400) emit neither, so the log stream and the metric agree on what a decision
  * is. See `observability/decisionEvent.mts` for what the line does and does not
  * carry.
+ *
+ * A caller-sent `x-request-id` (#200) is echoed on every response the router
+ * writes and carried on the `decision` line, on every failure line and to
+ * collectors on `CollectorContext.headers` — when it is a bounded token of a
+ * safe charset (`acceptRequestId`). Any other value is treated as absent, and
+ * none is minted.
  */
 /**
  * A signal that aborts when the response closes before it was finished — the
@@ -634,8 +641,10 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 		signal: AbortSignal,
 	): Promise<DecisionResponse> {
 		const subject = auth.subject;
-		const requestId = req.get("x-request-id");
-		const headers = requestId ? { "x-request-id": requestId } : undefined;
+		// #200: the id is carried only in the shape `acceptRequestId` admits —
+		// the same value the response echoes and every line below logs.
+		const requestId = requestIdOf(req);
+		const headers = requestId !== undefined ? { [REQUEST_ID_HEADER]: requestId } : undefined;
 		// `subject` was populated from a credential the authenticator verified and
 		// `headers` were read off the transport; `entry.context` is whatever the
 		// caller put in the body, so it crosses into the collector layer marked as
@@ -702,7 +711,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 					err: cause,
 					resource: entry.resource,
 					action: entry.action,
-					requestId,
+					...correlation(requestId),
 					...failure,
 				},
 				denial.code,
@@ -750,6 +759,16 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	}
 
 	const router = express.Router();
+	// #200: the caller's request id goes back on every response this router
+	// writes — decisions, refusals and the 500 alike — so a denial can be
+	// matched to the enforcing service's own log. First, ahead of the body
+	// parser, so its refusals carry it too. An id `acceptRequestId` refuses is
+	// not echoed, and none is ever minted: see `http/requestId.mts`.
+	router.use((req, res, next) => {
+		const requestId = requestIdOf(req);
+		if (requestId !== undefined) res.setHeader(REQUEST_ID_HEADER, requestId);
+		next();
+	});
 	// An explicit limit, not Express's unstated 100 KB default (#118). It is the
 	// only one of the five spent here: a body over it never becomes an object,
 	// and `bodyParserFailure` below turns the refusal into the deny envelope.
@@ -783,7 +802,10 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				return;
 			}
 			const failure = classifyFailure(cause);
-			logger.error({ err: cause, endpoint: "/verify", ...failure }, "verify_internal_error");
+			logger.error(
+				{ err: cause, endpoint: "/verify", ...correlation(requestIdOf(req)), ...failure },
+				"verify_internal_error",
+			);
 			countCollectorFailure(failure);
 			res.status(500).json(errorBody("internal_error", "Internal server error"));
 		}
@@ -890,7 +912,10 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				return;
 			}
 			const failure = classifyFailure(cause);
-			logger.error({ err: cause, endpoint: "/verify/batch", ...failure }, "verify_internal_error");
+			logger.error(
+				{ err: cause, endpoint: "/verify/batch", ...correlation(requestIdOf(req)), ...failure },
+				"verify_internal_error",
+			);
 			countCollectorFailure(failure);
 			res.status(500).json(errorBody("internal_error", "Internal server error"));
 		}
@@ -930,7 +955,10 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 		const failure: ClassifiedFailure = isBodyParserFailure(err)
 			? { category: "body_rejected" }
 			: classifyFailure(err);
-		logger.error({ err, endpoint: req.path, ...failure }, "verify_internal_error");
+		logger.error(
+			{ err, endpoint: req.path, ...correlation(requestIdOf(req)), ...failure },
+			"verify_internal_error",
+		);
 		countCollectorFailure(failure);
 		res.status(500).json(errorBody("internal_error", "Internal server error"));
 	};
@@ -977,6 +1005,20 @@ function bodyParserFailure(
 		default:
 			return undefined;
 	}
+}
+
+/** The request id this router carries for `req` — see `http/requestId.mts`. */
+function requestIdOf(req: express.Request): string | undefined {
+	return acceptRequestId(req.get(REQUEST_ID_HEADER));
+}
+
+/**
+ * The `requestId` field of a failure line: present when there is an id to
+ * carry, and absent — not `undefined` — when there is none, the disposition the
+ * `decision` line already takes (see `present` in `observability/decisionEvent`).
+ */
+function correlation(requestId: string | undefined): { requestId?: string } {
+	return requestId !== undefined ? { requestId } : {};
 }
 
 /**
