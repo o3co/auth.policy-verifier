@@ -6,6 +6,192 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
+## [0.11.0] - 2026-09-17
+
+### Security
+
+- **Nothing a caller or a collector wrote reaches the new failure fields or
+  `/metrics`** (`@o3co/auth.policy-verifier.server`, `.core`,
+  [#200](https://github.com/o3co/auth.policy-verifier/issues/200),
+  [#242](https://github.com/o3co/auth.policy-verifier/pull/242)). `category`
+  is an enum. The `collector` on a line or a label is the one the collector
+  runner recorded for that decision, never a name read off the error, so a
+  collector cannot relabel itself — or put a credential on a log line or on
+  `/metrics` — by throwing a `CollectorTimeoutError` it built. A timeout
+  nothing recorded is `collector: "unattributed"`. A class name is used only
+  when it is an identifier of at most 64 characters, because `name` is an
+  ordinary property. A rule's `ruleType` and `code` are carried only when
+  identifier-shaped (a letter, then letters, digits, `_`, `.` or `-`, at most
+  64 characters), because a rule collector may build rules per request from
+  the claims or `context`, and are `redacted` otherwise.
+
+  **`err` is rebuilt for core's three deny errors.** `CollectorTimeoutError`,
+  `RuleTimeoutError` and `AttributeConflictError` name a collector, a rule or
+  an attribute key in their message and in their own fields, which a JSON
+  logger serialises, and through 0.10.0 each was logged exactly as
+  constructed. Each is now logged as a fresh instance built from the
+  classified collector or rule and the attribute key held to the same
+  identifier shape, with a stack of its header line alone. An attribute key
+  outside that shape (one carrying `:` or `/`, say) therefore reads `redacted`
+  on the `attribute_conflict` line. What was thrown, and what the deny is
+  routed on, is untouched. Any other error is logged as thrown, so its message
+  stays its author's to keep free of the token, the claims and `context`.
+
+- **The request id is carried only as a token** (`.server`,
+  [#242](https://github.com/o3co/auth.policy-verifier/pull/242)). The
+  `x-request-id` a caller sends now reaches a response header as well as the
+  logs and the collectors, and protobuf.interceptors forwards an incoming id
+  unchanged, so the check has to live here: 1–128 characters of
+  `A-Z a-z 0-9 - _ . : + / = #` (`acceptRequestId`). That refuses whitespace
+  and line breaks, a trailing one included (a forged second log line), quotes
+  and braces (a forged JSON field), commas (Node joins two `x-request-id`
+  headers with `, `, which is two ids, not one), `;`, `%` and anything outside
+  ASCII. A refused id is not trimmed or escaped into something the caller did
+  not send; it is treated exactly as a missing one. What that changes for an
+  existing deployment is under Changed.
+
+### Added
+
+- **Failure lines say what kind of failure kept a decision from being made,
+  and where** (`.server`,
+  [#200](https://github.com/o3co/auth.policy-verifier/issues/200),
+  [#242](https://github.com/o3co/auth.policy-verifier/pull/242)).
+  `verify_internal_error` carried only `err` and `endpoint`: finding the
+  failing fact source was a regex over `err.message`, no dashboard could point
+  at one collector, and a `500` could not be matched to the enforcing
+  service's log. Every failure line for a decision that could not be made now
+  carries a `category`, the `collector` or `rule` when there is one to name,
+  and `requestId` when the caller sent one the server carries:
+
+  | Event | Answered | `category` | Also names |
+  | --- | --- | --- | --- |
+  | `collector_timeout` | `403 collector_timeout` | `collector_timeout` | `collector` |
+  | `rule_timeout` | `403 rule_timeout` | `rule_timeout` | `rule: { ruleType, code }` |
+  | `attribute_conflict` | `403 attribute_conflict` | `attribute_conflict` | — |
+  | `verify_internal_error` | `500 internal_error` | `collector_threw`, `rule_threw`, `body_rejected`, `internal` | `collector` for `collector_threw`, `rule` for `rule_threw` |
+
+  The set is closed (`FAILURE_CATEGORIES`), so filter and alert on it by
+  equality. `body_rejected` is a body-parser failure the deny envelope does
+  not map to a 4xx; `internal` is anything that did not come out of a
+  decision's own collect or evaluation — a resource parser or authenticator
+  that threw, whatever it threw. An unreachable JWKS has no category (it is
+  answered `401` and logged as `jwt_verification_unavailable`), and neither
+  does a Cedar engine failure (the rule answers it as a `cedar_deny` with a
+  line of its own). A collector is named by its position in config and its
+  class, `attribute.collectors[1] (EntitlementStoreCollector)`, or by the list
+  itself (`attribute.collectors`) when the pipeline overran
+  `collectorDeadlineMs`. `verify_internal_error` carries these on `/verify`,
+  `/verify/batch` and the router's terminal handler. The router picks the deny
+  it answers from the same classification, so the logged `category` and the
+  wire `code` always agree; no decision changes. On every failure line
+  `requestId` is now left out when there is no id, rather than set to
+  `undefined`. What the new fields may contain is under Security. Also exports
+  `FailureCategory`, `CollectorFailureCategory` and `ClassifiedFailure`.
+  Written up under "Failure events" in the root and `templates/standalone`
+  READMEs, in both languages.
+
+- **`auth_collector_failures_total{collector,category}`** (`.server`,
+  [#242](https://github.com/o3co/auth.policy-verifier/pull/242)). Which fact
+  source is failing decisions, and how: `category` is `collector_timeout` or
+  `collector_threw`, and `collector` is the name the failure line carries. It
+  is incremented once for each line that reports one, so a batch in which
+  three entries time out counts three and a batch that fails with a `500`
+  counts one. Rule failures are not counted. The label is bounded by
+  configuration, and capped at 32 distinct values (`MAX_COLLECTOR_LABELS`) as a
+  backstop, after which new values read `other`, as `code` on
+  `auth_denials_total` already does. The seam is the new optional
+  `DecisionMetrics.observeCollectorFailure` (`CollectorFailureObservation`),
+  so a `DecisionMetrics` written before it still type-checks and simply does
+  not count.
+
+- **`FailureRecord`: which collector or rule one decision's failure came
+  from** (`@o3co/auth.policy-verifier.core`,
+  [#242](https://github.com/o3co/auth.policy-verifier/pull/242)). The
+  collector runner and `evaluate()` knew where a failure was and threw the
+  error on without saying. A caller now creates one `FailureRecord` per
+  decision and hands it to both collects — `collect(request, { failures })`,
+  the new optional `CollectOptions` argument of `AttributePipeline.collect` and
+  `RulePipeline.collect` — and to `evaluate(attrs, rules, { failures })`
+  (`EvaluateOptions.failures`). `sourceOf(error)` then answers a
+  `FailureSource`: `{ kind: "collector", pipeline, collector }`,
+  `{ kind: "deadline", pipeline }` or `{ kind: "rule", ruleType, code }`. The
+  runner and the evaluator record every failure themselves, their own timeouts
+  included, and never read the source off the error. It is recorded beside the
+  error, not wrapped around it: `collect` and `evaluate()` still reject with
+  exactly what was thrown, so a transport that tells a deny from a fault by
+  class sees no change. Nothing is kept process-wide, so concurrent decisions
+  failing on one shared error object each get their own answer; within one
+  decision, the first source recorded for a value wins. A rejection after the
+  collector's or rule's own signal aborted — a sibling failed, the deadline
+  passed, the caller left — is attributed to nobody. Written up in core's
+  README, "FailureRecord". The server's router keeps one record per decision,
+  and refuses to build when `evaluateOptions` carries `failures`.
+
+- **The caller's `x-request-id` comes back on every decision-endpoint
+  response** (`.server`,
+  [#242](https://github.com/o3co/auth.policy-verifier/pull/242)). So that a
+  denial, or a `500`, can be matched to the enforcing service's own log,
+  `POST /verify` and `POST /verify/batch` set the `x-request-id` response
+  header on everything they write: allow, deny, batch, the
+  `400` / `401` / `413` / `415` refusals and `500`. Body and status are
+  unchanged. The id is echoed only in the shape under Security — UUIDs, ULIDs,
+  hex and W3C trace ids, base64 and base64url, Kong's `uuid#counter` and
+  protobuf.interceptors' own `YYYYMMDDHHmmss_<16 hex>` all fit — and that
+  same value is the `requestId` on the `decision` line and the failure lines,
+  and the one forwarded on `CollectorContext.headers`. No id is minted when the
+  caller sent none. The `http.callerAuth` gate answers before the router and
+  does not echo it. Exports `acceptRequestId`, `REQUEST_ID_HEADER` and
+  `MAX_REQUEST_ID_LENGTH`.
+
+- **The wire-contract fixture pins the `x-request-id` response header**
+  (`tests/integration`,
+  [#242](https://github.com/o3co/auth.policy-verifier/pull/242)).
+  `responseEnvelopes.json`, the table
+  [o3co/protobuf.interceptors](https://github.com/o3co/protobuf.interceptors)
+  implements against, gains a top-level `requestId` block — `header`,
+  `maxLength` (`128`), `pattern`, `echoedOn` and `otherwise` — and its notes
+  say the caller-auth gate does not echo. Every existing key is unchanged. The
+  conformance suite exercises the block on the wire: the id is echoed on an
+  allow, a deny, a batch, a `401` and a `400`, and on the terminal `500` where
+  the adapter has a `failing` fixture; nothing is echoed when no id was sent,
+  or for an id over the bound or outside the pattern, which is still decided
+  rather than refused. `WireExchange` and `WireResponse` gain an optional
+  `requestId` for the adapter.
+
+### Changed
+
+- **BREAKING: an `x-request-id` outside the accepted shape is treated as
+  absent everywhere** (`.server`, #200, #242). Through 0.10.0 any non-empty
+  value was logged as sent on the `decision` line and forwarded on
+  `CollectorContext.headers`. A value that is not 1–128 characters of
+  `A-Z a-z 0-9 - _ . : + / = #` is now neither, and is not echoed or carried
+  on a failure line either. The decision is made exactly as for a request
+  that sent no id: it is not a refusal, and nothing reports the drop. **Check
+  the ids your enforcement layer sends against that shape**: one carrying
+  whitespace, a comma, `;`, `%` or non-ASCII, or longer than 128 characters,
+  loses its correlation. A request carrying two `x-request-id` headers — a
+  proxy that adds its own beside the caller's, for instance — reaches the
+  server as one comma-joined value and loses it the same way. A collector that
+  forwards `headers["x-request-id"]` upstream already has to cope with its
+  absence, for a caller that sends none, and now sees it absent for these
+  requests too.
+
+- **BREAKING (text only)**: `CollectorTimeoutError` names the collector by its
+  position in config (`.core`, #200, #242). A per-collector timeout's message
+  moves from `attribute collector EntitlementStoreCollector (index 1) did not
+  finish within its 2000 ms budget` to `collector attribute.collectors[1]
+  (EntitlementStoreCollector) did not finish within its 2000 ms budget`, and
+  its `collector` field from `EntitlementStoreCollector (index 1)` to
+  `attribute.collectors[1] (EntitlementStoreCollector)`, the name the failure
+  lines and the counter carry. A collector wired as an object literal, formerly
+  `at index 1`, is `attribute.collectors[1]`, and so is one whose class name is
+  not an identifier of at most 64 characters. The pipeline deadline's message
+  and every type are unchanged. **A log query, alert or code that matches the
+  old message or parses `collector` must update**; matching the
+  `collector_timeout` event and its `collector` field is the durable form.
+
+- Dependencies (#241). `.server` now requires `zod ^4.6.2`.
+
 ## [0.10.0] - 2026-09-14
 
 ### Added
