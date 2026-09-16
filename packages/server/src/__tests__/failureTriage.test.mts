@@ -47,7 +47,7 @@ import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { HS256KeyResolverFactory } from "#/jwt/index.mjs";
-import { classifyFailure, FAILURE_CATEGORIES } from "#/observability/failure.mjs";
+import { classifyFailure, FAILURE_CATEGORIES, loggableError } from "#/observability/failure.mjs";
 import { createMetrics, MAX_COLLECTOR_LABELS } from "#/observability/metrics.mjs";
 import { createVerifyRouter, type VerifyRouterConfig } from "#/routes/verify.mjs";
 
@@ -274,6 +274,94 @@ describe("the failure category set (#200)", () => {
 		["a rejection that is not an object", "boom", undefined, { category: "internal" }],
 	])("classifies %s", (_what, cause, failures, expected) => {
 		expect(classifyFailure(cause, failures)).toEqual(expected);
+	});
+
+	describe("loggableError", () => {
+		const secret = "victim@example.com";
+
+		it("rebuilds a RuleTimeoutError from the classified rule, leaving no trace of the original text", () => {
+			const cause = new RuleTimeoutError({
+				ruleType: secret,
+				code: "078-05-1120",
+				timeoutMs: 20,
+				limit: "deadline",
+				started: false,
+			});
+
+			const logged = loggableError(cause, {
+				category: "rule_timeout",
+				rule: { ruleType: "redacted", code: "redacted" },
+			}) as RuleTimeoutError;
+
+			expect(logged).toBeInstanceOf(RuleTimeoutError);
+			expect(logged).toMatchObject({
+				ruleType: "redacted",
+				code: "redacted",
+				timeoutMs: 20,
+				limit: "deadline",
+				started: false,
+			});
+			expect(
+				JSON.stringify({ ...logged, message: logged.message, stack: logged.stack }),
+			).not.toMatch(/victim|078-05/);
+		});
+
+		it("rebuilds a CollectorTimeoutError from the classified collector, not the name it carries", () => {
+			const cause = new CollectorTimeoutError({
+				pipeline: "rule",
+				limit: "collector",
+				timeoutMs: 30,
+				collector: secret,
+			});
+
+			const logged = loggableError(cause, {
+				category: "collector_timeout",
+				collector: "rule.collectors[0]",
+			}) as CollectorTimeoutError;
+
+			expect(logged).toBeInstanceOf(CollectorTimeoutError);
+			expect(logged.message).toBe(
+				"collector rule.collectors[0] did not finish within its 30 ms budget",
+			);
+			expect(logged.stack).not.toContain(secret);
+		});
+
+		it("does not carry a field of the wrong type into the rebuilt message", () => {
+			const cause = new CollectorTimeoutError({
+				pipeline: secret as "rule",
+				limit: "deadline",
+				timeoutMs: secret as unknown as number,
+			});
+
+			const logged = loggableError(cause, { category: "internal" }) as CollectorTimeoutError;
+
+			expect(`${logged.message} ${logged.stack} ${JSON.stringify({ ...logged })}`).not.toContain(
+				secret,
+			);
+		});
+
+		it("rebuilds an AttributeConflictError around a key held to the identifier shape", () => {
+			expect(
+				(
+					loggableError(new AttributeConflictError(`ssn ${secret}`), {
+						category: "attribute_conflict",
+					}) as AttributeConflictError
+				).key,
+			).toBe("redacted");
+			expect(
+				(
+					loggableError(new AttributeConflictError("tenantId"), {
+						category: "attribute_conflict",
+					}) as AttributeConflictError
+				).key,
+			).toBe("tenantId");
+		});
+
+		it("hands back any other error as it was thrown", () => {
+			const cause = new Error(`store is down for ${secret}`);
+
+			expect(loggableError(cause, { category: "internal" })).toBe(cause);
+		});
 	});
 
 	it.each([
@@ -774,10 +862,87 @@ describe("redaction: nothing request-derived reaches a failure line or a label (
 		for (const event of [threw, timedOut]) {
 			expect(event.obj.rule).toEqual({ ruleType: "redacted", code: "redacted" });
 		}
-		// The whole line, error included, for the fault: its error names neither.
+		// The whole line, error included, on both paths: a RuleTimeoutError names
+		// its rule in its message and in its own fields, and pino's serializer
+		// logs both.
 		for (const secret of [token, "victim@example.com", "078-05-1120"]) {
 			expect(render(threw)).not.toContain(secret);
+			expect(render(timedOut)).not.toContain(secret);
 		}
+		expect(timedOut.obj.err).toBeInstanceOf(RuleTimeoutError);
+	});
+
+	it("keeps request-derived text inside a deny error's own message and fields out of `err`", async () => {
+		// CollectorTimeoutError and AttributeConflictError are public and carry
+		// text in their message and fields: a collector name, an attribute key.
+		// A collector can build either from the claims or the context.
+		const ssn = "078-05-1120";
+		const forging: AttributeCollector = {
+			collect: async (context) => {
+				const value = String(readUntrustedRequestContext(context.requestContext)?.ssn);
+				if (context.action === "forge") {
+					throw new CollectorTimeoutError({
+						pipeline: "attribute",
+						limit: "collector",
+						timeoutMs: 1,
+						collector: `ssn ${value}`,
+					});
+				}
+				return context.action === "conflict" ? new Map([[`ssn:${value}`, "a"]]) : new Map();
+			},
+		};
+		const conflicting: AttributeCollector = {
+			collect: async (context) => {
+				const value = String(readUntrustedRequestContext(context.requestContext)?.ssn);
+				return context.action === "conflict" ? new Map([[`ssn:${value}`, "b"]]) : new Map();
+			},
+		};
+		const { app, events } = createTestApp({
+			attributeCollectors: [new PayloadScopeCollector(), forging, conflicting],
+		});
+		const token = await signToken({ sub: "user-1", scope: "forge:project conflict:project" });
+		const send = (action: string) =>
+			request(app)
+				.post("/verify")
+				.set("Authorization", `Bearer ${token}`)
+				.send({ resource: "project", action, context: { ssn } });
+
+		expect((await send("forge")).status).toBe(403);
+		expect((await send("conflict")).status).toBe(403);
+
+		const [timedOut] = named(events, "collector_timeout");
+		const [conflict] = named(events, "attribute_conflict");
+		for (const event of [timedOut, conflict]) {
+			expect(render(event)).not.toContain(ssn);
+			expect(render(event)).not.toContain(token);
+		}
+		// Still the same kind of error, saying the same thing in safe terms.
+		expect(timedOut.obj.err).toBeInstanceOf(CollectorTimeoutError);
+		expect((timedOut.obj.err as Error).message).toBe(
+			"collector attribute.collectors[1] did not finish within its 1 ms budget",
+		);
+		expect(conflict.obj.err).toBeInstanceOf(AttributeConflictError);
+		expect((conflict.obj.err as AttributeConflictError).key).toBe("redacted");
+	});
+
+	it("keeps a forged deny error's text out of verify_internal_error's `err` too", async () => {
+		const forgedCode = "victim@example.com";
+		const { app, events } = createTestApp({
+			router: {
+				jwt: undefined,
+				authenticator: {
+					authenticate: async () => {
+						throw new RuleTimeoutError({ ruleType: "cedar", code: forgedCode, timeoutMs: 1 });
+					},
+				},
+			},
+		});
+
+		expect((await decide(app)).status).toBe(500);
+
+		const [failure] = named(events, "verify_internal_error");
+		expect(failure.obj.category).toBe("internal");
+		expect(render(failure)).not.toContain(forgedCode);
 	});
 
 	it("keeps the credential, the claims and the caller's context out of the lines and /metrics", async () => {

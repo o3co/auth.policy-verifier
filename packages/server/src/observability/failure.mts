@@ -74,20 +74,23 @@ export type CollectorFailureCategory = Extract<
  */
 export const UNATTRIBUTED = "unattributed";
 
-/** What a rule's `ruleType` or `code` is logged as when it is not identifier-shaped. */
+/** What a rule's `ruleType` or `code`, or an attribute key, is logged as when it is not identifier-shaped. */
 export const REDACTED = "redacted";
 
 /**
- * The shape a rule's `ruleType` and `code` must have to be logged: a letter,
- * then letters, digits, `_`, `.` or `-`, at most 64 characters in all. Codes
- * are documented as short stable identifiers (`invalid_scope`, `cedar_deny`),
- * but a rule collector builds rules per request and may derive either from the
- * claims or the context; anything carrying whitespace, `@`, `:`, a line break,
- * or the length of a token is not an identifier an operator wrote.
+ * The shape a rule's `ruleType` and `code` — and an attribute key — must have to
+ * be logged: a letter, then letters, digits, `_`, `.` or `-`, at most 64
+ * characters in all. Codes are documented as short stable identifiers
+ * (`invalid_scope`, `cedar_deny`) and keys as the deployment's own constants,
+ * but a collector builds rules and attribute maps per request and may derive
+ * either from the claims or the context; anything carrying whitespace, `@`,
+ * `:`, a line break, or the length of a token is not an identifier an operator
+ * wrote.
  */
-const RULE_IDENTIFIER = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
+const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
 
-const identifier = (value: string): string => (RULE_IDENTIFIER.test(value) ? value : REDACTED);
+const identifier = (value: unknown): string =>
+	typeof value === "string" && IDENTIFIER.test(value) ? value : REDACTED;
 
 /**
  * A failure, sorted. The collector or rule is named exactly when the category
@@ -144,6 +147,68 @@ export function classifyFailure(cause: unknown, failures?: FailureRecord): Class
 		return { category: "rule_threw", rule: ruleName(source) };
 	}
 	return { category: "internal" };
+}
+
+/**
+ * The error to log as `err` for a failure: the one thrown, except for the three
+ * deny errors core defines, which are rebuilt from safe parts.
+ *
+ * Those three name what they are about in their message **and** in their own
+ * fields — `RuleTimeoutError.ruleType` / `.code`, `CollectorTimeoutError.collector`,
+ * `AttributeConflictError.key` — and a JSON logger serialises both (pino's `err`
+ * serializer copies every enumerable property). Each is text a collector can
+ * derive from the claims or the context, or put into an instance it built
+ * itself. So what is logged is a fresh instance of the same class: the rule or
+ * collector the classification named (never the error's), an attribute key
+ * held to the identifier shape, and the numeric and enum fields only when they
+ * are what their types say. Its `stack` is the header line alone: the original
+ * stack begins with the original message, and the frames of the rebuilt one
+ * would be the log site's.
+ *
+ * Logging only — what was thrown, and what `instanceof` routed on, is untouched.
+ * Every other error is handed back as thrown: its message is its author's.
+ */
+export function loggableError(cause: unknown, failure: ClassifiedFailure): unknown {
+	if (cause instanceof RuleTimeoutError) {
+		const rule = "rule" in failure ? failure.rule : { ruleType: UNATTRIBUTED, code: UNATTRIBUTED };
+		return headerOnly(
+			new RuleTimeoutError({
+				ruleType: rule.ruleType,
+				code: rule.code,
+				timeoutMs: milliseconds(cause.timeoutMs),
+				limit: cause.limit === "deadline" ? "deadline" : "rule",
+				started: cause.started !== false,
+			}),
+		);
+	}
+	if (cause instanceof CollectorTimeoutError) {
+		const pipeline = cause.pipeline === "rule" ? "rule" : "attribute";
+		const timeoutMs = milliseconds(cause.timeoutMs);
+		return headerOnly(
+			cause.limit === "deadline"
+				? new CollectorTimeoutError({ pipeline, limit: "deadline", timeoutMs })
+				: new CollectorTimeoutError({
+						pipeline,
+						limit: "collector",
+						timeoutMs,
+						collector: "collector" in failure ? failure.collector : UNATTRIBUTED,
+					}),
+		);
+	}
+	if (cause instanceof AttributeConflictError) {
+		return headerOnly(new AttributeConflictError(identifier(cause.key)));
+	}
+	return cause;
+}
+
+/** A budget as logged: the number it should be, or `0` for anything else. */
+const milliseconds = (value: unknown): number =>
+	typeof value === "number" && Number.isFinite(value) ? value : 0;
+
+/** Replaces a rebuilt error's stack with its header line — see {@link loggableError}. */
+function headerOnly<E extends Error>(error: E): E {
+	error.stack = `${error.name}: ${error.message}`;
+	return error;
 }
 
 /** The collector a recorded source names: one entry, a pipeline's whole list, or nobody. */

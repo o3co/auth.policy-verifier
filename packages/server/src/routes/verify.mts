@@ -30,6 +30,7 @@ import {
 	type ClassifiedFailure,
 	classifyFailure,
 	type FailureCategory,
+	loggableError,
 } from "../observability/failure.mjs";
 import type { DecisionMetrics } from "../observability/metrics.mjs";
 
@@ -750,10 +751,11 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			// permit. A deny is built here instead, with an empty `reason` because
 			// no rule group was evaluated — which is the honest account of what
 			// happened. The conflicted attribute KEY reaches the log line via the
-			// error's message; the caller's message names neither key nor values.
+			// error — held to the identifier shape, as the rule a timeout names is
+			// (#200); the caller's message names neither key nor values.
 			logger.error(
 				{
-					err: cause,
+					err: loggableError(cause, failure),
 					resource: entry.resource,
 					action: entry.action,
 					...correlation(requestId),
@@ -848,7 +850,12 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				return;
 			}
 			logger.error(
-				{ err: cause, endpoint: "/verify", ...correlation(requestIdOf(req)), ...failure },
+				{
+					err: loggableError(cause, failure),
+					endpoint: "/verify",
+					...correlation(requestIdOf(req)),
+					...failure,
+				},
 				"verify_internal_error",
 			);
 			countCollectorFailure(failure);
@@ -958,7 +965,12 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				return;
 			}
 			logger.error(
-				{ err: cause, endpoint: "/verify/batch", ...correlation(requestIdOf(req)), ...failure },
+				{
+					err: loggableError(cause, failure),
+					endpoint: "/verify/batch",
+					...correlation(requestIdOf(req)),
+					...failure,
+				},
 				"verify_internal_error",
 			);
 			countCollectorFailure(failure);
@@ -1002,7 +1014,12 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			? { category: "body_rejected" }
 			: { category: "internal" };
 		logger.error(
-			{ err, endpoint: req.path, ...correlation(requestIdOf(req)), ...failure },
+			{
+				err: loggableError(err, failure),
+				endpoint: req.path,
+				...correlation(requestIdOf(req)),
+				...failure,
+			},
 			"verify_internal_error",
 		);
 		countCollectorFailure(failure);

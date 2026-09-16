@@ -168,7 +168,7 @@ Authorization: Bearer <jwt>
 
 この集合は閉じています: アラートとフィルタは `err.message` ではなく `category` の等値に対して張ってください。`collector` は `config/application.conf` の `attribute.collectors` / `rule.collectors` 内のエントリ位置とクラス名です。JWKS に到達できないことは category ではありません — `401` で応答され、`jwt_verification_unavailable` としてログに出ます（後述）。
 
-サーバーがこれらの行に加えるものは、トークン・クレーム・`context` のいずれも含みません。collector はその decision についてコレクターのランナーが記録したもので、エラーから読んだ名前ではなく、何も記録されていないタイムアウトは `collector: "unattributed"` です。ルールの `ruleType` と `code` はルールコレクターがリクエストごとにルールを組み立てうるため、識別子の形（英字で始まり、英数字・`_`・`.`・`-` が続く 64 文字以内）の場合だけ載り、それ以外は `redacted` になります。リクエスト ID は検証済みです。`err` は throw されたエラーそのものなので、コレクターが自分のエラーメッセージに何を書くかはそのコレクターの責任です。
+サーバーがこれらの行に加えるものは、トークン・クレーム・`context` のいずれも含みません。collector はその decision についてコレクターのランナーが記録したもので、エラーから読んだ名前ではなく、何も記録されていないタイムアウトは `collector: "unattributed"` です。ルールの `ruleType` と `code` はルールコレクターがリクエストごとにルールを組み立てうるため、識別子の形（英字で始まり、英数字・`_`・`.`・`-` が続く 64 文字以内）の場合だけ載り、それ以外は `redacted` になります。リクエスト ID は検証済みです。`err` は throw されたエラーそのものですが、例外が 1 つあります: core が定義する 3 つの deny エラー（`CollectorTimeoutError`、`RuleTimeoutError`、`AttributeConflictError`）はメッセージと自身のフィールドにコレクター・ルール・属性キーを含むため、分類されたコレクターやルール、同じ識別子の形に制限した属性キー、ヘッダ行だけの stack で組み立て直したものを記録します。それ以外のエラーのメッセージは、その作者の責任です。
 
 **リクエストの相関.** 呼び出し元が送った `x-request-id` は、`/verify` と `/verify/batch` が返すすべての応答 — allow、deny、拒否、`500` — にレスポンスヘッダとしてそのまま返され、これらの行と `decision` 行に `requestId` として載ります。これで deny を enforcement 側サービス自身のログと突き合わせられます。載せるのは `A-Z a-z 0-9 - _ . : + / = #` からなる 1〜128 文字の場合だけで、UUID、ULID、16 進や W3C のトレース ID、base64、[protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) が採番する ID はすべて収まります。それ以外は送られなかったものとして扱い — 返さず、ログに出さず、コレクターにも渡しません — 呼び出し元が送らなかった場合にサーバーが採番することもありません。`HTTP_CALLER_AUTH_TOKEN` のゲートは decision エンドポイントより手前で応答するため、ID を返しません。
 
