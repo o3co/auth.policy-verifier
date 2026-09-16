@@ -27,6 +27,8 @@ export {
 } from "./errors.mjs";
 export type { EvaluateOptions } from "./evaluate.mjs";
 export { evaluate } from "./evaluate.mjs";
+export type { FailureSource } from "./failureSource.mjs";
+export { failureSourceOf } from "./failureSource.mjs";
 export type {
 	AttributeKeyReservation,
 	AttributeKeyReservationRequest,

@@ -7,12 +7,14 @@ import {
 	resolveRuleTimeoutMs,
 } from "./collectorLimits.mjs";
 import { RuleTimeoutError } from "./errors.mjs";
+import { type FailureSource, recordFailureSource } from "./failureSource.mjs";
 import {
 	type AnyRule,
 	type AsyncRule,
 	type Attributes,
 	type Decision,
 	isAsyncRule,
+	type Rule,
 	type RuleGroupOutcome,
 	type RuleOutcome,
 } from "./types.mjs";
@@ -88,7 +90,8 @@ export interface EvaluateOptions {
  *   deny of its own for the transport, never a pass.
  * @throws whatever a rule threw or rejected with, or the caller's abort reason,
  *   unchanged: a rule that owns its engine's outage answers `false` and logs;
- *   one that throws is reporting a fault.
+ *   one that throws is reporting a fault. Which rule threw is recorded beside
+ *   the error rather than wrapped around it: ask `failureSourceOf` (#200).
  * @throws {RangeError} for an unusable `ruleTimeoutMs` or `evaluateDeadlineMs`,
  *   before any rule runs.
  */
@@ -176,12 +179,27 @@ async function evaluateGroup(
 	for (const rule of rules) {
 		const passed = isAsyncRule(rule)
 			? await runAsyncRule(rule, attrs, budget, caller)
-			: rule.verify(attrs);
+			: verifyRule(rule, attrs);
 		const outcome = { code: rule.code, message: rule.message, passed };
 		evaluated.push(outcome);
 		if (passed) return { ruleType, passed: true, evaluated, satisfiedBy: outcome };
 	}
 	return { ruleType, passed: false, evaluated };
+}
+
+/** How `failureSourceOf` names a rule: by the two things an operator finds it by in config. */
+function ruleSource(rule: AnyRule): FailureSource {
+	return { kind: "rule", ruleType: rule.ruleType, code: rule.code };
+}
+
+/** Asks a synchronous rule, recording it as the source of anything it throws (#200). */
+function verifyRule(rule: Rule, attrs: Attributes): boolean {
+	try {
+		return rule.verify(attrs);
+	} catch (error) {
+		recordFailureSource(error, ruleSource(rule));
+		throw error;
+	}
 }
 
 /**
@@ -232,9 +250,18 @@ async function runAsyncRule(
 			// AbortError, not with the reason. Whichever settles first, the
 			// answer is the reason the signal carries: the timeout or the
 			// caller's, never the transport's spelling of "aborted".
-			Promise.resolve(rule.decide(attrs, own.signal)).catch((error: unknown) => {
-				throw own.signal.aborted ? own.signal.reason : error;
-			}),
+			//
+			// Constructed rather than `Promise.resolve(rule.decide(...))`, so a
+			// `decide` that throws before returning a promise is attributed
+			// exactly as one that rejects (#200). A rejection after the abort is
+			// the abort's, and is attributed to nobody.
+			new Promise<boolean>((resolve) => resolve(rule.decide(attrs, own.signal))).catch(
+				(error: unknown) => {
+					if (own.signal.aborted) throw own.signal.reason;
+					recordFailureSource(error, ruleSource(rule));
+					throw error;
+				},
+			),
 			cancelled.promise,
 		]);
 	} finally {

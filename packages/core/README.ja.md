@@ -41,7 +41,7 @@ function evaluate(attrs: Attributes, rules: AnyRule[], options?: EvaluateOptions
 「残りも失敗したのか」に答えられないためです。deny の `code` / `message` は従来どおり最初に失敗した
 グループから取ります。
 
-ルールのリストにはどちらの種類のルールも混在できます (#225)。同期の `Rule` は `verify` で、`AsyncRule` は `ruleTimeoutMs` の制限下で `decide` を await して問い合わせます。どちらも収集順に 1 つずつ問い、グループ内で最初に通ったルール以降の代替ルールは種類を問わず実行されません。`evaluate` が非同期なのはそのためだけで、同期ルールだけのリストは同じターン内で答えが出ます。非同期ルールが予算を超えたとき、またはルール全体で `evaluateDeadlineMs` を超えたときは `RuleTimeoutError` で reject します（`limit: "rule"` または `"deadline"`。transport にとっては deny であり、pass にはなりません）。`signal` が abort されれば呼び出し側の abort 理由で、ルールが throw / reject すればその値で reject します。
+ルールのリストにはどちらの種類のルールも混在できます (#225)。同期の `Rule` は `verify` で、`AsyncRule` は `ruleTimeoutMs` の制限下で `decide` を await して問い合わせます。どちらも収集順に 1 つずつ問い、グループ内で最初に通ったルール以降の代替ルールは種類を問わず実行されません。`evaluate` が非同期なのはそのためだけで、同期ルールだけのリストは同じターン内で答えが出ます。非同期ルールが予算を超えたとき、またはルール全体で `evaluateDeadlineMs` を超えたときは `RuleTimeoutError` で reject します（`limit: "rule"` または `"deadline"`。transport にとっては deny であり、pass にはなりません）。`signal` が abort されれば呼び出し側の abort 理由で、ルールが throw / reject すればその値でそのまま reject し、そのルールを [`failureSourceOf`](#failuresourceof) 向けに記録します。
 
 ### AttributePipeline
 
@@ -80,6 +80,20 @@ interface CollectorLimits {
 コレクターはデータベースや HTTP API を呼ぶため、素の `Promise.all` で走らせる pipeline には待つのをやめる手段がありませんでした。各コレクターには `CollectorContext.signal` で専用の `AbortSignal` と専用の予算が渡され、fan-out 全体にはデッドラインが付き、同時に走るのは `concurrency` 本までです。何も渡さなければすべて既定値が適用されるため、上限なしで構築した pipeline も保護されています。正の整数でない上限はコンストラクタが `RangeError` で拒否します（黙って無視しません） — `concurrency: 0` は「何も集めずに解決する」になってしまうためです。
 
 **上限に達した場合は `CollectorTimeoutError` を送出し、部分的な解決は決してしません。** 部分的な attribute は Rule の入力を弱め、部分的な Rule はポリシー自体を弱めます — ルールが空なら `{ onEmptyRuleSet: "allow" }` の下では allow です。認可経路に「集まったぶんで答える」の安全な形は存在しません。
+
+### failureSourceOf
+
+```typescript
+type FailureSource =
+  | { kind: "collector"; pipeline: "attribute" | "rule"; collector: string }
+  | { kind: "rule"; ruleType: string; code: string }
+
+function failureSourceOf(error: unknown): FailureSource | undefined
+```
+
+失敗がどのコレクター、どのルールから来たかを答えます (#200)。reject したコレクターは collect を失敗させ、`verify` が throw した / `decide` が reject したルールは `evaluate` を失敗させます。どちらもそのエラーを**そのまま** reject します — 帰属はエラーを包むのではなくエラーの横に記録されるため、クラスで deny と障害を見分ける transport も、自分のエラーと照合する呼び出し側も、throw されたものをそのまま受け取ります。コレクターは位置（サーバーの設定パスと同じ綴り）と、クラスがあればクラス名で呼ばれます — `attribute.collectors[1] (EntitlementStoreCollector)`、オブジェクトリテラルなら `rule.collectors[0]`。`CollectorTimeoutError.collector` が予算を超えたコレクターを呼ぶ名前も同じです。どの部分も pipeline の構築時に決まるため、メトリクスラベルに使っても安全です。
+
+pipeline / 評価器が記録していないものには `undefined` を返します: 呼び出し側の abort 理由（signal が abort された後にコレクターがそれで reject した場合も含む — 失敗は fan-out のものであり、そのコレクターのものではない）、タイムアウト（コレクターやルールは自身が名乗る）、それ以外の場所から来たエラー、そしてオブジェクトでない reject — プリミティブは記録のキーになれないので、`Error` を throw してください。
 
 ### Registry\<T\>
 
@@ -123,7 +137,8 @@ interface ModuleContext {
 | `CollectorContext` | 各コレクターに渡される入力: `subject`、`resource`、`action`、`signal`、省略可能な `headers` と `requestContext` |
 | `CollectorRequest` | pipeline が受け取る形: コレクター単位の `signal` を除いた `CollectorContext`。`signal` は pipeline が供給する。こちらの省略可能な `signal` は呼び出し側のキャンセルで、pipeline 側の signal に連結される |
 | `CollectorLimits` | `{ collectorTimeoutMs?, deadlineMs?, concurrency? }` — pipeline が fan-out に課す上限。[コレクターの上限](#コレクターの上限) を参照 |
-| `CollectorTimeoutError` | コレクターが予算を、または fan-out がデッドラインを超えたときに送出される `Error` サブクラス。`pipeline` / `limit` / `timeoutMs` と、コレクター単位のタイムアウトでは `collector` を持つ。**劣化ではなく deny** — pipeline は何も返さない |
+| `CollectorTimeoutError` | コレクターが予算を、または fan-out がデッドラインを超えたときに送出される `Error` サブクラス。`pipeline` / `limit` / `timeoutMs` と、コレクター単位のタイムアウトでは `collector`（[`failureSourceOf`](#failuresourceof) と同じ名前）を持つ。**劣化ではなく deny** — pipeline は何も返さない |
+| `FailureSource` | `{ kind: "collector"; pipeline; collector } \| { kind: "rule"; ruleType; code }` — 失敗の出どころ。[failureSourceOf](#failuresourceof) を参照 |
 | `UntrustedRequestContext` | `requestContext` の型 — 呼び出し側のデータであり、読むには明示的な `readUntrustedRequestContext(...)` が必要な形で封じられている。トランスポート境界で生成するのは `markUntrustedRequestContext(...)`。[docs/extending.ja.md — 信頼境界](../../docs/extending.ja.md#信頼境界-requestcontext-は呼び出し側のもの) を参照 |
 | `Attributes` | `Map<string, unknown>` — サブジェクト属性のバッグ。可変: コレクターがこれを組み立て、`AttributePipeline` がマージする |
 | `ReadonlyAttributes` | `ReadonlyMap<string, unknown>` — Rule が判定対象として受け取るビュー。評価器は同一の live map をすべての Rule に渡すため、書き込む Rule は以降の全グループの入力を書き換えてしまう |
