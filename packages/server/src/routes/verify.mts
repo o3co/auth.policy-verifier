@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-	AttributeConflictError,
 	type AttributePipeline,
-	CollectorTimeoutError,
 	consoleLogger,
 	type Decision,
 	type DecisionReason,
@@ -16,7 +14,6 @@ import {
 	ResourceParseError,
 	type ResourceParser,
 	type RulePipeline,
-	RuleTimeoutError,
 	type SubjectAttributes,
 } from "@o3co/auth.policy-verifier.core";
 import express from "express";
@@ -27,6 +24,11 @@ import {
 	type VerifyRouterJwtConfig,
 } from "../jwt/tokenAuthenticator.mjs";
 import { DECISION_EVENT, decisionEvent, present } from "../observability/decisionEvent.mjs";
+import {
+	type ClassifiedFailure,
+	classifyFailure,
+	type FailureCategory,
+} from "../observability/failure.mjs";
 import type { DecisionMetrics } from "../observability/metrics.mjs";
 
 /**
@@ -124,8 +126,10 @@ export interface VerifyRouterConfig {
 	maxContextValueLength?: number | string;
 	/**
 	 * Sink for the router's failure events (`jwt_token_rejected`,
-	 * `jwt_verification_unavailable`, `verify_internal_error`) and for the
-	 * per-decision `decision` audit line (#111). Defaults to the console-backed
+	 * `jwt_verification_unavailable`, `verify_internal_error`, and the
+	 * `collector_timeout` / `rule_timeout` / `attribute_conflict` denies — the
+	 * last four carrying a `category`, #200) and for the per-decision `decision`
+	 * audit line (#111). Defaults to the console-backed
 	 * logger so neither is ever silent in a deployment that wires nothing.
 	 *
 	 * The decision line is emitted at `info`, so `logging.level` is the switch
@@ -233,6 +237,18 @@ const COLLECTOR_TIMEOUT_MESSAGE = "Authorization could not be decided in time";
 const RULE_TIMEOUT_MESSAGE = COLLECTOR_TIMEOUT_MESSAGE;
 const ATTRIBUTE_CONFLICT_CODE = "attribute_conflict";
 const ATTRIBUTE_CONFLICT_MESSAGE = "Authorization inputs conflicted";
+
+/**
+ * The failure categories a decision is denied on rather than failed with, and
+ * the deny each is answered with. Read off the category rather than tested
+ * class by class, so the deny the caller gets and the `category` the log line
+ * carries are one decision made once (#200).
+ */
+const DENIED_FAILURES: Partial<Record<FailureCategory, { code: string; message: string }>> = {
+	collector_timeout: { code: COLLECTOR_TIMEOUT_CODE, message: COLLECTOR_TIMEOUT_MESSAGE },
+	rule_timeout: { code: RULE_TIMEOUT_CODE, message: RULE_TIMEOUT_MESSAGE },
+	attribute_conflict: { code: ATTRIBUTE_CONFLICT_CODE, message: ATTRIBUTE_CONFLICT_MESSAGE },
+};
 
 /** One validated entry: the request as sent, plus its resource already parsed. */
 interface ValidatedDecisionRequest {
@@ -594,6 +610,22 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	// #175: resolved once — the per-request cost is a spread, not a branch tree.
 	const exposeCredential = config.credentialToCollectors === "expose";
 
+	/**
+	 * Counts a failure a collector is answerable for (#200). Called beside each
+	 * log line that reports one, and only there, so the counter and the log
+	 * stream agree on how many there were: a timed-out batch entry is one line
+	 * and one count, and a batch that failed with a 500 — which speaks for the
+	 * whole request — is also one of each.
+	 */
+	const countCollectorFailure = (failure: ClassifiedFailure): void => {
+		if ("collector" in failure) {
+			config.metrics?.observeCollectorFailure?.({
+				collector: failure.collector,
+				category: failure.category,
+			});
+		}
+	};
+
 	/** Runs the pipelines and the evaluator for one already-validated entry. */
 	async function decide(
 		req: express.Request,
@@ -652,18 +684,12 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 						: AbortSignal.any([config.evaluateOptions.signal, signal]),
 			});
 		} catch (cause) {
-			// Two collect failures are denies of their own (#115 timeouts, #174
-			// attribute conflicts); anything else is a genuine fault and keeps
-			// surfacing as a 500.
-			const denial =
-				cause instanceof CollectorTimeoutError
-					? { code: COLLECTOR_TIMEOUT_CODE, message: COLLECTOR_TIMEOUT_MESSAGE }
-					: cause instanceof RuleTimeoutError
-						? { code: RULE_TIMEOUT_CODE, message: RULE_TIMEOUT_MESSAGE }
-						: cause instanceof AttributeConflictError
-							? { code: ATTRIBUTE_CONFLICT_CODE, message: ATTRIBUTE_CONFLICT_MESSAGE }
-							: null;
-			if (denial === null) throw cause;
+			// Three failures are denies of their own (#115 collector timeouts,
+			// #225 rule timeouts, #174 attribute conflicts); anything else is a
+			// genuine fault and keeps surfacing as a 500, sorted at the route.
+			const failure = classifyFailure(cause);
+			const denial = DENIED_FAILURES[failure.category];
+			if (denial === undefined) throw cause;
 			// The evaluator is deliberately never reached: it is the one place a
 			// short rule list could still be read as a policy, and `onEmptyRuleSet:
 			// "allow"` would then turn a timed-out (or conflicted) pipeline into a
@@ -672,9 +698,16 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			// happened. The conflicted attribute KEY reaches the log line via the
 			// error's message; the caller's message names neither key nor values.
 			logger.error(
-				{ err: cause, resource: entry.resource, action: entry.action, requestId },
+				{
+					err: cause,
+					resource: entry.resource,
+					action: entry.action,
+					requestId,
+					...failure,
+				},
 				denial.code,
 			);
+			countCollectorFailure(failure);
 			decision = {
 				decision: "deny",
 				code: denial.code,
@@ -749,7 +782,9 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				logger.info({ endpoint: "/verify" }, "verify_caller_gone");
 				return;
 			}
-			logger.error({ err: cause, endpoint: "/verify" }, "verify_internal_error");
+			const failure = classifyFailure(cause);
+			logger.error({ err: cause, endpoint: "/verify", ...failure }, "verify_internal_error");
+			countCollectorFailure(failure);
 			res.status(500).json(errorBody("internal_error", "Internal server error"));
 		}
 	});
@@ -854,7 +889,9 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				logger.info({ endpoint: "/verify/batch" }, "verify_caller_gone");
 				return;
 			}
-			logger.error({ err: cause, endpoint: "/verify/batch" }, "verify_internal_error");
+			const failure = classifyFailure(cause);
+			logger.error({ err: cause, endpoint: "/verify/batch", ...failure }, "verify_internal_error");
+			countCollectorFailure(failure);
 			res.status(500).json(errorBody("internal_error", "Internal server error"));
 		}
 	});
@@ -881,14 +918,20 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			next(err);
 			return;
 		}
-		const failure = bodyParserFailure(err);
-		if (failure) {
-			res.status(failure.status).json(errorBody(failure.code, failure.message));
+		const refusal = bodyParserFailure(err);
+		if (refusal) {
+			res.status(refusal.status).json(errorBody(refusal.code, refusal.message));
 			return;
 		}
 		// `req.path`, not a literal: this handler covers both routes, and anything
-		// mounted on the router that never reached one of them.
-		logger.error({ err, endpoint: req.path }, "verify_internal_error");
+		// mounted on the router that never reached one of them. A body-parser
+		// failure the envelope does not map is `body_rejected`; only this handler
+		// can tell one apart, because only the parser's failures carry `type`.
+		const failure: ClassifiedFailure = isBodyParserFailure(err)
+			? { category: "body_rejected" }
+			: classifyFailure(err);
+		logger.error({ err, endpoint: req.path, ...failure }, "verify_internal_error");
+		countCollectorFailure(failure);
 		res.status(500).json(errorBody("internal_error", "Internal server error"));
 	};
 	router.use(denyOnBodyFailure);
@@ -934,6 +977,17 @@ function bodyParserFailure(
 		default:
 			return undefined;
 	}
+}
+
+/**
+ * Whether `err` is one of body-parser's own failures: it tags every one it
+ * raises with a string `type` (see {@link bodyParserFailure}). Asked only of
+ * what reaches the terminal handler, where the parser is the one thing mounted
+ * ahead of the routes — a collector's error that happened to carry a `type`
+ * never gets here, because the routes catch their own.
+ */
+function isBodyParserFailure(err: unknown): boolean {
+	return typeof (err as { type?: unknown } | null)?.type === "string";
 }
 
 /**
