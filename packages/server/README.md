@@ -102,12 +102,12 @@ Request flow:
 3. If `validate` is `true`: verify the signature **and** the RFC 9068 §4 claims — `iss` against `issuer`, the audience claim (`aud`, or the claim `audienceClaim` names) against `audience`, and the `typ` header against `tokenType` (an `application/` prefix is ignored; `"*"` pins nothing). Returns 401 on failure. `createVerifyRouter` throws if any of the three is missing.
 4. If `validate` is `false`: decode the JWT without verification. Returns 401 if the token is malformed.
 5. Either way, enforce the token's own lifetime: `exp` and `iat` are **required** (a token that never states an expiry never expires), `nbf` is honoured when present, `exp` must be in the future, and `now - iat` must not exceed `maxTokenAgeSeconds` — which is what refuses a token whose issuer set `exp` years out. `clockToleranceSeconds` widens every one of those comparisons. Returns 401 on failure. The decode-only path restates these checks by hand rather than skipping them, so both modes answer the same for the same token.
-6. Include `x-request-id` header in `CollectorContext.headers` if present (collectors can forward it to upstream calls they make).
+6. Include the `x-request-id` header in `CollectorContext.headers` if present and acceptable (collectors can forward it to upstream calls they make). Acceptable is 1–128 characters of `A-Z a-z 0-9 - _ . : + / = #` (`acceptRequestId`, #200); any other value is treated as absent here, on the log lines and on the response. An accepted id is echoed as the `x-request-id` response header on every response the router writes, the refusals in steps 1–5 included, and none is minted when the caller sent none.
 7. Run `attributePipeline.collect` and `rulePipeline.collect` in parallel, under the collector bounds (`verify.collectorTimeoutMs`, `verify.collectorDeadlineMs`, `verify.collectorConcurrency` — each collector is handed an `AbortSignal` on `CollectorContext.signal`); call `evaluate`.
 8. Return `200 { decision: "allow" }` or `403 { decision: "deny", code, message }`.
-9. Return `403 { decision: "deny", code: "collector_timeout" }` when a collector or the fan-out ran out of time (#115). The evaluator is never reached — collecting *some* of the rules is a weaker policy, and none of them is an allow under `rule.onEmptyRuleSet = "allow"` — so a timeout can only ever deny. Details go to the `collector_timeout` log line, not to the caller.
-10. Return `403 { decision: "deny", code: "rule_timeout" }` when an asynchronous rule did not answer within `verify.ruleTimeoutMs` (#225), or the asynchronous rules together overran `verify.evaluateDeadlineMs` — the same deny, its own code, so an operator can tell a stalled engine from a stalled collector.
-11. Return `500 { decision: "deny", code: "internal_error" }` on unexpected errors.
+9. Return `403 { decision: "deny", code: "collector_timeout" }` when a collector or the fan-out ran out of time (#115). The evaluator is never reached — collecting *some* of the rules is a weaker policy, and none of them is an allow under `rule.onEmptyRuleSet = "allow"` — so a timeout can only ever deny. Details go to the `collector_timeout` log line, not to the caller — `category: "collector_timeout"` and the `collector` that overran (`attribute.collectors[1] (EntitlementStoreCollector)`), or the list (`attribute.collectors`) when the pipeline's deadline did (#200).
+10. Return `403 { decision: "deny", code: "rule_timeout" }` when an asynchronous rule did not answer within `verify.ruleTimeoutMs` (#225), or the asynchronous rules together overran `verify.evaluateDeadlineMs` — the same deny, its own code, so an operator can tell a stalled engine from a stalled collector. The `rule_timeout` log line carries `category` and the `rule` (`{ ruleType, code }`).
+11. Return `500 { decision: "deny", code: "internal_error" }` on unexpected errors, logged as `verify_internal_error` with `endpoint`, `requestId` when there is one, and `category` (#200): `collector_threw` naming the `collector`, `rule_threw` naming the `rule`, `body_rejected` for a body-parser failure the envelope does not map, or `internal` for anything that did not come out of a decision. The collector and rule are what the router's per-decision `FailureRecord` recorded, never names read off the error; a rule's `ruleType` and `code` are logged only when identifier-shaped, and as `redacted` otherwise. The closed set is exported as `FAILURE_CATEGORIES`; the collector failures among them are counted through `DecisionMetrics.observeCollectorFailure` (`auth_collector_failures_total{collector,category}` under `createApp`).
 
 ### AppConfigSchema / AppConfig
 
@@ -293,6 +293,10 @@ HTTP/1.1 500 Internal Server Error
 
 { "decision": "deny", "code": "internal_error" }
 ```
+
+**Response header — `x-request-id`**
+
+Every response above carries `x-request-id: <the id the request sent>` when the request sent one of 1–128 characters of `A-Z a-z 0-9 - _ . : + / = #`, and no such header otherwise (#200). The id is the caller's, returned so an enforcement layer can match a decision — or a `500` — to its own log; the server never mints one.
 
 ### POST /verify/batch
 

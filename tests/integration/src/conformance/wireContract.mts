@@ -80,6 +80,8 @@ export interface WireExchange {
 	credential: WireCredential;
 	/** Explicit `Content-Type`; omitted means `application/json`. */
 	contentType?: string;
+	/** Sent verbatim as the `x-request-id` request header (#200); omitted means no header. */
+	requestId?: string;
 	payload: WirePayload;
 }
 
@@ -109,6 +111,8 @@ export interface WireResponse {
 	body: unknown;
 	/** The body as bytes-as-text, for the assertions about what is *not* in it. */
 	text: string;
+	/** The `x-request-id` response header as received (#200); `undefined` when there is none. */
+	requestId?: string;
 }
 
 /** A decision request body, as `POST /verify` takes it. */
@@ -180,6 +184,13 @@ interface ResponseEnvelopes {
 	ruleOutcome: { keys: string[] };
 	status: Record<string, number>;
 	codes: Record<string, string>;
+	requestId: {
+		header: string;
+		maxLength: number;
+		pattern: string;
+		echoedOn: string;
+		otherwise: string;
+	};
 }
 
 /**
@@ -228,6 +239,7 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 		ruleOutcome,
 		status,
 		codes,
+		requestId,
 	} = RESPONSE_ENVELOPES;
 
 	/** Sends a decision body with the given credential, defaulting to a usable one. */
@@ -520,6 +532,77 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 				const body = res.body as { decision: string; code: string };
 				expect(body.decision).toBe(error.decision);
 				expect(body.code).toBe(codes.internalError);
+			});
+		});
+
+		describe("the caller's request id (#200)", () => {
+			/** An id inside the contract's shape: the one protobuf.interceptors mints. */
+			const ID = "20260917123456_0123456789abcdef";
+
+			/** Sends a JSON body with a request id and a usable credential. */
+			const postWithId = (
+				endpoint: WireEndpoint,
+				value: unknown,
+				id: string,
+				credential: WireCredential = "valid",
+			): Promise<WireResponse> =>
+				adapter.send({ endpoint, credential, requestId: id, payload: { kind: "json", value } });
+
+			it("states a shape the example id is inside of", () => {
+				// The table is data another repository reads; this pins that its
+				// pattern and bound describe an id a caller can actually send.
+				expect(requestId.header).toBe("x-request-id");
+				expect(ID.length).toBeLessThanOrEqual(requestId.maxLength);
+				expect(new RegExp(requestId.pattern).test(ID)).toBe(true);
+			});
+
+			it("echoes the id on an allow, a deny, a batch and a refusal alike", async () => {
+				const answers = [
+					await postWithId("/verify", adapter.fixtures.allowed, ID),
+					await postWithId("/verify", adapter.fixtures.denied, ID),
+					await postWithId("/verify/batch", batchOf([adapter.fixtures.allowed]), ID),
+					await postWithId("/verify", adapter.fixtures.allowed, ID, "none"),
+					await postWithId("/verify", [], ID),
+				];
+
+				expect(answers.map((res) => res.status)).toEqual([
+					status.allow,
+					status.deny,
+					status.batchDecided,
+					status.unauthenticated,
+					status.invalidRequest,
+				]);
+				for (const res of answers) expect(res.requestId).toBe(ID);
+			});
+
+			it.runIf(adapter.fixtures.failing)("echoes the id on the terminal 500 too", async () => {
+				const failing = adapter.fixtures.failing;
+				if (!failing) return;
+				const res = await postWithId("/verify", failing, ID);
+
+				expect(res.status).toBe(status.internalError);
+				expect(res.requestId).toBe(ID);
+			});
+
+			it("mints none: a request without an id is answered without one", async () => {
+				const res = await post("/verify", adapter.fixtures.allowed);
+
+				expect(res.status).toBe(status.allow);
+				expect(res.requestId).toBeUndefined();
+			});
+
+			it.each([
+				["over the length bound", "r".repeat(requestId.maxLength + 1)],
+				["outside the pattern", "req 1"],
+			])("echoes no id %s", async (_what, id) => {
+				expect(id.length <= requestId.maxLength && new RegExp(requestId.pattern).test(id)).toBe(
+					false,
+				);
+				const res = await postWithId("/verify", adapter.fixtures.allowed, id);
+
+				// Still decided: an unusable id is absent, not a refusal.
+				expect(res.status).toBe(status.allow);
+				expect(res.requestId).toBeUndefined();
 			});
 		});
 

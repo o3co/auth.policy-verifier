@@ -92,7 +92,7 @@ export class UserLevelAtLeast implements Rule {
 |---|---|---|
 | `subject` | トランスポートが検証したクレデンシャルから組み立てる — デフォルト server は署名・issuer・audience・有効期限の検証を通過した bearer token のクレームを展開する | 検証済み |
 | `resource` / `action` | リクエストボディ。形は route が検証し、`resource` は設定された `ResourceParser` が parse する | 値は呼び出し側が選ぶ／形は検証済み |
-| `headers` | トランスポートが設定（現状は `x-request-id`） | トランスポート由来 |
+| `headers` | トランスポートが設定（現状は `x-request-id`。サーバーが受け入れる形 — `A-Z a-z 0-9 - _ . : + / = #` からなる 1〜128 文字 — の場合のみ） | トランスポート由来 |
 | `requestContext` | リクエストボディの `context` をそのまま転送 | **未検証（untrusted）** |
 
 （5 つ目のフィールド `signal` は入力ではなく、pipeline のキャンセルハンドルです。[デッドラインとキャンセル](#デッドラインとキャンセル) を参照。）
@@ -141,6 +141,8 @@ signal を無視するコレクターも pipeline は待つのをやめます �
 signal が abort する理由は 4 つあり、`signal.reason` がどれかを示します: このコレクターが予算を超えた、pipeline がデッドラインを超えた、兄弟コレクターがすでに決定を失敗させた、呼び出し側が去った。
 
 **上限を超えたリクエストは deny になります** — `403` と `code: "collector_timeout"`。pipeline は `CollectorTimeoutError` を送出し、何も返しません。これは意図的です: 間に合った attribute は Rule への入力を弱め、間に合った Rule は**ポリシー**を弱め、空になれば `rule.onEmptyRuleSet = "allow"` の deployment では allow と読まれてしまいます。だから部分的な答えはそもそも存在させません。言うことが本当に無いコレクターは、速やかに空の `Map` を返してください。タイムアウトはその表明手段ではありません。
+
+**失敗したコレクターは運用者のログで名指しされます** (#200)。reject は decision を `500` で失敗させ、pipeline はエラーを変えずに、それがどのコレクターから来たかを記録します: `verify_internal_error` は `category: "collector_threw"` と `collector: "attribute.collectors[1] (YourCollector)"` — 設定内のエントリ位置とクラス名 — を持ち、`auth_collector_failures_total` はその名前で計上します。ライブラリとして使う場合は core の `FailureRecord` が同じ答えを返します（decision ごとに 1 つ作り、両方の collect と `evaluate` に渡す）。名前はランナーが付けるもので、エラーから読むことはありません — 自分で throw した `CollectorTimeoutError` も deny にはなりますが、名指しされるのはそのエラーが持つ `collector` ではなく自分の位置です。作者の責任になるのはエラーそのものです: `err` としてログに届くので、そのメッセージにトークン・クレーム・呼び出し元の `context` を含めないでください — サーバーが加えるフィールドはこれらを決して含みませんし、メッセージも含めるべきではありません（core 自身の deny エラーは例外です: `CollectorTimeoutError`、`RuleTimeoutError`、`AttributeConflictError` は、構築時のテキストではなく、分類されたコレクターやルールと識別子の形の属性キーから組み立て直して記録されます）。ルールの `ruleType` と `code` も同様で、識別子の形（英字で始まり、英数字・`_`・`.`・`-` が続く 64 文字以内）の場合だけ失敗イベント行に載り、それ以外は `redacted` として記録されます。
 
 **Rule は signal を `verify` に持ち込んではいけません。** これはリクエストへの live なハンドルであり（`aborted` は勝手に変わります）、保持して `verify` で読むのは `ctx.resource` を保持するのと同じ違反です。[rule purity conformance suite](#rule-は-attrs-だけで判断する) はこれを同じ違反として検出します。
 

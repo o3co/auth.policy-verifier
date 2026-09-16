@@ -31,6 +31,7 @@
  */
 
 import { CollectorTimeoutError } from "./errors.mjs";
+import { describeCollector, type FailureRecord } from "./failureSource.mjs";
 import type { CollectorContext, CollectorRequest } from "./types.mjs";
 
 /**
@@ -128,6 +129,21 @@ export interface CollectorLimits {
 	concurrency?: number;
 }
 
+/**
+ * Per-call options for `AttributePipeline.collect` / `RulePipeline.collect`.
+ * Separate from the request, because nothing here is a fact about the request
+ * and none of it reaches a collector.
+ */
+export interface CollectOptions {
+	/**
+	 * Where this decision's failures are recorded (#200) — which collector
+	 * rejected, overran its budget, or which pipeline overran its deadline. One
+	 * per decision; see `FailureRecord`. Omitted, nothing is recorded, and the
+	 * collect behaves exactly as without it.
+	 */
+	failures?: FailureRecord;
+}
+
 /** {@link CollectorLimits} with every default filled in. */
 export interface ResolvedCollectorLimits {
 	collectorTimeoutMs: number;
@@ -220,6 +236,8 @@ interface Collecting<T> {
  * the fan-out overruns its deadline.
  * @throws whatever a collector rejected with, or the caller's abort reason —
  * both unchanged, so a store outage still surfaces as the store's own error.
+ * Where each failure came from is recorded in `failures` beside the error
+ * rather than wrapped around it (#200).
  *
  * It never resolves partially: on any failure the results gathered so far are
  * discarded and every sibling still running is cancelled.
@@ -229,6 +247,7 @@ export async function runCollectors<T>(
 	request: CollectorRequest,
 	limits: ResolvedCollectorLimits,
 	pipeline: CollectorPipeline,
+	failures?: FailureRecord,
 ): Promise<T[]> {
 	if (collectors.length === 0) return [];
 
@@ -238,9 +257,13 @@ export async function runCollectors<T>(
 	// whole wave.
 	const fanOut = new AbortController();
 	const deadline = setTimeout(() => {
-		fanOut.abort(
-			new CollectorTimeoutError({ pipeline, limit: "deadline", timeoutMs: limits.deadlineMs }),
-		);
+		const expired = new CollectorTimeoutError({
+			pipeline,
+			limit: "deadline",
+			timeoutMs: limits.deadlineMs,
+		});
+		failures?.record(expired, { kind: "deadline", pipeline });
+		fanOut.abort(expired);
 	}, limits.deadlineMs);
 
 	const caller = request.signal;
@@ -265,7 +288,15 @@ export async function runCollectors<T>(
 	const lane = async (): Promise<void> => {
 		while (next < collectors.length) {
 			const index = next++;
-			results[index] = await runOne(collectors[index], index, request, limits, pipeline, fanOut);
+			results[index] = await runOne(
+				collectors[index],
+				index,
+				request,
+				limits,
+				pipeline,
+				fanOut,
+				failures,
+			);
 		}
 	};
 
@@ -314,6 +345,7 @@ async function runOne<T>(
 	limits: ResolvedCollectorLimits,
 	pipeline: CollectorPipeline,
 	fanOut: AbortController,
+	failures: FailureRecord | undefined,
 ): Promise<T> {
 	if (fanOut.signal.aborted) {
 		// The reason is the fan-out's, not a timeout of this collector's own: it
@@ -329,24 +361,39 @@ async function runOne<T>(
 	const inheritAbort = () => own.abort(fanOut.signal.reason);
 	fanOut.signal.addEventListener("abort", inheritAbort, { once: true });
 
+	const name = describeCollector(collector, index, pipeline);
+	const source = { kind: "collector", pipeline, collector: name } as const;
 	const timeout = setTimeout(() => {
-		own.abort(
-			new CollectorTimeoutError({
-				pipeline,
-				limit: "collector",
-				timeoutMs: limits.collectorTimeoutMs,
-				collector: describeCollector(collector, index),
-			}),
-		);
+		const expired = new CollectorTimeoutError({
+			pipeline,
+			limit: "collector",
+			timeoutMs: limits.collectorTimeoutMs,
+			collector: name,
+		});
+		failures?.record(expired, source);
+		own.abort(expired);
 	}, limits.collectorTimeoutMs);
 
 	const cancelled = rejectOnAbort(own.signal);
 	try {
 		const context: CollectorContext = { ...request, signal: own.signal };
+		// Constructed rather than called bare, so a collector that throws before
+		// returning a promise is attributed exactly as one that rejects.
+		const collected = new Promise<T>((resolve) => resolve(collector.collect(context))).catch(
+			(error: unknown) => {
+				// #200: only a failure of the collector's own is its to answer for.
+				// Once its signal has aborted — a sibling failed, the deadline
+				// passed, the caller left — a collector honouring the signal
+				// rejects with that reason, and naming it here would blame it for
+				// the failure it was cancelled because of.
+				if (!own.signal.aborted) failures?.record(error, source);
+				throw error;
+			},
+		);
 		// Raced rather than awaited: a collector that ignores its signal — the
 		// hung-socket case this is all for — would otherwise never settle, and a
 		// bound only the cooperative respect is not a bound.
-		return await Promise.race([collector.collect(context), cancelled.promise]);
+		return await Promise.race([collected, cancelled.promise]);
 	} finally {
 		clearTimeout(timeout);
 		cancelled.dispose();
@@ -381,14 +428,4 @@ export function rejectOnAbort(signal: AbortSignal): {
 	const onAbort = () => reject(signal.reason);
 	signal.addEventListener("abort", onAbort, { once: true });
 	return { promise, dispose: () => signal.removeEventListener("abort", onAbort) };
-}
-
-/**
- * Names a collector the way an operator would look for it: by class, since that
- * is what the config's `collector` key resolves to, with the index as the
- * fallback for a collector wired as an object literal.
- */
-function describeCollector(collector: object, index: number): string {
-	const name = collector.constructor?.name;
-	return name && name !== "Object" ? `${name} (index ${index})` : `at index ${index}`;
 }

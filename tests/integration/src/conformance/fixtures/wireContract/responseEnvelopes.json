@@ -17,7 +17,12 @@
 		"`caller_unauthenticated` is the optional `http.callerAuth` gate's refusal (#108):",
 		"the gate sits IN FRONT of this surface and answers before the body is parsed, so",
 		"it appears in `codes`/`status` but never as a request case — where a deployment",
-		"sets the gate, every refusal below is reachable only through it."
+		"sets the gate, every refusal below is reachable only through it.",
+		"`requestId` (#200) is the one response HEADER this table pins. An `x-request-id`",
+		"the request carried is echoed on every response the two endpoints write when it is",
+		"at most `maxLength` characters matching `pattern`; any other value is treated as if",
+		"none was sent, and none is ever minted. The gate above answers before this surface",
+		"and does not echo it."
 	],
 	"error": {
 		"keys": ["decision", "code", "message"],
@@ -62,5 +67,12 @@
 		"attributeConflict": "attribute_conflict",
 		"callerUnauthenticated": "caller_unauthenticated",
 		"internalError": "internal_error"
+	},
+	"requestId": {
+		"header": "x-request-id",
+		"maxLength": 128,
+		"pattern": "^[A-Za-z0-9\\-_.:+/=#]+$",
+		"echoedOn": "every response POST /verify and POST /verify/batch write — allow, deny, batch, every refusal in this table and internal_error — when the request carried an id within maxLength matching pattern",
+		"otherwise": "no x-request-id response header: an id outside the shape is treated as absent, and none is minted when the request carried none"
 	}
 }

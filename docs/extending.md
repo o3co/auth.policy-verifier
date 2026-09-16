@@ -92,7 +92,7 @@ Notes:
 |---|---|---|
 | `subject` | populated by the transport from a credential it verified — the default server spreads in the bearer token's claims after signature, issuer, audience and expiry verification | verified |
 | `resource` / `action` | the request body; shape validated by the route, `resource` parsed by the configured `ResourceParser` | caller-chosen value, validated shape |
-| `headers` | set by the transport (currently `x-request-id`) | transport |
+| `headers` | set by the transport (currently `x-request-id`, only in the shape the server accepts — 1–128 characters of `A-Z a-z 0-9 - _ . : + / = #`) | transport |
 | `requestContext` | the request body's `context`, forwarded verbatim | **untrusted** |
 
 (`signal` is the fifth field and the only one that is not input at all — it is the pipeline's cancellation handle. See [Deadlines and cancellation](#deadlines-and-cancellation).)
@@ -141,6 +141,8 @@ The pipeline stops waiting on a collector that ignores its signal — the bound 
 The signal aborts for four reasons, and `signal.reason` says which: this collector overran its own budget, the pipeline overran its deadline, a sibling collector already failed the decision, or the caller went away.
 
 **Exceeding a bound denies the request** — `403` with `code: "collector_timeout"`. The pipeline throws `CollectorTimeoutError` and returns nothing at all, deliberately: attributes that arrived in time are a weaker input to a rule, and rules that arrived in time are a weaker *policy*, with the empty case reading as an allow wherever `rule.onEmptyRuleSet = "allow"` is set. So there is no partial answer to be tempted by. A collector that legitimately has nothing to say should return an empty `Map` promptly; timing out is never how you say that.
+
+**A collector that fails is named in the operator's log** (#200). A rejection fails the decision with a `500`, and the pipeline records which collector it came from without changing the error: `verify_internal_error` carries `category: "collector_threw"` and `collector: "attribute.collectors[1] (YourCollector)"` — the entry's position in config and your class name — and `auth_collector_failures_total` counts it under that name. A library consumer gets the same answer from core's `FailureRecord`: one per decision, handed to both collects and to `evaluate`. The name is the runner's, never your error's — a `CollectorTimeoutError` you throw yourself is still a deny, but it is named by your position, not by the `collector` it carries. What the author does own is the error itself: it reaches the log as `err`, so its message is yours to keep free of the token, the claims and the caller's `context` — the fields the server adds never carry them, and your message should not either. (Core's own deny errors are the exception: a `CollectorTimeoutError`, `RuleTimeoutError` or `AttributeConflictError` is logged rebuilt from the classified collector or rule and an identifier-shaped attribute key, never with the text it was constructed with.) The same goes for a rule's `ruleType` and `code`: they reach the failure lines only when identifier-shaped (a letter, then letters, digits, `_`, `.` or `-`, at most 64 characters) and are logged as `redacted` otherwise.
 
 **A rule must not carry the signal into `verify`.** It is a live handle on the request — `aborted` moves on its own — so holding one and reading it inside `verify` is the same violation as holding `ctx.resource`, and the [rule purity conformance suite](#a-rule-decides-from-attrs-and-only-from-attrs) catches it as one.
 

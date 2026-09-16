@@ -51,8 +51,10 @@ export interface DecisionEventInput {
 	resource: string;
 	action: string;
 	/**
-	 * `x-request-id` as sent, when the caller sent a non-empty one. See
-	 * {@link present} for why an empty value is dropped rather than carried.
+	 * `x-request-id` as sent, when the caller sent one the router carries —
+	 * `acceptRequestId` in `http/requestId.mts` (#200) refuses an empty, overlong
+	 * or unsafe value before it gets here. See {@link present} for why an empty
+	 * value is dropped rather than carried.
 	 */
 	requestId?: string;
 	/** Wall-clock time spent collecting attributes and rules and evaluating them. */

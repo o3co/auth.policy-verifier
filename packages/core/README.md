@@ -24,6 +24,8 @@ interface EvaluateOptions {
   evaluateDeadlineMs?: number
   /** The caller's signal; aborting it aborts the asynchronous rule in flight with its reason. */
   signal?: AbortSignal
+  /** This decision's FailureRecord: which rule threw, rejected or overran a budget (#200). */
+  failures?: FailureRecord
 }
 
 function evaluate(attrs: Attributes, rules: AnyRule[], options?: EvaluateOptions): Promise<Decision>
@@ -35,14 +37,14 @@ An **empty rule set is denied** (`code: "no_applicable_rule"`): a request no rul
 
 Every decision carries a structured `reason`: `reason.groups` lists each rule group in evaluation order with `passed` and `evaluated` — the rules that group actually ran, in order. A failing group ran every alternative, so `evaluated` lists them all; a passing group is an OR and stops at its first passing rule, so `evaluated` holds the alternatives that were tried and failed followed by that rule, and `satisfiedBy` (present only on a passing group) names it as the one that decided. All groups are evaluated, including groups after the first failing one, because stopping early cannot report which of the rest would also have failed. The `code` / `message` on a deny still come from the first failing group.
 
-The rule list may carry either kind of rule (#225): a synchronous `Rule` is asked through `verify`, an `AsyncRule` is awaited through `decide` under `ruleTimeoutMs`, one at a time in collection order, and alternatives after a pass never run whichever kind they are. `evaluate` is asynchronous for that reason alone — a list of synchronous rules answers in the same turn. It rejects with `RuleTimeoutError` when an asynchronous rule overruns its budget, or the rules together overrun `evaluateDeadlineMs` (`limit: "rule"` or `"deadline"`; a deny for the transport, never a pass), with the caller's abort reason when `signal` aborts, and with whatever a rule threw or rejected with.
+The rule list may carry either kind of rule (#225): a synchronous `Rule` is asked through `verify`, an `AsyncRule` is awaited through `decide` under `ruleTimeoutMs`, one at a time in collection order, and alternatives after a pass never run whichever kind they are. `evaluate` is asynchronous for that reason alone — a list of synchronous rules answers in the same turn. It rejects with `RuleTimeoutError` when an asynchronous rule overruns its budget, or the rules together overrun `evaluateDeadlineMs` (`limit: "rule"` or `"deadline"`; a deny for the transport, never a pass), with the caller's abort reason when `signal` aborts, and with whatever a rule threw or rejected with — unchanged, with the rule recorded in `failures` when a [`FailureRecord`](#failurerecord) was handed in.
 
 ### AttributePipeline
 
 ```typescript
 class AttributePipeline {
   constructor(collectors: AttributeCollector[], limits?: CollectorLimits)
-  collect(request: CollectorRequest): Promise<Attributes>
+  collect(request: CollectorRequest, options?: { failures?: FailureRecord }): Promise<Attributes>
 }
 ```
 
@@ -55,7 +57,7 @@ The fan-out is bounded — see [Collector limits](#collector-limits). `collect` 
 ```typescript
 class RulePipeline {
   constructor(collectors: RuleCollector[], limits?: CollectorLimits)
-  collect(request: CollectorRequest): Promise<AnyRule[]>
+  collect(request: CollectorRequest, options?: { failures?: FailureRecord }): Promise<AnyRule[]>
 }
 ```
 
@@ -74,6 +76,26 @@ interface CollectorLimits {
 Collectors call databases and HTTP APIs, so a pipeline that ran them under a bare `Promise.all` had no way to stop waiting. Each collector is handed its own `AbortSignal` on `CollectorContext.signal` and its own budget; the wave gets a deadline; and only `concurrency` collectors run at once. Every default is applied when nothing is passed, so a pipeline constructed with no limits is still bounded. A limit that is not a positive integer is refused by the constructor (`RangeError`) rather than ignored — `concurrency: 0` would otherwise resolve with nothing collected.
 
 **A bound that trips throws `CollectorTimeoutError`; it never resolves partially.** Partial attributes weaken a rule's inputs, and partial rules weaken the policy — an empty rule set is an allow under `{ onEmptyRuleSet: "allow" }`. There is no safe "answer with what we got" on an authorization path.
+
+### FailureRecord
+
+```typescript
+type FailureSource =
+  | { kind: "collector"; pipeline: "attribute" | "rule"; collector: string }
+  | { kind: "deadline"; pipeline: "attribute" | "rule" }
+  | { kind: "rule"; ruleType: string; code: string }
+
+class FailureRecord {
+  record(error: unknown, source: FailureSource): void
+  sourceOf(error: unknown): FailureSource | undefined
+}
+```
+
+Where **one decision's** failures came from (#200). Create one per decision and hand the same one to both collects and to `evaluate` (`collect(request, { failures })`, `evaluate(attrs, rules, { failures })`); then ask `sourceOf` with whatever the decision was failed with. The pipelines and `evaluate` still reject with the error **unchanged** — the source is recorded beside it, not wrapped around it, so a transport that tells a deny from a fault by class, and a caller matching its own error, see exactly what was thrown.
+
+What gets recorded: a collector that rejected, threw or overran its own budget (`collector`); a pipeline that overran its deadline (`deadline` — no one collector is answerable); a rule whose `verify` threw, whose `decide` rejected, or that overran a rule budget (`rule`). Every source is recorded by the runner or the evaluator itself and never read off the error, so a collector that throws a `CollectorTimeoutError` it built is recorded under its own position, whatever that error claims. A collector is named by its position, spelled as the server's config path, and by class when the class name is identifier-shaped and at most 64 characters — `attribute.collectors[1] (EntitlementStoreCollector)`, or `rule.collectors[0]` for an object literal — which is also how `CollectorTimeoutError.collector` names the collector that overran.
+
+The record is keyed by the value that was thrown, primitives included, and **the first source recorded for a value wins**: when two collectors of one decision fail with the same shared object, the one whose rejection landed first is named. It is per decision on purpose — nothing is kept process-wide, so a concurrent decision failing on the same shared object cannot rename this one's. Never share one across decisions. `sourceOf` answers `undefined` for a caller's abort reason (a rejection after a collector's or rule's own signal aborted belongs to whatever aborted it) and for anything no pipeline or evaluator recorded.
 
 ### Registry\<T\>
 
@@ -117,7 +139,9 @@ A module registers attribute-collector, rule-collector, and resource-parser fact
 | `CollectorContext` | Input passed to every collector: `subject`, `resource`, `action`, `signal`, optional `headers` and `requestContext` |
 | `CollectorRequest` | What a pipeline is handed: a `CollectorContext` without the per-collector `signal`, which the pipeline supplies. Its own optional `signal` is caller-side cancellation, linked into the pipeline's |
 | `CollectorLimits` | `{ collectorTimeoutMs?, deadlineMs?, concurrency? }` — the bounds a pipeline runs its fan-out under. See [Collector limits](#collector-limits) |
-| `CollectorTimeoutError` | `Error` subclass thrown when a collector overruns its budget or a fan-out overruns its deadline. Carries `pipeline`, `limit`, `timeoutMs` and (for a per-collector timeout) `collector`. **A deny, not a degradation** — the pipeline returns nothing at all |
+| `CollectorTimeoutError` | `Error` subclass thrown when a collector overruns its budget or a fan-out overruns its deadline. Carries `pipeline`, `limit`, `timeoutMs` and (for a per-collector timeout) `collector`, named as a [`FailureRecord`](#failurerecord) names one. **A deny, not a degradation** — the pipeline returns nothing at all |
+| `FailureSource` | `{ kind: "collector"; pipeline; collector } \| { kind: "deadline"; pipeline } \| { kind: "rule"; ruleType; code }` — where a failure came from. See [FailureRecord](#failurerecord) |
+| `CollectOptions` | `{ failures?: FailureRecord }` — the second argument of `collect` on both pipelines. See [FailureRecord](#failurerecord) |
 | `UntrustedRequestContext` | The type of `requestContext` — the caller's own data, sealed so it takes an explicit `readUntrustedRequestContext(...)` to read. `markUntrustedRequestContext(...)` mints one at the transport boundary. See [docs/extending.md — The trust boundary](../../docs/extending.md#the-trust-boundary-requestcontext-is-the-callers) |
 | `Attributes` | `Map<string, unknown>` — subject attribute bag. Mutable: collectors build one, and `AttributePipeline` merges them |
 | `ReadonlyAttributes` | `ReadonlyMap<string, unknown>` — the view a rule is judged against. The evaluator hands the same live map to every rule, so a rule that wrote into it would change the inputs of every group after it |

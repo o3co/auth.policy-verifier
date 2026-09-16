@@ -24,6 +24,10 @@
  * - `code` is a rule's own `code`, which comes from the deployment's configured
  *   rules — but `Rule.code` is an interface field, and a rule collector *can*
  *   compute it from the request, so it is additionally capped.
+ * - `collector` is a collector's position and identifier-shaped class name as
+ *   the collector runner recorded it (#200) — never the name inside an error —
+ *   or `"unattributed"`; it is capped as well, as a backstop. `category` is a
+ *   closed enum (`observability/failure.mts`).
  *
  * And two values are deliberately **not** labels at all: `resource` and
  * `action`. They come straight out of the request body, they are unbounded by
@@ -36,6 +40,7 @@
 
 import express from "express";
 import { Counter, collectDefaultMetrics, Histogram, Registry } from "prom-client";
+import type { CollectorFailureCategory } from "./failure.mjs";
 
 /** Namespace for the Node process defaults, so they cannot collide with anything else scraped. */
 const PROCESS_METRICS_PREFIX = "auth_policy_verifier_";
@@ -80,6 +85,34 @@ const KNOWN_METHODS = new Set([
  * codes per request.
  */
 export const MAX_DENY_CODE_LABELS = 32;
+
+/**
+ * Distinct `collector` label values published before the rest collapse into
+ * `"other"` (#200).
+ *
+ * A collector's name is what the collector runner recorded — its position and
+ * its identifier-shaped class name — or `"unattributed"`, so a deployment
+ * reaches this only with more than 32 collectors that have all failed. The cap
+ * is a backstop for the one part code controls: a class's `name` is an ordinary
+ * property, and a label is the wrong place to find out it was minted per
+ * request.
+ */
+export const MAX_COLLECTOR_LABELS = 32;
+
+/**
+ * A label that admits at most `max` distinct values, first come first served,
+ * and collapses the rest into `"other"` — so a deployment's real values are
+ * published and only what arrives after them is folded.
+ */
+function cappedLabel(max: number): (value: string) => string {
+	const published = new Set<string>();
+	return (value) => {
+		if (published.has(value)) return value;
+		if (published.size >= max) return "other";
+		published.add(value);
+		return value;
+	};
+}
 
 function methodLabel(req: express.Request): string {
 	return KNOWN_METHODS.has(req.method) ? req.method : "other";
@@ -129,6 +162,17 @@ export interface DecisionObservation {
 	durationSeconds: number;
 }
 
+/** One collector failure that kept a decision from being made, as the metrics seam sees it (#200). */
+export interface CollectorFailureObservation {
+	/**
+	 * `attribute.collectors[1] (EntitlementStoreCollector)`, or the list itself
+	 * (`attribute.collectors`) when the pipeline's deadline ran out. Bounded by
+	 * {@link MAX_COLLECTOR_LABELS} when published.
+	 */
+	collector: string;
+	category: CollectorFailureCategory;
+}
+
 /**
  * The narrow seam the verify router reports decisions through.
  *
@@ -138,6 +182,13 @@ export interface DecisionObservation {
  */
 export interface DecisionMetrics {
 	observe(observation: DecisionObservation): void;
+	/**
+	 * Called once per collector failure the router logs (#200) — a
+	 * `collector_timeout` deny, or a `verify_internal_error` a collector threw.
+	 * Optional, so an implementation written against the seam before it
+	 * existed still satisfies it and simply does not count them.
+	 */
+	observeCollectorFailure?(observation: CollectorFailureObservation): void;
 }
 
 /** Options accepted by {@link createMetrics}. */
@@ -175,6 +226,10 @@ export interface Metrics {
  * - `auth_decision_duration_seconds{decision}` — time inside the collector
  *   pipelines and the evaluator, which is distinct from the HTTP histogram:
  *   one `POST /verify/batch` request is up to `verify.maxBatchSize` decisions.
+ * - `auth_collector_failures_total{collector,category}` — which fact source is
+ *   failing decisions, and how (#200): `category` is `collector_timeout` or
+ *   `collector_threw`. The aggregate of the `collector` field on the
+ *   `collector_timeout` and `verify_internal_error` log lines.
  * - `auth_policy_verifier_*` — Node process defaults.
  *
  * **Deliberately not published yet:** a per-dependency `up` gauge like
@@ -226,15 +281,15 @@ export function createMetrics(options: CreateMetricsOptions = {}): Metrics {
 		registers: [registry],
 	});
 
-	// Codes already published, so the cap admits the deployment's real codes on a
-	// first-come basis and collapses only what arrives after them.
-	const publishedCodes = new Set<string>();
-	const codeLabel = (code: string): string => {
-		if (publishedCodes.has(code)) return code;
-		if (publishedCodes.size >= MAX_DENY_CODE_LABELS) return "other";
-		publishedCodes.add(code);
-		return code;
-	};
+	const collectorFailuresTotal = new Counter({
+		name: "auth_collector_failures_total",
+		help: "Collector failures that kept a decision from being made, by collector and category.",
+		labelNames: ["collector", "category"] as const,
+		registers: [registry],
+	});
+
+	const codeLabel = cappedLabel(MAX_DENY_CODE_LABELS);
+	const collectorLabel = cappedLabel(MAX_COLLECTOR_LABELS);
 
 	const middleware: express.RequestHandler = (req, res, next) => {
 		const endTimer = requestDuration.startTimer();
@@ -265,6 +320,9 @@ export function createMetrics(options: CreateMetricsOptions = {}): Metrics {
 			if (decision === "deny" && code !== undefined) {
 				denialsTotal.inc({ code: codeLabel(code) });
 			}
+		},
+		observeCollectorFailure({ collector, category }) {
+			collectorFailuresTotal.inc({ collector: collectorLabel(collector), category });
 		},
 	};
 

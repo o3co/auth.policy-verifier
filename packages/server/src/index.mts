@@ -38,6 +38,11 @@ export {
 	resolveCallerAuth,
 } from "./http/callerAuth.mjs";
 export {
+	acceptRequestId,
+	MAX_REQUEST_ID_LENGTH,
+	REQUEST_ID_HEADER,
+} from "./http/requestId.mjs";
+export {
 	type AssertedJwtConfig,
 	type AudienceClaimCheck,
 	type AuthenticationResult,
@@ -91,11 +96,19 @@ export {
 	type NamedRule,
 } from "./observability/decisionEvent.mjs";
 export {
+	type ClassifiedFailure,
+	type CollectorFailureCategory,
+	FAILURE_CATEGORIES,
+	type FailureCategory,
+} from "./observability/failure.mjs";
+export {
+	type CollectorFailureObservation,
 	type CreateMetricsOptions,
 	createMetrics,
 	DEFAULT_METRICS_PATH,
 	type DecisionMetrics,
 	type DecisionObservation,
+	MAX_COLLECTOR_LABELS,
 	MAX_DENY_CODE_LABELS,
 	type Metrics,
 } from "./observability/metrics.mjs";

@@ -413,7 +413,7 @@ Attribute and rule collectors are the layer that talks to databases and HTTP API
 
 Every collector is handed an `AbortSignal` on `CollectorContext.signal`; it aborts when that collector's budget runs out, when the pipeline's deadline does, when a sibling collector has already failed the decision, or when the caller went away. Pass it to whatever the collector waits on — `fetch(url, { signal: context.signal })` — so the outbound work is actually cancelled and not merely stopped being waited for.
 
-**Exceeding a bound denies.** The decision is answered `403` with `code: "collector_timeout"` and an empty `reason.groups`; the details go to the `collector_timeout` log line rather than to the caller. It is deliberately not a `5xx` and deliberately not "decide with what we collected in time": a short rule list is a *weaker policy*, and an empty one is an **allow** wherever `rule.onEmptyRuleSet = "allow"` is set — so the evaluator is never reached at all. In a batch the bound is per decision, so one entry timing out denies that entry and leaves the rest decided.
+**Exceeding a bound denies.** The decision is answered `403` with `code: "collector_timeout"` and an empty `reason.groups`; the details go to the `collector_timeout` log line rather than to the caller — which names the collector, and counts it in `auth_collector_failures_total` (see [Failure events](#failure-events)). It is deliberately not a `5xx` and deliberately not "decide with what we collected in time": a short rule list is a *weaker policy*, and an empty one is an **allow** wherever `rule.onEmptyRuleSet = "allow"` is set — so the evaluator is never reached at all. In a batch the bound is per decision, so one entry timing out denies that entry and leaves the rest decided.
 
 ### Rule deadlines
 
@@ -538,6 +538,27 @@ One structured event per decision, named `decision`, at `info`:
 
 **Never logged:** the raw bearer token, the claim set beyond `sub`, and the caller's `context` object — free-form, forwarded verbatim to collectors, and therefore exactly where a calling service's own request payload ends up.
 
+### Failure events
+
+A decision that could not be made is logged at `error`, and the line says what kind of failure it was and where (#200):
+
+```json
+{"msg":"verify_internal_error","endpoint":"/verify","requestId":"6f1c…","category":"collector_threw","collector":"attribute.collectors[1] (EntitlementStoreCollector)","err":{"message":"entitlement store is down"}}
+```
+
+| Event | Answered | `category` | Also names |
+|---|---|---|---|
+| `collector_timeout` | `403 collector_timeout` | `collector_timeout` | `collector`: the entry that overran `verify.collectorTimeoutMs`, or the list itself (`attribute.collectors`) when the pipeline overran `verify.collectorDeadlineMs` |
+| `rule_timeout` | `403 rule_timeout` | `rule_timeout` | `rule`: `{ ruleType, code }` |
+| `attribute_conflict` | `403 attribute_conflict` | `attribute_conflict` | — (two collectors disagreed; neither alone is answerable) |
+| `verify_internal_error` | `500 internal_error` | `collector_threw`, `rule_threw`, `body_rejected` or `internal` | `collector` for `collector_threw`, `rule` for `rule_threw` |
+
+`category` is a closed set of those seven values, so filter by equality rather than by a regex over `err.message`. `collector` is the entry's position in `attribute.collectors` / `rule.collectors` plus its class, both fixed by configuration. `body_rejected` is a body-parser failure the deny envelope does not map to a 4xx (e.g. a request stream something in front of the router already read); `internal` is anything that did not come out of a decision's own collect or evaluation — a resource parser or authenticator that threw, whatever it threw. An unreachable JWKS is not among them: it is answered `401` and logged as `jwt_verification_unavailable`.
+
+Nothing the router adds to these lines carries the credential, the claims or `context`. The category is an enum. The collector is the one the collector runner recorded for that decision — never a name read off the error, so a collector cannot relabel itself by throwing a `CollectorTimeoutError` it built — and a timeout nothing recorded is `collector: "unattributed"`. A rule's `ruleType` and `code` are carried only when identifier-shaped (a letter, then letters, digits, `_`, `.` or `-`, at most 64 characters), since a rule collector may build them per request, and are `redacted` otherwise. The request id is validated as below. `err` is the error as thrown, with one exception: the three deny errors core defines (`CollectorTimeoutError`, `RuleTimeoutError`, `AttributeConflictError`) name a collector, a rule or an attribute key in their message and their own fields, so each is logged rebuilt — the classified collector or rule, the key held to the same identifier shape, and a stack of the header line only. Any other error's message is its author's responsibility.
+
+**Request correlation.** An `x-request-id` the caller sent is echoed as a response header on every answer the decision endpoints give — allow, deny, refusal and `500` — and carried as `requestId` on every line above and on the `decision` line, so a denial can be matched to the enforcing service's own log. It is carried only as 1–128 characters of `A-Z a-z 0-9 - _ . : + / = #` (UUIDs, ULIDs, hex and W3C trace ids, base64 and protobuf.interceptors' own ids all fit). Any other value is treated as absent — not echoed, not logged, not forwarded to collectors — and no id is minted when the caller sent none.
+
 ### Metrics
 
 `GET /metrics`, Prometheus text exposition format:
@@ -547,12 +568,13 @@ One structured event per decision, named `decision`, at `info`:
 | `auth_decisions_total` | counter | `decision` |
 | `auth_denials_total` | counter | `code` |
 | `auth_decision_duration_seconds` | histogram | `decision` |
+| `auth_collector_failures_total` | counter | `collector`, `category` |
 | `http_request_duration_seconds` | histogram | `method`, `route`, `status` |
 | `auth_policy_verifier_*` | various | Node process defaults |
 
 `http_request_duration_seconds` matches [auth.provider](https://github.com/o3co/auth.provider)'s name and label set, so one Prometheus job covers both halves of the stack.
 
-**Every label is bounded**, because an unbounded one mints a fresh time series per distinct value — which is how a metrics endpoint takes down the monitoring meant to watch it. `resource`, `action` and `sub` are not labels at all: they come from the request (body or token) and belong on the log line, where high cardinality is the point. `route` is the Express route pattern with unmatched requests collapsing to `route="unmatched"`; `method` is an allowlist with everything else `"other"`; `code` is capped at 32 distinct values.
+**Every label is bounded**, because an unbounded one mints a fresh time series per distinct value — which is how a metrics endpoint takes down the monitoring meant to watch it. `resource`, `action` and `sub` are not labels at all: they come from the request (body or token) and belong on the log line, where high cardinality is the point. `route` is the Express route pattern with unmatched requests collapsing to `route="unmatched"`; `method` is an allowlist with everything else `"other"`; `code` is capped at 32 distinct values. On `auth_collector_failures_total`, `collector` is a configured entry (capped at 32 the same way) and `category` is `collector_timeout` or `collector_threw`.
 
 **`/metrics` is not gated by `http.callerAuth`.** Prometheus scrape configs carry `authorization` / `basic_auth` / `oauth2` and no arbitrary header, so gating it on `x-caller-token` would make it unscrapable by a stock scraper and push operators into handing the credential that authorizes *decisions* to the monitoring system. The endpoint publishes counts and latencies with bounded labels and nothing about any individual decision. The boundary is the bind address, which is loopback by default (#108) — put the scraper on the host (a sidecar in the same Kubernetes pod shares the network namespace and reaches `127.0.0.1:3000/metrics` with the default untouched), and where the bind must be `0.0.0.0`, restrict the port at the network layer as you already do for `/verify`.
 

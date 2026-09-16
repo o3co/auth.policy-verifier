@@ -7,12 +7,14 @@ import {
 	resolveRuleTimeoutMs,
 } from "./collectorLimits.mjs";
 import { RuleTimeoutError } from "./errors.mjs";
+import type { FailureRecord, FailureSource } from "./failureSource.mjs";
 import {
 	type AnyRule,
 	type AsyncRule,
 	type Attributes,
 	type Decision,
 	isAsyncRule,
+	type Rule,
 	type RuleGroupOutcome,
 	type RuleOutcome,
 } from "./types.mjs";
@@ -50,6 +52,12 @@ export interface EvaluateOptions {
 	evaluateDeadlineMs?: number;
 	/** The caller's signal; when it aborts, the asynchronous rule in flight is aborted with its reason. */
 	signal?: AbortSignal;
+	/**
+	 * Where this decision's failures are recorded (#200) — which rule threw,
+	 * rejected or overran a rule budget. The same record the decision's two
+	 * collects were handed; see `FailureRecord`. Omitted, nothing is recorded.
+	 */
+	failures?: FailureRecord;
 }
 
 /**
@@ -88,7 +96,8 @@ export interface EvaluateOptions {
  *   deny of its own for the transport, never a pass.
  * @throws whatever a rule threw or rejected with, or the caller's abort reason,
  *   unchanged: a rule that owns its engine's outage answers `false` and logs;
- *   one that throws is reporting a fault.
+ *   one that throws is reporting a fault. Which rule threw is recorded in
+ *   `failures` beside the error rather than wrapped around it (#200).
  * @throws {RangeError} for an unusable `ruleTimeoutMs` or `evaluateDeadlineMs`,
  *   before any rule runs.
  */
@@ -120,7 +129,9 @@ export async function evaluate(
 	// pure predicates over attributes by contract, so running them all is safe.
 	const outcomes: RuleGroupOutcome[] = [];
 	for (const [ruleType, groupRules] of groups) {
-		outcomes.push(await evaluateGroup(ruleType, groupRules, attrs, budget, options?.signal));
+		outcomes.push(
+			await evaluateGroup(ruleType, groupRules, attrs, budget, options?.signal, options?.failures),
+		);
 	}
 
 	// Phase 4: deny names the FIRST failing group, as before; reason carries all.
@@ -171,17 +182,33 @@ async function evaluateGroup(
 	attrs: Attributes,
 	budget: RuleBudget,
 	caller: AbortSignal | undefined,
+	failures: FailureRecord | undefined,
 ): Promise<RuleGroupOutcome> {
 	const evaluated: RuleOutcome[] = [];
 	for (const rule of rules) {
 		const passed = isAsyncRule(rule)
-			? await runAsyncRule(rule, attrs, budget, caller)
-			: rule.verify(attrs);
+			? await runAsyncRule(rule, attrs, budget, caller, failures)
+			: verifyRule(rule, attrs, failures);
 		const outcome = { code: rule.code, message: rule.message, passed };
 		evaluated.push(outcome);
 		if (passed) return { ruleType, passed: true, evaluated, satisfiedBy: outcome };
 	}
 	return { ruleType, passed: false, evaluated };
+}
+
+/** How a `FailureRecord` names a rule: by the two things an operator finds it by in config. */
+function ruleSource(rule: AnyRule): FailureSource {
+	return { kind: "rule", ruleType: rule.ruleType, code: rule.code };
+}
+
+/** Asks a synchronous rule, recording it as the source of anything it throws (#200). */
+function verifyRule(rule: Rule, attrs: Attributes, failures: FailureRecord | undefined): boolean {
+	try {
+		return rule.verify(attrs);
+	} catch (error) {
+		failures?.record(error, ruleSource(rule));
+		throw error;
+	}
 }
 
 /**
@@ -198,12 +225,13 @@ async function runAsyncRule(
 	attrs: Attributes,
 	budget: RuleBudget,
 	caller: AbortSignal | undefined,
+	failures: FailureRecord | undefined,
 ): Promise<boolean> {
 	if (caller?.aborted) throw caller.reason;
 	const remaining = budget.deadlineAt - performance.now();
 	const phaseBinds = remaining < budget.ruleTimeoutMs;
-	const expired = (started: boolean) =>
-		phaseBinds
+	const expired = (started: boolean) => {
+		const error = phaseBinds
 			? new RuleTimeoutError({
 					ruleType: rule.ruleType,
 					code: rule.code,
@@ -216,6 +244,9 @@ async function runAsyncRule(
 					code: rule.code,
 					timeoutMs: budget.ruleTimeoutMs,
 				});
+		failures?.record(error, ruleSource(rule));
+		return error;
+	};
 	// The phase is spent: this rule is not started at all.
 	if (remaining <= 0) throw expired(false);
 	const own = new AbortController();
@@ -232,9 +263,18 @@ async function runAsyncRule(
 			// AbortError, not with the reason. Whichever settles first, the
 			// answer is the reason the signal carries: the timeout or the
 			// caller's, never the transport's spelling of "aborted".
-			Promise.resolve(rule.decide(attrs, own.signal)).catch((error: unknown) => {
-				throw own.signal.aborted ? own.signal.reason : error;
-			}),
+			//
+			// Constructed rather than `Promise.resolve(rule.decide(...))`, so a
+			// `decide` that throws before returning a promise is attributed
+			// exactly as one that rejects (#200). A rejection after the abort is
+			// the abort's, and is attributed to nobody.
+			new Promise<boolean>((resolve) => resolve(rule.decide(attrs, own.signal))).catch(
+				(error: unknown) => {
+					if (own.signal.aborted) throw own.signal.reason;
+					failures?.record(error, ruleSource(rule));
+					throw error;
+				},
+			),
 			cancelled.promise,
 		]);
 	} finally {

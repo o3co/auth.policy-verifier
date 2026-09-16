@@ -3,6 +3,7 @@
 
 export { AttributePipeline } from "./AttributePipeline.mjs";
 export type {
+	CollectOptions,
 	CollectorLimits,
 	CollectorPipeline,
 	ResolvedCollectorLimits,
@@ -27,6 +28,8 @@ export {
 } from "./errors.mjs";
 export type { EvaluateOptions } from "./evaluate.mjs";
 export { evaluate } from "./evaluate.mjs";
+export type { FailureSource } from "./failureSource.mjs";
+export { FailureRecord } from "./failureSource.mjs";
 export type {
 	AttributeKeyReservation,
 	AttributeKeyReservationRequest,

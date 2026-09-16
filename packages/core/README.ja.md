@@ -24,6 +24,8 @@ interface EvaluateOptions {
   evaluateDeadlineMs?: number
   /** The caller's signal; aborting it aborts the asynchronous rule in flight with its reason. */
   signal?: AbortSignal
+  /** This decision's FailureRecord: which rule threw, rejected or overran a budget (#200). */
+  failures?: FailureRecord
 }
 
 function evaluate(attrs: Attributes, rules: AnyRule[], options?: EvaluateOptions): Promise<Decision>
@@ -41,14 +43,14 @@ function evaluate(attrs: Attributes, rules: AnyRule[], options?: EvaluateOptions
 「残りも失敗したのか」に答えられないためです。deny の `code` / `message` は従来どおり最初に失敗した
 グループから取ります。
 
-ルールのリストにはどちらの種類のルールも混在できます (#225)。同期の `Rule` は `verify` で、`AsyncRule` は `ruleTimeoutMs` の制限下で `decide` を await して問い合わせます。どちらも収集順に 1 つずつ問い、グループ内で最初に通ったルール以降の代替ルールは種類を問わず実行されません。`evaluate` が非同期なのはそのためだけで、同期ルールだけのリストは同じターン内で答えが出ます。非同期ルールが予算を超えたとき、またはルール全体で `evaluateDeadlineMs` を超えたときは `RuleTimeoutError` で reject します（`limit: "rule"` または `"deadline"`。transport にとっては deny であり、pass にはなりません）。`signal` が abort されれば呼び出し側の abort 理由で、ルールが throw / reject すればその値で reject します。
+ルールのリストにはどちらの種類のルールも混在できます (#225)。同期の `Rule` は `verify` で、`AsyncRule` は `ruleTimeoutMs` の制限下で `decide` を await して問い合わせます。どちらも収集順に 1 つずつ問い、グループ内で最初に通ったルール以降の代替ルールは種類を問わず実行されません。`evaluate` が非同期なのはそのためだけで、同期ルールだけのリストは同じターン内で答えが出ます。非同期ルールが予算を超えたとき、またはルール全体で `evaluateDeadlineMs` を超えたときは `RuleTimeoutError` で reject します（`limit: "rule"` または `"deadline"`。transport にとっては deny であり、pass にはなりません）。`signal` が abort されれば呼び出し側の abort 理由で、ルールが throw / reject すればその値でそのまま reject し、[`FailureRecord`](#failurerecord) が渡されていればそのルールを `failures` に記録します。
 
 ### AttributePipeline
 
 ```typescript
 class AttributePipeline {
   constructor(collectors: AttributeCollector[], limits?: CollectorLimits)
-  collect(request: CollectorRequest): Promise<Attributes>
+  collect(request: CollectorRequest, options?: { failures?: FailureRecord }): Promise<Attributes>
 }
 ```
 
@@ -61,7 +63,7 @@ fan-out には上限があります — [コレクターの上限](#コレクタ
 ```typescript
 class RulePipeline {
   constructor(collectors: RuleCollector[], limits?: CollectorLimits)
-  collect(request: CollectorRequest): Promise<AnyRule[]>
+  collect(request: CollectorRequest, options?: { failures?: FailureRecord }): Promise<AnyRule[]>
 }
 ```
 
@@ -80,6 +82,26 @@ interface CollectorLimits {
 コレクターはデータベースや HTTP API を呼ぶため、素の `Promise.all` で走らせる pipeline には待つのをやめる手段がありませんでした。各コレクターには `CollectorContext.signal` で専用の `AbortSignal` と専用の予算が渡され、fan-out 全体にはデッドラインが付き、同時に走るのは `concurrency` 本までです。何も渡さなければすべて既定値が適用されるため、上限なしで構築した pipeline も保護されています。正の整数でない上限はコンストラクタが `RangeError` で拒否します（黙って無視しません） — `concurrency: 0` は「何も集めずに解決する」になってしまうためです。
 
 **上限に達した場合は `CollectorTimeoutError` を送出し、部分的な解決は決してしません。** 部分的な attribute は Rule の入力を弱め、部分的な Rule はポリシー自体を弱めます — ルールが空なら `{ onEmptyRuleSet: "allow" }` の下では allow です。認可経路に「集まったぶんで答える」の安全な形は存在しません。
+
+### FailureRecord
+
+```typescript
+type FailureSource =
+  | { kind: "collector"; pipeline: "attribute" | "rule"; collector: string }
+  | { kind: "deadline"; pipeline: "attribute" | "rule" }
+  | { kind: "rule"; ruleType: string; code: string }
+
+class FailureRecord {
+  record(error: unknown, source: FailureSource): void
+  sourceOf(error: unknown): FailureSource | undefined
+}
+```
+
+**1 つの decision の**失敗がどこから来たかを記録します (#200)。decision ごとに 1 つ作り、同じものを両方の collect と `evaluate` に渡し（`collect(request, { failures })`、`evaluate(attrs, rules, { failures })`）、decision を失敗させた値で `sourceOf` を問い合わせます。pipeline と `evaluate` はエラーを**そのまま** reject します — 出どころはエラーを包むのではなくエラーの横に記録されるため、クラスで deny と障害を見分ける transport も、自分のエラーと照合する呼び出し側も、throw されたものをそのまま受け取ります。
+
+記録されるもの: reject / throw した、または自分の予算を超えたコレクター（`collector`）、デッドラインを超えた pipeline（`deadline` — 特定のコレクターの責任ではない）、`verify` が throw した / `decide` が reject した / ルールの予算を超えたルール（`rule`）。出どころは必ずランナーまたは評価器自身が記録し、エラーから読み取ることはありません。そのため自前で作った `CollectorTimeoutError` を throw したコレクターは、そのエラーが何を名乗っていても自分の位置で記録されます。コレクターは位置（サーバーの設定パスと同じ綴り）と、クラス名が識別子の形で 64 文字以内ならクラス名で呼ばれます — `attribute.collectors[1] (EntitlementStoreCollector)`、オブジェクトリテラルなら `rule.collectors[0]`。`CollectorTimeoutError.collector` が予算を超えたコレクターを呼ぶ名前も同じです。
+
+記録は throw された値（プリミティブを含む）をキーにし、**同じ値に対しては最初に記録された出どころが優先**されます: 1 つの decision の 2 つのコレクターが同じ共有オブジェクトで失敗した場合、先に reject が届いた方が名指しされます。decision 単位なのは意図的です — プロセス全体では何も保持しないため、同じ共有オブジェクトで失敗した並行 decision がこちらの記録を書き換えることはありません。複数の decision で共有しないでください。呼び出し側の abort 理由（コレクターやルール自身の signal が abort された後の reject は、abort させた側のもの）と、どの pipeline / 評価器も記録していないものには `undefined` を返します。
 
 ### Registry\<T\>
 
@@ -123,7 +145,9 @@ interface ModuleContext {
 | `CollectorContext` | 各コレクターに渡される入力: `subject`、`resource`、`action`、`signal`、省略可能な `headers` と `requestContext` |
 | `CollectorRequest` | pipeline が受け取る形: コレクター単位の `signal` を除いた `CollectorContext`。`signal` は pipeline が供給する。こちらの省略可能な `signal` は呼び出し側のキャンセルで、pipeline 側の signal に連結される |
 | `CollectorLimits` | `{ collectorTimeoutMs?, deadlineMs?, concurrency? }` — pipeline が fan-out に課す上限。[コレクターの上限](#コレクターの上限) を参照 |
-| `CollectorTimeoutError` | コレクターが予算を、または fan-out がデッドラインを超えたときに送出される `Error` サブクラス。`pipeline` / `limit` / `timeoutMs` と、コレクター単位のタイムアウトでは `collector` を持つ。**劣化ではなく deny** — pipeline は何も返さない |
+| `CollectorTimeoutError` | コレクターが予算を、または fan-out がデッドラインを超えたときに送出される `Error` サブクラス。`pipeline` / `limit` / `timeoutMs` と、コレクター単位のタイムアウトでは `collector`（[`FailureRecord`](#failurerecord) と同じ名前）を持つ。**劣化ではなく deny** — pipeline は何も返さない |
+| `FailureSource` | `{ kind: "collector"; pipeline; collector } \| { kind: "deadline"; pipeline } \| { kind: "rule"; ruleType; code }` — 失敗の出どころ。[FailureRecord](#failurerecord) を参照 |
+| `CollectOptions` | `{ failures?: FailureRecord }` — 両 pipeline の `collect` の第 2 引数。[FailureRecord](#failurerecord) を参照 |
 | `UntrustedRequestContext` | `requestContext` の型 — 呼び出し側のデータであり、読むには明示的な `readUntrustedRequestContext(...)` が必要な形で封じられている。トランスポート境界で生成するのは `markUntrustedRequestContext(...)`。[docs/extending.ja.md — 信頼境界](../../docs/extending.ja.md#信頼境界-requestcontext-は呼び出し側のもの) を参照 |
 | `Attributes` | `Map<string, unknown>` — サブジェクト属性のバッグ。可変: コレクターがこれを組み立て、`AttributePipeline` がマージする |
 | `ReadonlyAttributes` | `ReadonlyMap<string, unknown>` — Rule が判定対象として受け取るビュー。評価器は同一の live map をすべての Rule に渡すため、書き込む Rule は以降の全グループの入力を書き換えてしまう |

@@ -48,7 +48,11 @@ export type CollectorTimeoutDetail =
 			limit: "collector";
 			/** The bound that was exceeded, in milliseconds. */
 			timeoutMs: number;
-			/** The collector that overran. Always known for this limit. */
+			/**
+			 * The collector that overran. Always known for this limit, and spelled
+			 * as a `FailureRecord` names a collector that threw:
+			 * `attribute.collectors[1] (EntitlementStoreCollector)`.
+			 */
 			collector: string;
 	  }
 	| {
@@ -81,7 +85,7 @@ export class CollectorTimeoutError extends Error {
 	constructor(detail: CollectorTimeoutDetail) {
 		super(
 			detail.limit === "collector"
-				? `${detail.pipeline} collector ${detail.collector} did not finish within its ${detail.timeoutMs} ms budget`
+				? `collector ${detail.collector} did not finish within its ${detail.timeoutMs} ms budget`
 				: `the ${detail.pipeline} pipeline did not finish within its ${detail.timeoutMs} ms deadline`,
 		);
 		this.name = "CollectorTimeoutError";

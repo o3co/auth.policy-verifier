@@ -128,7 +128,7 @@ Every decision emits one structured event named `decision`, at `info`:
 | `code` | Deny only — the same code the caller got on the wire |
 | `satisfiedBy` | Allow only — the `{ruleType, code}` of the rule that satisfied each group |
 | `deniedBy` | Deny only — the first failing group, and every alternative in it that refused |
-| `requestId` | `x-request-id` as sent, when the caller sent one. Omitted otherwise |
+| `requestId` | `x-request-id` as sent, when the caller sent one the server carries (see [Failure events](#failure-events)). Omitted otherwise |
 | `durationMs` | Time in the collector pipelines and the evaluator — not the HTTP round trip |
 
 One line per decision, so a `POST /verify/batch` of N entries emits N lines sharing one `requestId`. Alert and index on the event name, never on message text.
@@ -141,6 +141,37 @@ One line per decision, so a `POST /verify/batch` of N entries emits N lines shar
 - **the caller's `context` object.** It is free-form and forwarded verbatim to collectors, so it is exactly where a calling service's own request payload ends up. Logging it would make the audit stream a copy of that payload.
 - **rule `message` text**, which is derived from the resource and action already on the line.
 
+### Failure events
+
+A decision that could not be made is logged at `error` (level 50), and the line says what kind of failure it was and where:
+
+```json
+{"level":50,"msg":"verify_internal_error","endpoint":"/verify","requestId":"6f1c…","category":"collector_threw","collector":"attribute.collectors[1] (EntitlementStoreCollector)","err":{"type":"Error","message":"entitlement store is down","stack":"…"}}
+```
+
+| Event | Answered | `category` | Also names |
+|---|---|---|---|
+| `collector_timeout` | `403 collector_timeout` | `collector_timeout` | `collector`: the entry that overran `VERIFY_COLLECTOR_TIMEOUT_MS`, or the list itself (`attribute.collectors`) when the pipeline overran `VERIFY_COLLECTOR_DEADLINE_MS` |
+| `rule_timeout` | `403 rule_timeout` | `rule_timeout` | `rule`: `{ ruleType, code }` |
+| `attribute_conflict` | `403 attribute_conflict` | `attribute_conflict` | — (two collectors disagreed; neither alone is answerable) |
+| `verify_internal_error` | `500 internal_error` | `collector_threw`, `rule_threw`, `body_rejected` or `internal` | `collector` for `collector_threw`, `rule` for `rule_threw` |
+
+| `category` | What failed |
+|---|---|
+| `collector_timeout` | A collector overran its budget, or a pipeline its deadline |
+| `collector_threw` | A collector rejected or threw |
+| `attribute_conflict` | Two attribute collectors wrote different values to one scalar key |
+| `rule_timeout` | An asynchronous rule overran its budget, or the rule phase its deadline |
+| `rule_threw` | A rule's `verify` threw or its `decide` rejected |
+| `body_rejected` | The JSON body parser failed in a way the deny envelope does not map to a 4xx |
+| `internal` | Anything that did not come out of a decision's own collect or evaluation — a resource parser or authenticator that threw, whatever it threw |
+
+The set is closed: alert and filter on `category` by equality, never on `err.message`. `collector` is the entry's position in `attribute.collectors` / `rule.collectors` in `config/application.conf`, plus its class. An unreachable JWKS is not a category — it is answered `401` and logged as `jwt_verification_unavailable` (see below).
+
+Nothing the server adds to these lines carries the token, the claims or `context`. The collector is the one the collector runner recorded for that decision, never a name read off an error, and a timeout nothing recorded is `collector: "unattributed"`. A rule's `ruleType` and `code` are carried only when identifier-shaped (a letter, then letters, digits, `_`, `.` or `-`, at most 64 characters) and are `redacted` otherwise, because a rule collector may build rules per request. The request id is validated. `err` is the error as thrown, with one exception: the three deny errors core defines (`CollectorTimeoutError`, `RuleTimeoutError`, `AttributeConflictError`) name a collector, a rule or an attribute key in their message and their own fields, so each is logged rebuilt — the classified collector or rule, the key held to the same identifier shape, and a stack of the header line only. Any other error's message is its author's responsibility.
+
+**Request correlation.** An `x-request-id` the caller sent is echoed as a response header on every answer `/verify` and `/verify/batch` give — allow, deny, refusal and `500` — and carried as `requestId` on these lines and the `decision` line, so a denial can be matched to the enforcing service's own log. It is carried only as 1–128 characters of `A-Z a-z 0-9 - _ . : + / = #`, which UUIDs, ULIDs, hex and W3C trace ids, base64 and the ids [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) mints all fit. Anything else is treated as absent — not echoed, not logged, not forwarded to collectors — and the server never mints one when the caller sent none. The `HTTP_CALLER_AUTH_TOKEN` gate answers before the decision endpoints and does not echo it.
+
 ### Metrics
 
 `GET /metrics` serves the Prometheus text exposition format.
@@ -150,6 +181,7 @@ One line per decision, so a `POST /verify/batch` of N entries emits N lines shar
 | `auth_decisions_total` | counter | `decision` | The allow/deny rate. Exactly two series |
 | `auth_denials_total` | counter | `code` | Which rule is doing the denying — the aggregate of the log line's `deniedBy` |
 | `auth_decision_duration_seconds` | histogram | `decision` | Time in the pipelines and the evaluator |
+| `auth_collector_failures_total` | counter | `collector`, `category` | Which fact source is failing decisions, and how — the aggregate of the `collector` field on the failure lines. `category` is `collector_timeout` or `collector_threw` |
 | `http_request_duration_seconds` | histogram | `method`, `route`, `status` | Request rate, error rate and latency (the RED method) |
 | `auth_policy_verifier_*` | various | — | Node process defaults — event-loop lag, heap, GC, handles |
 
@@ -165,6 +197,7 @@ An unbounded label mints a fresh time series per distinct value, which is how a 
 - **`route`** is the Express route *pattern*, never the URL, and anything unmatched — 404 probes from whatever can route to the port — collapses to `route="unmatched"`.
 - **`method`** is an allowlist of the nine methods this service can serve; everything else is `method="other"`. Node's parser hands the server every method llhttp knows (`PURGE`, `MKCOL`, `PROPFIND`, …), so `req.method` is as caller-controlled as a path.
 - **`code`** comes from the rules a deployment configured, which makes it operator-bounded — but `code` is a field on the `Rule` interface and rules are built per request, so a custom rule collector is one edit away from deriving it from the resource. It is capped at 32 distinct values, after which the rest collapse to `code="other"`. A climbing `code="other"` is itself the signal that a rule is minting codes per request.
+- **`collector`** is a configured entry — its position in `attribute.collectors` / `rule.collectors` and its identifier-shaped class name, as the collector runner recorded it — or `collector="unattributed"`, so it is bounded by the config. A `CollectorTimeoutError` a collector builds itself cannot name anything else. The label is still capped at 32 distinct values as a backstop, collapsing to `collector="other"`. **`category`** is a closed enum.
 
 #### Reaching `/metrics`
 
