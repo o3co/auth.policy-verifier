@@ -546,9 +546,9 @@ allow のときは `deniedBy` の代わりに `satisfiedBy` が入り、各グ�
 | `attribute_conflict` | `403 attribute_conflict` | `attribute_conflict` | —（2 つのコレクターが食い違った。どちらか一方だけの責任ではない） |
 | `verify_internal_error` | `500 internal_error` | `collector_threw`、`rule_threw`、`body_rejected`、`internal` のいずれか | `collector_threw` なら `collector`、`rule_threw` なら `rule` |
 
-`category` はこの 7 値の閉じた集合なので、`err.message` への正規表現ではなく等値でフィルタしてください。`collector` は `attribute.collectors` / `rule.collectors` 内のエントリ位置とクラス名で、どちらも設定で決まります。`body_rejected` は deny エンベロープが 4xx に対応付けていない body parser の失敗（router の手前の何かがストリームを読んでしまった等）、`internal` はどの pipeline にも帰属しなかったもの — throw した resource parser や authenticator、`Error` ではなく文字列などオブジェクトでない値で reject したコレクター — です。JWKS に到達できない場合はここに含まれません: それは `401` で応答され、`jwt_verification_unavailable` としてログに出ます。
+`category` はこの 7 値の閉じた集合なので、`err.message` への正規表現ではなく等値でフィルタしてください。`collector` は `attribute.collectors` / `rule.collectors` 内のエントリ位置とクラス名で、どちらも設定で決まります。`body_rejected` は deny エンベロープが 4xx に対応付けていない body parser の失敗（router の手前の何かがストリームを読んでしまった等）、`internal` は decision 自身の collect や評価から出てきたのではないもの — throw した resource parser や authenticator（何を throw したかによらず）— です。JWKS に到達できない場合はここに含まれません: それは `401` で応答され、`jwt_verification_unavailable` としてログに出ます。
 
-router がこれらの行に加えるものは、資格情報・クレーム・`context` のいずれも含みません: category は列挙値、コレクター名とルール名は設定由来、リクエスト ID は下記のとおり検証済みです。`err` は throw されたエラーそのもので、コレクターが自分のエラーメッセージに何を書くかはそのコレクターの責任です。
+router がこれらの行に加えるものは、資格情報・クレーム・`context` のいずれも含みません。category は列挙値です。collector はその decision についてコレクターのランナーが記録したもので、エラーから読んだ名前ではありません — 自分で作った `CollectorTimeoutError` を throw してもコレクターは名前を付け替えられません — 何も記録されていないタイムアウトは `collector: "unattributed"` です。ルールの `ruleType` と `code` はルールコレクターがリクエストごとに組み立てうるため、識別子の形（英字で始まり、英数字・`_`・`.`・`-` が続く 64 文字以内）の場合だけ載り、それ以外は `redacted` になります。リクエスト ID は下記のとおり検証済みです。`err` は throw されたエラーそのもので、コレクターが自分のエラーメッセージに何を書くかはそのコレクターの責任です。
 
 **リクエストの相関.** 呼び出し元が送った `x-request-id` は、decision エンドポイントが返すすべての応答 — allow、deny、拒否、`500` — にレスポンスヘッダとしてそのまま返され、上記すべての行と `decision` 行に `requestId` として載ります。これで deny を enforcement 側サービス自身のログと突き合わせられます。載せるのは `A-Z a-z 0-9 - _ . : + / = #` からなる 1〜128 文字の場合だけです（UUID、ULID、16 進や W3C のトレース ID、base64、protobuf.interceptors 自身の ID はすべて収まります）。それ以外の値は送られなかったものとして扱い — 返さず、ログに出さず、コレクターにも渡しません — 呼び出し元が送らなかった場合にサーバー側で ID を採番することもありません。
 

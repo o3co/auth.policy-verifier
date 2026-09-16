@@ -15,7 +15,8 @@
 import {
 	AttributeConflictError,
 	CollectorTimeoutError,
-	failureSourceOf,
+	type FailureRecord,
+	type FailureSource,
 	RuleTimeoutError,
 } from "@o3co/auth.policy-verifier.core";
 import type { NamedRule } from "./decisionEvent.mjs";
@@ -38,9 +39,9 @@ import type { NamedRule } from "./decisionEvent.mjs";
  * - `body_rejected` — the JSON body parser failed in a way the deny envelope
  *   does not map to a 4xx (a stream something upstream already read or set an
  *   encoding on, a length mismatch). Answered `500`.
- * - `internal` — anything nothing attributed: a resource parser or
- *   authenticator that threw, a collector that rejected with something other
- *   than an object. Answered `500`.
+ * - `internal` — anything that did not come out of a decision's own collect
+ *   or evaluation: a resource parser or authenticator that threw, whatever
+ *   class it threw. Answered `500`.
  *
  * **Not a category: an unreachable JWKS.** The built-in authenticator answers
  * it `401 invalid_token` and logs `jwt_verification_unavailable` at error; it
@@ -66,13 +67,37 @@ export type CollectorFailureCategory = Extract<
 >;
 
 /**
+ * The collector named when a failure's class says "collector timeout" but no
+ * collector runner recorded it — a rule that rejected with one, or a pipeline
+ * that does not keep a `FailureRecord`. `CollectorTimeoutError` is a public
+ * class, and the name inside one somebody else built is not read.
+ */
+export const UNATTRIBUTED = "unattributed";
+
+/** What a rule's `ruleType` or `code` is logged as when it is not identifier-shaped. */
+export const REDACTED = "redacted";
+
+/**
+ * The shape a rule's `ruleType` and `code` must have to be logged: a letter,
+ * then letters, digits, `_`, `.` or `-`, at most 64 characters in all. Codes
+ * are documented as short stable identifiers (`invalid_scope`, `cedar_deny`),
+ * but a rule collector builds rules per request and may derive either from the
+ * claims or the context; anything carrying whitespace, `@`, `:`, a line break,
+ * or the length of a token is not an identifier an operator wrote.
+ */
+const RULE_IDENTIFIER = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
+
+const identifier = (value: string): string => (RULE_IDENTIFIER.test(value) ? value : REDACTED);
+
+/**
  * A failure, sorted. The collector or rule is named exactly when the category
  * has one to name, which the union states rather than leaving to optional
  * fields.
  *
- * Every field is fixed by configuration — a category from the set above, a
- * collector's position and class, a rule's `ruleType` and `code` — so nothing
- * here was read from the request.
+ * Nothing here is read off the error or from the request: the category is from
+ * the set above, the collector or rule is what the runner or the evaluator
+ * recorded — or {@link UNATTRIBUTED} — and a rule's identity passes the
+ * identifier shape or is {@link REDACTED}.
  */
 export type ClassifiedFailure =
 	| {
@@ -88,34 +113,49 @@ export type ClassifiedFailure =
 	| { category: "attribute_conflict" | "body_rejected" | "internal" };
 
 /**
- * Sorts whatever kept a decision from being made.
+ * Sorts what one decision's collect or evaluation failed with, reading where
+ * it came from out of that decision's own `failures`.
  *
  * The three deny errors are recognised by class first, exactly as the router
  * recognises them to answer a deny: a collector that rethrows a nested
- * pipeline's `CollectorTimeoutError` is still a timeout. Only then is core's
- * attribution consulted. `body_rejected` is not decided here — only the
- * router's terminal handler can tell a body-parser failure from anything else
- * that reached it.
+ * pipeline's `CollectorTimeoutError` is still a timeout. What the class does
+ * **not** decide is the name — that is always the record's, so a collector
+ * cannot log or label itself as anything but its own position by throwing a
+ * timeout it built.
+ *
+ * Only for failures out of a decision: a fault anywhere else is `internal`,
+ * and `body_rejected` is the router's terminal handler's to decide.
  */
-export function classifyFailure(cause: unknown): ClassifiedFailure {
+export function classifyFailure(cause: unknown, failures?: FailureRecord): ClassifiedFailure {
+	const source = failures?.sourceOf(cause);
 	if (cause instanceof CollectorTimeoutError) {
-		return {
-			category: "collector_timeout",
-			collector: cause.collector ?? `${cause.pipeline}.collectors`,
-		};
+		return { category: "collector_timeout", collector: collectorName(source) };
 	}
 	if (cause instanceof RuleTimeoutError) {
-		return { category: "rule_timeout", rule: { ruleType: cause.ruleType, code: cause.code } };
+		return { category: "rule_timeout", rule: ruleName(source) };
 	}
 	if (cause instanceof AttributeConflictError) {
 		return { category: "attribute_conflict" };
 	}
-	const source = failureSourceOf(cause);
 	if (source?.kind === "collector") {
 		return { category: "collector_threw", collector: source.collector };
 	}
 	if (source?.kind === "rule") {
-		return { category: "rule_threw", rule: { ruleType: source.ruleType, code: source.code } };
+		return { category: "rule_threw", rule: ruleName(source) };
 	}
 	return { category: "internal" };
+}
+
+/** The collector a recorded source names: one entry, a pipeline's whole list, or nobody. */
+function collectorName(source: FailureSource | undefined): string {
+	if (source?.kind === "collector") return source.collector;
+	if (source?.kind === "deadline") return `${source.pipeline}.collectors`;
+	return UNATTRIBUTED;
+}
+
+/** The rule a recorded source names, each part held to the identifier shape. */
+function ruleName(source: FailureSource | undefined): NamedRule {
+	return source?.kind === "rule"
+		? { ruleType: identifier(source.ruleType), code: identifier(source.code) }
+		: { ruleType: UNATTRIBUTED, code: UNATTRIBUTED };
 }

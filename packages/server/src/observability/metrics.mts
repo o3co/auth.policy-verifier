@@ -24,10 +24,10 @@
  * - `code` is a rule's own `code`, which comes from the deployment's configured
  *   rules — but `Rule.code` is an interface field, and a rule collector *can*
  *   compute it from the request, so it is additionally capped.
- * - `collector` is a collector's position and class, fixed when the pipeline
- *   is built (#200) — but `CollectorTimeoutError` is a public class a collector
- *   can construct naming anything, so it is capped the same way; `category` is
- *   a closed enum (`observability/failure.mts`).
+ * - `collector` is a collector's position and identifier-shaped class name as
+ *   the collector runner recorded it (#200) — never the name inside an error —
+ *   or `"unattributed"`; it is capped as well, as a backstop. `category` is a
+ *   closed enum (`observability/failure.mts`).
  *
  * And two values are deliberately **not** labels at all: `resource` and
  * `action`. They come straight out of the request body, they are unbounded by
@@ -90,11 +90,12 @@ export const MAX_DENY_CODE_LABELS = 32;
  * Distinct `collector` label values published before the rest collapse into
  * `"other"` (#200).
  *
- * A collector's name is its position and class, fixed by configuration, so a
- * deployment reaches this only with more than 32 collectors that have all
- * failed. The cap is for the name that is not: `CollectorTimeoutError` is a
- * public class, and a collector that throws one of its own chooses what it
- * names — the same one-edit-away reasoning as {@link MAX_DENY_CODE_LABELS}.
+ * A collector's name is what the collector runner recorded — its position and
+ * its identifier-shaped class name — or `"unattributed"`, so a deployment
+ * reaches this only with more than 32 collectors that have all failed. The cap
+ * is a backstop for the one part code controls: a class's `name` is an ordinary
+ * property, and a label is the wrong place to find out it was minted per
+ * request.
  */
 export const MAX_COLLECTOR_LABELS = 32;
 

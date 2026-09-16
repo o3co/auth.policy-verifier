@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+	type CollectOptions,
 	type CollectorLimits,
 	type ResolvedCollectorLimits,
 	resolveCollectorLimits,
@@ -36,9 +37,14 @@ export class AttributePipeline {
 		this.limits = resolveCollectorLimits(limits);
 	}
 
-	/** Runs every collector under the pipeline's bounds and returns the merged map. */
-	async collect(request: CollectorRequest): Promise<Attributes> {
-		return merge(await runCollectors(this.collectors, request, this.limits, "attribute"));
+	/**
+	 * Runs every collector under the pipeline's bounds and returns the merged
+	 * map. `options.failures` records where a failure came from (#200).
+	 */
+	async collect(request: CollectorRequest, options?: CollectOptions): Promise<Attributes> {
+		return merge(
+			await runCollectors(this.collectors, request, this.limits, "attribute", options?.failures),
+		);
 	}
 }
 

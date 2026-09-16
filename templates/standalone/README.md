@@ -164,11 +164,11 @@ A decision that could not be made is logged at `error` (level 50), and the line 
 | `rule_timeout` | An asynchronous rule overran its budget, or the rule phase its deadline |
 | `rule_threw` | A rule's `verify` threw or its `decide` rejected |
 | `body_rejected` | The JSON body parser failed in a way the deny envelope does not map to a 4xx |
-| `internal` | Anything nothing attributed — a resource parser or authenticator that threw, a collector that rejected with a string or other non-object rather than an `Error` |
+| `internal` | Anything that did not come out of a decision's own collect or evaluation — a resource parser or authenticator that threw, whatever it threw |
 
 The set is closed: alert and filter on `category` by equality, never on `err.message`. `collector` is the entry's position in `attribute.collectors` / `rule.collectors` in `config/application.conf`, plus its class. An unreachable JWKS is not a category — it is answered `401` and logged as `jwt_verification_unavailable` (see below).
 
-Nothing the server adds to these lines carries the token, the claims or `context`: the category is an enum, the collector and rule names come from configuration, and the request id is validated. `err` is the error as thrown, so what a collector writes into its own error message is that collector's responsibility.
+Nothing the server adds to these lines carries the token, the claims or `context`. The collector is the one the collector runner recorded for that decision, never a name read off an error, and a timeout nothing recorded is `collector: "unattributed"`. A rule's `ruleType` and `code` are carried only when identifier-shaped (a letter, then letters, digits, `_`, `.` or `-`, at most 64 characters) and are `redacted` otherwise, because a rule collector may build rules per request. The request id is validated. `err` is the error as thrown, so what a collector writes into its own error message is that collector's responsibility.
 
 **Request correlation.** An `x-request-id` the caller sent is echoed as a response header on every answer `/verify` and `/verify/batch` give — allow, deny, refusal and `500` — and carried as `requestId` on these lines and the `decision` line, so a denial can be matched to the enforcing service's own log. It is carried only as 1–128 characters of `A-Z a-z 0-9 - _ . : + / = #`, which UUIDs, ULIDs, hex and W3C trace ids, base64 and the ids [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) mints all fit. Anything else is treated as absent — not echoed, not logged, not forwarded to collectors — and the server never mints one when the caller sent none. The `HTTP_CALLER_AUTH_TOKEN` gate answers before the decision endpoints and does not echo it.
 
@@ -197,7 +197,7 @@ An unbounded label mints a fresh time series per distinct value, which is how a 
 - **`route`** is the Express route *pattern*, never the URL, and anything unmatched — 404 probes from whatever can route to the port — collapses to `route="unmatched"`.
 - **`method`** is an allowlist of the nine methods this service can serve; everything else is `method="other"`. Node's parser hands the server every method llhttp knows (`PURGE`, `MKCOL`, `PROPFIND`, …), so `req.method` is as caller-controlled as a path.
 - **`code`** comes from the rules a deployment configured, which makes it operator-bounded — but `code` is a field on the `Rule` interface and rules are built per request, so a custom rule collector is one edit away from deriving it from the resource. It is capped at 32 distinct values, after which the rest collapse to `code="other"`. A climbing `code="other"` is itself the signal that a rule is minting codes per request.
-- **`collector`** is a configured entry — its position in `attribute.collectors` / `rule.collectors` and its class — so it is bounded by the config. A collector can still throw a `CollectorTimeoutError` naming anything it likes, so the label is capped at 32 distinct values the same way, collapsing to `collector="other"`. **`category`** is a closed enum.
+- **`collector`** is a configured entry — its position in `attribute.collectors` / `rule.collectors` and its identifier-shaped class name, as the collector runner recorded it — or `collector="unattributed"`, so it is bounded by the config. A `CollectorTimeoutError` a collector builds itself cannot name anything else. The label is still capped at 32 distinct values as a backstop, collapsing to `collector="other"`. **`category`** is a closed enum.
 
 #### Reaching `/metrics`
 

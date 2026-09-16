@@ -50,7 +50,7 @@ export type CollectorTimeoutDetail =
 			timeoutMs: number;
 			/**
 			 * The collector that overran. Always known for this limit, and spelled
-			 * as `failureSourceOf` spells a collector that threw:
+			 * as a `FailureRecord` names a collector that threw:
 			 * `attribute.collectors[1] (EntitlementStoreCollector)`.
 			 */
 			collector: string;

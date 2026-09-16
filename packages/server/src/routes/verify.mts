@@ -9,6 +9,7 @@ import {
 	type EvaluateOptions,
 	type EventLogger,
 	evaluate,
+	FailureRecord,
 	markUntrustedRequestContext,
 	type Resource,
 	ResourceParseError,
@@ -62,10 +63,11 @@ export interface VerifyRouterConfig {
 	 * Evaluator semantics overrides; omitted means engine defaults (deny on an
 	 * empty rule set). The rule deadlines are not among them: `ruleTimeoutMs` and
 	 * `evaluateDeadlineMs` are this config's own fields, and carrying either here
-	 * is refused at construction rather than silently overridden. A `signal` is
+	 * is refused at construction rather than silently overridden, as is
+	 * `failures`, which the router keeps one of per decision (#200). A `signal` is
 	 * combined with the caller's, never replaced by it.
 	 */
-	evaluateOptions?: Omit<EvaluateOptions, "ruleTimeoutMs" | "evaluateDeadlineMs">;
+	evaluateOptions?: Omit<EvaluateOptions, "ruleTimeoutMs" | "evaluateDeadlineMs" | "failures">;
 	/**
 	 * Most entries `POST /verify/batch` will decide in one request. Defaults to
 	 * 50, and is held to the same bound `AppConfigSchema` holds
@@ -236,6 +238,34 @@ const COLLECTOR_TIMEOUT_MESSAGE = "Authorization could not be decided in time";
  * not the response's. The alias exists so the reuse reads as intent.
  */
 const RULE_TIMEOUT_MESSAGE = COLLECTOR_TIMEOUT_MESSAGE;
+/**
+ * What a decision that failed with a 500 throws out of `decide()`: the error as
+ * thrown, and the classification only that decision's `FailureRecord` could
+ * make (#200). Private to this router — the route unwraps it before anything
+ * is logged or compared, so `err` is still the original error and the caller's
+ * abort reason is still recognised by identity.
+ */
+class DecisionFault extends Error {
+	constructor(
+		readonly original: unknown,
+		readonly failure: ClassifiedFailure,
+	) {
+		super("the decision failed");
+		this.name = "DecisionFault";
+	}
+}
+
+/**
+ * What a route caught, unwrapped: a decision's fault with its classification,
+ * or anything else — the resource parser, the authenticator, the router's own
+ * bookkeeping — as `internal`, whatever its class.
+ */
+function unwrapFault(thrown: unknown): { cause: unknown; failure: ClassifiedFailure } {
+	return thrown instanceof DecisionFault
+		? { cause: thrown.original, failure: thrown.failure }
+		: { cause: thrown, failure: { category: "internal" } };
+}
+
 const ATTRIBUTE_CONFLICT_CODE = "attribute_conflict";
 const ATTRIBUTE_CONFLICT_MESSAGE = "Authorization inputs conflicted";
 
@@ -569,6 +599,14 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			);
 		}
 	}
+	// #200: the router keeps one failure record per decision. One handed in here
+	// would be shared by every decision the router makes, which is exactly the
+	// cross-talk a per-decision record exists to rule out.
+	if (config.evaluateOptions !== undefined && "failures" in config.evaluateOptions) {
+		throw new Error(
+			"createVerifyRouter: evaluateOptions.failures is not read — the router keeps one failure record per decision",
+		);
+	}
 	const ruleTimeoutMs = resolveBound(config.ruleTimeoutMs, NUMERIC_BOUNDS.ruleTimeoutMs, "verify");
 	const evaluateDeadlineMs = resolveBound(
 		config.evaluateDeadlineMs,
@@ -669,11 +707,16 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 		// request is many decisions, and it is the per-decision cost that a
 		// collector reaching out to a store makes worse.
 		const startedAt = performance.now();
+		// #200: where this decision's failures came from, and only this one's.
+		// Both collects and the evaluator record into it; nothing is kept beside
+		// the error process-wide, where a concurrent decision failing on the same
+		// shared object could overwrite it.
+		const failures = new FailureRecord();
 		let decision: Decision;
 		try {
 			const [attrs, rules] = await Promise.all([
-				config.attributePipeline.collect(context),
-				config.rulePipeline.collect(context),
+				config.attributePipeline.collect(context, { failures }),
+				config.rulePipeline.collect(context, { failures }),
 			]);
 			// #225: the rule list may carry asynchronous rules — an out-of-process
 			// engine answers here, after both collects, where the evaluator
@@ -691,14 +734,16 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 					config.evaluateOptions?.signal === undefined
 						? signal
 						: AbortSignal.any([config.evaluateOptions.signal, signal]),
+				failures,
 			});
 		} catch (cause) {
 			// Three failures are denies of their own (#115 collector timeouts,
 			// #225 rule timeouts, #174 attribute conflicts); anything else is a
-			// genuine fault and keeps surfacing as a 500, sorted at the route.
-			const failure = classifyFailure(cause);
+			// genuine fault and keeps surfacing as a 500 — carrying the
+			// classification only this decision's record could make.
+			const failure = classifyFailure(cause, failures);
 			const denial = DENIED_FAILURES[failure.category];
-			if (denial === undefined) throw cause;
+			if (denial === undefined) throw new DecisionFault(cause, failure);
 			// The evaluator is deliberately never reached: it is the one place a
 			// short rule list could still be read as a policy, and `onEmptyRuleSet:
 			// "allow"` would then turn a timed-out (or conflicted) pipeline into a
@@ -794,14 +839,14 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 
 			const decision = await decide(req, auth, parsed.entry, signal);
 			res.status(decision.decision === "deny" ? 403 : 200).json(decision);
-		} catch (cause) {
+		} catch (thrown) {
+			const { cause, failure } = unwrapFault(thrown);
 			// Only the caller's own abort is downgraded: a fault that happened to
 			// land as the caller left is still a fault.
 			if (signal.aborted && cause === signal.reason) {
 				logger.info({ endpoint: "/verify" }, "verify_caller_gone");
 				return;
 			}
-			const failure = classifyFailure(cause);
 			logger.error(
 				{ err: cause, endpoint: "/verify", ...correlation(requestIdOf(req)), ...failure },
 				"verify_internal_error",
@@ -906,12 +951,12 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				throw cause;
 			}
 			res.status(200).json({ decisions });
-		} catch (cause) {
+		} catch (thrown) {
+			const { cause, failure } = unwrapFault(thrown);
 			if (signal.aborted && cause === signal.reason) {
 				logger.info({ endpoint: "/verify/batch" }, "verify_caller_gone");
 				return;
 			}
-			const failure = classifyFailure(cause);
 			logger.error(
 				{ err: cause, endpoint: "/verify/batch", ...correlation(requestIdOf(req)), ...failure },
 				"verify_internal_error",
@@ -952,9 +997,10 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 		// mounted on the router that never reached one of them. A body-parser
 		// failure the envelope does not map is `body_rejected`; only this handler
 		// can tell one apart, because only the parser's failures carry `type`.
+		// Nothing else here came out of a decision, so nothing else is named.
 		const failure: ClassifiedFailure = isBodyParserFailure(err)
 			? { category: "body_rejected" }
-			: classifyFailure(err);
+			: { category: "internal" };
 		logger.error(
 			{ err, endpoint: req.path, ...correlation(requestIdOf(req)), ...failure },
 			"verify_internal_error",

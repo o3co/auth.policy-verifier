@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+	type CollectOptions,
 	type CollectorLimits,
 	type ResolvedCollectorLimits,
 	resolveCollectorLimits,
@@ -30,8 +31,13 @@ export class RulePipeline {
 		this.limits = resolveCollectorLimits(limits);
 	}
 
-	/** Runs every collector under the pipeline's bounds and returns the flattened rule list. */
-	async collect(request: CollectorRequest): Promise<AnyRule[]> {
-		return (await runCollectors(this.collectors, request, this.limits, "rule")).flat();
+	/**
+	 * Runs every collector under the pipeline's bounds and returns the flattened
+	 * rule list. `options.failures` records where a failure came from (#200).
+	 */
+	async collect(request: CollectorRequest, options?: CollectOptions): Promise<AnyRule[]> {
+		return (
+			await runCollectors(this.collectors, request, this.limits, "rule", options?.failures)
+		).flat();
 	}
 }

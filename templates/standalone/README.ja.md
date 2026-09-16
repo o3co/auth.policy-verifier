@@ -164,11 +164,11 @@ Authorization: Bearer <jwt>
 | `rule_timeout` | 非同期ルールが予算を、またはルールフェーズがデッドラインを超えた |
 | `rule_threw` | ルールの `verify` が throw した、または `decide` が reject した |
 | `body_rejected` | JSON body parser が、deny エンベロープが 4xx に対応付けていない形で失敗した |
-| `internal` | どこにも帰属しなかったもの — throw した resource parser や authenticator、`Error` ではなく文字列などオブジェクトでない値で reject したコレクター |
+| `internal` | decision 自身の collect や評価から出てきたのではないもの — throw した resource parser や authenticator（何を throw したかによらず） |
 
 この集合は閉じています: アラートとフィルタは `err.message` ではなく `category` の等値に対して張ってください。`collector` は `config/application.conf` の `attribute.collectors` / `rule.collectors` 内のエントリ位置とクラス名です。JWKS に到達できないことは category ではありません — `401` で応答され、`jwt_verification_unavailable` としてログに出ます（後述）。
 
-サーバーがこれらの行に加えるものは、トークン・クレーム・`context` のいずれも含みません: category は列挙値、コレクター名とルール名は設定由来、リクエスト ID は検証済みです。`err` は throw されたエラーそのものなので、コレクターが自分のエラーメッセージに何を書くかはそのコレクターの責任です。
+サーバーがこれらの行に加えるものは、トークン・クレーム・`context` のいずれも含みません。collector はその decision についてコレクターのランナーが記録したもので、エラーから読んだ名前ではなく、何も記録されていないタイムアウトは `collector: "unattributed"` です。ルールの `ruleType` と `code` はルールコレクターがリクエストごとにルールを組み立てうるため、識別子の形（英字で始まり、英数字・`_`・`.`・`-` が続く 64 文字以内）の場合だけ載り、それ以外は `redacted` になります。リクエスト ID は検証済みです。`err` は throw されたエラーそのものなので、コレクターが自分のエラーメッセージに何を書くかはそのコレクターの責任です。
 
 **リクエストの相関.** 呼び出し元が送った `x-request-id` は、`/verify` と `/verify/batch` が返すすべての応答 — allow、deny、拒否、`500` — にレスポンスヘッダとしてそのまま返され、これらの行と `decision` 行に `requestId` として載ります。これで deny を enforcement 側サービス自身のログと突き合わせられます。載せるのは `A-Z a-z 0-9 - _ . : + / = #` からなる 1〜128 文字の場合だけで、UUID、ULID、16 進や W3C のトレース ID、base64、[protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) が採番する ID はすべて収まります。それ以外は送られなかったものとして扱い — 返さず、ログに出さず、コレクターにも渡しません — 呼び出し元が送らなかった場合にサーバーが採番することもありません。`HTTP_CALLER_AUTH_TOKEN` のゲートは decision エンドポイントより手前で応答するため、ID を返しません。
 
@@ -197,7 +197,7 @@ deny はエラーではないので、書く価値のあるアラートは deny 
 - **`route`** は URL ではなく Express の route *パターン*で、マッチしなかったもの（ポートに到達できる何かからの 404 プローブ）はすべて `route="unmatched"` に潰れます。
 - **`method`** はこのサービスが実際に処理できる 9 メソッドの allowlist で、それ以外は `method="other"` です。Node のパーサは llhttp が知る全メソッド（`PURGE`, `MKCOL`, `PROPFIND` など）をサーバーに渡すため、`req.method` はパスと同程度に呼び出し元の制御下にあります。
 - **`code`** は deployment が設定したルールに由来するので運用者が有界にできます — ただし `code` は `Rule` インターフェースのフィールドであり、ルールはリクエストごとに構築されるため、カスタム rule collector が resource から code を導出するようになるまでは 1 回の編集です。異なる値 32 個で打ち止め、それ以降は `code="other"` に潰れます。`code="other"` が伸びていること自体が、リクエストごとに code を作っているルールがあるというシグナルです。
-- **`collector`** は設定されたエントリ — `attribute.collectors` / `rule.collectors` 内の位置とクラス名 — なので設定によって有界です。ただしコレクターは任意の名前を付けた `CollectorTimeoutError` を自分で throw できるため、同じく異なる値 32 個で打ち止め、それ以降は `collector="other"` に潰れます。**`category`** は閉じた列挙値です。
+- **`collector`** は設定されたエントリ — コレクターのランナーが記録した `attribute.collectors` / `rule.collectors` 内の位置と識別子の形のクラス名 — または `collector="unattributed"` なので、設定によって有界です。コレクターが自分で作った `CollectorTimeoutError` で別の名前を名乗ることはできません。それでも念のため異なる値 32 個で打ち止め、それ以降は `collector="other"` に潰れます。**`category`** は閉じた列挙値です。
 
 #### `/metrics` への到達方法
 

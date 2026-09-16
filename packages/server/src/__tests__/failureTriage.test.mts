@@ -34,10 +34,13 @@ import {
 	type Attributes,
 	CollectorTimeoutError,
 	type EventLogger,
+	FailureRecord,
+	type FailureSource,
 	type Rule,
 	type RuleCollector,
 	RulePipeline,
 	RuleTimeoutError,
+	readUntrustedRequestContext,
 } from "@o3co/auth.policy-verifier.core";
 import express from "express";
 import { SignJWT } from "jose";
@@ -146,6 +149,14 @@ const decide = async (
 
 const scrape = async (app: express.Express) => (await request(app).get("/metrics")).text;
 
+/** A line rendered the way a JSON logger renders it: errors with every own property, message and stack. */
+const render = (event: CapturedEvent): string =>
+	JSON.stringify(event.obj, (_key, value) =>
+		value instanceof Error
+			? { ...value, name: value.name, message: value.message, stack: value.stack }
+			: value,
+	);
+
 describe("the failure category set (#200)", () => {
 	it("is closed, and every value is one an operator can filter on exactly", () => {
 		expect([...FAILURE_CATEGORIES]).toEqual([
@@ -159,13 +170,42 @@ describe("the failure category set (#200)", () => {
 		]);
 	});
 
-	it.each([
+	/** A record holding one source for `cause`, as the runner or evaluator would have left it. */
+	const recorded = (cause: unknown, source: FailureSource): FailureRecord => {
+		const failures = new FailureRecord();
+		failures.record(cause, source);
+		return failures;
+	};
+	const timeout = (collector: string) =>
+		new CollectorTimeoutError({
+			pipeline: "attribute",
+			limit: "collector",
+			timeoutMs: 20,
+			collector,
+		});
+	const deadline = new CollectorTimeoutError({
+		pipeline: "rule",
+		limit: "deadline",
+		timeoutMs: 50,
+	});
+	const ruleTimeout = (ruleType: string, code: string) =>
+		new RuleTimeoutError({ ruleType, code, timeoutMs: 20 });
+	const forgedName = "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEifQ.sig";
+	const attributed = timeout("attribute.collectors[2] (StalledStoreCollector)");
+	const forged = timeout(forgedName);
+	const ruleTimedOut = ruleTimeout("cedar", "cedar_deny");
+	const unattributedRule = ruleTimeout("cedar", "cedar_deny");
+	const outage = new Error("store is down");
+	const ruleFault = new Error("rule bug");
+	const shapedRuleFault = new Error("rule bug");
+
+	it.each<[string, unknown, FailureRecord | undefined, unknown]>([
 		[
-			"a collector's own timeout, naming the collector",
-			new CollectorTimeoutError({
+			"a collector's own timeout, naming the collector the runner recorded",
+			attributed,
+			recorded(attributed, {
+				kind: "collector",
 				pipeline: "attribute",
-				limit: "collector",
-				timeoutMs: 20,
 				collector: "attribute.collectors[2] (StalledStoreCollector)",
 			}),
 			{
@@ -175,23 +215,84 @@ describe("the failure category set (#200)", () => {
 		],
 		[
 			"a fan-out deadline, naming the list rather than any one entry of it",
-			new CollectorTimeoutError({ pipeline: "rule", limit: "deadline", timeoutMs: 50 }),
+			deadline,
+			recorded(deadline, { kind: "deadline", pipeline: "rule" }),
 			{ category: "collector_timeout", collector: "rule.collectors" },
 		],
 		[
-			"a rule timeout, naming the rule",
-			new RuleTimeoutError({ ruleType: "cedar", code: "cedar_deny", timeoutMs: 20 }),
+			"a timeout nothing recorded, naming no collector — not the one the error claims",
+			forged,
+			new FailureRecord(),
+			{ category: "collector_timeout", collector: "unattributed" },
+		],
+		[
+			"a rule timeout, naming the rule the evaluator recorded",
+			ruleTimedOut,
+			recorded(ruleTimedOut, { kind: "rule", ruleType: "cedar", code: "cedar_deny" }),
 			{ category: "rule_timeout", rule: { ruleType: "cedar", code: "cedar_deny" } },
+		],
+		[
+			"a rule timeout nothing recorded",
+			unattributedRule,
+			undefined,
+			{ category: "rule_timeout", rule: { ruleType: "unattributed", code: "unattributed" } },
+		],
+		[
+			"a collector that threw",
+			outage,
+			recorded(outage, { kind: "collector", pipeline: "rule", collector: "rule.collectors[0]" }),
+			{ category: "collector_threw", collector: "rule.collectors[0]" },
+		],
+		[
+			"a rule that threw",
+			ruleFault,
+			recorded(ruleFault, { kind: "rule", ruleType: "tenant", code: "wrong_tenant" }),
+			{ category: "rule_threw", rule: { ruleType: "tenant", code: "wrong_tenant" } },
+		],
+		[
+			"a rule whose metadata is not identifier-shaped, redacting what is not",
+			shapedRuleFault,
+			recorded(shapedRuleFault, {
+				kind: "rule",
+				ruleType: "tenant",
+				code: "deny for victim@example.com",
+			}),
+			{ category: "rule_threw", rule: { ruleType: "tenant", code: "redacted" } },
 		],
 		[
 			"an attribute conflict",
 			new AttributeConflictError("tenantId"),
+			undefined,
 			{ category: "attribute_conflict" },
 		],
-		["anything nothing attributed", new Error("boom"), { category: "internal" }],
-		["a rejection that is not an object", "boom", { category: "internal" }],
-	])("classifies %s", (_what, cause, expected) => {
-		expect(classifyFailure(cause)).toEqual(expected);
+		[
+			"anything nothing attributed",
+			new Error("boom"),
+			new FailureRecord(),
+			{ category: "internal" },
+		],
+		["a rejection that is not an object", "boom", undefined, { category: "internal" }],
+	])("classifies %s", (_what, cause, failures, expected) => {
+		expect(classifyFailure(cause, failures)).toEqual(expected);
+	});
+
+	it.each([
+		["a credential", "Bearer eyJhbGciOiJIUzI1NiJ9"],
+		["an email", "victim@example.com"],
+		["an identifier that starts with a digit — an SSN", "078-05-1120"],
+		["whitespace", "wrong tenant"],
+		["a line break", "wrong_tenant\ninjected"],
+		["a scope-shaped value", "read:project"],
+		["more than 64 characters", `c${"x".repeat(64)}`],
+		["nothing", ""],
+	])("redacts rule metadata carrying %s", (_what, value) => {
+		const fault = new Error("rule bug");
+		const failures = recorded(fault, { kind: "rule", ruleType: value, code: value });
+
+		expect(classifyFailure(fault, failures)).toEqual({
+			category: "rule_threw",
+			rule: { ruleType: "redacted", code: "redacted" },
+		});
 	});
 });
 
@@ -260,6 +361,77 @@ describe("verify_internal_error names what failed (#200)", () => {
 			rule: { ruleType: "tenant", code: "wrong_tenant" },
 		});
 		expect(event.obj).not.toHaveProperty("collector");
+	});
+
+	it("files a CollectorTimeoutError an authenticator threw under internal, naming no collector", async () => {
+		// The class is public. Thrown from anywhere but a decision's own collect,
+		// it is not a collector timeout, and what it claims to name is not read.
+		const forgedName = "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEifQ.sig";
+		const { app, events } = createTestApp({
+			router: {
+				jwt: undefined,
+				authenticator: {
+					authenticate: async () => {
+						throw new CollectorTimeoutError({
+							pipeline: "attribute",
+							limit: "collector",
+							timeoutMs: 1,
+							collector: forgedName,
+						});
+					},
+				},
+			},
+		});
+
+		const res = await decide(app);
+
+		expect(res.status).toBe(500);
+		const [event] = named(events, "verify_internal_error");
+		expect(event.obj).toMatchObject({ category: "internal" });
+		expect(event.obj).not.toHaveProperty("collector");
+		expect(await scrape(app)).not.toContain(forgedName);
+	});
+
+	it("names the collector's position, not the name inside a CollectorTimeoutError it built", async () => {
+		const forgedName = "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEifQ.sig";
+		const forging: AttributeCollector = {
+			collect: () =>
+				Promise.reject(
+					new CollectorTimeoutError({
+						pipeline: "attribute",
+						limit: "collector",
+						timeoutMs: 1,
+						collector: forgedName,
+					}),
+				),
+		};
+		const { app, events } = createTestApp({
+			attributeCollectors: [new PayloadScopeCollector(), forging],
+		});
+
+		const res = await decide(app);
+
+		// Still the deny its class earns; only the name is the runner's.
+		expect(res.status).toBe(403);
+		expect(named(events, "collector_timeout")[0].obj).toMatchObject({
+			category: "collector_timeout",
+			collector: "attribute.collectors[1]",
+		});
+		const metrics = await scrape(app);
+		expect(metrics).toContain(
+			'auth_collector_failures_total{collector="attribute.collectors[1]",category="collector_timeout"} 1',
+		);
+		expect(metrics).not.toContain("eyJhbGciOiJIUzI1NiJ9");
+	});
+
+	it("refuses evaluateOptions.failures — one record shared across decisions is the defect it prevents", () => {
+		expect(() =>
+			createTestApp({
+				router: { evaluateOptions: { failures: new FailureRecord() } as never },
+			}),
+		).toThrow(
+			"createVerifyRouter: evaluateOptions.failures is not read — the router keeps one failure record per decision",
+		);
 	});
 
 	it("files a fault nothing attributed under internal, naming nothing", async () => {
@@ -449,14 +621,164 @@ describe("auth_collector_failures_total{collector,category} (#200)", () => {
 	});
 });
 
-describe("redaction: nothing request-derived reaches a failure line or a label (#200)", () => {
-	/** An error rendered the way a JSON logger renders one: every own property, plus message and stack. */
-	const render = (event: CapturedEvent): string =>
-		JSON.stringify(event.obj, (_key, value) =>
-			value instanceof Error
-				? { ...value, name: value.name, message: value.message, stack: value.stack }
-				: value,
+describe("attribution is per decision, not per error object (#200 review)", () => {
+	/**
+	 * One rejection shared by every collector that awaits it — the shape a
+	 * memoised downstream call or a circuit breaker's cached failure takes.
+	 * `fail()` rejects it once every expected caller is already waiting on it,
+	 * so all of their rejections land in the same turn, before any route has
+	 * caught its own.
+	 */
+	function sharedFailure(waiters: number) {
+		const error = new Error("shared downstream call failed");
+		let reject!: (reason: unknown) => void;
+		const promise = new Promise<never>((_, r) => {
+			reject = r;
+		});
+		promise.catch(() => {});
+		let waiting = 0;
+		let allWaiting!: () => void;
+		const ready = new Promise<void>((resolve) => {
+			allWaiting = resolve;
+		});
+		const wait = async (): Promise<never> => {
+			waiting += 1;
+			if (waiting === waiters) allWaiting();
+			return promise;
+		};
+		return { error, wait, fail: async () => ready.then(() => reject(error)) };
+	}
+
+	it("names each request's own collector when concurrent requests fail with the same object", async () => {
+		const shared = sharedFailure(2);
+		class SharedClientCollector implements AttributeCollector {
+			async collect(context: Parameters<AttributeCollector["collect"]>[0]): Promise<Attributes> {
+				return context.action === "read" ? shared.wait() : new Map();
+			}
+		}
+		const sharedRules: RuleCollector = {
+			collect: async (context) => (context.action === "write" ? shared.wait() : []),
+		};
+		const { app, events } = createTestApp({
+			attributeCollectors: [new PayloadScopeCollector(), new SharedClientCollector()],
+			ruleCollectors: [new ResourceActionScopeRuleCollector(), sharedRules],
+		});
+		const token = await signToken({ sub: "user-1", scope: "read:project write:project" });
+		const send = (action: string) =>
+			request(app)
+				.post("/verify")
+				.set("Authorization", `Bearer ${token}`)
+				.set("x-request-id", action)
+				.send({ resource: "project", action });
+
+		const [read, write] = await Promise.all([send("read"), send("write"), shared.fail()]);
+
+		expect([read.status, write.status]).toEqual([500, 500]);
+		const byRequest = Object.fromEntries(
+			named(events, "verify_internal_error").map((e) => [e.obj.requestId, e.obj.collector]),
 		);
+		expect(byRequest).toEqual({
+			read: "attribute.collectors[1] (SharedClientCollector)",
+			write: "rule.collectors[1]",
+		});
+		const metrics = await scrape(app);
+		expect(metrics).toContain(
+			'auth_collector_failures_total{collector="attribute.collectors[1] (SharedClientCollector)",category="collector_threw"} 1',
+		);
+		expect(metrics).toContain(
+			'auth_collector_failures_total{collector="rule.collectors[1]",category="collector_threw"} 1',
+		);
+	});
+
+	it("names the collector that recorded first when both pipelines of one decision fail with the same object", async () => {
+		// Both failed the decision; the line names one and the counter counts
+		// one. The first to record is the attribute collector — its pipeline
+		// starts first, so it was waiting first and its rejection lands first.
+		const shared = sharedFailure(2);
+		class SharedClientCollector implements AttributeCollector {
+			async collect(): Promise<Attributes> {
+				return shared.wait();
+			}
+		}
+		const sharedRules: RuleCollector = { collect: async () => shared.wait() };
+		const { app, events } = createTestApp({
+			attributeCollectors: [new SharedClientCollector()],
+			ruleCollectors: [sharedRules],
+		});
+
+		const [res] = await Promise.all([decide(app), shared.fail()]);
+
+		expect(res.status).toBe(500);
+		const failures = named(events, "verify_internal_error");
+		expect(failures).toHaveLength(1);
+		expect(failures[0].obj).toMatchObject({
+			category: "collector_threw",
+			collector: "attribute.collectors[0] (SharedClientCollector)",
+		});
+		expect(failures[0].obj.err).toBe(shared.error);
+		const counted = (await scrape(app))
+			.split("\n")
+			.filter((line) => line.startsWith("auth_collector_failures_total{"));
+		expect(counted).toEqual([
+			'auth_collector_failures_total{collector="attribute.collectors[0] (SharedClientCollector)",category="collector_threw"} 1',
+		]);
+	});
+});
+
+describe("redaction: nothing request-derived reaches a failure line or a label (#200)", () => {
+	it("keeps request-derived rule metadata out of the failure fields (#200 review)", async () => {
+		// A rule collector may build its rules per request, and nothing stops
+		// one deriving `ruleType` or `code` from the claims or the context.
+		const perRequest: RuleCollector = {
+			collect: async (context) => {
+				const ssn = String(readUntrustedRequestContext(context.requestContext)?.ssn);
+				const email = String(context.subject.email);
+				const throwing: Rule = {
+					ruleType: email,
+					code: ssn,
+					message: "Denied",
+					verify: () => {
+						throw new Error("rule bug");
+					},
+				};
+				const stalling: AsyncRule = {
+					ruleType: email,
+					code: ssn,
+					message: "Denied",
+					async: true,
+					decide: () => new Promise<boolean>(() => {}),
+				};
+				return context.action === "read" ? [throwing] : [stalling];
+			},
+		};
+		const { app, events } = createTestApp({
+			ruleCollectors: [perRequest],
+			router: { ruleTimeoutMs: 20 },
+		});
+		const token = await signToken({
+			sub: "user-1",
+			scope: "read:project write:project",
+			email: "victim@example.com",
+		});
+		const send = (action: string) =>
+			request(app)
+				.post("/verify")
+				.set("Authorization", `Bearer ${token}`)
+				.send({ resource: "project", action, context: { ssn: "078-05-1120" } });
+
+		expect((await send("read")).status).toBe(500);
+		expect((await send("write")).status).toBe(403);
+
+		const [threw] = named(events, "verify_internal_error");
+		const [timedOut] = named(events, "rule_timeout");
+		for (const event of [threw, timedOut]) {
+			expect(event.obj.rule).toEqual({ ruleType: "redacted", code: "redacted" });
+		}
+		// The whole line, error included, for the fault: its error names neither.
+		for (const secret of [token, "victim@example.com", "078-05-1120"]) {
+			expect(render(threw)).not.toContain(secret);
+		}
+	});
 
 	it("keeps the credential, the claims and the caller's context out of the lines and /metrics", async () => {
 		// The collector is handed all three — `credentialToCollectors: "expose"`
