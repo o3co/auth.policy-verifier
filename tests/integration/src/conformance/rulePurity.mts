@@ -7,7 +7,9 @@ import {
 	type Attributes,
 	type CollectorContext,
 	type CollectorRequest,
+	evaluate,
 	isAsyncRule,
+	MAX_TIMER_MS,
 	type ReadonlyAttributes,
 	type RuleEvaluation,
 } from "@o3co/auth.policy-verifier.core";
@@ -187,31 +189,40 @@ function isRevokedProxyError(error: unknown): boolean {
 }
 
 /**
- * Asks one rule, whichever kind it is (#225). An asynchronous rule is asked
- * through `decide` with a signal that never aborts — this suite checks what a
- * rule answers, not what it does when cancelled — and is held to the same
- * property as `verify`: the answer must come from `attrs` alone.
+ * Asks one rule, whichever kind it is (#225) — **through `evaluate()`**, as the
+ * only rule of a decision, and reads its one outcome.
  *
- * The answer is kept whole (#244): the boolean, and whatever the rule reported
- * about the evaluation behind it. The report is as much part of the answer as
- * the boolean is — a rule that reported whichever policy revision it saw last
- * would pass a pass/fail comparison while reading state the engine cannot see.
+ * Not by calling `verify` / `decide` here. What a rule answers includes what it
+ * reports about the evaluation behind the answer (#244): a rule that reported
+ * whichever policy revision it saw last would pass a pass/fail comparison while
+ * reading state the engine cannot see. And what a report *says* is whatever the
+ * evaluator reads out of it. A reading of this suite's own is a second opinion,
+ * and the two it has had were both wrong in the rule's favour: holding the
+ * reported object let a rule that rewrites one object and reports it again
+ * compare equal to itself, and `structuredClone` copies own data properties
+ * without ever running an accessor, so a class-backed report snapshotted as
+ * `{}` — hiding a getter that moves, or one that reads the collector's context
+ * and would have thrown once it was revoked. Through `evaluate()` there is one
+ * reading: core's, taken when the report is made, copied and frozen.
  *
- * The rule is asked the way `evaluate()` asks it, with a reporter made for
- * this one call, and what it reports is **copied as it is reported**. Holding
- * the reported object instead would let a rule that rewrites one object and
- * reports it again overwrite the first reading before anything compared it:
- * the two would be the same reference, and equal.
+ * It follows that a rule core refuses fails here too — an answer that is not a
+ * boolean, a report that does not read, a pass reporting its evaluator
+ * `failed` — and whatever the rule throws comes back unchanged, which is how
+ * a read of the revoked context is recognised below.
+ *
+ * The rule budgets are lifted as far as a timer goes: this suite checks what a
+ * rule answers, not how quickly, and an asynchronous rule is held to the same
+ * property as `verify` — the answer must come from `attrs` alone.
  */
 async function ask(rule: AnyRule, attrs: ReadonlyAttributes): Promise<Answer> {
-	let evaluation: RuleEvaluation | undefined;
-	const report = (reported: RuleEvaluation): void => {
-		evaluation = structuredClone(reported);
-	};
-	const passed = isAsyncRule(rule)
-		? await rule.decide(attrs, new AbortController().signal, report)
-		: rule.verify(attrs, report);
-	return evaluation === undefined ? { passed } : { passed, evaluation };
+	const decision = await evaluate(attrs as Attributes, [rule], {
+		ruleTimeoutMs: MAX_TIMER_MS,
+		evaluateDeadlineMs: MAX_TIMER_MS,
+	});
+	const [outcome] = decision.reason.groups[0].evaluated;
+	return outcome.evaluation === undefined
+		? { passed: outcome.passed }
+		: { passed: outcome.passed, evaluation: outcome.evaluation };
 }
 
 /** What one rule answered for one map: the boolean, and the evaluation it reported, if any. */

@@ -431,8 +431,24 @@ function buildRule(bound: BoundRule): AnyRule {
 	 * class doc comment for why that, and not a richer return value.
 	 */
 	const deliver = (answered: Answered, report: ReportRuleEvaluation | undefined): boolean => {
+		if (report === undefined) warnUnreported();
 		report?.(answered.evaluation);
 		return answered.passed;
+	};
+	// `requireConfirmedRevision` is set so that every decision's record names
+	// its policies. Asked without a reporter — an evaluator that predates it,
+	// which in practice is a copy of core one release older beside this package
+	// — the rule still enforces the knob and still answers correctly, and none
+	// of it is recorded. Nothing else would say so; said once, not per request.
+	// The answer never depends on whether a reporter was passed.
+	let warnedUnreported = false;
+	const warnUnreported = (): void => {
+		if (!requireConfirmedRevision || warnedUnreported) return;
+		warnedUnreported = true;
+		faultLogger.warn(
+			identity,
+			"requireConfirmedRevision is set, but this rule was asked without a reporter, so the revisions it enforces are not being recorded — the evaluator running it predates evaluation reports; upgrade @o3co/auth.policy-verifier.core and .server together with this package",
+		);
 	};
 
 	const callFailed = (cause: unknown): Answered => {

@@ -301,6 +301,43 @@ describe("evaluate — what a rule may report", () => {
 		await expect(evaluate(attrs, [rule])).rejects.toThrow(TypeError);
 	});
 
+	it("hands back, unchanged, what the report's own accessor threw — swallowed or not", async () => {
+		// Not one of this module's refusals: the rule's own code threw, from a
+		// getter core ran while reading the report. `evaluate()` promises that
+		// whatever a rule throws comes back unchanged, and that holds for a throw
+		// that came out through the reporter — same object, same class, so a
+		// conformance suite can still recognise a read of a revoked context.
+		class Boom extends Error {}
+		const boom = new Boom("from the rule's own getter");
+		const evaluation = {
+			get status(): "completed" {
+				throw boom;
+			},
+		} as unknown as RuleEvaluation;
+
+		for (const swallow of [false, true]) {
+			const failures = new FailureRecord();
+			const rule = sync("cedar", "cedar_deny", (report) => {
+				if (!swallow) report?.(evaluation);
+				else {
+					try {
+						report?.(evaluation);
+					} catch {
+						// shrug
+					}
+				}
+				return false;
+			});
+			const error = await evaluate(attrs, [rule], { failures }).catch((cause: unknown) => cause);
+			expect(error).toBe(boom);
+			expect(failures.sourceOf(error)).toEqual({
+				kind: "rule",
+				ruleType: "cedar",
+				code: "cedar_deny",
+			});
+		}
+	});
+
 	it("refuses a second report for one invocation", async () => {
 		const rule = sync("cedar", "cedar_deny", (report) => {
 			report?.({ status: "completed", revision: REVISION_A });

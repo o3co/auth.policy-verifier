@@ -157,12 +157,15 @@ same way — see [docs/extending.md](../../docs/extending.md#the-trust-boundary-
 
 ## Policy revision: which policies decided
 
-Every answer of the rule reports the evaluation behind it (#244) — to the
-reporter core hands `verify` / `decide` for that one call; the rule itself
-still answers a boolean, so an evaluator that predates the reporter reads a
-deny as a deny — and core carries that onto the decision — into the `decision` log event always, and into
-the response under `verify.evaluationInResponse = "include"`. A denial is
-`cedar_deny` whether or not a policy produced it; this is what tells them apart:
+Every answer of the rule reports the evaluation behind it (#244). The report
+goes to the reporter core hands `verify` / `decide` for that one call, and core
+carries it onto the decision: into the `decision` log event always, and into the
+response under `verify.evaluationInResponse = "include"`. The rule itself still
+answers a boolean, so an evaluator that predates the reporter reads a deny as a
+deny.
+
+A denial is `cedar_deny` whether or not a policy produced it; this is what
+tells them apart:
 
 | the rule answered because | `evaluation.status` | the revision |
 | --- | --- | --- |

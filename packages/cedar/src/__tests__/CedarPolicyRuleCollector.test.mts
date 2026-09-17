@@ -62,18 +62,23 @@ function attrsWith(entries: ReadonlyArray<[string, unknown]> = []): Attributes {
 	return new Map<string, unknown>([...REQUEST_FACTS, ...entries]);
 }
 
-function fakeLogger(): { logger: Logger; error: ReturnType<typeof vi.fn> } {
+function fakeLogger(): {
+	logger: Logger;
+	error: ReturnType<typeof vi.fn>;
+	warn: ReturnType<typeof vi.fn>;
+} {
 	const error = vi.fn();
+	const warn = vi.fn();
 	const logger = {
 		trace: vi.fn(),
 		debug: vi.fn(),
 		info: vi.fn(),
-		warn: vi.fn(),
+		warn,
 		error,
 		fatal: vi.fn(),
 		child: (): Logger => logger,
 	} as Logger;
-	return { logger, error };
+	return { logger, error, warn };
 }
 
 const PERMIT_ALL = "permit(principal, action, resource);";
@@ -842,6 +847,41 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 			);
 			expect(ask(rule, attrsWith()).passed).toBe(false);
 			expect(error).toHaveBeenCalledOnce();
+		});
+
+		it("warns, once, when it is asked without a reporter — the audit it was set for is not being written", async () => {
+			// The knob exists so that every decision's record names its policies.
+			// An evaluator that passes no reporter — a core one release older, in a
+			// mixed install — gets correct answers and records none of it, and
+			// nothing else would say so. The ANSWER does not depend on it.
+			const { logger, warn } = fakeLogger();
+			const rule = await collectSync(
+				{ policies: PERMIT_ALL, requireConfirmedRevision: true },
+				logger,
+			);
+			warn.mockClear();
+			expect(rule.verify(attrsWith())).toBe(true);
+			expect(rule.verify(attrsWith())).toBe(true);
+			expect(warn).toHaveBeenCalledOnce();
+			expect(JSON.stringify(warn.mock.calls[0])).toMatch(/requireConfirmedRevision/);
+
+			// Asked with one, it has nothing to say.
+			warn.mockClear();
+			const reporting = await collectSync(
+				{ policies: PERMIT_ALL, requireConfirmedRevision: true },
+				logger,
+			);
+			warn.mockClear();
+			expect(ask(reporting, attrsWith()).passed).toBe(true);
+			expect(warn).not.toHaveBeenCalled();
+		});
+
+		it("says nothing about a missing reporter when the deployment did not ask for revisions", async () => {
+			const { logger, warn } = fakeLogger();
+			const rule = await collectSync({ policies: PERMIT_ALL, engine: "wasm" }, logger);
+			warn.mockClear();
+			expect(rule.verify(attrsWith())).toBe(true);
+			expect(warn).not.toHaveBeenCalled();
 		});
 
 		it("lets the same unvouched answer through when the deployment did not ask", async () => {

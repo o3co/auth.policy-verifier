@@ -181,6 +181,68 @@ describe("rule purity conformance — the check itself", () => {
 		);
 	});
 
+	/*
+	 * A report is read the way `evaluate()` reads it, because the suite asks
+	 * through `evaluate()`. A reading of its own would be a second opinion about
+	 * what a report says: `structuredClone`, for one, copies own data properties
+	 * and never runs an accessor on the prototype — so a class-backed report
+	 * snapshots as `{}`, while core destructures it and runs every getter.
+	 */
+	it("rejects a getter-backed report whose revision moves (#244)", async () => {
+		let calls = 0;
+		class MovingEvaluation {
+			get status(): "completed" {
+				return "completed";
+			}
+			get revision(): string {
+				return `sha256:${(calls++ % 2 === 0 ? "a" : "b").repeat(64)}`;
+			}
+		}
+		const collect = async (): Promise<Rule[]> => [
+			{
+				ruleType: "cedar",
+				code: "cedar_deny",
+				message: "Denied by Cedar policy",
+				verify: (_attrs, report) => {
+					report?.(new MovingEvaluation());
+					return true;
+				},
+			},
+		];
+		await expect(assertRuleIndependentOfContext(collect, scopeContext, attrs)).rejects.toThrow(
+			/not a deterministic function of its attributes/,
+		);
+	});
+
+	it("rejects a getter-backed report that reads the collector's context (#244)", async () => {
+		// The request, reached not from `verify` but from an accessor on what
+		// `verify` reports — read by core after the context is gone.
+		const collect = async (ctx: CollectorContext): Promise<Rule[]> => {
+			class ContextBackedEvaluation {
+				get status(): "completed" {
+					return "completed";
+				}
+				get revision(): string {
+					return `sha256:${(ctx.action === "read" ? "a" : "b").repeat(64)}`;
+				}
+			}
+			return [
+				{
+					ruleType: "cedar",
+					code: "cedar_deny",
+					message: "Denied by Cedar policy",
+					verify: (_attrs, report) => {
+						report?.(new ContextBackedEvaluation());
+						return true;
+					},
+				},
+			];
+		};
+		await expect(assertRuleIndependentOfContext(collect, scopeContext, attrs)).rejects.toThrow(
+			/read its collector's context/,
+		);
+	});
+
 	it("rejects a rule that kept a reference into the context rather than the context", async () => {
 		const collect = async (ctx: CollectorContext): Promise<Rule[]> => {
 			// Not `ctx` itself — one field of it, held live.

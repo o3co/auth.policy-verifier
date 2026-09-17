@@ -26,14 +26,22 @@ import type {
 	RuleCollector,
 	RuleEvaluation,
 } from "@o3co/auth.policy-verifier.core";
-import { AttributePipeline, RulePipeline } from "@o3co/auth.policy-verifier.core";
+import {
+	AttributePipeline,
+	evaluate,
+	POLICY_REVISION_MAX_LENGTH,
+	POLICY_REVISION_PATTERN,
+	RulePipeline,
+} from "@o3co/auth.policy-verifier.core";
 import { createVerifyRouter, type VerifyRouterConfig } from "@o3co/auth.policy-verifier.server";
 import express from "express";
 import { SignJWT } from "jose";
 import type { Test } from "supertest";
 import request from "supertest";
+import { describe, expect, it } from "vitest";
 import {
 	describeWireContractConformance,
+	RESPONSE_ENVELOPES,
 	type WireContractAdapter,
 	type WireCredential,
 	type WireExchange,
@@ -355,3 +363,44 @@ describeWireContractConformance(
 		},
 	),
 );
+
+/*
+ * The fixture states the revision grammar, its length bound and the statuses
+ * as data, for a driver that cannot import core. They are copies, and a copy
+ * drifts: core would start refusing — or accepting — what the table still
+ * says, and the suite would hold deployments to the stale half. Pinned here,
+ * where both can be seen.
+ */
+describe("the fixture's evaluation table is core's own", () => {
+	const { evaluation } = RESPONSE_ENVELOPES;
+
+	it("states the revision grammar and bound core enforces", () => {
+		expect(evaluation.revision.pattern).toBe(POLICY_REVISION_PATTERN.source);
+		expect(evaluation.revision.maxLength).toBe(POLICY_REVISION_MAX_LENGTH);
+	});
+
+	it("lists exactly the statuses core accepts", async () => {
+		const accepts = async (status: string): Promise<boolean> => {
+			const report = status === "not_invoked" ? { status } : { status, revision: null };
+			return evaluate(new Map(), [
+				{
+					ruleType: "policy",
+					code: "policy_deny",
+					message: "Denied by policy",
+					verify: (_attrs, tell) => {
+						tell?.(report as RuleEvaluation);
+						return false;
+					},
+				},
+			]).then(
+				() => true,
+				() => false,
+			);
+		};
+		for (const status of evaluation.statuses) expect(await accepts(status)).toBe(true);
+		expect(await accepts("skipped")).toBe(false);
+		expect([...evaluation.evaluated.statuses, "not_invoked"].sort()).toEqual(
+			[...evaluation.statuses].sort(),
+		);
+	});
+});

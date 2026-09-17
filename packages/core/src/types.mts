@@ -190,7 +190,7 @@ export type RuleEvaluation =
 /**
  * The shape a policy revision reference is held to: `scheme:encoded`, the OCI
  * image-spec digest grammar. Enforced by `evaluate()` on everything a rule
- * reports, because what a rule returns reaches the wire and the audit log — a
+ * reports, because what a rule reports reaches the wire and the audit log — a
  * path, a label with spaces or policy text does not fit it.
  */
 export const POLICY_REVISION_PATTERN = /^[a-z0-9]+(?:[+._-][a-z0-9]+)*:[A-Za-z0-9=_-]+$/;

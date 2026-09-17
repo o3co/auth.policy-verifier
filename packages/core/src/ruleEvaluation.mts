@@ -13,8 +13,11 @@
  * would record the decision as having reported none, and a wrong audit record
  * that looks complete is worse than a loud fault.
  *
- * No message here repeats the value it refuses. The error is logged, and the
- * value is whatever the rule put there — policy text and paths included.
+ * No message written here repeats the value it refuses. The error is logged,
+ * and the value is whatever the rule put there — policy text and paths
+ * included. An error the report's own accessor threw is not one of these: it
+ * is the rule's, and like anything else a rule throws it comes back unchanged
+ * — the same object, so its class and message are its author's.
  *
  * Everything is read ONCE, into locals, and what is kept is rebuilt from those
  * locals: an object whose properties answer differently the second time — an
@@ -44,8 +47,9 @@ export interface RuleInvocation {
 	/**
 	 * @throws {TypeError} for an answer that is not a boolean, for a report that
 	 *   was refused (even if the rule caught the refusal), and for a pass that
-	 *   reports its evaluator `failed` or `not_invoked`. The caller attributes
-	 *   it to the rule.
+	 *   reports its evaluator `failed` or `not_invoked`.
+	 * @throws whatever an accessor on the report threw, unchanged — likewise even
+	 *   if the rule caught it. The caller attributes either to the rule.
 	 */
 	conclude(answer: unknown): RuleResult;
 	close(): void;
@@ -63,14 +67,15 @@ const EVALUATED_KEYS: ReadonlySet<string> = new Set(["status", "revision", "load
  */
 export function beginRuleInvocation(): RuleInvocation {
 	let reported: RuleEvaluation | undefined;
-	let refusal: TypeError | undefined;
+	// Boxed, because what is kept may be anything a rule's accessor threw.
+	let refusal: { readonly error: unknown } | undefined;
 	let closed = false;
 
-	const refuse = (message: string): never => {
+	const refuse = (error: unknown): never => {
 		// Kept as well as thrown: the rule may catch it, and a decision must not
 		// come out looking as if nothing had been reported. The first one wins.
-		refusal ??= new TypeError(message);
-		throw refusal;
+		refusal ??= { error };
+		throw refusal.error;
 	};
 
 	return {
@@ -79,18 +84,20 @@ export function beginRuleInvocation(): RuleInvocation {
 			// the rule's own detached code, as an unhandled rejection.
 			if (closed) return;
 			if (reported !== undefined || refusal !== undefined) {
-				refuse("a rule reported its evaluation more than once for one invocation");
+				refuse(new TypeError("a rule reported its evaluation more than once for one invocation"));
 			}
 			try {
 				reported = readEvaluation(evaluation);
 			} catch (cause) {
-				refuse(cause instanceof Error ? cause.message : "a rule's evaluation could not be read");
+				// Either this module's own TypeError, or whatever an accessor on the
+				// report threw. Both are kept as they are — see the header comment.
+				refuse(cause);
 			}
 		},
 
 		conclude(answer) {
 			closed = true;
-			if (refusal !== undefined) throw refusal;
+			if (refusal !== undefined) throw refusal.error;
 			if (typeof answer !== "boolean") {
 				// Read by truthiness, this was fail-open for a rule authored in
 				// JavaScript — `verify: (attrs) => attrs.get("role")` passed whenever
