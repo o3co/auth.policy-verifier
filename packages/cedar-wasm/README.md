@@ -18,6 +18,13 @@ same choice out — that setting refuses to start when this package was not
 imported, naming it. Nothing else about the collector's config changes with the
 engine; see cedar's README for the whole of it.
 
+It also vouches for the policy revision behind every answer
+(`confirmsRevision`, #244): the set is compiled in this process, from the files
+the revision was computed over, under an id nothing else holds — so an answer
+cannot have come from any other policies. It is the engine
+`requireConfirmedRevision = true` boots over; see cedar's [Policy
+revision](../cedar/README.md#policy-revision-which-policies-decided).
+
 ## What it costs, and when to choose it
 
 The policy set is compiled once, at boot, into wasm memory; each request

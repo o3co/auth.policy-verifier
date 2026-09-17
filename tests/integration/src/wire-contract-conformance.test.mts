@@ -24,9 +24,10 @@ import type {
 	CollectorContext,
 	Rule,
 	RuleCollector,
+	RuleEvaluation,
 } from "@o3co/auth.policy-verifier.core";
 import { AttributePipeline, RulePipeline } from "@o3co/auth.policy-verifier.core";
-import { createVerifyRouter } from "@o3co/auth.policy-verifier.server";
+import { createVerifyRouter, type VerifyRouterConfig } from "@o3co/auth.policy-verifier.server";
 import express from "express";
 import { SignJWT } from "jose";
 import type { Test } from "supertest";
@@ -53,6 +54,14 @@ const CONFLICTING_ACTION = "conflict";
 
 /** The action the failing collector below throws on — a fault, not a timeout. */
 const FAILING_ACTION = "explode";
+
+/**
+ * The actions the policy-backed rule below reports each evaluation shape for
+ * (#244). `read` and `delete` — the suite's ordinary allow and deny — report a
+ * completed evaluation of a vouched revision.
+ */
+const UNCONFIRMED_ACTION = "read-remote";
+const NOT_INVOKED_ACTION = "read-unbuilt";
 
 /**
  * Small enough that a case can exceed them cheaply, and stated here rather than
@@ -119,9 +128,51 @@ const tenantRuleCollector: RuleCollector = {
 	},
 };
 
-const app = express();
-app.use(
-	createVerifyRouter({
+/**
+ * A rule group backed by a policy evaluator, as `packages/cedar` builds one:
+ * it answers a verdict, and the verdict says how the evaluation went and which
+ * policy revision it concerned (#244). Synthetic so that one deployment can
+ * stage every shape of the evaluation envelope; the real collector's verdicts
+ * are pinned against Cedar in `packages/cedar-wasm`. It passes whatever it is
+ * asked about except where a shape implies a denial, so the scope and tenant
+ * groups beside it keep deciding the cases they always decided.
+ */
+const REVISION = `sha256:${"0123456789abcdef".repeat(4)}`;
+const policyBackedRuleCollector: RuleCollector = {
+	async collect(collectorContext: CollectorContext) {
+		const evaluation: RuleEvaluation =
+			collectorContext.action === NOT_INVOKED_ACTION
+				? { status: "not_invoked" }
+				: collectorContext.action === UNCONFIRMED_ACTION
+					? { status: "completed", revision: null, loadedRevision: REVISION }
+					: { status: "completed", revision: REVISION };
+		const rule: Rule = {
+			ruleType: "policy",
+			code: "policy_deny",
+			message: "Denied by policy",
+			verify: () => ({ passed: evaluation.status !== "not_invoked", evaluation }),
+		};
+		return [rule];
+	},
+};
+
+/** The reference deployment, with whatever a second one needs to differ in. */
+function deployment(
+	overrides: Partial<VerifyRouterConfig> = {},
+	ruleCollectors: RuleCollector[] = [],
+): express.Express {
+	const app = express();
+	app.use(
+		createVerifyRouter({
+			...referenceConfig(ruleCollectors),
+			...overrides,
+		}),
+	);
+	return app;
+}
+
+function referenceConfig(ruleCollectors: RuleCollector[]): VerifyRouterConfig {
+	return {
 		jwt: {
 			validate: true,
 			key: secret,
@@ -146,11 +197,15 @@ app.use(
 			// never the thing that trips them.
 			{ collectorTimeoutMs: 50, deadlineMs: 150 },
 		),
-		rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector(), tenantRuleCollector]),
+		rulePipeline: new RulePipeline([
+			new ResourceActionScopeRuleCollector(),
+			tenantRuleCollector,
+			...ruleCollectors,
+		]),
 		maxBodyBytes: MAX_BODY_BYTES,
 		maxBatchSize: MAX_BATCH_SIZE,
-	}),
-);
+	};
+}
 
 /** A token this deployment verifies, with or without a `sub` claim. */
 async function mintToken(subject: string | undefined): Promise<string> {
@@ -201,8 +256,12 @@ function serialize(payload: WirePayload): string {
 	}
 }
 
-const adapter: WireContractAdapter = {
-	name: "@o3co/auth.policy-verifier.server createVerifyRouter over HTTP",
+const adapterFor = (
+	name: string,
+	app: express.Express,
+	fixtures: Partial<WireContractAdapter["fixtures"]> = {},
+): WireContractAdapter => ({
+	name,
 
 	async send(exchange: WireExchange): Promise<WireResponse> {
 		let pending: Test = request(app).post(exchange.endpoint);
@@ -243,7 +302,39 @@ const adapter: WireContractAdapter = {
 			context: { tenant_id: "acme" },
 		},
 		failing: { resource: "project:1", action: FAILING_ACTION, context: { tenant_id: "acme" } },
+		...fixtures,
 	},
-};
+});
 
-describeWireContractConformance(adapter);
+// The deployment as it ships: `verify.evaluationInResponse` left at "omit".
+describeWireContractConformance(
+	adapterFor("@o3co/auth.policy-verifier.server createVerifyRouter over HTTP", deployment()),
+);
+
+// …and the same one opted in (#244), with a policy-backed rule group beside the
+// others. The whole table runs again, because the opt-in must change nothing
+// but the one optional key: every refusal, status and envelope is the same.
+// The token carries `read:project` only, so the staged actions are told apart
+// by the policy-backed rule and allowed by no scope — which is fine, the
+// evaluation rides on the outcome whether the decision is an allow or a deny.
+describeWireContractConformance(
+	adapterFor(
+		"@o3co/auth.policy-verifier.server with verify.evaluationInResponse = include",
+		deployment({ evaluationInResponse: "include" }, [policyBackedRuleCollector]),
+		{
+			reportingEvaluation: {
+				confirmed: allowed,
+				unconfirmed: {
+					resource: "project:1",
+					action: UNCONFIRMED_ACTION,
+					context: { tenant_id: "acme" },
+				},
+				notInvoked: {
+					resource: "project:1",
+					action: NOT_INVOKED_ACTION,
+					context: { tenant_id: "acme" },
+				},
+			},
+		},
+	),
+);

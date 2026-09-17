@@ -317,6 +317,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 			maxContextEntries: config.verify.maxContextEntries,
 			maxContextValueLength: config.verify.maxContextValueLength,
 			credentialToCollectors: config.verify.credentialToCollectors,
+			evaluationInResponse: config.verify.evaluationInResponse,
 		}),
 	);
 

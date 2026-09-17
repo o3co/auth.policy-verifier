@@ -8,6 +8,7 @@ import {
 } from "./collectorLimits.mjs";
 import { RuleTimeoutError } from "./errors.mjs";
 import type { FailureRecord, FailureSource } from "./failureSource.mjs";
+import { type ReadRuleAnswer, readRuleAnswer } from "./ruleVerdict.mjs";
 import {
 	type AnyRule,
 	type AsyncRule,
@@ -15,6 +16,7 @@ import {
 	type Decision,
 	isAsyncRule,
 	type Rule,
+	type RuleAnswer,
 	type RuleGroupOutcome,
 	type RuleOutcome,
 } from "./types.mjs";
@@ -98,6 +100,8 @@ export interface EvaluateOptions {
  *   unchanged: a rule that owns its engine's outage answers `false` and logs;
  *   one that throws is reporting a fault. Which rule threw is recorded in
  *   `failures` beside the error rather than wrapped around it (#200).
+ * @throws {TypeError} when a rule answers a verdict that does not read — see
+ *   `readRuleAnswer` (#244). Attributed to the rule in `failures`, like a throw.
  * @throws {RangeError} for an unusable `ruleTimeoutMs` or `evaluateDeadlineMs`,
  *   before any rule runs.
  */
@@ -186,10 +190,19 @@ async function evaluateGroup(
 ): Promise<RuleGroupOutcome> {
 	const evaluated: RuleOutcome[] = [];
 	for (const rule of rules) {
-		const passed = isAsyncRule(rule)
+		const { passed, evaluation } = isAsyncRule(rule)
 			? await runAsyncRule(rule, attrs, budget, caller, failures)
 			: verifyRule(rule, attrs, failures);
-		const outcome = { code: rule.code, message: rule.message, passed };
+		// #244: the evaluation is this invocation's, read off this answer — the
+		// outcome is the only place it is ever kept. Absent rather than
+		// `undefined` for a rule that reported none, so the outcome of a boolean
+		// rule is key-for-key what it was.
+		const outcome: RuleOutcome = {
+			code: rule.code,
+			message: rule.message,
+			passed,
+			...(evaluation !== undefined ? { evaluation } : {}),
+		};
 		evaluated.push(outcome);
 		if (passed) return { ruleType, passed: true, evaluated, satisfiedBy: outcome };
 	}
@@ -201,10 +214,18 @@ function ruleSource(rule: AnyRule): FailureSource {
 	return { kind: "rule", ruleType: rule.ruleType, code: rule.code };
 }
 
-/** Asks a synchronous rule, recording it as the source of anything it throws (#200). */
-function verifyRule(rule: Rule, attrs: Attributes, failures: FailureRecord | undefined): boolean {
+/**
+ * Asks a synchronous rule, recording it as the source of anything it throws
+ * (#200) — an answer that does not read (#244) included, which is as much the
+ * rule's fault as a throw is.
+ */
+function verifyRule(
+	rule: Rule,
+	attrs: Attributes,
+	failures: FailureRecord | undefined,
+): ReadRuleAnswer {
 	try {
-		return rule.verify(attrs);
+		return readRuleAnswer(rule.verify(attrs));
 	} catch (error) {
 		failures?.record(error, ruleSource(rule));
 		throw error;
@@ -226,7 +247,7 @@ async function runAsyncRule(
 	budget: RuleBudget,
 	caller: AbortSignal | undefined,
 	failures: FailureRecord | undefined,
-): Promise<boolean> {
+): Promise<ReadRuleAnswer> {
 	if (caller?.aborted) throw caller.reason;
 	const remaining = budget.deadlineAt - performance.now();
 	const phaseBinds = remaining < budget.ruleTimeoutMs;
@@ -268,13 +289,16 @@ async function runAsyncRule(
 			// `decide` that throws before returning a promise is attributed
 			// exactly as one that rejects (#200). A rejection after the abort is
 			// the abort's, and is attributed to nobody.
-			new Promise<boolean>((resolve) => resolve(rule.decide(attrs, own.signal))).catch(
-				(error: unknown) => {
+			//
+			// The answer is read inside the same chain (#244), so one that does
+			// not read is attributed to the rule by the same `catch`.
+			new Promise<RuleAnswer>((resolve) => resolve(rule.decide(attrs, own.signal)))
+				.then(readRuleAnswer)
+				.catch((error: unknown) => {
 					if (own.signal.aborted) throw own.signal.reason;
 					failures?.record(error, ruleSource(rule));
 					throw error;
-				},
-			),
+				}),
 			cancelled.promise,
 		]);
 	} finally {

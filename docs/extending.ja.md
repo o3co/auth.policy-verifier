@@ -32,11 +32,11 @@ interface Rule {
   ruleType: string;
   code: string;
   message: string;
-  verify(attrs: ReadonlyAttributes): boolean;
+  verify(attrs: ReadonlyAttributes): RuleAnswer; // boolean | RuleVerdict
 }
 ```
 
-- `verify(attrs)` は述語です。通過時に `true`、失敗時に `false` を返します。**safe-deny 規約:** 欠落・型不一致・不正な属性は `false` を返してください。例外を投げない。例外を投げるとポリシー失敗がエラー応答になり、評価状態が漏れます。
+- `verify(attrs)` は述語です。通過時に `true`、失敗時に `false` を返します。（policy evaluator を背後に持つ Rule は、代わりに `RuleVerdict` を返せます — [answer の背後にある evaluation を報告する](#answer-の背後にある-evaluation-を報告する) を参照。報告するものが無い Rule は boolean を返し続けます。）**safe-deny 規約:** 欠落・型不一致・不正な属性は `false` を返してください。例外を投げない。例外を投げるとポリシー失敗がエラー応答になり、評価状態が漏れます。
 - `attrs` はコレクターが返す `Attributes` ではなく `ReadonlyAttributes`（`ReadonlyMap<string, unknown>`）です。評価器は同一の live map を全グループの全 Rule に渡すため、書き込む Rule は以降のグループが判定される対象そのものを書き換えてしまいます。read-only ビューはそれをデバッグ作業ではなくコンパイルエラーにします。コレクター側は従来どおり可変の `Map` を組み立てて返します。
 - `ruleType` は評価器が Rule をグループ化するのに使います。同じ `ruleType` の Rule は OR 結合されます（いずれか 1 つ通ればグループ通過）。異なる `ruleType` の Rule はグループ間 AND 結合されます（全グループ通過が必要）。**既定の `ruleType` は、暗黙の衝突を避けるためにルール設定を十分にエンコードしてください。** 例えば `AttrLiteralEqual` は `attr_literal_equal:${a}:${typeof v}:${String(v)}` を使います — `typeof v` セグメントは `v=true` と `v="true"` が同じ `ruleType` に畳み込まれて意図に反して OR 結合されるのを防ぎます。
 - `code` は短く安定した識別子（例: `"no_permission"`、`"attr_not_equal"`）で、下流のプログラム的ハンドリングに適した文字列にしてください。**1 つの Rule が生成しうる code の集合は小さく固定に保つこと。** `code` は `auth_denials_total` メトリクスの `code` ラベルと decision ログ行の `deniedBy` になるため、リクエストごとに導出される code（例えばリソース ID を畳み込んだもの）は有界でないメトリクスラベルになります。これは、監視すべき対象を監視する仕組みそのものをメトリクスエンドポイントが落とす経路です。サーバー側は異なる値 32 個で打ち止め、それ以降を `code="other"` に潰すので、最悪でも「Prometheus が死ぬ」ではなく「メトリクスが役に立たなくなる」で済みますが、変動する部分はラベルにならない `message` に入れてください。
@@ -205,7 +205,7 @@ interface AsyncRule {
   code: string;
   message: string;
   readonly async: true; // 判別子 — isAsyncRule は decide の有無ではなくこれを読む
-  decide(attrs: ReadonlyAttributes, signal: AbortSignal): Promise<boolean>;
+  decide(attrs: ReadonlyAttributes, signal: AbortSignal): Promise<RuleAnswer>; // boolean | RuleVerdict
 }
 ```
 
@@ -215,6 +215,34 @@ RuleCollector は 1 つのリストでどちらの種類を返しても、両方
 - **`signal` を `fetch` に渡してください。** この signal は Rule の予算が尽きたとき、または呼び出し側が終わったときに abort します — server のもとでは、呼び出し側が終わるとは HTTP クライアントが接続を閉じることです。予算は `EvaluateOptions.ruleTimeoutMs`（既定 2000 ms）、あるいは `EvaluateOptions.evaluateDeadlineMs`（既定 5000 ms。1 決定の非同期 Rule すべての合計）の残りがそれより短ければその残りです — server は両方を `verify.ruleTimeoutMs` / `verify.evaluateDeadlineMs` から読んで `evaluate()` に渡し、ライブラリ利用者は直接渡します。signal を無視する Rule にも上限は効きます — 評価器がその Rule を race させるからです — が、誰も読まない答えのためにソケットを開いたままにしてしまいます。
 - **エンジンの障害は自分で引き受けてください。** reject する Rule は障害を報告しているのであり、そのリクエストは 500 で応答します。エンジンに到達できないことを deny にすべきなら — 通常はそうすべきです — catch してログを出し、`false` を返してください。予算を超えた Rule はそれ自体が deny（`rule_timeout`）であり、決して pass にはなりません。
 - **問い合わせは 1 つずつです。** 1 つの `ruleType` グループ内の代替 Rule は順に実行され、最初に通ったところで止まります。そのため同じグループ内で安価な同期 Rule の後ろに置いた高価な非同期 Rule は、安価な方が拒否したときにだけ問い合わせられます。
+
+## answer の背後にある evaluation を報告する
+
+policy evaluator（Cedar の policy set、OPA の bundle、OpenFGA の model）を背後に持つ Rule は、policy のものではない理由でも失敗します。request を組み立てられなかった、engine が答えなかった、evaluation がエラーを出した、の 3 つです。Rule は fail-closed なので、いずれも「失敗した Rule」でなければなりません。しかし evaluator から見るとどれも同じ `code` であり、そのすべてを policy set に帰属させた監査記録は、決めていない policy や一度も走っていない policy の名前を挙げることになります（#244）。XACML が `Decision` と `Status` に分けているのと同じ区別です。
+
+そこで `verify` / `decide` は boolean の代わりに `RuleVerdict` を返せます:
+
+```ts
+interface RuleVerdict {
+  readonly passed: boolean;
+  readonly evaluation?: RuleEvaluation;
+}
+
+type RuleEvaluation =
+  | { status: "not_invoked" }                                   // evaluator は一度も呼ばれていない
+  | { status: "completed" | "failed"; revision: string }        // 走った。何を評価したかを evaluator が保証する
+  | { status: "completed" | "failed"; revision: null; loadedRevision?: string }; // 走った。何を評価したかは確定できない
+```
+
+`evaluate()` は verdict を検査し、`evaluation` の frozen なコピーをその呼び出しの `RuleOutcome` に載せます。そこから `decision` イベントには常に、response には `verify.evaluationInResponse = "include"` のときに届きます。
+
+- **戻り値なのは、それが 1 回の呼び出しについての事実だからです。** 1 つの Rule オブジェクトは並行する決定に答えます。呼び出しの間に Rule 上へ何かを残す（「最後の evaluation」フィールド、共有状態への callback）と、ある決定の evaluation が別の決定の記録に載ります。answer の一部なので、純粋性の契約もそのまま及びます — 等しい attributes には等しい verdict。`describeRulePurityConformance` は answer 全体を比較するので、「最後に見た revision」を報告する Rule は落ちます。
+- **`completed` は evaluator が答えに到達したこと**を意味します。答えが permit でも forbid でも、どの policy も該当しなかった場合でも同じです。**`failed`** は呼び出したがきれいな答えが得られなかったこと。**`not_invoked`** は問い合わせる前に Rule が失敗したことで、revision 系のキーはどちらも持ちません。一度も問われていない evaluator は何も評価していないからです。
+- **`revision` は「何が評価されたか」についての主張**なので、evaluator が保証するときだけ文字列になります。保証できない場合（何を走らせたかを言わない remote engine）は `revision: null` とし、分かっていれば自分が *load した* ものを `loadedRevision` に入れます。2 つは決して同じ名前を共有しないので、`revision` を読む consumer が「誰も確認していない snapshot」を「評価された snapshot」と取り違えることはありません。URL・デプロイのラベル・更新時刻から revision をでっち上げないでください。
+- **参照は `scheme:encoded`** — OCI の digest 文法で、最大 256 文字です。content digest なら `sha256:<小文字 hex 64 桁>`、版が digest でない engine は独自の scheme を名乗ります（`POLICY_REVISION_PATTERN`）。Rule の戻り値は wire と監査ログに載るので、core がこれを強制します。読めない verdict（パス、policy 本文、未知の status、余分なキー）は Rule に帰属する `TypeError` となり、request は `500` で答えます。切り詰めずに拒否するのは、完全に見える誤った監査記録のほうが、騒がしい障害より悪いからです。
+- **answer は `ruleAnswerPassed(answer)` で読み、truthiness で読まないでください。** 失敗した verdict はオブジェクトで、オブジェクトは truthy です。これに出会うのは Rule を直接呼ぶコード（テスト）だけで、`evaluate()` は代わりに読んでくれます。
+
+`packages/cedar` が実例です。`CedarPolicyRuleCollector` は answer table の各行を報告し、revision は load した policy ファイルの digest で、`CedarEngine` port は engine がその answer を保証するかどうかを answer ごとに伝えます。
 
 ## RuleCollector を書くタイミング
 

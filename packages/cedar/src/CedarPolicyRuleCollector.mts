@@ -9,6 +9,8 @@ import type {
 	ReadonlyAttributes,
 	Rule,
 	RuleCollector,
+	RuleEvaluation,
+	RuleVerdict,
 } from "@o3co/auth.policy-verifier.core";
 import { createConsoleLogger } from "@o3co/auth.policy-verifier.core";
 import {
@@ -98,6 +100,23 @@ export interface CedarPolicyRuleCollectorConfig {
 	 * indistinguishable from a policy deny. The healthy path never logs.
 	 */
 	logEvaluationErrors?: boolean;
+	/**
+	 * Whether every decision must be able to say which policy revision was
+	 * evaluated (#244). Default `false`.
+	 *
+	 * Each answer's `evaluation` names the revision only when the engine vouches
+	 * for it (`CedarDecision.revision`); otherwise it reads `revision: null`,
+	 * with what this collector loaded beside it as `loadedRevision`. That is an
+	 * honest record and, for a deployment whose audit has to name the policies
+	 * behind every decision, not an acceptable one: set this, and an answer
+	 * nobody vouched for is a logged deny instead of a permit of unknown origin.
+	 *
+	 * Refused at boot over an engine that does not declare `confirmsRevision` —
+	 * the http engine, since cedar-agent does not report what it evaluated —
+	 * because there every answer would be that deny. Evaluate in-process, or
+	 * leave it off and record `loadedRevision` for what it is.
+	 */
+	requireConfirmedRevision?: boolean;
 	/** Entity/context mapping — see `resolveMapping` for the shape. */
 	principal?: unknown;
 	action?: unknown;
@@ -153,20 +172,35 @@ export interface CedarPolicyRuleCollectorOptions {
  *
  * ## Answer interpretation
  *
- * | Cedar answered | with | the rule answers |
- * | --- | --- | --- |
- * | `allow` | no errors | pass |
- * | `deny` | determining `forbid` | fail |
- * | `deny` | no determining policy | `onNoDeterminingPolicy` (default `"deny"`) |
- * | anything | evaluation errors | **fail, and log** |
- * | — | the call itself failed | **fail, and log** |
+ * | Cedar answered | with | the rule answers | `evaluation.status` |
+ * | --- | --- | --- | --- |
+ * | `allow` | no errors | pass | `completed` |
+ * | `deny` | determining `forbid` | fail | `completed` |
+ * | `deny` | no determining policy | `onNoDeterminingPolicy` (default `"deny"`) | `completed` |
+ * | anything | evaluation errors | **fail, and log** | `failed` |
+ * | — | the call itself failed | **fail, and log** | `failed` |
+ * | — | the request could not be built, so Cedar was not asked | **fail, and log** | `not_invoked` |
+ * | anything | a revision other than the one loaded | **fail, and log** | `failed` |
  *
  * The errors row is unconditional — an evaluation error is never an
  * abstention. Cedar treats a policy that errors as not satisfied, so a
  * `forbid` that errors stops forbidding and the top-level decision can read
  * `allow`; the errors check runs first precisely so that a broken input fails
- * closed. The last row is the engine not answering at all (`CedarEngineError`,
- * a rejected call): also a deny, also logged, never an abstention.
+ * closed. The call-failed row is the engine not answering at all
+ * (`CedarEngineError`, a rejected call): also a deny, also logged, never an
+ * abstention.
+ *
+ * ## What the rule reports about each answer (#244)
+ *
+ * Every failing row is the same `cedar_deny` to the evaluator, and must be —
+ * the rule fails closed. But only the first three are a policy's answer, and
+ * an audit record that attributed the rest to the policy set would name
+ * policies that did not decide, or never ran. So the rule answers a
+ * `RuleVerdict` whose `evaluation` carries the last column, and beside it the
+ * revision of the policy set: as `revision` when the engine vouched for this
+ * answer, as `revision: null` with `loadedRevision` when it did not, and not
+ * at all for `not_invoked`. It is built from this call's own values and
+ * returned — nothing is kept on the rule, which answers concurrent decisions.
  */
 export class CedarPolicyRuleCollector implements RuleCollector {
 	private constructor(private readonly rule: AnyRule) {}
@@ -210,6 +244,14 @@ export class CedarPolicyRuleCollector implements RuleCollector {
 		}
 		const logEvaluationErrors = rawLog ?? true;
 
+		const rawRequire = raw.requireConfirmedRevision;
+		if (rawRequire !== undefined && typeof rawRequire !== "boolean") {
+			throw new Error(
+				`CedarPolicyRuleCollector: requireConfirmedRevision must be a boolean, got ${JSON.stringify(rawRequire)}`,
+			);
+		}
+		const requireConfirmedRevision = rawRequire ?? false;
+
 		const engine = selectEngine(raw.engine);
 		const mapping: ResolvedMapping = resolveMapping(raw);
 		const source = loadPolicySource(raw);
@@ -244,6 +286,14 @@ export class CedarPolicyRuleCollector implements RuleCollector {
 			);
 		}
 
+		if (requireConfirmedRevision && engine.confirmsRevision !== true) {
+			// See the config field's doc comment. Refused before `load` for the
+			// reason above: serving, every answer of this engine would be a deny.
+			throw new Error(
+				`CedarPolicyRuleCollector: requireConfirmedRevision = true cannot be used with the "${engine.name}" engine — it does not report which policy revision an answer was evaluated against, so no decision could name one. Evaluate in-process: import "@o3co/auth.policy-verifier.cedar-wasm" and set engine = "wasm"; or leave requireConfirmedRevision off, and the revision this collector loaded is recorded as loadedRevision`,
+			);
+		}
+
 		// Boot-time compile, by the engine: a set it cannot parse refuses to
 		// start here, with the engine's message naming the offending file.
 		let policySet: LoadedCedarPolicySet;
@@ -268,6 +318,8 @@ export class CedarPolicyRuleCollector implements RuleCollector {
 				engine,
 				policySet,
 				policySource: source.description,
+				loadedRevision: source.revision,
+				requireConfirmedRevision,
 				mapping,
 				logger: logEvaluationErrors ? logger : undefined,
 			}),
@@ -295,13 +347,25 @@ interface BoundRule {
 	engine: CedarEngine;
 	policySet: LoadedCedarPolicySet;
 	policySource: string;
+	/** `PolicySource.revision` of the set handed to `engine.load` (#244). */
+	loadedRevision: string;
+	requireConfirmedRevision: boolean;
 	mapping: ResolvedMapping;
 	logger: Logger | undefined;
 }
 
 function buildRule(bound: BoundRule): AnyRule {
-	const { ruleType, onNoDeterminingPolicy, engine, policySet, policySource, mapping, logger } =
-		bound;
+	const {
+		ruleType,
+		onNoDeterminingPolicy,
+		engine,
+		policySet,
+		policySource,
+		loadedRevision,
+		requireConfirmedRevision,
+		mapping,
+		logger,
+	} = bound;
 	// `ruleType` too: two collectors over the same source (two inline sets, one
 	// directory twice) are told apart in a log line only by the group they decide for.
 	const identity = { engine: engine.name, policySet: policySource, ruleType };
@@ -320,14 +384,49 @@ function buildRule(bound: BoundRule): AnyRule {
 			return undefined;
 		}
 	};
-	const callFailed = (cause: unknown): false => {
+	// #244: the ways a verdict accounts for the revision. Constants of the
+	// rule — the loaded revision is fixed at boot — so equal attributes give
+	// an equal verdict, which is what the purity contract asks of it.
+	const NOT_INVOKED: RuleVerdict = { passed: false, evaluation: { status: "not_invoked" } };
+	/** Nothing vouched for what ran: the call failed, or the engine does not say. */
+	const unconfirmed = (status: "completed" | "failed"): RuleEvaluation => ({
+		status,
+		revision: null,
+		loadedRevision,
+	});
+
+	const callFailed = (cause: unknown): RuleVerdict => {
 		logger?.error(
 			{ ...identity, reason: errorMessage(cause) },
 			"cedar authorization call failed — denying",
 		);
-		return false;
+		return { passed: false, evaluation: unconfirmed("failed") };
 	};
-	const interpret = (answer: CedarDecision): boolean => {
+	const interpret = (answer: CedarDecision): RuleVerdict => {
+		if (answer.revision !== undefined && answer.revision !== loadedRevision) {
+			// The engine holds a policy set this collector did not load — replaced
+			// under it, or never its own. A permit from there is a permit from
+			// somebody else's policies, so it is refused before the decision is
+			// read. What the engine named is not repeated: it is the engine's text.
+			logger?.error(
+				{ ...identity, loadedRevision },
+				"cedar engine answered from a policy revision other than the one loaded — denying",
+			);
+			return { passed: false, evaluation: unconfirmed("failed") };
+		}
+		const confirmed = answer.revision !== undefined;
+		if (requireConfirmedRevision && !confirmed) {
+			// The engine declared `confirmsRevision` — boot checked — and this
+			// answer did not name one. Denied rather than let through unnamed.
+			logger?.error(
+				{ ...identity, loadedRevision },
+				"cedar engine did not name the policy revision it evaluated, and requireConfirmedRevision is set — denying",
+			);
+			return { passed: false, evaluation: unconfirmed("failed") };
+		}
+		const evaluated = (status: "completed" | "failed"): RuleEvaluation =>
+			confirmed ? { status, revision: loadedRevision } : unconfirmed(status);
+
 		if (answer.errors.length > 0) {
 			// Checked before the decision on purpose: an erroring `forbid` stops
 			// forbidding, so `decision` can read "allow" exactly when it is least
@@ -336,11 +435,16 @@ function buildRule(bound: BoundRule): AnyRule {
 				{ ...identity, decision: answer.decision, errors: [...answer.errors] },
 				"cedar policy evaluation raised errors — denying",
 			);
-			return false;
+			return { passed: false, evaluation: evaluated("failed") };
 		}
-		if (answer.decision === "allow") return true;
-		if (answer.reason.length === 0) return onNoDeterminingPolicy === "abstain";
-		return false;
+		// From here Cedar ran to an answer, and the answer is the policies' own —
+		// "no policy determined the request" included, under either setting.
+		const evaluation = evaluated("completed");
+		if (answer.decision === "allow") return { passed: true, evaluation };
+		if (answer.reason.length === 0) {
+			return { passed: onNoDeterminingPolicy === "abstain", evaluation };
+		}
+		return { passed: false, evaluation };
 	};
 
 	if (!policySet.async) {
@@ -348,7 +452,7 @@ function buildRule(bound: BoundRule): AnyRule {
 			...base,
 			verify(attrs) {
 				const built = request(attrs);
-				if (built === undefined) return false;
+				if (built === undefined) return NOT_INVOKED;
 				let answer: CedarDecision;
 				try {
 					answer = policySet.isAuthorized(built);
@@ -366,7 +470,7 @@ function buildRule(bound: BoundRule): AnyRule {
 		async: true,
 		async decide(attrs, signal) {
 			const built = request(attrs);
-			if (built === undefined) return false;
+			if (built === undefined) return NOT_INVOKED;
 			let answer: CedarDecision;
 			try {
 				answer = await policySet.isAuthorized(built, signal);

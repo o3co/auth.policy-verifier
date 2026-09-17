@@ -152,13 +152,16 @@ interface ModuleContext {
 | `Attributes` | `Map<string, unknown>` — サブジェクト属性のバッグ。可変: コレクターがこれを組み立て、`AttributePipeline` がマージする |
 | `ReadonlyAttributes` | `ReadonlyMap<string, unknown>` — Rule が判定対象として受け取るビュー。評価器は同一の live map をすべての Rule に渡すため、書き込む Rule は以降の全グループの入力を書き換えてしまう |
 | `AttributeCollector` | `collect(context: CollectorContext): Promise<Attributes>` |
-| `Rule` | `{ ruleType: string; code: string; message: string; verify(attrs: ReadonlyAttributes): boolean }` — `verify` は `attrs` の決定的かつ副作用のない関数でなければならない。[AGENTS.md — Collector / Rule / Attribute Contract](../../AGENTS.md#collector--rule--attribute-contract) を参照 |
-| `AsyncRule` | `{ ruleType: string; code: string; message: string; readonly async: true; decide(attrs: ReadonlyAttributes, signal: AbortSignal): Promise<boolean> }` — `Rule` と同じ契約で I/O を行うもの、デッドラインのもとで実行される (#225)。`isAsyncRule` は判別子 `async` を読む |
+| `Rule` | `{ ruleType: string; code: string; message: string; verify(attrs: ReadonlyAttributes): RuleAnswer }` — `verify` は `attrs` の決定的かつ副作用のない関数でなければならない。[AGENTS.md — Collector / Rule / Attribute Contract](../../AGENTS.md#collector--rule--attribute-contract) を参照 |
+| `AsyncRule` | `{ ruleType: string; code: string; message: string; readonly async: true; decide(attrs: ReadonlyAttributes, signal: AbortSignal): Promise<RuleAnswer> }` — `Rule` と同じ契約で I/O を行うもの、デッドラインのもとで実行される (#225)。`isAsyncRule` は判別子 `async` を読む |
 | `RuleCollector` | `collect(context: CollectorContext): Promise<AnyRule[]>` — `Rule`、`AsyncRule`、またはその両方 |
 | `Decision` | `{ decision: "allow"; reason: DecisionReason } \| { decision: "deny"; code: string; message: string; reason: DecisionReason }` |
 | `DecisionReason` | `{ groups: RuleGroupOutcome[] }` |
 | `RuleGroupOutcome` | `{ ruleType: string; passed: true; evaluated: RuleOutcome[]; satisfiedBy: RuleOutcome } \| { ruleType: string; passed: false; evaluated: RuleOutcome[] }` — `evaluated` は実際に走ったルールを評価順に列挙し、`satisfiedBy` は通過グループを満たしたルールを指す |
-| `RuleOutcome` | `{ code: string; message: string; passed: boolean }` |
+| `RuleOutcome` | `{ code: string; message: string; passed: boolean; evaluation?: RuleEvaluation }` — `evaluation` は、この answer の背後にある evaluation について Rule が報告したもの (#244)。`evaluate()` が検査して freeze する。報告が無ければキー自体が無い |
+| `RuleAnswer` | `boolean \| RuleVerdict` — `verify` / `decide` が返せるもの。`ruleAnswerPassed(answer)` で読むこと。truthiness で読まない: 失敗した verdict はオブジェクトである |
+| `RuleVerdict` | `{ passed: boolean; evaluation?: RuleEvaluation }` — policy evaluator を背後に持つ Rule の answer。1 回の呼び出しについての事実なので戻り値になっている。[docs/extending.ja.md](../../docs/extending.ja.md#answer-の背後にある-evaluation-を報告する) を参照 |
+| `RuleEvaluation` | `{ status: "not_invoked" } \| { status: "completed" \| "failed"; revision: string } \| { status: "completed" \| "failed"; revision: null; loadedRevision?: string }` — `revision` は evaluator が「何を評価したか」を保証するときだけ文字列になり、`null` は明示的な「不明」。参照は `scheme:encoded`（`POLICY_REVISION_PATTERN`、最大 `POLICY_REVISION_MAX_LENGTH` 文字） |
 | `Role` | `{ name: string; permissions: string[] }` |
 | `SubjectAttributes` | `{ readonly [key: string]: unknown }` — トランスポートが保証するサブジェクトの検証済み属性バッグ。core はフィールド名を一切定めない。デフォルト server の下ではキーは検証済み JWT のクレーム（`sub`、`azp`、`scope`、…）と `authScheme`（クレームではなく、トークンが到着した `Authorization` スキーム） |
 | `PathResolver` | `(specifier: string) => string` — モジュール相対パスを解決する |

@@ -50,6 +50,7 @@ Individual values can also be overridden with environment variables.
 | `RULE_ON_EMPTY_RULE_SET` | `deny` | Decision when no rule is collected (`deny` \| `allow`) |
 | `VERIFY_MAX_BATCH_SIZE` | `50` | Cap on `POST /verify/batch` entries |
 | `VERIFY_CREDENTIAL_TO_COLLECTORS` | `never` | `expose` hands collectors the raw credential as `context.credential` — only for a collector that calls a downstream API as the subject. The default keeps collectors on verified claims; the credential is replayable and a logged context would leak it |
+| `VERIFY_EVALUATION_IN_RESPONSE` | `omit` | `include` puts each policy-backed rule's `evaluation` — its status and the policy revision it evaluated (#244) — on the decision response, for a calling service that records which revision authorized an operation. The `decision` log event carries it either way. It tells any holder of an accepted token when the policy set changed, so pair it with `HTTP_CALLER_AUTH_TOKEN` where that matters |
 | `LOG_LEVEL` | `info` | Minimum level emitted: `trace`\|`debug`\|`info`\|`warn`\|`error`\|`fatal`\|`silent`. Also the switch for the decision log — see [Observability](#observability) |
 
 ## HS256 secret strength

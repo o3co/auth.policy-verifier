@@ -110,6 +110,49 @@ describe("rule purity conformance — the check itself", () => {
 		);
 	});
 
+	it("accepts a rule that answers an equal verdict each time, in a fresh object (#244)", async () => {
+		// A verdict is compared by what it says, not by which object says it: a
+		// policy-backed rule builds one per call.
+		const collect = async (): Promise<Rule[]> => [
+			{
+				ruleType: "cedar",
+				code: "cedar_deny",
+				message: "Denied by Cedar policy",
+				verify: () => ({
+					passed: true,
+					evaluation: { status: "completed", revision: `sha256:${"a".repeat(64)}` },
+				}),
+			},
+		];
+		await expect(assertRuleIndependentOfContext(collect, scopeContext, attrs)).resolves.toEqual([
+			true,
+		]);
+	});
+
+	it("rejects a verdict whose evaluation moves while its pass/fail does not (#244)", async () => {
+		// The evaluation is part of the answer. A rule reporting whichever
+		// revision it saw last is reading state the engine cannot see — exactly
+		// the shared "last decision" slot the provenance contract rules out.
+		let calls = 0;
+		const collect = async (): Promise<Rule[]> => [
+			{
+				ruleType: "cedar",
+				code: "cedar_deny",
+				message: "Denied by Cedar policy",
+				verify: () => ({
+					passed: true,
+					evaluation: {
+						status: "completed",
+						revision: `sha256:${(calls++ % 2 === 0 ? "a" : "b").repeat(64)}`,
+					},
+				}),
+			},
+		];
+		await expect(assertRuleIndependentOfContext(collect, scopeContext, attrs)).rejects.toThrow(
+			/not a deterministic function of its attributes/,
+		);
+	});
+
 	it("rejects a rule that kept a reference into the context rather than the context", async () => {
 		const collect = async (ctx: CollectorContext): Promise<Rule[]> => {
 			// Not `ctx` itself — one field of it, held live.

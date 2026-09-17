@@ -360,6 +360,12 @@ verify {
 
   batchConcurrency     = 8      # batch entries decided at once (#183)
   batchConcurrency     = ${?VERIFY_BATCH_CONCURRENCY}
+
+  # Whether the decision RESPONSE carries each policy-backed rule's evaluation —
+  # its status and the policy revision it evaluated (#244). The `decision` log
+  # event always does. See "Recording which policy revision decided" below.
+  evaluationInResponse = "omit" # or "include"
+  evaluationInResponse = ${?VERIFY_EVALUATION_IN_RESPONSE}
 }
 ```
 
@@ -534,6 +540,8 @@ One structured event per decision, named `decision`, at `info`:
 
 `satisfiedBy` replaces `deniedBy` on an allow, naming the rule that satisfied each group. A `POST /verify/batch` of N entries emits N lines sharing one `requestId`. `durationMs` is time in the pipelines and the evaluator, not the HTTP round trip.
 
+When a rule reports the evaluation behind its answer (#244) — `packages/cedar` does — the line also carries `evaluations`, one entry per reporting rule in evaluation order: `{"ruleType":"cedar","code":"cedar_deny","status":"completed","revision":"sha256:9f2c…"}`. See [Recording which policy revision decided](#recording-which-policy-revision-decided). A deployment with no policy-backed rule writes the line it always wrote.
+
 `logging.level` (`LOG_LEVEL`) is the switch — the line is `info`, so `warn` turns the stream off, and there is no second flag. A deny is a normal outcome for a decision point rather than a fault, so it is not routed to `warn`: that would let any caller manufacture warn-level noise. Alert on the metrics, read the log for the "why".
 
 **Never logged:** the raw bearer token, the claim set beyond `sub`, and the caller's `context` object — free-form, forwarded verbatim to collectors, and therefore exactly where a calling service's own request payload ends up.
@@ -558,6 +566,31 @@ A decision that could not be made is logged at `error`, and the line says what k
 Nothing the router adds to these lines carries the credential, the claims or `context`. The category is an enum. The collector is the one the collector runner recorded for that decision — never a name read off the error, so a collector cannot relabel itself by throwing a `CollectorTimeoutError` it built — and a timeout nothing recorded is `collector: "unattributed"`. A rule's `ruleType` and `code` are carried only when identifier-shaped (a letter, then letters, digits, `_`, `.` or `-`, at most 64 characters), since a rule collector may build them per request, and are `redacted` otherwise. The request id is validated as below. `err` is the error as thrown, with one exception: the three deny errors core defines (`CollectorTimeoutError`, `RuleTimeoutError`, `AttributeConflictError`) name a collector, a rule or an attribute key in their message and their own fields, so each is logged rebuilt — the classified collector or rule, the key held to the same identifier shape, and a stack of the header line only. Any other error's message is its author's responsibility.
 
 **Request correlation.** An `x-request-id` the caller sent is echoed as a response header on every answer the decision endpoints give — allow, deny, refusal and `500` — and carried as `requestId` on every line above and on the `decision` line, so a denial can be matched to the enforcing service's own log. It is carried only as 1–128 characters of `A-Z a-z 0-9 - _ . : + / = #` (UUIDs, ULIDs, hex and W3C trace ids, base64 and protobuf.interceptors' own ids all fit). Any other value is treated as absent — not echoed, not logged, not forwarded to collectors — and no id is minted when the caller sent none.
+
+### Recording which policy revision decided
+
+After a policy update or during a rolling deployment, a decision's result and rule codes do not say which policy *contents* produced it: a Cedar policy keeps its id while its text changes. A rule backed by a policy evaluator therefore reports, per answer, the evaluation behind it (#244):
+
+```json
+"evaluated": [{ "code": "cedar_deny", "message": "Denied by Cedar policy", "passed": false,
+                "evaluation": { "status": "completed", "revision": "sha256:9f2c…" } }]
+```
+
+| `evaluation` | means |
+| --- | --- |
+| `{ "status": "completed", "revision": "sha256:…" }` | the evaluator ran to an answer — a permit, a forbid, or no policy applying — against that revision, and vouches for it |
+| `{ "status": "failed", … }` | the evaluator was invoked and did not produce a clean answer (the call failed, or Cedar raised evaluation errors). The rule failed closed; **no policy produced this denial** |
+| `{ "status": "not_invoked" }` | the rule failed before asking its evaluator (the request could not be built). No revision key of either kind: nothing was evaluated |
+| `"revision": null`, with `"loadedRevision": "sha256:…"` | the evaluator ran, and what it evaluated cannot be established — every answer of the out-of-process `http` engine, since cedar-agent does not say what it holds. `loadedRevision` is what this verifier loaded at boot: worth recording, **not proof of what ran** |
+| absent | the rule reported nothing — a TypeScript rule has no policy source to name; the deployed version and its config are what decided. Also what an older verifier, or one that has not opted in, answers: **absence means unknown** |
+
+The reference sits on the outcome of the rule that reported it, so a decision made under two policy sources carries two revisions, never one standing for both. In a batch every entry carries its own; a batch does not pin a snapshot, and needs none while the policy set is loaded once at boot — each replica reports the snapshot *it* evaluated, which during a rolling deployment is how two answers to the same request are told apart. A deny the router made itself (`collector_timeout`, `rule_timeout`, `attribute_conflict`, `no_applicable_rule`) has no groups and so no evaluation, and a request refused before evaluation (`400`, `401`) is not a decision at all: neither is ever recorded as decided by a policy.
+
+**Where it goes.** The `decision` event always carries it, as `evaluations`. The response carries it only under `verify.evaluationInResponse = "include"` (default `"omit"`, under which the response is key-for-key what it was). The opt-in is the deployment's rather than the caller's — unlike XACML's `ReturnPolicyIdList` or OPA's `?provenance=true` — because it tells any holder of an accepted token when the policy set changed and whether a denial was a policy's or the engine failing. Pair it with [`http.callerAuth`](#configuration) where that matters.
+
+**What an application stores.** For each operation it authorizes or refuses: the `decision`, the deny `code`, the `reason` (which carries each `evaluation`), and the `x-request-id` it sent. The PDP's `decision` event carries the same `requestId` and the same `evaluations`, so the two records join on the id — and, for a batch, on the id plus the entry's `resource` and `action`. A client that *requires* a revision treats an allow whose satisfying outcomes carry no string `revision` as not established, and decides for itself what to do with it; on the PDP side, `requireConfirmedRevision = true` on the Cedar collector turns such an answer into a deny before it leaves (and refuses at boot an engine that could never satisfy it).
+
+**What a revision does not promise.** It identifies policy contents — for `packages/cedar`, the `*.cedar` files by name and text ([the algorithm](packages/cedar/README.md#policy-revision-which-policies-decided)). The attribute mapping, `onNoDeterminingPolicy`, the evaluator's version and the attributes the request was decided over shape an answer too, and none of them is in it. Replaying a decision needs those as well; the revision tells you which policies to replay against, not that the replay will agree.
 
 ### Metrics
 
