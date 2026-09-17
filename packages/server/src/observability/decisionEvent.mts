@@ -40,13 +40,24 @@ export interface DenyingGroup {
 }
 
 /**
- * What one rule reported about the evaluation behind its answer (#244), named
- * the way this line names a rule. The evaluation's own fields are spread in
- * beside the name, so the line stays flat and greppable: `status`, and then
- * `revision` — with `loadedRevision` when it is `null` — unless the evaluator
- * was never invoked, in which case there is no revision key of either kind.
+ * What one rule reported about the evaluation behind its answer (#244): the
+ * rule, named the way this line names a rule; which way it answered; and the
+ * evaluation, as core carries it.
+ *
+ * `passed` is here because a group is an OR. A Cedar rule that forbade,
+ * followed by another that permitted, is an allow whose line lists both — and
+ * without `passed` the first would read as a revision standing behind the
+ * allow when it is the one that refused. Two collectors in one group share
+ * `ruleType` and `code`, so it is also what tells their entries apart.
+ *
+ * `evaluation` is nested, the way the response nests it on an outcome, and not
+ * spread beside the name: a key added to it later (#199's determining policy
+ * ids) cannot then collide with `ruleType`, `code` or `passed`.
  */
-export type ReportedEvaluation = NamedRule & RuleEvaluation;
+export interface ReportedEvaluation extends NamedRule {
+	passed: boolean;
+	evaluation: RuleEvaluation;
+}
 
 /**
  * Every evaluation the decision's rules reported, in evaluation order.
@@ -57,15 +68,24 @@ export type ReportedEvaluation = NamedRule & RuleEvaluation;
  * that refused. A rule that reported nothing is not listed — it has no policy
  * source to name, and an entry for it would have to invent one.
  *
- * Exactly what the response carries under `verify.evaluationInResponse =
- * "include"`, from the same `Decision`: the two are projections of one value,
- * which is what makes the audit record and the caller's copy agree.
+ * Each entry is the outcome the response carries under
+ * `verify.evaluationInResponse = "include"` — `code`, `passed`, `evaluation` —
+ * with the group's `ruleType` in place of the rule's `message`, read off the
+ * same `Decision`: two projections of one value, which is what makes the audit
+ * record and the caller's copy agree.
  */
 function reportedEvaluations(decision: Decision): ReportedEvaluation[] {
 	return decision.reason.groups.flatMap((group) =>
 		group.evaluated.flatMap((outcome) =>
 			outcome.evaluation !== undefined
-				? [{ ruleType: group.ruleType, code: outcome.code, ...outcome.evaluation }]
+				? [
+						{
+							ruleType: group.ruleType,
+							code: outcome.code,
+							passed: outcome.passed,
+							evaluation: outcome.evaluation,
+						},
+					]
 				: [],
 		),
 	);
@@ -132,7 +152,8 @@ function satisfyingRule(group: RuleGroupOutcome): NamedRule | undefined {
  * That is the set an operator needs to answer "why was this denied" and to
  * join the answer to the caller's own trace. And, when any rule reported one,
  * `evaluations` (#244): which policy revision each policy-backed rule
- * evaluated, and whether it evaluated at all — see {@link reportedEvaluations}.
+ * evaluated, whether it evaluated at all, and which way it answered — see
+ * {@link reportedEvaluations}.
  * A revision is a bounded `scheme:encoded` reference by the time it is on a
  * `Decision` (core checks it), never a path and never policy text.
  *

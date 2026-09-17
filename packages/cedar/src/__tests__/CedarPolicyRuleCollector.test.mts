@@ -15,9 +15,9 @@ import type {
 	CollectorContext,
 	Logger,
 	Rule,
-	RuleVerdict,
+	RuleEvaluation,
 } from "@o3co/auth.policy-verifier.core";
-import { evaluate, isAsyncRule, ruleAnswerPassed } from "@o3co/auth.policy-verifier.core";
+import { evaluate, isAsyncRule } from "@o3co/auth.policy-verifier.core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	CedarPolicyRuleCollector,
@@ -62,18 +62,23 @@ function attrsWith(entries: ReadonlyArray<[string, unknown]> = []): Attributes {
 	return new Map<string, unknown>([...REQUEST_FACTS, ...entries]);
 }
 
-function fakeLogger(): { logger: Logger; error: ReturnType<typeof vi.fn> } {
+function fakeLogger(): {
+	logger: Logger;
+	error: ReturnType<typeof vi.fn>;
+	warn: ReturnType<typeof vi.fn>;
+} {
 	const error = vi.fn();
+	const warn = vi.fn();
 	const logger = {
 		trace: vi.fn(),
 		debug: vi.fn(),
 		info: vi.fn(),
-		warn: vi.fn(),
+		warn,
 		error,
 		fatal: vi.fn(),
 		child: (): Logger => logger,
 	} as Logger;
-	return { logger, error };
+	return { logger, error, warn };
 }
 
 const PERMIT_ALL = "permit(principal, action, resource);";
@@ -305,37 +310,37 @@ describe("CedarPolicyRuleCollector — rule metadata", () => {
 describe("CedarPolicyRuleCollector — answer interpretation", () => {
 	it("passes on allow", async () => {
 		const rule = await collectSync({ policies: PERMIT_ALL });
-		expect(ruleAnswerPassed(rule.verify(attrsWith()))).toBe(true);
+		expect(rule.verify(attrsWith())).toBe(true);
 	});
 
 	it("fails on a determining forbid", async () => {
 		sync.answer = () => FORBIDDEN;
 		const rule = await collectSync({ policies: PERMIT_ALL });
-		expect(ruleAnswerPassed(rule.verify(attrsWith()))).toBe(false);
+		expect(rule.verify(attrsWith())).toBe(false);
 	});
 
 	it("denies by default when no policy determines the request", async () => {
 		sync.answer = () => UNDETERMINED;
 		const rule = await collectSync({ policies: PERMIT_ALL });
-		expect(ruleAnswerPassed(rule.verify(attrsWith()))).toBe(false);
+		expect(rule.verify(attrsWith())).toBe(false);
 	});
 
 	it("abstains when the deployment asks for it — the migration posture", async () => {
 		sync.answer = () => UNDETERMINED;
 		const rule = await collectSync({ policies: PERMIT_ALL, onNoDeterminingPolicy: "abstain" });
-		expect(ruleAnswerPassed(rule.verify(attrsWith()))).toBe(true);
+		expect(rule.verify(attrsWith())).toBe(true);
 	});
 
 	it("denies when the deployment spells the default out", async () => {
 		sync.answer = () => UNDETERMINED;
 		const rule = await collectSync({ policies: PERMIT_ALL, onNoDeterminingPolicy: "deny" });
-		expect(ruleAnswerPassed(rule.verify(attrsWith()))).toBe(false);
+		expect(rule.verify(attrsWith())).toBe(false);
 	});
 
 	it("leaves a determining permit alone under either setting", async () => {
 		for (const onNoDeterminingPolicy of ["abstain", "deny"] as const) {
 			const rule = await collectSync({ policies: PERMIT_ALL, onNoDeterminingPolicy });
-			expect(ruleAnswerPassed(rule.verify(attrsWith()))).toBe(true);
+			expect(rule.verify(attrsWith())).toBe(true);
 		}
 	});
 
@@ -350,7 +355,7 @@ describe("CedarPolicyRuleCollector — answer interpretation", () => {
 			{ policies: PERMIT_ALL, onNoDeterminingPolicy: "abstain" },
 			logger,
 		);
-		expect(ruleAnswerPassed(rule.verify(attrsWith()))).toBe(false);
+		expect(rule.verify(attrsWith())).toBe(false);
 		expect(error).toHaveBeenCalledOnce();
 		expect(JSON.stringify(error.mock.calls[0])).toMatch(/does not have the attribute/);
 		expect(JSON.stringify(error.mock.calls[0])).toMatch(/"engine":"wasm"/);
@@ -361,7 +366,7 @@ describe("CedarPolicyRuleCollector — answer interpretation", () => {
 		const { logger, error } = fakeLogger();
 		sync.answer = () => ({ decision: "allow", reason: ["policy0"], errors: ["policy1: boom"] });
 		const rule = await collectSync({ policies: PERMIT_ALL }, logger);
-		expect(ruleAnswerPassed(rule.verify(attrsWith()))).toBe(false);
+		expect(rule.verify(attrsWith())).toBe(false);
 		expect(error).toHaveBeenCalledOnce();
 	});
 
@@ -374,7 +379,7 @@ describe("CedarPolicyRuleCollector — answer interpretation", () => {
 			{ policies: PERMIT_ALL, onNoDeterminingPolicy: "abstain" },
 			logger,
 		);
-		expect(ruleAnswerPassed(rule.verify(attrsWith()))).toBe(false);
+		expect(rule.verify(attrsWith())).toBe(false);
 		expect(error).toHaveBeenCalledOnce();
 		expect(JSON.stringify(error.mock.calls[0])).toMatch(/authorization call failed/);
 		expect(JSON.stringify(error.mock.calls[0])).toMatch(/wasm instance gone/);
@@ -384,7 +389,7 @@ describe("CedarPolicyRuleCollector — answer interpretation", () => {
 		const { logger, error } = fakeLogger();
 		sync.answer = () => ({ decision: "deny", reason: [], errors: ["policy0: boom"] });
 		const rule = await collectSync({ policies: PERMIT_ALL, logEvaluationErrors: false }, logger);
-		expect(ruleAnswerPassed(rule.verify(attrsWith()))).toBe(false);
+		expect(rule.verify(attrsWith())).toBe(false);
 		expect(error).not.toHaveBeenCalled();
 	});
 
@@ -393,7 +398,7 @@ describe("CedarPolicyRuleCollector — answer interpretation", () => {
 		const rule = await collectSync({ policies: PERMIT_ALL }, logger);
 		const attrs = attrsWith();
 		attrs.delete("userId");
-		expect(ruleAnswerPassed(rule.verify(attrs))).toBe(false);
+		expect(rule.verify(attrs)).toBe(false);
 		expect(sync.requests).toHaveLength(0);
 		expect(error).toHaveBeenCalledOnce();
 		expect(JSON.stringify(error.mock.calls[0])).toMatch(/principal id/);
@@ -405,7 +410,7 @@ describe("CedarPolicyRuleCollector — answer interpretation", () => {
 			{ policies: PERMIT_ALL, principal: { parents: { Group: "groups" } } },
 			logger,
 		);
-		expect(ruleAnswerPassed(rule.verify(attrsWith([["groups", [1, 2]]])))).toBe(false);
+		expect(rule.verify(attrsWith([["groups", [1, 2]]]))).toBe(false);
 		expect(sync.requests).toHaveLength(0);
 		expect(error).toHaveBeenCalledOnce();
 		expect(JSON.stringify(error.mock.calls[0])).toMatch(/groups/);
@@ -415,11 +420,11 @@ describe("CedarPolicyRuleCollector — answer interpretation", () => {
 describe("CedarPolicyRuleCollector — an asynchronous engine yields an AsyncRule", () => {
 	it("interprets the answer by the same table, through decide", async () => {
 		const rule = await collectAsync({ policies: PERMIT_ALL });
-		expect(ruleAnswerPassed(await rule.decide(attrsWith(), NEVER_ABORTS))).toBe(true);
+		expect(await rule.decide(attrsWith(), NEVER_ABORTS)).toBe(true);
 		async.answer = () => FORBIDDEN;
-		expect(ruleAnswerPassed(await rule.decide(attrsWith(), NEVER_ABORTS))).toBe(false);
+		expect(await rule.decide(attrsWith(), NEVER_ABORTS)).toBe(false);
 		async.answer = () => UNDETERMINED;
-		expect(ruleAnswerPassed(await rule.decide(attrsWith(), NEVER_ABORTS))).toBe(false);
+		expect(await rule.decide(attrsWith(), NEVER_ABORTS)).toBe(false);
 	});
 
 	it("hands the engine the signal it was given", async () => {
@@ -440,7 +445,7 @@ describe("CedarPolicyRuleCollector — an asynchronous engine yields an AsyncRul
 			throw new CedarEngineError("engine unreachable");
 		};
 		const rule = await collectAsync({ policies: PERMIT_ALL }, logger);
-		expect(ruleAnswerPassed(await rule.decide(attrsWith(), NEVER_ABORTS))).toBe(false);
+		expect(await rule.decide(attrsWith(), NEVER_ABORTS)).toBe(false);
 		expect(error).toHaveBeenCalledOnce();
 		expect(JSON.stringify(error.mock.calls[0])).toMatch(/engine unreachable/);
 		expect(JSON.stringify(error.mock.calls[0])).toMatch(/"engine":"fake-async"/);
@@ -468,7 +473,7 @@ describe("CedarPolicyRuleCollector — an asynchronous engine yields an AsyncRul
 
 	it("denies on attributes that cannot supply the request, without asking the engine", async () => {
 		const rule = await collectAsync({ policies: PERMIT_ALL, logEvaluationErrors: false });
-		expect(ruleAnswerPassed(await rule.decide(new Map(), NEVER_ABORTS))).toBe(false);
+		expect(await rule.decide(new Map(), NEVER_ABORTS)).toBe(false);
 		expect(async.requests).toHaveLength(0);
 	});
 });
@@ -507,7 +512,9 @@ describe("CedarPolicyRuleCollector — layered PDP through core evaluate", () =>
  * #244: what the rule reports about the evaluation behind each answer.
  *
  * Every `false` below is the same `cedar_deny` to the evaluator, and has to
- * be — the rule fails closed. What differs is whether a policy produced it.
+ * be — the rule fails closed. What differs is whether a policy produced it,
+ * and the rule says so through the reporter core hands it for that one call.
+ * It still ANSWERS a boolean: see "asked without a reporter".
  * The answer table, again, with the column the audit record needs:
  *
  * | the rule answered because | evaluation.status | revision |
@@ -522,15 +529,29 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 	const OTHER_POLICIES = "forbid(principal, action, resource);";
 	const OTHER_REVISION = computePolicyRevision([{ name: "policies", text: OTHER_POLICIES }]);
 
-	const verdict = (answer: unknown): RuleVerdict => {
-		expect(typeof answer).toBe("object");
-		return answer as RuleVerdict;
+	/** What a rule answered and what it reported — asked the way core asks, with a reporter. */
+	type Asked = { passed: boolean; evaluation?: RuleEvaluation };
+	const asked = (passed: boolean, evaluation: RuleEvaluation | undefined): Asked =>
+		evaluation === undefined ? { passed } : { passed, evaluation };
+	const ask = (rule: Rule, attrs: Attributes): Asked => {
+		let evaluation: RuleEvaluation | undefined;
+		const passed = rule.verify(attrs, (reported) => {
+			evaluation = reported;
+		});
+		return asked(passed, evaluation);
+	};
+	const askAsync = async (rule: AsyncRule, attrs: Attributes): Promise<Asked> => {
+		let evaluation: RuleEvaluation | undefined;
+		const passed = await rule.decide(attrs, NEVER_ABORTS, (reported) => {
+			evaluation = reported;
+		});
+		return asked(passed, evaluation);
 	};
 
 	describe("an engine that vouches for what it evaluated (in-process)", () => {
 		it("reports a completed evaluation of the loaded revision on a permit", async () => {
 			const rule = await collectSync({ policies: PERMIT_ALL });
-			expect(verdict(rule.verify(attrsWith()))).toEqual({
+			expect(ask(rule, attrsWith())).toEqual({
 				passed: true,
 				evaluation: { status: "completed", revision: REVISION },
 			});
@@ -539,7 +560,7 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 		it("reports the same on a forbid — a policy-deny is a completed evaluation", async () => {
 			sync.answer = () => FORBIDDEN;
 			const rule = await collectSync({ policies: PERMIT_ALL });
-			expect(verdict(rule.verify(attrsWith()))).toEqual({
+			expect(ask(rule, attrsWith())).toEqual({
 				passed: false,
 				evaluation: { status: "completed", revision: REVISION },
 			});
@@ -555,7 +576,7 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 				// not a failure to get one.
 				sync.answer = () => UNDETERMINED;
 				const rule = await collectSync({ policies: PERMIT_ALL, onNoDeterminingPolicy });
-				expect(verdict(rule.verify(attrsWith()))).toEqual({
+				expect(ask(rule, attrsWith())).toEqual({
 					passed,
 					evaluation: { status: "completed", revision: REVISION },
 				});
@@ -566,7 +587,7 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 			const rule = await collectSync({ policies: PERMIT_ALL }, fakeLogger().logger);
 			const attrs = attrsWith();
 			attrs.delete("userId");
-			const answer = verdict(rule.verify(attrs));
+			const answer = ask(rule, attrs);
 			expect(sync.requests).toHaveLength(0);
 			expect(answer).toEqual({ passed: false, evaluation: { status: "not_invoked" } });
 			expect(JSON.stringify(answer)).not.toContain("sha256:");
@@ -577,7 +598,7 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 				throw new CedarEngineError("wasm instance gone");
 			};
 			const rule = await collectSync({ policies: PERMIT_ALL }, fakeLogger().logger);
-			expect(verdict(rule.verify(attrsWith()))).toEqual({
+			expect(ask(rule, attrsWith())).toEqual({
 				passed: false,
 				evaluation: { status: "failed", revision: null, loadedRevision: REVISION },
 			});
@@ -587,36 +608,78 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 			const rule = await collectSync({ policies: PERMIT_ALL }, fakeLogger().logger);
 			for (const decision of ["deny", "allow"] as const) {
 				sync.answer = () => ({ decision, reason: ["policy0"], errors: ["policy1: boom"] });
-				expect(verdict(rule.verify(attrsWith()))).toEqual({
+				expect(ask(rule, attrsWith())).toEqual({
 					passed: false,
 					evaluation: { status: "failed", revision: REVISION },
 				});
 			}
 		});
 
-		it("answers equal attributes with an equal verdict — the evaluation is part of the answer", async () => {
+		it("answers equal attributes with an equal report — the evaluation is part of the answer", async () => {
 			const rule = await collectSync({ policies: PERMIT_ALL });
-			expect(rule.verify(attrsWith())).toEqual(rule.verify(attrsWith()));
+			expect(ask(rule, attrsWith())).toEqual(ask(rule, attrsWith()));
 		});
 
 		it("names the revision of what was loaded, per collector", async () => {
 			const one = await collectSync({ policies: PERMIT_ALL });
 			const other = await collectSync({ policies: OTHER_POLICIES, ruleType: "cedar-other" });
-			expect(verdict(one.verify(attrsWith())).evaluation).toEqual({
+			expect(ask(one, attrsWith()).evaluation).toEqual({
 				status: "completed",
 				revision: REVISION,
 			});
-			expect(verdict(other.verify(attrsWith())).evaluation).toEqual({
+			expect(ask(other, attrsWith()).evaluation).toEqual({
 				status: "completed",
 				revision: OTHER_REVISION,
 			});
 		});
 	});
 
+	describe("asked without a reporter — an evaluator that predates it", () => {
+		/*
+		 * The reason the evaluation is reported rather than returned. A mixed
+		 * install — this package beside a server and core one release older —
+		 * has the OLD `evaluate()` running this rule, and it reads the answer by
+		 * truthiness. An answer carrying the evaluation is an object, and an
+		 * object is truthy: every Cedar deny would have been an allow.
+		 */
+		const legacyReads = (answer: unknown): boolean => Boolean(answer);
+
+		it("answers a plain boolean on every row of the table, so a deny stays a deny", async () => {
+			const { logger } = fakeLogger();
+			const rule = await collectSync({ policies: PERMIT_ALL }, logger);
+
+			expect(rule.verify(attrsWith())).toBe(true);
+
+			sync.answer = () => FORBIDDEN;
+			expect(rule.verify(attrsWith())).toBe(false);
+			expect(legacyReads(rule.verify(attrsWith()))).toBe(false);
+
+			sync.answer = () => ({ decision: "allow", reason: ["policy0"], errors: ["policy1: boom"] });
+			expect(legacyReads(rule.verify(attrsWith()))).toBe(false);
+
+			sync.answer = () => {
+				throw new CedarEngineError("wasm instance gone");
+			};
+			expect(legacyReads(rule.verify(attrsWith()))).toBe(false);
+
+			const unbuilt = attrsWith();
+			unbuilt.delete("userId");
+			expect(legacyReads(rule.verify(unbuilt))).toBe(false);
+		});
+
+		it("does the same through decide", async () => {
+			const rule = await collectAsync({ policies: PERMIT_ALL }, fakeLogger().logger);
+			async.answer = () => FORBIDDEN;
+			const answer = await rule.decide(attrsWith(), NEVER_ABORTS);
+			expect(answer).toBe(false);
+			expect(legacyReads(answer)).toBe(false);
+		});
+	});
+
 	describe("an engine that does not say what it evaluated (remote)", () => {
 		it("reports the revision as not established, and what was loaded apart from it", async () => {
 			const rule = await collectAsync({ policies: PERMIT_ALL });
-			expect(verdict(await rule.decide(attrsWith(), NEVER_ABORTS))).toEqual({
+			expect(await askAsync(rule, attrsWith())).toEqual({
 				passed: true,
 				evaluation: { status: "completed", revision: null, loadedRevision: REVISION },
 			});
@@ -626,7 +689,7 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 			const rule = await collectAsync({ policies: PERMIT_ALL }, fakeLogger().logger);
 			const attrs = attrsWith();
 			attrs.delete("userId");
-			expect(verdict(await rule.decide(attrs, NEVER_ABORTS))).toEqual({
+			expect(await askAsync(rule, attrs)).toEqual({
 				passed: false,
 				evaluation: { status: "not_invoked" },
 			});
@@ -634,13 +697,13 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 			async.answer = () => {
 				throw new CedarEngineError("agent unreachable");
 			};
-			expect(verdict(await rule.decide(attrsWith(), NEVER_ABORTS))).toEqual({
+			expect(await askAsync(rule, attrsWith())).toEqual({
 				passed: false,
 				evaluation: { status: "failed", revision: null, loadedRevision: REVISION },
 			});
 
 			async.answer = () => ({ decision: "deny", reason: [], errors: ["policy0: boom"] });
-			expect(verdict(await rule.decide(attrsWith(), NEVER_ABORTS))).toEqual({
+			expect(await askAsync(rule, attrsWith())).toEqual({
 				passed: false,
 				evaluation: { status: "failed", revision: null, loadedRevision: REVISION },
 			});
@@ -658,7 +721,7 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 
 		it("reports the revision as evaluated when it is the one that was loaded", async () => {
 			const rule = await collectVouching({ policies: PERMIT_ALL });
-			expect(verdict(await rule.decide(attrsWith(), NEVER_ABORTS))).toEqual({
+			expect(await askAsync(rule, attrsWith())).toEqual({
 				passed: true,
 				evaluation: { status: "completed", revision: REVISION },
 			});
@@ -667,24 +730,69 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 		it.each([
 			["another policy set's", OTHER_REVISION],
 			["not a revision at all", "/etc/verifier/policies"],
+			["something that is not a string", null],
 		])(
 			"fails closed and logs when the engine names %s — and never repeats it",
 			async (_name, named) => {
 				// The engine holds a set this verifier did not load: a permit from it
 				// is a permit from somebody else's policies.
 				const { logger, error } = fakeLogger();
-				asyncVouching.answer = () => ({ ...ALLOW, revision: named });
+				asyncVouching.answer = () => ({ ...ALLOW, revision: named as string });
 				const rule = await collectVouching({ policies: PERMIT_ALL }, logger);
-				const answer = verdict(await rule.decide(attrsWith(), NEVER_ABORTS));
+				const answer = await askAsync(rule, attrsWith());
 				expect(answer).toEqual({
 					passed: false,
 					evaluation: { status: "failed", revision: null, loadedRevision: REVISION },
 				});
-				expect(JSON.stringify(answer)).not.toContain(named);
+				if (typeof named === "string") expect(JSON.stringify(answer)).not.toContain(named);
 				expect(error).toHaveBeenCalledOnce();
 				expect(JSON.stringify(error.mock.calls[0])).toMatch(/revision/);
 			},
 		);
+
+		it("logs a mismatch even with logEvaluationErrors off — it is not an evaluation error", async () => {
+			// `logEvaluationErrors = false` silences a policy reading a missing
+			// attribute. An engine answering from a policy set this verifier did
+			// not load is a fault of the deployment, and is never silent.
+			const { logger, error } = fakeLogger();
+			asyncVouching.answer = () => ({ ...ALLOW, revision: OTHER_REVISION });
+			const rule = await collectVouching(
+				{ policies: PERMIT_ALL, logEvaluationErrors: false },
+				logger,
+			);
+			expect((await askAsync(rule, attrsWith())).passed).toBe(false);
+			expect(error).toHaveBeenCalledOnce();
+		});
+	});
+
+	describe("the loaded revision is the collector's own reading, taken before the engine has the source", () => {
+		it("is not what an engine rewrote on the source during load", async () => {
+			// `PolicySource` is a plain object and `load` is handed it. An engine
+			// that rewrote `revision` there — a bug, or worse — must not thereby
+			// choose what this collector reports as loaded, or have its own
+			// answers confirmed against the rewrite.
+			const rewriting = scriptedEngine("fake-rewriting", false, { confirmsRevision: true });
+			const load = rewriting.load.bind(rewriting);
+			rewriting.load = (source, loadContext) => {
+				(source as { revision: string }).revision = OTHER_REVISION;
+				return load(source, loadContext);
+			};
+			registerCedarEngine(rewriting);
+
+			const { logger, error } = fakeLogger();
+			const collector = await CedarPolicyRuleCollector.create(
+				{ policies: PERMIT_ALL, engine: "fake-rewriting" },
+				{ logger },
+			);
+			const [rule] = await collector.collect(context);
+			// The engine now vouches for OTHER_REVISION; the collector loaded
+			// REVISION. That is a mismatch, and it fails closed.
+			expect(ask(rule as Rule, attrsWith())).toEqual({
+				passed: false,
+				evaluation: { status: "failed", revision: null, loadedRevision: REVISION },
+			});
+			expect(error).toHaveBeenCalledOnce();
+		});
 	});
 
 	describe("requireConfirmedRevision — a deployment that must be able to say which policies decided", () => {
@@ -723,17 +831,63 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 				{ policies: PERMIT_ALL, requireConfirmedRevision: true },
 				logger,
 			);
-			expect(verdict(rule.verify(attrsWith()))).toEqual({
+			expect(ask(rule, attrsWith())).toEqual({
 				passed: false,
 				evaluation: { status: "failed", revision: null, loadedRevision: REVISION },
 			});
 			expect(error).toHaveBeenCalledOnce();
 		});
 
+		it("logs that deny even with logEvaluationErrors off", async () => {
+			const { logger, error } = fakeLogger();
+			sync.answer = () => ({ ...ALLOW, revision: undefined });
+			const rule = await collectSync(
+				{ policies: PERMIT_ALL, requireConfirmedRevision: true, logEvaluationErrors: false },
+				logger,
+			);
+			expect(ask(rule, attrsWith()).passed).toBe(false);
+			expect(error).toHaveBeenCalledOnce();
+		});
+
+		it("warns, once, when it is asked without a reporter — the audit it was set for is not being written", async () => {
+			// The knob exists so that every decision's record names its policies.
+			// An evaluator that passes no reporter — a core one release older, in a
+			// mixed install — gets correct answers and records none of it, and
+			// nothing else would say so. The ANSWER does not depend on it.
+			const { logger, warn } = fakeLogger();
+			const rule = await collectSync(
+				{ policies: PERMIT_ALL, requireConfirmedRevision: true },
+				logger,
+			);
+			warn.mockClear();
+			expect(rule.verify(attrsWith())).toBe(true);
+			expect(rule.verify(attrsWith())).toBe(true);
+			expect(warn).toHaveBeenCalledOnce();
+			expect(JSON.stringify(warn.mock.calls[0])).toMatch(/requireConfirmedRevision/);
+
+			// Asked with one, it has nothing to say.
+			warn.mockClear();
+			const reporting = await collectSync(
+				{ policies: PERMIT_ALL, requireConfirmedRevision: true },
+				logger,
+			);
+			warn.mockClear();
+			expect(ask(reporting, attrsWith()).passed).toBe(true);
+			expect(warn).not.toHaveBeenCalled();
+		});
+
+		it("says nothing about a missing reporter when the deployment did not ask for revisions", async () => {
+			const { logger, warn } = fakeLogger();
+			const rule = await collectSync({ policies: PERMIT_ALL, engine: "wasm" }, logger);
+			warn.mockClear();
+			expect(rule.verify(attrsWith())).toBe(true);
+			expect(warn).not.toHaveBeenCalled();
+		});
+
 		it("lets the same unvouched answer through when the deployment did not ask", async () => {
 			sync.answer = () => ({ ...ALLOW, revision: undefined });
 			const rule = await collectSync({ policies: PERMIT_ALL });
-			expect(verdict(rule.verify(attrsWith()))).toEqual({
+			expect(ask(rule, attrsWith())).toEqual({
 				passed: true,
 				evaluation: { status: "completed", revision: null, loadedRevision: REVISION },
 			});

@@ -39,10 +39,10 @@ export type EvaluationInResponseCheck =
 
 /**
  * Reads `verify.evaluationInResponse`. Absent is the default; anything that is
- * not one of {@link EVALUATION_IN_RESPONSE_VALUES} is refused, `null` included —
- * the schema types the key as an optional enum and refuses `null` before this
- * is reached, so reading it here as "unset" would hand a hand-built config a
- * different answer from a parsed one.
+ * not one of {@link EVALUATION_IN_RESPONSE_VALUES} is refused, `null` included.
+ * Both boundaries hand their value straight to this function — the schema
+ * reads the key as `unknown` for that purpose — so `null` is refused here for
+ * both, in the same words, rather than read as "unset" by one of them.
  */
 export function checkEvaluationInResponse(
 	value: unknown,

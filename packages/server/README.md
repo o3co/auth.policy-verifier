@@ -69,6 +69,8 @@ interface VerifyRouterConfig {
   ruleTimeoutMs?: number | string;
   /** How long all of a decision's asynchronous rules may take together. Defaults to 5000 ms. */
   evaluateDeadlineMs?: number | string;
+  /** Whether the response carries each rule's `evaluation` (#244). Defaults to "omit"; refused when it is neither. */
+  evaluationInResponse?: "omit" | "include";
 }
 
 // Discriminated on `validate`: verification parameters exist only when verifying.
@@ -269,6 +271,8 @@ HTTP/1.1 403 Forbidden
 ```
 
 `reason.groups` lists every rule group in evaluation order — `passed`, plus `evaluated`: every rule that actually ran in that group, in order. A failing group ran (and lists) every alternative; a passing group stops at its first passing rule, so `evaluated` ends with it after any alternatives that were tried and failed, and `satisfiedBy` — present only on a passing group, absent on a failing one — names that deciding rule explicitly. `code` / `message` come from the first failing group, as before.
+
+**`evaluation` (#244).** A rule that fronts a policy evaluator — `CedarPolicyRuleCollector` — reports, per answer, whether its evaluator ran and which policy revision it evaluated, and each such outcome then carries `"evaluation": { "status": "completed", "revision": "sha256:…" }` beside `passed`. The `decision` log event always lists them, as `evaluations`. The response carries them only under `verify.evaluationInResponse = "include"`; the default, `"omit"`, leaves the response above key-for-key what it is, because an evaluation tells any holder of an accepted token when the policy set changed and whether a denial was the engine failing. The shapes, and what an application should store, are in the root README, [Recording which policy revision decided](../../README.md#recording-which-policy-revision-decided).
 
 **Response — malformed request**
 

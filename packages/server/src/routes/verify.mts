@@ -1147,22 +1147,18 @@ function toResponse(
 
 /**
  * The reason with every outcome's `evaluation` left out (#244) — and nothing
- * else: whatever else an outcome carries stays. `satisfiedBy` is rebuilt as the
- * last evaluated outcome, which is what it is (#135), so the two cannot differ
- * in what was omitted.
+ * else. Groups and outcomes are spread rather than rebuilt from a list of
+ * keys, so whatever else either carries, now or later, stays. `satisfiedBy` is
+ * rebuilt as the last evaluated outcome, which is what it is (#135), so the two
+ * cannot differ in what was omitted.
  */
 function withoutEvaluations(reason: DecisionReason): DecisionReason {
 	return {
 		groups: reason.groups.map((group) => {
 			const evaluated = group.evaluated.map(({ evaluation: _evaluation, ...outcome }) => outcome);
 			return group.passed
-				? {
-						ruleType: group.ruleType,
-						passed: true,
-						evaluated,
-						satisfiedBy: evaluated[evaluated.length - 1],
-					}
-				: { ruleType: group.ruleType, passed: false, evaluated };
+				? { ...group, evaluated, satisfiedBy: evaluated[evaluated.length - 1] }
+				: { ...group, evaluated };
 		}),
 	};
 }

@@ -33,9 +33,13 @@
 		"about what was EVALUATED: a string only when the evaluator vouched for it, `null` when",
 		"it ran and what it evaluated cannot be established (a remote engine that does not",
 		"say). What the verifier LOADED is then carried apart as `loadedRevision`, which is not",
-		"proof of what ran. `not_invoked` carries no revision key of either kind. A deny the",
-		"router made itself (`collector_timeout`, `rule_timeout`, `attribute_conflict`,",
-		"`no_applicable_rule`) has no groups and therefore no evaluation: no policy decided it."
+		"proof of what ran. `not_invoked` carries no revision key of either kind. A deny made",
+		"without a policy evaluation (`collector_timeout`, `rule_timeout`, `attribute_conflict`,",
+		"`no_applicable_rule`) has no groups and therefore no evaluation: no policy decided it.",
+		"The key sets under `evaluation` below are what THIS version sends, and the suite holds",
+		"a DEPLOYMENT to them exactly. A CLIENT reads the other way: it MUST IGNORE any key inside",
+		"`evaluation` that it does not know. More will be added there (the determining policy ids",
+		"of #199), and a client that rejects an unknown key breaks on the verifier's next minor."
 	],
 	"error": {
 		"keys": ["decision", "code", "message"],

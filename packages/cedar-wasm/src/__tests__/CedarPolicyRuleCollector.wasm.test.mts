@@ -31,7 +31,7 @@ import {
 	type ResourceParserFactory,
 	type Rule,
 	type RuleCollectorFactory,
-	ruleAnswerPassed,
+	type RuleEvaluation,
 } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it, vi } from "vitest";
 
@@ -115,7 +115,7 @@ describe("CedarPolicyRuleCollector on the wasm engine — selection", () => {
 		});
 		const [rule] = await collector.collect(context);
 		expect(isAsyncRule(rule)).toBe(false);
-		expect(ruleAnswerPassed((rule as Rule).verify(attrsWith()))).toBe(true);
+		expect((rule as Rule).verify(attrsWith())).toBe(true);
 	});
 });
 
@@ -127,7 +127,7 @@ describe("CedarPolicyRuleCollector on the wasm engine — answer interpretation"
 			policies: DEPT_POLICY,
 			principal: { attributes: { dept: "department" } },
 		});
-		expect(ruleAnswerPassed(rule.verify(attrsWith([["department", "eng"]])))).toBe(true);
+		expect(rule.verify(attrsWith([["department", "eng"]]))).toBe(true);
 	});
 
 	it("fails on a determining forbid, even beside a permit", async () => {
@@ -138,8 +138,8 @@ describe("CedarPolicyRuleCollector on the wasm engine — answer interpretation"
 			`,
 			context: { suspended: "suspended" },
 		});
-		expect(ruleAnswerPassed(rule.verify(attrsWith([["suspended", true]])))).toBe(false);
-		expect(ruleAnswerPassed(rule.verify(attrsWith([["suspended", false]])))).toBe(true);
+		expect(rule.verify(attrsWith([["suspended", true]]))).toBe(false);
+		expect(rule.verify(attrsWith([["suspended", false]]))).toBe(true);
 	});
 
 	it("denies by default when no policy determines the request", async () => {
@@ -147,17 +147,17 @@ describe("CedarPolicyRuleCollector on the wasm engine — answer interpretation"
 			policies: DEPT_POLICY,
 			principal: { attributes: { dept: "department" } },
 		});
-		expect(ruleAnswerPassed(rule.verify(attrsWith([["department", "sales"]])))).toBe(false);
+		expect(rule.verify(attrsWith([["department", "sales"]]))).toBe(false);
 	});
 
 	it("denies by default on an empty policy set", async () => {
 		const rule = await collectRule({ policies: "" });
-		expect(ruleAnswerPassed(rule.verify(attrsWith()))).toBe(false);
+		expect(rule.verify(attrsWith())).toBe(false);
 	});
 
 	it("abstains when the deployment asks for it — the migration posture", async () => {
 		const rule = await collectRule({ policies: "", onNoDeterminingPolicy: "abstain" });
-		expect(ruleAnswerPassed(rule.verify(attrsWith()))).toBe(true);
+		expect(rule.verify(attrsWith())).toBe(true);
 	});
 
 	it("leaves a determining permit alone under either setting", async () => {
@@ -167,7 +167,7 @@ describe("CedarPolicyRuleCollector on the wasm engine — answer interpretation"
 				principal: { attributes: { dept: "department" } },
 				onNoDeterminingPolicy,
 			});
-			expect(ruleAnswerPassed(rule.verify(attrsWith([["department", "eng"]])))).toBe(true);
+			expect(rule.verify(attrsWith([["department", "eng"]]))).toBe(true);
 		}
 	});
 
@@ -179,7 +179,7 @@ describe("CedarPolicyRuleCollector on the wasm engine — answer interpretation"
 			{ policies: DEPT_POLICY, onNoDeterminingPolicy: "abstain" },
 			logger,
 		);
-		expect(ruleAnswerPassed(rule.verify(attrsWith()))).toBe(false);
+		expect(rule.verify(attrsWith())).toBe(false);
 		expect(error).toHaveBeenCalledOnce();
 		expect(JSON.stringify(error.mock.calls[0])).toMatch(/does not have the attribute/);
 		expect(JSON.stringify(error.mock.calls[0])).toMatch(/"engine":"wasm"/);
@@ -198,7 +198,7 @@ describe("CedarPolicyRuleCollector on the wasm engine — answer interpretation"
 		);
 		// `banned` is unmapped: the forbid errors and stops forbidding, Cedar's
 		// top-level decision reads "allow" — the errors check must still deny.
-		expect(ruleAnswerPassed(rule.verify(attrsWith()))).toBe(false);
+		expect(rule.verify(attrsWith())).toBe(false);
 		expect(error).toHaveBeenCalledOnce();
 	});
 
@@ -207,7 +207,7 @@ describe("CedarPolicyRuleCollector on the wasm engine — answer interpretation"
 		const rule = await collectRule({ policies: "permit(principal, action, resource);" }, logger);
 		const attrs = attrsWith();
 		attrs.delete("userId");
-		expect(ruleAnswerPassed(rule.verify(attrs))).toBe(false);
+		expect(rule.verify(attrs)).toBe(false);
 		expect(error).toHaveBeenCalledOnce();
 		expect(JSON.stringify(error.mock.calls[0])).toMatch(/principal id/);
 	});
@@ -221,7 +221,7 @@ describe("CedarPolicyRuleCollector on the wasm engine — answer interpretation"
 			},
 			logger,
 		);
-		expect(ruleAnswerPassed(rule.verify(attrsWith([["groups", [1, 2]]])))).toBe(false);
+		expect(rule.verify(attrsWith([["groups", [1, 2]]]))).toBe(false);
 		expect(error).toHaveBeenCalledOnce();
 		expect(JSON.stringify(error.mock.calls[0])).toMatch(/groups/);
 	});
@@ -234,10 +234,10 @@ describe("CedarPolicyRuleCollector on the wasm engine — entity synthesis", () 
 			onNoDeterminingPolicy: "deny",
 			principal: { parents: { Group: "groups" } },
 		});
-		expect(ruleAnswerPassed(rule.verify(attrsWith([["groups", ["admins"]]])))).toBe(true);
-		expect(ruleAnswerPassed(rule.verify(attrsWith([["groups", ["users"]]])))).toBe(false);
+		expect(rule.verify(attrsWith([["groups", ["admins"]]]))).toBe(true);
+		expect(rule.verify(attrsWith([["groups", ["users"]]]))).toBe(false);
 		// Absent memberships are a legitimate state, not an error.
-		expect(ruleAnswerPassed(rule.verify(attrsWith()))).toBe(false);
+		expect(rule.verify(attrsWith())).toBe(false);
 	});
 
 	it("supports entity-reference attributes (resource.owner == principal)", async () => {
@@ -246,8 +246,8 @@ describe("CedarPolicyRuleCollector on the wasm engine — entity synthesis", () 
 			onNoDeterminingPolicy: "deny",
 			resource: { attributes: { owner: { attribute: "resourceOwner", entityType: "User" } } },
 		});
-		expect(ruleAnswerPassed(rule.verify(attrsWith([["resourceOwner", "alice"]])))).toBe(true);
-		expect(ruleAnswerPassed(rule.verify(attrsWith([["resourceOwner", "bob"]])))).toBe(false);
+		expect(rule.verify(attrsWith([["resourceOwner", "alice"]]))).toBe(true);
+		expect(rule.verify(attrsWith([["resourceOwner", "bob"]]))).toBe(false);
 	});
 
 	it("supports context mapping", async () => {
@@ -255,7 +255,7 @@ describe("CedarPolicyRuleCollector on the wasm engine — entity synthesis", () 
 			policies: "permit(principal, action, resource) when { context.mfa == true };",
 			context: { mfa: "mfaVerified" },
 		});
-		expect(ruleAnswerPassed(rule.verify(attrsWith([["mfaVerified", true]])))).toBe(true);
+		expect(rule.verify(attrsWith([["mfaVerified", true]]))).toBe(true);
 	});
 });
 
@@ -293,22 +293,31 @@ describe("CedarPolicyRuleCollector on the wasm engine — the evaluation behind 
 	const NEEDS_DEPT = `permit(principal, action, resource) when { principal.dept == "eng" };`;
 	const revisionOf = (text: string) => computePolicyRevision([{ name: "policies", text }]);
 
+	/** Asks a rule the way core does: the boolean back, the evaluation to a reporter. */
+	const ask = (rule: Rule, attrs: Attributes) => {
+		let evaluation: RuleEvaluation | undefined;
+		const passed = rule.verify(attrs, (reported) => {
+			evaluation = reported;
+		});
+		return { passed, evaluation };
+	};
+
 	it("names the loaded revision on a permit, a forbid and an implicit deny — all completed", async () => {
 		const permit = await collectRule({ policies: PERMIT_READ });
-		expect(permit.verify(attrsWith())).toEqual({
+		expect(ask(permit, attrsWith())).toEqual({
 			passed: true,
 			evaluation: { status: "completed", revision: revisionOf(PERMIT_READ) },
 		});
 
 		const forbid = await collectRule({ policies: FORBID_ALL });
-		expect(forbid.verify(attrsWith())).toEqual({
+		expect(ask(forbid, attrsWith())).toEqual({
 			passed: false,
 			evaluation: { status: "completed", revision: revisionOf(FORBID_ALL) },
 		});
 
 		// Nothing matched: Cedar's implicit deny is Cedar's answer.
 		const unmatched = await collectRule({ policies: PERMIT_READ });
-		expect(unmatched.verify(attrsWith([["requestAction", "delete"]]))).toEqual({
+		expect(ask(unmatched, attrsWith([["requestAction", "delete"]]))).toEqual({
 			passed: false,
 			evaluation: { status: "completed", revision: revisionOf(PERMIT_READ) },
 		});
@@ -318,7 +327,7 @@ describe("CedarPolicyRuleCollector on the wasm engine — the evaluation behind 
 		const rule = await collectRule({ policies: PERMIT_READ }, fakeLogger().logger);
 		const attrs = attrsWith();
 		attrs.delete("userId");
-		const answer = rule.verify(attrs);
+		const answer = ask(rule, attrs);
 		expect(answer).toEqual({ passed: false, evaluation: { status: "not_invoked" } });
 		expect(JSON.stringify(answer)).not.toContain("sha256:");
 	});
@@ -326,7 +335,7 @@ describe("CedarPolicyRuleCollector on the wasm engine — the evaluation behind 
 	it("reports a failed evaluation on Cedar's diagnostic errors — the policies ran, and did not decide", async () => {
 		const { logger, error } = fakeLogger();
 		const rule = await collectRule({ policies: NEEDS_DEPT }, logger);
-		expect(rule.verify(attrsWith())).toEqual({
+		expect(ask(rule, attrsWith())).toEqual({
 			passed: false,
 			evaluation: { status: "failed", revision: revisionOf(NEEDS_DEPT) },
 		});
@@ -338,7 +347,7 @@ describe("CedarPolicyRuleCollector on the wasm engine — the evaluation behind 
 		// engine throws, and no answer means nothing vouched for what ran.
 		const { logger, error } = fakeLogger();
 		const rule = await collectRule({ policies: PERMIT_READ }, logger);
-		const answer = rule.verify(attrsWith([["requestResourceType", "not a type"]]));
+		const answer = ask(rule, attrsWith([["requestResourceType", "not a type"]]));
 		expect(answer).toEqual({
 			passed: false,
 			evaluation: {
@@ -364,11 +373,9 @@ describe("CedarPolicyRuleCollector on the wasm engine — the evaluation behind 
 		const same = await collectRule({ policyDir: dirWith(PERMIT_READ) });
 
 		const revision = (rule: Rule) => {
-			const answer = rule.verify(attrsWith());
-			if (typeof answer !== "object" || answer.evaluation?.status !== "completed") {
-				throw new Error("expected a completed evaluation");
-			}
-			return answer.evaluation.revision;
+			const { evaluation } = ask(rule, attrsWith());
+			if (evaluation?.status !== "completed") throw new Error("expected a completed evaluation");
+			return evaluation.revision;
 		};
 		expect(revision(after)).not.toBe(revision(before));
 		// …and an unchanged set, mounted somewhere else, keeps it.
@@ -377,7 +384,16 @@ describe("CedarPolicyRuleCollector on the wasm engine — the evaluation behind 
 
 	it("boots under requireConfirmedRevision, which this engine can honour", async () => {
 		const rule = await collectRule({ policies: PERMIT_READ, requireConfirmedRevision: true });
-		expect(ruleAnswerPassed(rule.verify(attrsWith()))).toBe(true);
+		expect(rule.verify(attrsWith())).toBe(true);
+	});
+
+	it("answers a plain boolean to an evaluator that passes no reporter — a deny stays a deny", async () => {
+		// The mixed-install case, against real Cedar: an older `evaluate()` calls
+		// `verify(attrs)` and reads the answer by truthiness.
+		const forbid = await collectRule({ policies: FORBID_ALL });
+		const answer = forbid.verify(attrsWith());
+		expect(answer).toBe(false);
+		expect(answer ? "allow" : "deny").toBe("deny");
 	});
 
 	it("carries it onto the decision's outcome through core evaluate", async () => {

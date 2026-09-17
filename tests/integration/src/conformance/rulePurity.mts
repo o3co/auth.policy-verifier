@@ -7,10 +7,11 @@ import {
 	type Attributes,
 	type CollectorContext,
 	type CollectorRequest,
+	evaluate,
 	isAsyncRule,
+	MAX_TIMER_MS,
 	type ReadonlyAttributes,
-	type RuleAnswer,
-	ruleAnswerPassed,
+	type RuleEvaluation,
 } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 
@@ -188,35 +189,60 @@ function isRevokedProxyError(error: unknown): boolean {
 }
 
 /**
- * Asks one rule, whichever kind it is (#225). An asynchronous rule is asked
- * through `decide` with a signal that never aborts — this suite checks what a
- * rule answers, not what it does when cancelled — and is held to the same
- * property as `verify`: the answer must come from `attrs` alone.
+ * Asks one rule, whichever kind it is (#225) — **through `evaluate()`**, as the
+ * only rule of a decision, and reads its one outcome.
  *
- * The answer is kept whole (#244). A rule may answer a `RuleVerdict`, and the
- * `evaluation` on it is as much part of the answer as `passed` is: a rule that
- * reported whichever policy revision it saw last would pass a pass/fail
- * comparison while reading state the engine cannot see.
+ * Not by calling `verify` / `decide` here. What a rule answers includes what it
+ * reports about the evaluation behind the answer (#244): a rule that reported
+ * whichever policy revision it saw last would pass a pass/fail comparison while
+ * reading state the engine cannot see. And what a report *says* is whatever the
+ * evaluator reads out of it. A reading of this suite's own is a second opinion,
+ * and the two it has had were both wrong in the rule's favour: holding the
+ * reported object let a rule that rewrites one object and reports it again
+ * compare equal to itself, and `structuredClone` copies own data properties
+ * without ever running an accessor, so a class-backed report snapshotted as
+ * `{}` — hiding a getter that moves, or one that reads the collector's context
+ * and would have thrown once it was revoked. Through `evaluate()` there is one
+ * reading: core's, taken when the report is made, copied and frozen.
+ *
+ * It follows that a rule core refuses fails here too — an answer that is not a
+ * boolean, a report that does not read, a pass reporting its evaluator
+ * `failed` — and whatever the rule throws comes back unchanged, which is how
+ * a read of the revoked context is recognised below.
+ *
+ * The rule budgets are lifted as far as a timer goes: this suite checks what a
+ * rule answers, not how quickly, and an asynchronous rule is held to the same
+ * property as `verify` — the answer must come from `attrs` alone.
  */
-async function ask(rule: AnyRule, attrs: ReadonlyAttributes): Promise<RuleAnswer> {
-	return isAsyncRule(rule) ? rule.decide(attrs, new AbortController().signal) : rule.verify(attrs);
+async function ask(rule: AnyRule, attrs: ReadonlyAttributes): Promise<Answer> {
+	const decision = await evaluate(attrs as Attributes, [rule], {
+		ruleTimeoutMs: MAX_TIMER_MS,
+		evaluateDeadlineMs: MAX_TIMER_MS,
+	});
+	const [outcome] = decision.reason.groups[0].evaluated;
+	return outcome.evaluation === undefined
+		? { passed: outcome.passed }
+		: { passed: outcome.passed, evaluation: outcome.evaluation };
+}
+
+/** What one rule answered for one map: the boolean, and the evaluation it reported, if any. */
+interface Answer {
+	passed: boolean;
+	evaluation?: RuleEvaluation;
 }
 
 /** {@link ask} for a whole list, in order. */
-async function askAll(rules: AnyRule[], attrs: ReadonlyAttributes): Promise<RuleAnswer[]> {
-	const answers: RuleAnswer[] = [];
+async function askAll(rules: AnyRule[], attrs: ReadonlyAttributes): Promise<Answer[]> {
+	const answers: Answer[] = [];
 	for (const rule of rules) answers.push(await ask(rule, attrs));
 	return answers;
 }
 
-/**
- * Whether two answers say the same thing. By value: a verdict is a fresh
- * object on every call, and it is what it says that has to hold still.
- */
-const sameAnswer = (one: RuleAnswer, other: RuleAnswer): boolean => isDeepStrictEqual(one, other);
+/** Whether two answers say the same thing, by value. */
+const sameAnswer = (one: Answer, other: Answer): boolean => isDeepStrictEqual(one, other);
 
 /** An answer as an assertion message prints it. */
-const printed = (answer: RuleAnswer): string => JSON.stringify(answer);
+const printed = (answer: Answer): string => JSON.stringify(answer);
 
 /** Names a rule in an assertion message the way a reader would look for it. */
 function describeRule(rule: AnyRule, index: number): string {
@@ -276,7 +302,7 @@ export async function assertRuleIndependentOfContext(
 
 	revoke();
 
-	const withoutContext: RuleAnswer[] = [];
+	const withoutContext: Answer[] = [];
 	for (const [index, rule] of rules.entries()) {
 		try {
 			withoutContext.push(await ask(rule, attrs));
@@ -303,7 +329,7 @@ export async function assertRuleIndependentOfContext(
 	}
 
 	// Pass / fail is what a caller asserts on; the whole answer is what was compared.
-	return withoutContext.map(ruleAnswerPassed);
+	return withoutContext.map((answer) => answer.passed);
 }
 
 /**

@@ -533,7 +533,7 @@ oauth.jwt {
 
 allow のときは `deniedBy` の代わりに `satisfiedBy` が入り、各グループを満たしたルールを示します。N 件の `POST /verify/batch` は同一 `requestId` を持つ N 行を出力します。`durationMs` はパイプラインと evaluator に費やした時間であり、HTTP の往復時間ではありません。
 
-Rule が answer の背後にある evaluation を報告する場合（#244。`packages/cedar` は報告します）、この行には `evaluations` も入ります。報告した Rule ごとに 1 件、評価順です: `{"ruleType":"cedar","code":"cedar_deny","status":"completed","revision":"sha256:9f2c…"}`。[どの policy revision が決めたかを記録する](#どの-policy-revision-が決めたかを記録する) を参照してください。policy を背後に持つ Rule が無いデプロイでは、行はこれまでと同じです。
+Rule が answer の背後にある evaluation を報告する場合（#244。`packages/cedar` は報告します）、この行には `evaluations` も入ります。報告した Rule ごとに 1 件、評価順です: `{"ruleType":"cedar","code":"cedar_deny","passed":false,"evaluation":{"status":"completed","revision":"sha256:9f2c…"}}`。`passed` があるのは group が OR だからです。forbid した Rule の後に permit した Rule が続くと allow になり、行には両方が並びますが、前者は *拒否した* revision です。[どの policy revision が決めたかを記録する](#どの-policy-revision-が決めたかを記録する) を参照してください。policy を背後に持つ Rule が無いデプロイでは、行はこれまでと同じです。
 
 スイッチは `logging.level`（`LOG_LEVEL`）です — この行は `info` なので `warn` にすればストリームごと止まり、2 つ目のフラグはありません。deny は decision point にとって障害ではなく正常な結果なので `warn` には送っていません。送れば任意の呼び出し元が warn レベルのノイズを製造できてしまいます。アラートはメトリクスに、「なぜ」はログに求めてください。
 
@@ -572,12 +572,12 @@ policy の更新後や rolling deployment の最中は、決定の結果と rule
 | `evaluation` | 意味 |
 | --- | --- |
 | `{ "status": "completed", "revision": "sha256:…" }` | evaluator がその revision に対して答え（permit、forbid、または該当 policy なし）に到達し、それを保証している |
-| `{ "status": "failed", … }` | evaluator を呼んだが、きれいな答えが得られなかった（呼び出しの失敗、または Cedar の evaluation error）。Rule は fail-closed で失敗した。**この deny を生んだ policy は無い** |
+| `{ "status": "failed", … }` | evaluator を呼んだが、きれいな答えが得られなかった: 呼び出しの失敗、Cedar の evaluation error、engine が load したものと別の policy set から答えた、または `requireConfirmedRevision` の下で engine が revision を名指さなかった。Rule は fail-closed で失敗した。**この deny を生んだ policy は無い** |
 | `{ "status": "not_invoked" }` | evaluator に問う前に Rule が失敗した（request を組み立てられなかった）。revision 系のキーはどちらも無い。何も評価されていない |
 | `"revision": null` と `"loadedRevision": "sha256:…"` | evaluator は走ったが、何を評価したかを確定できない。out-of-process の `http` engine の answer はすべてこれ（cedar-agent は自分が何を保持しているかを言わない）。`loadedRevision` はこの verifier が boot 時に load したもの。記録する価値はあるが、**何が走ったかの証明ではない** |
 | 無い | Rule は何も報告していない。TypeScript の Rule には名指すべき policy source が無く、決めたのはデプロイされた版とその config。古い verifier や opt-in していない verifier の答えもこれ。**無い = 不明** |
 
-参照は報告した Rule の outcome に載るので、2 つの policy source の下で下された決定は 2 つの revision を持ち、1 つが両方を代表することはありません。batch では entry ごとに自分のものを持ちます。batch は snapshot を固定しませんし、policy set が boot 時に 1 回だけ load される間は固定する必要もありません。各 replica は *自分が* 評価した snapshot を報告するので、rolling deployment 中に同じ request への 2 つの答えを見分けられます。router 自身が作った deny（`collector_timeout`、`rule_timeout`、`attribute_conflict`、`no_applicable_rule`）は group を持たないので evaluation も無く、評価前に拒否された request（`400`、`401`）はそもそも決定ではありません。どちらも「policy が決めた」と記録されることはありません。
+参照は報告した Rule の outcome に載るので、2 つの policy source の下で下された決定は 2 つの revision を持ち、1 つが両方を代表することはありません。batch では entry ごとに自分のものを持ちます。batch は snapshot を固定しませんし、policy set が boot 時に 1 回だけ load される間は固定する必要もありません。各 replica は *自分が* 評価した snapshot を報告するので、rolling deployment 中に同じ request への 2 つの答えを見分けられます。policy の評価なしに作られた deny — router の `collector_timeout`、`rule_timeout`、`attribute_conflict` と、evaluator の `no_applicable_rule` — は group を持たないので evaluation も無く、評価前に拒否された request（`400`、`401`）はそもそも決定ではありません。どちらも「policy が決めた」と記録されることはありません。
 
 **どこに出るか。** `decision` イベントには常に `evaluations` として載ります。response に載るのは `verify.evaluationInResponse = "include"` のときだけです（既定は `"omit"` で、その場合 response はキー単位でこれまでと同一）。XACML の `ReturnPolicyIdList` や OPA の `?provenance=true` と違って opt-in が呼び出し側ではなくデプロイ側にあるのは、これが「policy set がいつ変わったか」「deny が policy によるものか engine の失敗か」を、受理される token の保持者全員に伝えるからです。それが問題になる環境では [`http.callerAuth`](#設定) と併用してください。
 

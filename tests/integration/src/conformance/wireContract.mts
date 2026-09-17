@@ -695,7 +695,13 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 				async () => {
 					const res = await post("/verify", reporting?.confirmed);
 					const evaluations = evaluationsOf(expectDecisionEnvelope(res.body));
-					const vouched = evaluations.filter((evaluation) => evaluation.revision !== null);
+					// A string, and not merely "not null": a `not_invoked` evaluation has
+					// no `revision` key at all, and `undefined !== null`. A response may
+					// well carry one beside the confirmed one — an OR alternative that
+					// never reached its evaluator, then the one that did.
+					const vouched = evaluations.filter(
+						(evaluation) => typeof evaluation.revision === "string",
+					);
 					expect(vouched.length).toBeGreaterThan(0);
 					for (const evaluation of vouched) {
 						expect(evaluationEnvelope.evaluated.statuses).toContain(evaluation.status);

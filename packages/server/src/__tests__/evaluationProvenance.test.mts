@@ -6,7 +6,8 @@
  * line always, on the wire when the deployment says so.
  *
  * The router adds nothing of its own here. A rule reports the evaluation
- * behind its answer, `evaluate()` lands it on that invocation's outcome, and
+ * behind its answer — to the reporter core hands it for that one call; it still
+ * answers a boolean — `evaluate()` lands it on that invocation's outcome, and
  * the two projections of one `Decision` — the `decision` event and the
  * response — either carry it or drop it. So what these tests hold the router
  * to is that both projections say the same thing, that the response says it
@@ -20,7 +21,6 @@ import {
 	AttributePipeline,
 	type Decision,
 	type EventLogger,
-	type RuleAnswer,
 	type RuleCollector,
 	type RuleEvaluation,
 	RulePipeline,
@@ -58,16 +58,28 @@ function capture(): { events: Captured[]; logger: EventLogger } {
 const decisionLines = (events: Captured[]) =>
 	events.filter((event) => event.msg === "decision").map((event) => event.obj);
 
-/** A policy-backed rule: answers a verdict carrying the evaluation it is given. */
-function reporting(ruleType: string, answer: (action: string) => RuleAnswer): RuleCollector {
+/** What a staged rule does for one request: its answer, and what it reports, if anything. */
+type Staged = boolean | { passed: boolean; evaluation: RuleEvaluation };
+
+/** A policy-backed rule: reports the evaluation it is given, and answers the boolean. */
+function reporting(
+	ruleType: string,
+	answer: (action: string) => Staged,
+	code = `${ruleType}_deny`,
+): RuleCollector {
 	return {
 		async collect(context) {
 			const action = context.action;
 			const rule: AnyRule = {
 				ruleType,
-				code: `${ruleType}_deny`,
+				code,
 				message: `Denied by ${ruleType}`,
-				verify: () => answer(action),
+				verify: (_attrs, report) => {
+					const staged = answer(action);
+					if (typeof staged === "boolean") return staged;
+					report?.(staged.evaluation);
+					return staged.passed;
+				},
 			};
 			return [rule];
 		},
@@ -123,7 +135,7 @@ describe("the decision event — always carries what the rules reported", () => 
 		// The builtin-style rule reported nothing and is not listed: it has no
 		// policy source to name, and an entry for it would have to invent one.
 		expect(line.evaluations).toEqual([
-			{ ruleType: "cedar", code: "cedar_deny", status: "completed", revision: REVISION_A },
+			{ ruleType: "cedar", code: "cedar_deny", passed: true, evaluation: completed(REVISION_A) },
 		]);
 	});
 
@@ -133,8 +145,43 @@ describe("the decision event — always carries what the rules reported", () => 
 		const [line] = decisionLines(events);
 		expect(line).toMatchObject({ decision: "deny", code: "cedar_deny" });
 		expect(line.evaluations).toEqual([
-			{ ruleType: "cedar", code: "cedar_deny", status: "completed", revision: REVISION_A },
+			{ ruleType: "cedar", code: "cedar_deny", passed: false, evaluation: completed(REVISION_A) },
 		]);
+	});
+
+	it("says which way each rule answered — a revision that refused is not one that authorized", async () => {
+		// One OR group, two policy sources: the first forbids, the second
+		// permits, and the decision is an allow. Without `passed` the line reads
+		// as two revisions standing behind the allow, and the two entries — same
+		// `ruleType`, same `code` — could be told apart only by position.
+		const forbids = reporting(
+			"cedar",
+			() => ({ passed: false, evaluation: completed(REVISION_A) }),
+			"cedar_deny",
+		);
+		const permits = reporting(
+			"cedar",
+			() => ({ passed: true, evaluation: completed(REVISION_B) }),
+			"cedar_deny",
+		);
+		const { app, events } = appWith([forbids, permits], { evaluationInResponse: "include" });
+		const res = await verify(app, { resource: "project:1", action: "read" }).expect(200);
+		const [line] = decisionLines(events);
+		expect(line.decision).toBe("allow");
+		expect(line.evaluations).toEqual([
+			{ ruleType: "cedar", code: "cedar_deny", passed: false, evaluation: completed(REVISION_A) },
+			{ ruleType: "cedar", code: "cedar_deny", passed: true, evaluation: completed(REVISION_B) },
+		]);
+		// …which is the response's own account, outcome for outcome.
+		expect(
+			(line.evaluations as Record<string, unknown>[]).map(
+				({ ruleType: _ruleType, ...rest }) => rest,
+			),
+		).toEqual(
+			res.body.reason.groups[0].evaluated.map(
+				({ message: _message, ...rest }: Record<string, unknown>) => rest,
+			),
+		);
 	});
 
 	it("keeps a denial no policy produced apart from a policy's, under the same code", async () => {
@@ -147,7 +194,12 @@ describe("the decision event — always carries what the rules reported", () => 
 		const [line] = decisionLines(events);
 		expect(line).toMatchObject({ decision: "deny", code: "cedar_deny" });
 		expect(line.evaluations).toEqual([
-			{ ruleType: "cedar", code: "cedar_deny", status: "not_invoked" },
+			{
+				ruleType: "cedar",
+				code: "cedar_deny",
+				passed: false,
+				evaluation: { status: "not_invoked" },
+			},
 		]);
 		expect(JSON.stringify(line)).not.toContain("sha256:");
 	});
@@ -163,9 +215,8 @@ describe("the decision event — always carries what the rules reported", () => 
 			{
 				ruleType: "cedar",
 				code: "cedar_deny",
-				status: "completed",
-				revision: null,
-				loadedRevision: REVISION_A,
+				passed: true,
+				evaluation: { status: "completed", revision: null, loadedRevision: REVISION_A },
 			},
 		]);
 	});
@@ -175,8 +226,13 @@ describe("the decision event — always carries what the rules reported", () => 
 		const { app, events } = appWith([cedarLike, other]);
 		await verify(app, { resource: "project:1", action: "read" }).expect(200);
 		expect(decisionLines(events)[0].evaluations).toEqual([
-			{ ruleType: "cedar", code: "cedar_deny", status: "completed", revision: REVISION_A },
-			{ ruleType: "cedar-b", code: "cedar-b_deny", status: "completed", revision: REVISION_B },
+			{ ruleType: "cedar", code: "cedar_deny", passed: true, evaluation: completed(REVISION_A) },
+			{
+				ruleType: "cedar-b",
+				code: "cedar-b_deny",
+				passed: true,
+				evaluation: completed(REVISION_B),
+			},
 		]);
 	});
 
@@ -233,8 +289,8 @@ describe("the response — carries it only when the deployment says so", () => {
 		expect(deny.body).toMatchObject({ decision: "deny", code: "cedar_deny" });
 
 		for (const [index, res] of [allow, deny].entries()) {
-			const onTheLine = (decisionLines(events)[index].evaluations as Record<string, unknown>[]).map(
-				({ ruleType: _ruleType, code: _code, ...evaluation }) => evaluation,
+			const onTheLine = (decisionLines(events)[index].evaluations as { evaluation: unknown }[]).map(
+				(entry) => entry.evaluation,
 			);
 			expect(onTheLine).toEqual(evaluationsIn(res.body));
 		}
@@ -278,7 +334,8 @@ describe("the response — carries it only when the deployment says so", () => {
 				{
 					ruleType: "cedar",
 					code: "cedar_deny",
-					...completed(line.action === "read" ? REVISION_A : REVISION_B),
+					passed: true,
+					evaluation: completed(line.action === "read" ? REVISION_A : REVISION_B),
 				},
 			]);
 		}
@@ -297,7 +354,7 @@ describe("decisions no policy made — no revision, on either surface", () => {
 						code: "cedar_deny",
 						message: "Denied by cedar",
 						async: true,
-						decide: () => new Promise<RuleAnswer>(() => {}),
+						decide: () => new Promise<boolean>(() => {}),
 					},
 				];
 			},
@@ -329,7 +386,7 @@ describe("decisions no policy made — no revision, on either surface", () => {
 		expect(decisionLines(events)).toEqual([]);
 	});
 
-	it("a rule whose verdict does not read is a fault, and its text reaches neither surface", async () => {
+	it("a rule whose report does not read is a fault, and its text reaches neither surface", async () => {
 		const leaking = reporting("cedar", () => ({
 			passed: true,
 			evaluation: {

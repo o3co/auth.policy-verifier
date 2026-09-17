@@ -45,7 +45,11 @@ let policySetCounter = 0;
  * It vouches for the revision it evaluated (`confirmsRevision`, #244), and can:
  * the set is compiled here, from the source `load` was handed, under an id
  * minted here and known to nothing else. An answer through that id cannot have
- * come from any other policies, so every answer names `source.revision`.
+ * come from any other policies, so every answer names the revision of that
+ * source — read once, at `load`, beside the compile. `PolicySource` is a plain
+ * object the caller still holds; reading `source.revision` when answering would
+ * be reading "the current revision", which is a claim about the object and not
+ * about the policies that were compiled.
  */
 export const cedarWasmEngine: CedarWasmEngine = {
 	name: CEDAR_WASM_ENGINE_NAME,
@@ -60,6 +64,8 @@ export const cedarWasmEngine: CedarWasmEngine = {
 			}
 		}
 
+		// Captured with the compile below, not read per answer — see the doc comment.
+		const { revision } = source;
 		const policySetId = `auth.policy-verifier.cedar-wasm:${policySetCounter++}`;
 		const compiled = preparsePolicySet(policySetId, { staticPolicies: source.text });
 		if (compiled.type === "failure") {
@@ -82,7 +88,7 @@ export const cedarWasmEngine: CedarWasmEngine = {
 					decision,
 					reason: diagnostics.reason,
 					errors: diagnostics.errors.map((error) => `${error.policyId}: ${error.error.message}`),
-					revision: source.revision,
+					revision,
 				};
 			},
 		};

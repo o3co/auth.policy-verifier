@@ -7,10 +7,10 @@ import type {
 	CollectorContext,
 	Logger,
 	ReadonlyAttributes,
+	ReportRuleEvaluation,
 	Rule,
 	RuleCollector,
 	RuleEvaluation,
-	RuleVerdict,
 } from "@o3co/auth.policy-verifier.core";
 import { createConsoleLogger } from "@o3co/auth.policy-verifier.core";
 import {
@@ -195,12 +195,19 @@ export interface CedarPolicyRuleCollectorOptions {
  * Every failing row is the same `cedar_deny` to the evaluator, and must be —
  * the rule fails closed. But only the first three are a policy's answer, and
  * an audit record that attributed the rest to the policy set would name
- * policies that did not decide, or never ran. So the rule answers a
- * `RuleVerdict` whose `evaluation` carries the last column, and beside it the
- * revision of the policy set: as `revision` when the engine vouched for this
- * answer, as `revision: null` with `loadedRevision` when it did not, and not
- * at all for `not_invoked`. It is built from this call's own values and
- * returned — nothing is kept on the rule, which answers concurrent decisions.
+ * policies that did not decide, or never ran. So the rule **reports** the last
+ * column, and beside it the revision of the policy set: as `revision` when the
+ * engine vouched for this answer, as `revision: null` with `loadedRevision`
+ * when it did not, and not at all for `not_invoked`. It goes to the reporter
+ * core hands `verify` / `decide` for that one call (`ReportRuleEvaluation`) —
+ * built from this call's own values, with nothing kept on the rule, which
+ * answers concurrent decisions.
+ *
+ * The rule still **answers a boolean**, and that is deliberate. An evaluator
+ * that passes no reporter — a copy of core one release older, in a mixed
+ * install — reads the boolean it always read and records no evaluation. Had
+ * the evaluation ridden in the answer, that evaluator would have read an
+ * object, by truthiness, and every deny on this page as an allow.
  */
 export class CedarPolicyRuleCollector implements RuleCollector {
 	private constructor(private readonly rule: AnyRule) {}
@@ -255,6 +262,10 @@ export class CedarPolicyRuleCollector implements RuleCollector {
 		const engine = selectEngine(raw.engine);
 		const mapping: ResolvedMapping = resolveMapping(raw);
 		const source = loadPolicySource(raw);
+		// #244: read here, once, before an engine is handed `source`. What this
+		// collector reports as loaded is its own reading of what it loaded — not
+		// a property an engine could have rewritten by the time `load` returns.
+		const loadedRevision = source.revision;
 		const logger =
 			options?.logger ?? createConsoleLogger({ collector: "CedarPolicyRuleCollector" });
 
@@ -318,10 +329,11 @@ export class CedarPolicyRuleCollector implements RuleCollector {
 				engine,
 				policySet,
 				policySource: source.description,
-				loadedRevision: source.revision,
+				loadedRevision,
 				requireConfirmedRevision,
 				mapping,
 				logger: logEvaluationErrors ? logger : undefined,
+				faultLogger: logger,
 			}),
 		);
 	}
@@ -347,11 +359,25 @@ interface BoundRule {
 	engine: CedarEngine;
 	policySet: LoadedCedarPolicySet;
 	policySource: string;
-	/** `PolicySource.revision` of the set handed to `engine.load` (#244). */
+	/** `PolicySource.revision`, read before the set was handed to `engine.load` (#244). */
 	loadedRevision: string;
 	requireConfirmedRevision: boolean;
 	mapping: ResolvedMapping;
+	/** For evaluation errors; absent under `logEvaluationErrors = false`. */
 	logger: Logger | undefined;
+	/**
+	 * For what `logEvaluationErrors` does not govern: an engine answering from
+	 * a policy set this collector did not load, or not vouching under
+	 * `requireConfirmedRevision`. Those are faults of the deployment, not of a
+	 * policy reading a missing attribute, and are never silent.
+	 */
+	faultLogger: Logger;
+}
+
+/** One answer of the rule, before it is split into the boolean and the report. */
+interface Answered {
+	passed: boolean;
+	evaluation: RuleEvaluation;
 }
 
 function buildRule(bound: BoundRule): AnyRule {
@@ -365,6 +391,7 @@ function buildRule(bound: BoundRule): AnyRule {
 		requireConfirmedRevision,
 		mapping,
 		logger,
+		faultLogger,
 	} = bound;
 	// `ruleType` too: two collectors over the same source (two inline sets, one
 	// directory twice) are told apart in a log line only by the group they decide for.
@@ -384,31 +411,61 @@ function buildRule(bound: BoundRule): AnyRule {
 			return undefined;
 		}
 	};
-	// #244: the ways a verdict accounts for the revision. Constants of the
+	// #244: the ways an answer accounts for the revision. Constants of the
 	// rule — the loaded revision is fixed at boot — so equal attributes give
-	// an equal verdict, which is what the purity contract asks of it.
-	const NOT_INVOKED: RuleVerdict = { passed: false, evaluation: { status: "not_invoked" } };
+	// an equal report, which is what the purity contract asks of it.
+	const NOT_INVOKED: Answered = Object.freeze({
+		passed: false,
+		evaluation: Object.freeze({ status: "not_invoked" }),
+	});
 	/** Nothing vouched for what ran: the call failed, or the engine does not say. */
 	const unconfirmed = (status: "completed" | "failed"): RuleEvaluation => ({
 		status,
 		revision: null,
 		loadedRevision,
 	});
+	/**
+	 * Splits an answer the way core takes it: the evaluation to the reporter
+	 * of this one call, the boolean back. `report` is absent when the evaluator
+	 * asking predates it, and the boolean is then the whole answer — see the
+	 * class doc comment for why that, and not a richer return value.
+	 */
+	const deliver = (answered: Answered, report: ReportRuleEvaluation | undefined): boolean => {
+		if (report === undefined) warnUnreported();
+		report?.(answered.evaluation);
+		return answered.passed;
+	};
+	// `requireConfirmedRevision` is set so that every decision's record names
+	// its policies. Asked without a reporter — an evaluator that predates it,
+	// which in practice is a copy of core one release older beside this package
+	// — the rule still enforces the knob and still answers correctly, and none
+	// of it is recorded. Nothing else would say so; said once, not per request.
+	// The answer never depends on whether a reporter was passed.
+	let warnedUnreported = false;
+	const warnUnreported = (): void => {
+		if (!requireConfirmedRevision || warnedUnreported) return;
+		warnedUnreported = true;
+		faultLogger.warn(
+			identity,
+			"requireConfirmedRevision is set, but this rule was asked without a reporter, so the revisions it enforces are not being recorded — the evaluator running it predates evaluation reports; upgrade @o3co/auth.policy-verifier.core and .server together with this package",
+		);
+	};
 
-	const callFailed = (cause: unknown): RuleVerdict => {
+	const callFailed = (cause: unknown): Answered => {
 		logger?.error(
 			{ ...identity, reason: errorMessage(cause) },
 			"cedar authorization call failed — denying",
 		);
 		return { passed: false, evaluation: unconfirmed("failed") };
 	};
-	const interpret = (answer: CedarDecision): RuleVerdict => {
+	const interpret = (answer: CedarDecision): Answered => {
 		if (answer.revision !== undefined && answer.revision !== loadedRevision) {
 			// The engine holds a policy set this collector did not load — replaced
 			// under it, or never its own. A permit from there is a permit from
 			// somebody else's policies, so it is refused before the decision is
 			// read. What the engine named is not repeated: it is the engine's text.
-			logger?.error(
+			// On `faultLogger`: not an evaluation error, so not `logEvaluationErrors`' to silence.
+			faultLogger.error(
 				{ ...identity, loadedRevision },
 				"cedar engine answered from a policy revision other than the one loaded — denying",
 			);
@@ -418,7 +475,7 @@ function buildRule(bound: BoundRule): AnyRule {
 		if (requireConfirmedRevision && !confirmed) {
 			// The engine declared `confirmsRevision` — boot checked — and this
 			// answer did not name one. Denied rather than let through unnamed.
-			logger?.error(
+			faultLogger.error(
 				{ ...identity, loadedRevision },
 				"cedar engine did not name the policy revision it evaluated, and requireConfirmedRevision is set — denying",
 			);
@@ -450,16 +507,16 @@ function buildRule(bound: BoundRule): AnyRule {
 	if (!policySet.async) {
 		const rule: Rule = {
 			...base,
-			verify(attrs) {
+			verify(attrs, report) {
 				const built = request(attrs);
-				if (built === undefined) return NOT_INVOKED;
+				if (built === undefined) return deliver(NOT_INVOKED, report);
 				let answer: CedarDecision;
 				try {
 					answer = policySet.isAuthorized(built);
 				} catch (cause) {
-					return callFailed(cause);
+					return deliver(callFailed(cause), report);
 				}
-				return interpret(answer);
+				return deliver(interpret(answer), report);
 			},
 		};
 		return rule;
@@ -468,9 +525,9 @@ function buildRule(bound: BoundRule): AnyRule {
 	const rule: AsyncRule = {
 		...base,
 		async: true,
-		async decide(attrs, signal) {
+		async decide(attrs, signal, report) {
 			const built = request(attrs);
-			if (built === undefined) return NOT_INVOKED;
+			if (built === undefined) return deliver(NOT_INVOKED, report);
 			let answer: CedarDecision;
 			try {
 				answer = await policySet.isAuthorized(built, signal);
@@ -480,9 +537,9 @@ function buildRule(bound: BoundRule): AnyRule {
 				// the evaluator as such — folded into a deny, a timeout read as
 				// `cedar_deny` and a departed caller as a failing engine.
 				if (signal.aborted) throw signal.reason;
-				return callFailed(cause);
+				return deliver(callFailed(cause), report);
 			}
-			return interpret(answer);
+			return deliver(interpret(answer), report);
 		},
 	};
 	return rule;

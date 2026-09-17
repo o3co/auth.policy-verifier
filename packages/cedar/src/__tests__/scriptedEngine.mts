@@ -55,9 +55,9 @@ export function scriptedEngine(
 	options: ScriptedEngineOptions = {},
 ): ScriptedEngine {
 	const confirmsRevision = options.confirmsRevision ?? false;
-	/** Stamps the loaded revision on an answer that does not mention one at all. */
-	const vouch = (answer: CedarDecision, source: PolicySource): CedarDecision =>
-		confirmsRevision && !("revision" in answer) ? { ...answer, revision: source.revision } : answer;
+	/** Stamps the revision captured at load on an answer that does not mention one at all. */
+	const vouch = (answer: CedarDecision, revision: string): CedarDecision =>
+		confirmsRevision && !("revision" in answer) ? { ...answer, revision } : answer;
 	const engine: ScriptedEngine = {
 		name,
 		async,
@@ -72,12 +72,14 @@ export function scriptedEngine(
 				}
 			}
 			engine.loads.push(source);
+			// Read once, here: what an engine vouches for is what it loaded.
+			const { revision } = source;
 			if (!async) {
 				return {
 					async: false,
 					isAuthorized(request) {
 						engine.requests.push(request);
-						return vouch(engine.answer(request), source);
+						return vouch(engine.answer(request), revision);
 					},
 				};
 			}
@@ -85,7 +87,7 @@ export function scriptedEngine(
 				async: true,
 				async isAuthorized(request, signal) {
 					engine.requests.push(request);
-					return vouch(engine.answer(request, signal), source);
+					return vouch(engine.answer(request, signal), revision);
 				},
 			};
 		},
