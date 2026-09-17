@@ -6,6 +6,188 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
+## [0.12.0] - 2026-09-18
+
+### Security
+
+- **A rule's answer is a boolean, and nothing a rule reports reaches the wire
+  or the audit line unchecked** (`@o3co/auth.policy-verifier.core`,
+  [#244](https://github.com/o3co/auth.policy-verifier/issues/244),
+  [#245](https://github.com/o3co/auth.policy-verifier/pull/245),
+  [#246](https://github.com/o3co/auth.policy-verifier/pull/246)). Through
+  0.11.0 `evaluate()` read whatever `verify` / `decide` returned by truthiness
+  and copied it onto the outcome. For a rule authored in JavaScript that is
+  fail-open — `verify: (attrs) => attrs.get("role")` passed whenever the
+  attribute was set, and a synchronous rule that returned a Promise always
+  passed — and it put that value on the response and the `decision` line as
+  `passed`. An answer that is not a boolean is now a `TypeError` attributed to
+  the rule (`rule_threw`), and the request answers `500`. The error names the
+  kind of value, never the value. What that changes for an existing rule is
+  under Changed.
+
+  What a rule **reports** (below) is held to the same standard, because it is
+  copied onto the decision: a status from a closed set, a revision that matches
+  `POLICY_REVISION_PATTERN` (`scheme:encoded`, the OCI digest grammar) and is
+  at most `POLICY_REVISION_MAX_LENGTH` (256) characters, and no key the
+  contract does not name. A path, a label with spaces or policy text does not
+  fit, and is refused rather than dropped — even if the rule caught the
+  refusal — because a wrong audit record that looks complete is worse than a
+  loud fault. Everything is read once and rebuilt from the values read, and
+  `evaluate()` keeps a frozen copy, so neither an accessor that answers
+  differently the second time nor a rule that reuses one object can rewrite a
+  decision.
+
+### Added
+
+- **A decision says which policy revision was evaluated, and whether the
+  evaluator ran at all** (`.core`, `.cedar`, `.cedar-wasm`, `.server`, [#244](https://github.com/o3co/auth.policy-verifier/issues/244),
+  [#245](https://github.com/o3co/auth.policy-verifier/pull/245), [#246](https://github.com/o3co/auth.policy-verifier/pull/246)). After a policy update or during a rolling deployment, a
+  decision's result and rule codes did not identify the policy *contents* that
+  produced it: a Cedar policy keeps its id while its text changes. And every
+  failing Cedar rule was the same `cedar_deny`, whether a `forbid` refused the
+  request or the request never reached Cedar. A rule that fronts a policy
+  evaluator now reports, per answer, the evaluation behind it, and core carries
+  it onto that invocation's `RuleOutcome` as `evaluation`:
+
+  | `evaluation` | means |
+  | --- | --- |
+  | `{ "status": "completed", "revision": "sha256:…" }` | the evaluator ran to an answer — a permit, a forbid, or no policy applying — against that revision, and vouches for it |
+  | `{ "status": "failed", … }` | the evaluator was invoked and did not produce a clean answer: the call failed, Cedar raised evaluation errors, the engine answered from a policy set other than the one loaded, or it named no revision under `requireConfirmedRevision`. The rule failed closed; no policy produced this denial |
+  | `{ "status": "not_invoked" }` | the rule failed before asking its evaluator (the request could not be built from the attributes). No revision key of either kind |
+  | `"revision": null`, with `"loadedRevision": "sha256:…"` | the evaluator ran, and what it evaluated cannot be established. `loadedRevision` is what the verifier loaded at boot: worth recording, not proof of what ran |
+  | absent | the rule reported nothing — a TypeScript rule has no policy source to name. Also what a deployment that has not opted in answers: absence means unknown |
+
+  **The channel is a reporter, and the rule still answers a boolean.**
+  `evaluate()` makes a `ReportRuleEvaluation` for each invocation and hands it
+  in — `verify(attrs, report?)`, `decide(attrs, signal, report?)` — and the
+  rule calls it at most once, before it answers. It is per invocation because
+  one rule object answers concurrent decisions, and anything kept on the rule
+  between them would be one decision's evaluation on another's record. It is a
+  reporter rather than a richer return value because of what happens when the
+  evaluator does not know about it: `{ passed, evaluation }` is an object, an
+  object is truthy, and an older copy of core in a mixed install — or a
+  composite rule calling `verify` itself — would read every deny as a pass. An
+  evaluator that passes no reporter reads the boolean it always read and
+  records no evaluation, which is what an absent `evaluation` already means.
+
+  The reference sits on the outcome of the rule that reported it, so a decision
+  made under two policy sources carries two revisions, and every entry of a
+  batch carries its own. A deny made without a policy evaluation
+  (`collector_timeout`, `rule_timeout`, `attribute_conflict`,
+  `no_applicable_rule`) has no groups and so no evaluation. A second report in
+  one invocation, a report that does not read, and a **pass** that reports its
+  evaluator `failed` or `not_invoked` are refused. Core exports
+  `ReportRuleEvaluation`, `RuleEvaluation`, `RuleEvaluationStatus`,
+  `POLICY_REVISION_PATTERN` and `POLICY_REVISION_MAX_LENGTH`;
+  `docs/extending.md` has the contract for rule authors, composite rules
+  included.
+
+- **The `decision` event carries `evaluations`** (`.server`, [#245](https://github.com/o3co/auth.policy-verifier/pull/245), [#246](https://github.com/o3co/auth.policy-verifier/pull/246)): one
+  entry per reporting rule, in evaluation order —
+  `{"ruleType":"cedar","code":"cedar_deny","passed":false,"evaluation":{"status":"completed","revision":"sha256:…"}}`.
+  `passed` is there because a group is an OR: a rule that forbade, followed by
+  one that permitted, is an allow whose line lists both, and the first is the
+  revision that refused. Always on; a deployment with no policy-backed rule
+  writes the line it always wrote.
+
+- **`verify.evaluationInResponse`** (`.server`, [#245](https://github.com/o3co/auth.policy-verifier/pull/245);
+  `VERIFY_EVALUATION_IN_RESPONSE` in the standalone template). `"omit"`
+  (default): the response is key-for-key what it was. `"include"`: each
+  outcome's `evaluation` is on the response too, for a calling service that
+  records which policy revision authorized an operation. The opt-in is the
+  deployment's rather than the caller's, because it tells any holder of an
+  accepted token when the policy set changed and whether a denial was the
+  engine failing; pair it with `http.callerAuth` where that matters. Read
+  through one check shared by `AppConfigSchema` and `createVerifyRouter`, so a
+  hand-built config that misspells `"include"` is refused in the schema's
+  words instead of running as `"omit"`.
+
+- **The Cedar policy revision** (`.cedar`, [#245](https://github.com/o3co/auth.policy-verifier/pull/245), [#246](https://github.com/o3co/auth.policy-verifier/pull/246)). `loadPolicySource`
+  computes `PolicySource.revision` once, at boot: `sha256:` and the lowercase
+  hex SHA-256 of a versioned header followed by each `*.cedar` file as two
+  netstrings, `<bytes>:<name>,<bytes>:<text>,`, in load order. The same files
+  give the same revision on any replica at any mount path — the directory is
+  not part of it, and no path appears in a decision. An edit that keeps a
+  policy's id changes it; so does a rename, because under the http engine the
+  file name is the policy id. `loadPolicySource` and `computePolicyRevision`
+  are exported, so CI can compute the revision of a directory and compare it
+  with what production reports. It is the text as loaded that is hashed, so
+  line endings (`core.autocrlf`), a byte-order mark and the Unicode
+  normalization of a non-ASCII file name change it. It identifies policy
+  contents only: the attribute mapping, `onNoDeterminingPolicy`, the
+  evaluator's version and the attributes a request was decided over shape an
+  answer too, so it is not a promise of replay.
+
+- **The engine port says, per answer, whether the engine vouches for what it
+  evaluated** (`.cedar`, `.cedar-wasm`, [#245](https://github.com/o3co/auth.policy-verifier/pull/245), [#246](https://github.com/o3co/auth.policy-verifier/pull/246)): `CedarDecision.revision`,
+  and `CedarEngine.confirmsRevision` to declare it up front. The wasm engine
+  vouches — the set is compiled in-process from the files that were hashed,
+  under an id nothing else holds, and the revision is captured with the
+  compile. The http engine cannot: cedar-agent answers
+  `{ decision, diagnostics }` and does not say which policies it holds, and a
+  restarted agent comes back empty, so its answers report `revision: null` with
+  the digest pushed at boot as `loadedRevision`. An engine that names a
+  revision other than the loaded one is answering from a policy set this
+  verifier did not load; the rule fails it closed, and logs it whatever
+  `logEvaluationErrors` says.
+
+- **`requireConfirmedRevision`** on `CedarPolicyRuleCollector` (`.cedar`,
+  [#245](https://github.com/o3co/auth.policy-verifier/pull/245), [#246](https://github.com/o3co/auth.policy-verifier/pull/246)), for a deployment whose audit has to name the policies behind
+  every decision: an answer nobody vouched for becomes a deny, always logged,
+  instead of a permit of unknown origin. Refused at boot over an engine that
+  does not declare `confirmsRevision` — `engine = "http"` — because there every
+  answer would be that deny. A rule asked without a reporter under this setting
+  warns once: the evaluator running it predates evaluation reports, so the
+  revisions being enforced are not being recorded.
+
+- **The wire-contract fixture pins the `evaluation` envelope**
+  (`tests/integration`, [#245](https://github.com/o3co/auth.policy-verifier/pull/245), [#246](https://github.com/o3co/auth.policy-verifier/pull/246)): its statuses, the key set of each shape
+  and the revision grammar, in `responseEnvelopes.json`, each pinned to core's
+  own constants. `WireFixtures` gains an optional `reportingEvaluation`, and
+  the reference deployment runs the whole table twice — as shipped, and opted
+  in — because the opt-in must change nothing but the one optional key. The
+  fixture tells a client to ignore keys inside `evaluation` it does not know.
+
+### Changed
+
+- **BREAKING: an answer that is not a boolean is a `TypeError`** (`.core`,
+  [#245](https://github.com/o3co/auth.policy-verifier/pull/245), [#246](https://github.com/o3co/auth.policy-verifier/pull/246); see Security). A JavaScript rule that returned `undefined` for
+  "no", a number or a string for "yes", or a Promise from a synchronous
+  `verify`, now fails the request with `500 internal_error` and a `rule_threw`
+  line naming the rule. Return an actual boolean. Rules typed against `Rule` /
+  `AsyncRule` already do.
+
+- **BREAKING: `PolicyFile` gains `name` and `PolicySource` gains `revision`**
+  (`.cedar`, [#245](https://github.com/o3co/auth.policy-verifier/pull/245)). Both are filled in by `loadPolicySource`; only code that
+  builds a `PolicySource` by hand — a custom engine's tests — needs the two
+  fields, and `computePolicyRevision(files)` supplies the second.
+
+- **BREAKING: the wire-contract fixture's `ruleOutcome.keys` is now
+  `ruleOutcome.required` + `ruleOutcome.optional`** (`tests/integration`,
+  [#245](https://github.com/o3co/auth.policy-verifier/pull/245)), with `evaluation` the one optional key. A driver in another
+  repository that read `ruleOutcome.keys` reads the two lists instead. Nothing
+  changes on the wire unless a deployment sets `verify.evaluationInResponse =
+  "include"`.
+
+- **`evaluate()` calls `verify` with a second argument and `decide` with a
+  third** (`.core`, [#246](https://github.com/o3co/auth.policy-verifier/pull/246)): the reporter above. A rule typed against `Rule` /
+  `AsyncRule` is unaffected. A JavaScript rule with an optional trailing
+  parameter of its own (`verify(attrs, depth = 0)`) now receives a function
+  there, and a test double asserting `toHaveBeenCalledWith(attrs)` sees the
+  extra argument.
+
+- **`Decision.reason` carries `evaluation` for whoever calls `evaluate()`
+  directly** (`.core`, [#245](https://github.com/o3co/auth.policy-verifier/pull/245)). The `"omit"` default lives in the server's router.
+  A library consumer that forwards `reason` to its own callers now forwards
+  the evaluations with it, and decides for itself whether to.
+
+- **The rule-purity conformance suite asks a rule through `evaluate()`**
+  (`tests/integration`, [#246](https://github.com/o3co/auth.policy-verifier/pull/246)), so what a report says is what core reads out of
+  it — copied when the report is made. A rule that reports whichever revision
+  it saw last, rewrites one object and reports it again, or reaches the
+  collector's context from an accessor on its report now fails
+  `describeRulePurityConformance`, and so does a rule core itself refuses.
+
 ## [0.11.0] - 2026-09-17
 
 ### Security
