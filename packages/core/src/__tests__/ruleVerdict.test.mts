@@ -270,6 +270,41 @@ describe("evaluate — what a verdict may carry", () => {
 		expect(String((error as Error).message)).not.toContain(secret);
 	});
 
+	/*
+	 * Not a verdict and not a boolean: an answer nobody can read. It used to be
+	 * read by truthiness, which is fail-open — a JavaScript rule that returns
+	 * the attribute it looked up (`attrs.get("role")`) passed whenever the
+	 * attribute was set — and it put that value on the wire as `passed`.
+	 */
+	it.each([
+		["a truthy string", "yes"],
+		["a truthy number", 1],
+		["a falsy number", 0],
+		["an empty string", ""],
+		["undefined", undefined],
+		["null", null],
+	])("refuses an answer that is neither a boolean nor a verdict: %s", async (_name, answer) => {
+		const failures = new FailureRecord();
+		const rule = sync("scope", "invalid_scope", () => answer as unknown as RuleAnswer);
+		const attempt = evaluate(attrs, [rule], { failures });
+		await expect(attempt).rejects.toThrow(TypeError);
+		const error = await attempt.catch((cause: unknown) => cause);
+		expect(failures.sourceOf(error)).toEqual({
+			kind: "rule",
+			ruleType: "scope",
+			code: "invalid_scope",
+		});
+	});
+
+	it("names the kind of a refused answer, never the answer — it may be an attribute value", async () => {
+		const email = "alice@example.test";
+		const rule = sync("scope", "invalid_scope", () => email as unknown as RuleAnswer);
+		const error = await evaluate(attrs, [rule]).catch((cause: unknown) => cause);
+		expect(error).toBeInstanceOf(TypeError);
+		expect((error as Error).message).toMatch(/string/);
+		expect((error as Error).message).not.toContain(email);
+	});
+
 	it("refuses the same from an asynchronous rule", async () => {
 		const rule = async("cedar", "cedar_deny", () => ({ passed: "yes" }) as unknown as RuleAnswer);
 		await expect(evaluate(attrs, [rule])).rejects.toThrow(TypeError);
@@ -283,5 +318,13 @@ describe("ruleAnswerPassed", () => {
 		expect(ruleAnswerPassed({ passed: true })).toBe(true);
 		// The case a truthiness check gets wrong: a failing verdict is an object.
 		expect(ruleAnswerPassed({ passed: false })).toBe(false);
+	});
+
+	it("agrees with evaluate() on every answer evaluate() accepts", async () => {
+		// One answer, two readers: they must not disagree about what a pass is.
+		for (const answer of [true, false, { passed: true }, { passed: false }]) {
+			const decision = await evaluate(attrs, [sync("scope", "invalid_scope", () => answer)]);
+			expect(decision.decision === "allow").toBe(ruleAnswerPassed(answer));
+		}
 	});
 });

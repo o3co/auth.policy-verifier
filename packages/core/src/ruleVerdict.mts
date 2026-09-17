@@ -37,16 +37,27 @@ const EVALUATED_KEYS: ReadonlySet<string> = new Set(["status", "revision", "load
 /**
  * Reads what `verify` / `decide` returned.
  *
- * A boolean — anything that is not an object, for a JavaScript rule — is the
- * answer it always was. An object is a `RuleVerdict` and is checked whole:
- * `passed` a boolean, `evaluation` absent or one of the three shapes
- * `RuleEvaluation` allows, no key beyond those.
+ * A boolean is the answer it always was. An object is a `RuleVerdict` and is
+ * checked whole: `passed` a boolean, `evaluation` absent or one of the three
+ * shapes `RuleEvaluation` allows, no key beyond those.
  *
- * @throws {TypeError} for a verdict that is not one; the caller attributes it
+ * Anything else is refused. It used to be read by truthiness, which for a
+ * rule authored in JavaScript is fail-open — `verify: (attrs) =>
+ * attrs.get("role")` passed whenever the attribute was set — and carried that
+ * value onto the wire and the audit line as `passed`. It also had this reader
+ * and `ruleAnswerPassed` disagreeing about what a pass is. The refusal names
+ * the kind of value and never the value, for the second reason.
+ *
+ * @throws {TypeError} for an answer that is neither; the caller attributes it
  *   to the rule.
  */
 export function readRuleAnswer(answer: RuleAnswer): ReadRuleAnswer {
-	if (typeof answer !== "object" || answer === null) return { passed: answer };
+	if (typeof answer === "boolean") return { passed: answer };
+	if (typeof answer !== "object" || answer === null) {
+		throw new TypeError(
+			`a rule must answer a boolean or a RuleVerdict, got ${answer === null ? "null" : typeof answer}`,
+		);
+	}
 
 	const verdict = answer as unknown as Record<string, unknown>;
 	refuseUnknownKeys(verdict, VERDICT_KEYS, "a rule verdict");
