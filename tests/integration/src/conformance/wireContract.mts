@@ -159,6 +159,22 @@ export interface WireFixtures {
 	 * with no failable collector.
 	 */
 	failing?: WireDecisionRequest;
+	/**
+	 * Optional (#244): requests decided with a rule that reports an evaluation,
+	 * on a deployment whose responses include it (`verify.evaluationInResponse =
+	 * "include"`). Omitted by a deployment that does not opt in or has no
+	 * policy-backed rule — the cases that need it do not run, and every other
+	 * case still holds its responses to the envelope, where `evaluation` is
+	 * optional. `confirmed` is a request whose evaluator vouched for the revision
+	 * it evaluated; the other two are for a deployment that can stage them.
+	 */
+	reportingEvaluation?: {
+		confirmed: WireDecisionRequest;
+		/** A request answered by an evaluator that does not say what it evaluated. */
+		unconfirmed?: WireDecisionRequest;
+		/** A request the rule denied before its evaluator was asked. */
+		notInvoked?: WireDecisionRequest;
+	};
 }
 
 /** Hooks a decision endpoint must provide to be checked against the wire contract. */
@@ -181,7 +197,13 @@ interface ResponseEnvelopes {
 	};
 	batch: { keys: string[] };
 	ruleGroup: { required: string[]; onlyOnAPassingGroup: string[] };
-	ruleOutcome: { keys: string[] };
+	ruleOutcome: { required: string[]; optional: string[] };
+	evaluation: {
+		statuses: string[];
+		notInvoked: { keys: string[] };
+		evaluated: { statuses: string[]; required: string[]; onlyWhenRevisionIsNull: string[] };
+		revision: { pattern: string; maxLength: number; about: string };
+	};
 	status: Record<string, number>;
 	codes: Record<string, string>;
 	requestId: {
@@ -237,6 +259,7 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 		batch,
 		ruleGroup,
 		ruleOutcome,
+		evaluation: evaluationEnvelope,
 		status,
 		codes,
 		requestId,
@@ -249,6 +272,60 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 		credential: WireCredential = "valid",
 	): Promise<WireResponse> =>
 		adapter.send({ endpoint, credential, payload: { kind: "json", value } });
+
+	/**
+	 * Asserts one revision reference is the bounded `scheme:encoded` shape the
+	 * contract carries (#244) — which is what keeps a path, a label or policy
+	 * text from ever being one.
+	 */
+	const expectRevision = (value: unknown): void => {
+		expect(typeof value).toBe("string");
+		expect((value as string).length).toBeLessThanOrEqual(evaluationEnvelope.revision.maxLength);
+		expect(value).toMatch(new RegExp(evaluationEnvelope.revision.pattern));
+	};
+
+	/**
+	 * Asserts one outcome's `evaluation` is one of the three shapes the contract
+	 * allows (#244), exhaustively: a status from the table; no revision key of
+	 * either kind on an evaluator that was never invoked; otherwise a `revision`
+	 * that is a reference or an explicit `null`, with `loadedRevision` beside it
+	 * only in the `null` case — so the digest of a snapshot nobody confirmed can
+	 * never sit under the name that claims it was evaluated.
+	 */
+	const expectEvaluation = (value: unknown): Record<string, unknown> => {
+		expect(value).toBeTypeOf("object");
+		expect(value).not.toBeNull();
+		const evaluation = value as Record<string, unknown>;
+		expect(evaluationEnvelope.statuses).toContain(evaluation.status);
+
+		if (!evaluationEnvelope.evaluated.statuses.includes(evaluation.status as string)) {
+			expect(keysOf(evaluation)).toEqual([...evaluationEnvelope.notInvoked.keys].sort());
+			return evaluation;
+		}
+		for (const key of evaluationEnvelope.evaluated.required) {
+			expect(Object.keys(evaluation)).toContain(key);
+		}
+		const permitted = new Set([
+			...evaluationEnvelope.evaluated.required,
+			...(evaluation.revision === null ? evaluationEnvelope.evaluated.onlyWhenRevisionIsNull : []),
+		]);
+		expect(Object.keys(evaluation).filter((key) => !permitted.has(key))).toEqual([]);
+		if (evaluation.revision !== null) expectRevision(evaluation.revision);
+		for (const key of evaluationEnvelope.evaluated.onlyWhenRevisionIsNull) {
+			if (key in evaluation) expectRevision(evaluation[key]);
+		}
+		return evaluation;
+	};
+
+	/** Every `evaluation` a decision body carries, in evaluation order, each checked. */
+	const evaluationsOf = (body: unknown): Record<string, unknown>[] =>
+		(
+			body as { reason: { groups: { evaluated: Record<string, unknown>[] }[] } }
+		).reason.groups.flatMap((group) =>
+			group.evaluated.flatMap((outcome) =>
+				"evaluation" in outcome ? [expectEvaluation(outcome.evaluation)] : [],
+			),
+		);
 
 	/**
 	 * Asserts one decision body carries exactly the contract's keys, and that its
@@ -283,8 +360,12 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 			const permittedGroupKeys = new Set([...ruleGroup.required, ...ruleGroup.onlyOnAPassingGroup]);
 			for (const key of ruleGroup.required) expect(Object.keys(group)).toContain(key);
 			expect(Object.keys(group).filter((key) => !permittedGroupKeys.has(key))).toEqual([]);
+			const permittedOutcomeKeys = new Set([...ruleOutcome.required, ...ruleOutcome.optional]);
 			for (const outcome of group.evaluated as Record<string, unknown>[]) {
-				expect(keysOf(outcome)).toEqual([...ruleOutcome.keys].sort());
+				for (const key of ruleOutcome.required) expect(Object.keys(outcome)).toContain(key);
+				expect(Object.keys(outcome).filter((key) => !permittedOutcomeKeys.has(key))).toEqual([]);
+				// #244: optional, and held to its own envelope wherever it appears.
+				if ("evaluation" in outcome) expectEvaluation(outcome.evaluation);
 			}
 		}
 		return decision;
@@ -604,6 +685,78 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 				expect(res.status).toBe(status.allow);
 				expect(res.requestId).toBeUndefined();
 			});
+		});
+
+		describe("the evaluation behind a rule's answer (#244)", () => {
+			const reporting = adapter.fixtures.reportingEvaluation;
+
+			it.runIf(reporting)(
+				"names the revision the evaluator vouched for, under revision",
+				async () => {
+					const res = await post("/verify", reporting?.confirmed);
+					const evaluations = evaluationsOf(expectDecisionEnvelope(res.body));
+					const vouched = evaluations.filter((evaluation) => evaluation.revision !== null);
+					expect(vouched.length).toBeGreaterThan(0);
+					for (const evaluation of vouched) {
+						expect(evaluationEnvelope.evaluated.statuses).toContain(evaluation.status);
+						expect(evaluation).not.toHaveProperty("loadedRevision");
+					}
+				},
+			);
+
+			it.runIf(reporting?.unconfirmed)(
+				"says null when what was evaluated is not established, and what was loaded beside it",
+				async () => {
+					const res = await post("/verify", reporting?.unconfirmed);
+					const evaluations = evaluationsOf(expectDecisionEnvelope(res.body));
+					const unconfirmed = evaluations.filter((evaluation) => evaluation.revision === null);
+					expect(unconfirmed.length).toBeGreaterThan(0);
+					// The envelope check above already held `loadedRevision`, where
+					// present, to the revision shape — and refused it anywhere else.
+				},
+			);
+
+			it.runIf(reporting?.notInvoked)(
+				"claims no revision of either kind for an evaluator that was never invoked",
+				async () => {
+					const res = await post("/verify", reporting?.notInvoked);
+					const evaluations = evaluationsOf(expectDecisionEnvelope(res.body));
+					const notInvoked = evaluations.filter(
+						(evaluation) => evaluation.status === "not_invoked",
+					);
+					expect(notInvoked.length).toBeGreaterThan(0);
+					for (const evaluation of notInvoked) {
+						expect(keysOf(evaluation)).toEqual([...evaluationEnvelope.notInvoked.keys].sort());
+					}
+				},
+			);
+
+			it.runIf(reporting?.unconfirmed && reporting?.notInvoked)(
+				"attributes each batch entry to its own evaluation, in request order",
+				async () => {
+					const requests = [reporting?.notInvoked, reporting?.confirmed, reporting?.unconfirmed];
+					const singly = [];
+					for (const request of requests) {
+						singly.push(evaluationsOf((await post("/verify", request)).body));
+					}
+					const res = await post("/verify/batch", { decisions: requests });
+					expect(res.status).toBe(status.batchDecided);
+					const batched = (res.body as { decisions: unknown[] }).decisions.map((entry) =>
+						evaluationsOf(expectDecisionEnvelope(entry)),
+					);
+					// Not whichever evaluation came last, stamped on all three.
+					expect(batched).toEqual(singly);
+					expect(new Set(batched.map((entry) => JSON.stringify(entry))).size).toBe(requests.length);
+				},
+			);
+
+			it.runIf(adapter.fixtures.stalling)(
+				"carries none on a deny the router made itself — no policy decided it",
+				async () => {
+					const res = await post("/verify", adapter.fixtures.stalling);
+					expect(evaluationsOf(expectDecisionEnvelope(res.body))).toEqual([]);
+				},
+			);
 		});
 
 		describe("the code the table names without a request case (#182)", () => {

@@ -10,7 +10,7 @@
  */
 
 import type { Logger } from "@o3co/auth.policy-verifier.core";
-import { evaluate, isAsyncRule } from "@o3co/auth.policy-verifier.core";
+import { evaluate, isAsyncRule, ruleAnswerPassed } from "@o3co/auth.policy-verifier.core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CedarPolicyRuleCollector } from "../CedarPolicyRuleCollector.mjs";
 import { CedarEngineError, type CedarEngineLoadContext } from "../engine.mjs";
@@ -21,7 +21,7 @@ import {
 	entityUidLiteral,
 } from "../httpEngine.mjs";
 import type { CedarRequest } from "../mapping.mjs";
-import type { PolicySource } from "../policySource.mjs";
+import { computePolicyRevision, type PolicySource } from "../policySource.mjs";
 // Registers the http engine under "http" for the collector-level cases.
 import "../index.mjs";
 
@@ -49,14 +49,21 @@ function loadContext(config: Record<string, unknown> = {}): CedarEngineLoadConte
 }
 
 function inline(text: string): PolicySource {
-	return { files: [{ source: "policies (inline)", text }], text, description: "inline policies" };
+	const files = [{ name: "policies", source: "policies (inline)", text }];
+	return { files, text, description: "inline policies", revision: computePolicyRevision(files) };
 }
 
-function dir(files: Array<[string, string]>): PolicySource {
+function dir(entries: Array<[string, string]>): PolicySource {
+	const files = entries.map(([name, text]) => ({
+		name,
+		source: `/etc/verifier/policies/${name}`,
+		text,
+	}));
 	return {
-		files: files.map(([name, text]) => ({ source: `/etc/verifier/policies/${name}`, text })),
-		text: files.map(([, text]) => text).join("\n"),
+		files,
+		text: files.map((file) => file.text).join("\n"),
 		description: "/etc/verifier/policies",
+		revision: computePolicyRevision(files),
 	};
 }
 
@@ -634,7 +641,7 @@ describe("CedarPolicyRuleCollector on the http engine", () => {
 			["requestAction", "read"],
 			["requestResourceType", 'Document"; forbid(principal, action, resource);'],
 		]);
-		expect(await rule.decide(attrs, NEVER_ABORTS)).toBe(false);
+		expect(ruleAnswerPassed(await rule.decide(attrs, NEVER_ABORTS))).toBe(false);
 		expect(calls).toHaveLength(before);
 		expect(JSON.stringify((logger.error as ReturnType<typeof vi.fn>).mock.calls[0])).toMatch(
 			/not a Cedar entity type path/,
@@ -650,6 +657,51 @@ describe("CedarPolicyRuleCollector on the http engine", () => {
 		).rejects.toThrow(/cannot be used with the asynchronous "http" engine/);
 		// Nothing was pushed, and the agent is not held for the refused collector.
 		expect(calls).toHaveLength(0);
+		await expect(CedarPolicyRuleCollector.create(config)).resolves.toBeDefined();
+	});
+
+	it("reports what it pushed as loaded, never as evaluated — the agent does not say what it ran (#244)", async () => {
+		// cedar-agent answers `{ decision, diagnostics }` and nothing else, and a
+		// restarted agent comes back empty: the set pushed at boot is not proof
+		// of the set that answered.
+		let up = true;
+		const { doFetch } = agent(() => {
+			if (!up) throw new TypeError("fetch failed: ECONNREFUSED");
+			return json(200, ALLOW);
+		});
+		vi.stubGlobal("fetch", doFetch);
+		const collector = await CedarPolicyRuleCollector.create(
+			{ engine: "http", endpoint: "http://127.0.0.1:18205", policies: PERMIT_ALL },
+			{ logger: silentLogger() },
+		);
+		const [rule] = await collector.collect(context);
+		if (!isAsyncRule(rule)) throw new Error("expected an AsyncRule");
+		const attrs = new Map<string, unknown>([
+			["userId", "alice"],
+			["requestAction", "read"],
+			["requestResourceType", "Document"],
+		]);
+		const loadedRevision = inline(PERMIT_ALL).revision;
+		expect(await rule.decide(attrs, NEVER_ABORTS)).toEqual({
+			passed: true,
+			evaluation: { status: "completed", revision: null, loadedRevision },
+		});
+		up = false;
+		expect(await rule.decide(attrs, NEVER_ABORTS)).toEqual({
+			passed: false,
+			evaluation: { status: "failed", revision: null, loadedRevision },
+		});
+	});
+
+	it("refuses requireConfirmedRevision at boot, before anything is pushed (#244)", async () => {
+		const { doFetch, calls } = agent();
+		vi.stubGlobal("fetch", doFetch);
+		const config = { engine: "http", endpoint: "http://127.0.0.1:18206", policies: PERMIT_ALL };
+		await expect(
+			CedarPolicyRuleCollector.create({ ...config, requireConfirmedRevision: true }),
+		).rejects.toThrow(/requireConfirmedRevision = true cannot be used with the "http" engine/);
+		expect(calls).toHaveLength(0);
+		// …and the agent is not held for the refused collector.
 		await expect(CedarPolicyRuleCollector.create(config)).resolves.toBeDefined();
 	});
 
@@ -676,9 +728,9 @@ describe("CedarPolicyRuleCollector on the http engine", () => {
 			["requestAction", "read"],
 			["requestResourceType", "Document"],
 		]);
-		expect(await rule.decide(attrs, NEVER_ABORTS)).toBe(true);
+		expect(ruleAnswerPassed(await rule.decide(attrs, NEVER_ABORTS))).toBe(true);
 		up = false;
-		expect(await rule.decide(attrs, NEVER_ABORTS)).toBe(false);
+		expect(ruleAnswerPassed(await rule.decide(attrs, NEVER_ABORTS))).toBe(false);
 		expect(logger.error).toHaveBeenCalledOnce();
 		expect(JSON.stringify((logger.error as ReturnType<typeof vi.fn>).mock.calls[0])).toMatch(
 			/"engine":"http".*authorization call failed/,

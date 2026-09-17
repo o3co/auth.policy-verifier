@@ -131,7 +131,104 @@ export interface Rule {
 	ruleType: string;
 	code: string;
 	message: string;
-	verify(attrs: ReadonlyAttributes): boolean;
+	/** A boolean, or a `RuleVerdict` when the rule has an evaluation to report. */
+	verify(attrs: ReadonlyAttributes): RuleAnswer;
+}
+
+/**
+ * How one invocation of the policy evaluator behind a rule went (#244).
+ *
+ * A rule that fronts an evaluator — a Cedar policy set, an OPA bundle — denies
+ * for reasons that are not a policy's: the request could not be built, the
+ * engine did not answer, the evaluation raised errors. All of them are a
+ * failing rule, and have to be, because the rule fails closed; but an audit
+ * record that attributed each of them to the policy would name a policy that
+ * never ran. XACML keeps the same two things apart as `Decision` and `Status`.
+ *
+ * | status | the evaluator | the answer is |
+ * | --- | --- | --- |
+ * | `completed` | ran to an answer without errors | the policy's own — a permit, a forbid, or no policy determining the request |
+ * | `failed` | was invoked and did not produce a clean answer | the rule failing closed |
+ * | `not_invoked` | was never asked | the rule failing closed before it got that far |
+ */
+export type RuleEvaluationStatus = "completed" | "failed" | "not_invoked";
+
+/**
+ * What a rule reports about the evaluation behind one answer: its
+ * {@link RuleEvaluationStatus}, and which policy snapshot it concerned.
+ *
+ * `revision` is a claim about what was **evaluated**, so it is a string only
+ * when the evaluator vouches for it. `null` is the explicit unknown — the
+ * evaluator ran, and what it evaluated cannot be established, which is every
+ * answer of a remote engine that does not say. What the deployment *loaded*
+ * is then carried apart, as `loadedRevision`: worth recording, and not proof
+ * of what ran. The two never share a name, so a consumer reading `revision`
+ * cannot take a snapshot nobody confirmed for one that was evaluated.
+ *
+ * `not_invoked` has no revision key of either kind, by type and by the check
+ * in `evaluate()`: an evaluator that was never asked evaluated nothing.
+ *
+ * A reference is `scheme:encoded` — {@link POLICY_REVISION_PATTERN}, the OCI
+ * digest grammar — so `sha256:<64 hex>` for a content digest, and an engine
+ * whose versions are not digests names its own scheme. What the reference
+ * covers is its producer's to document: for `packages/cedar`, the policy files
+ * and nothing else. It is never a promise of replay — attributes, mapping and
+ * evaluator version decide an answer too.
+ */
+export type RuleEvaluation =
+	| { readonly status: "not_invoked" }
+	| { readonly status: "completed" | "failed"; readonly revision: string }
+	| {
+			readonly status: "completed" | "failed";
+			readonly revision: null;
+			readonly loadedRevision?: string;
+	  };
+
+/**
+ * The shape a policy revision reference is held to: `scheme:encoded`, the OCI
+ * image-spec digest grammar. Enforced by `evaluate()` on everything a rule
+ * reports, because what a rule returns reaches the wire and the audit log — a
+ * path, a label with spaces or policy text does not fit it.
+ */
+export const POLICY_REVISION_PATTERN = /^[a-z0-9]+(?:[+._-][a-z0-9]+)*:[A-Za-z0-9=_-]+$/;
+
+/** Longest reference carried. `sha512:` and its 128 hex characters is 135. */
+export const POLICY_REVISION_MAX_LENGTH = 256;
+
+/**
+ * A rule's answer with an account of the evaluation behind it (#244).
+ *
+ * It is the return value, and not a field on the rule or a callback, because
+ * it is a fact about one invocation: the same rule object answers concurrent
+ * decisions, and anything it kept between them would be one decision's
+ * evaluation on another's record. Being part of the answer, it falls under the
+ * purity contract with the rest of it — equal attributes, equal verdict.
+ *
+ * `evaluate()` copies `evaluation` onto this invocation's {@link RuleOutcome}
+ * after checking it, and refuses a verdict it cannot read with a `TypeError`
+ * attributed to the rule.
+ */
+export interface RuleVerdict {
+	readonly passed: boolean;
+	readonly evaluation?: RuleEvaluation;
+}
+
+/**
+ * What `verify` / `decide` may answer. A rule with nothing to report keeps
+ * answering a boolean.
+ *
+ * Read it with {@link ruleAnswerPassed}, never by truthiness: a failing
+ * verdict is an object, and an object is truthy.
+ */
+export type RuleAnswer = boolean | RuleVerdict;
+
+/**
+ * Whether an answer is a pass — for code that asks a rule directly (a test, a
+ * conformance suite) instead of through `evaluate()`. Strict on purpose: only
+ * `true` and a verdict whose `passed` is `true` are a pass.
+ */
+export function ruleAnswerPassed(answer: RuleAnswer): boolean {
+	return typeof answer === "object" && answer !== null ? answer.passed === true : answer === true;
 }
 
 /**
@@ -161,7 +258,8 @@ export interface AsyncRule {
 	 * method must not be sent down the asynchronous path (v0.10.0 audit).
 	 */
 	readonly async: true;
-	decide(attrs: ReadonlyAttributes, signal: AbortSignal): Promise<boolean>;
+	/** A boolean, or a `RuleVerdict` when the rule has an evaluation to report. */
+	decide(attrs: ReadonlyAttributes, signal: AbortSignal): Promise<RuleAnswer>;
 }
 
 /** Either kind of rule. A collector may return both in one list. */
@@ -185,6 +283,13 @@ export interface RuleOutcome {
 	code: string;
 	message: string;
 	passed: boolean;
+	/**
+	 * What the rule reported about the evaluation behind this answer (#244) —
+	 * checked and frozen by `evaluate()`. Absent when the rule reported none,
+	 * which is every rule that has no policy source to identify: what decides
+	 * for a TypeScript rule is the deployed code and its config.
+	 */
+	evaluation?: RuleEvaluation;
 }
 
 /**

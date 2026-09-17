@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isDeepStrictEqual } from "node:util";
 import {
 	type AnyRule,
 	type Attributes,
@@ -8,6 +9,8 @@ import {
 	type CollectorRequest,
 	isAsyncRule,
 	type ReadonlyAttributes,
+	type RuleAnswer,
+	ruleAnswerPassed,
 } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 
@@ -189,17 +192,31 @@ function isRevokedProxyError(error: unknown): boolean {
  * through `decide` with a signal that never aborts — this suite checks what a
  * rule answers, not what it does when cancelled — and is held to the same
  * property as `verify`: the answer must come from `attrs` alone.
+ *
+ * The answer is kept whole (#244). A rule may answer a `RuleVerdict`, and the
+ * `evaluation` on it is as much part of the answer as `passed` is: a rule that
+ * reported whichever policy revision it saw last would pass a pass/fail
+ * comparison while reading state the engine cannot see.
  */
-async function ask(rule: AnyRule, attrs: ReadonlyAttributes): Promise<boolean> {
+async function ask(rule: AnyRule, attrs: ReadonlyAttributes): Promise<RuleAnswer> {
 	return isAsyncRule(rule) ? rule.decide(attrs, new AbortController().signal) : rule.verify(attrs);
 }
 
 /** {@link ask} for a whole list, in order. */
-async function askAll(rules: AnyRule[], attrs: ReadonlyAttributes): Promise<boolean[]> {
-	const answers: boolean[] = [];
+async function askAll(rules: AnyRule[], attrs: ReadonlyAttributes): Promise<RuleAnswer[]> {
+	const answers: RuleAnswer[] = [];
 	for (const rule of rules) answers.push(await ask(rule, attrs));
 	return answers;
 }
+
+/**
+ * Whether two answers say the same thing. By value: a verdict is a fresh
+ * object on every call, and it is what it says that has to hold still.
+ */
+const sameAnswer = (one: RuleAnswer, other: RuleAnswer): boolean => isDeepStrictEqual(one, other);
+
+/** An answer as an assertion message prints it. */
+const printed = (answer: RuleAnswer): string => JSON.stringify(answer);
 
 /** Names a rule in an assertion message the way a reader would look for it. */
 function describeRule(rule: AnyRule, index: number): string {
@@ -249,17 +266,17 @@ export async function assertRuleIndependentOfContext(
 	// moves on its own is not a function of `attrs` at all.
 	const repeated = await askAll(rules, attrs);
 	for (const [index, answer] of repeated.entries()) {
-		if (answer !== withContext[index]) {
+		if (!sameAnswer(answer, withContext[index])) {
 			throw new Error(
 				`${describeRule(rules[index], index)} is not a deterministic function of its attributes: ` +
-					`it answered ${String(withContext[index])} and then ${String(answer)} for the same map.`,
+					`it answered ${printed(withContext[index])} and then ${printed(answer)} for the same map.`,
 			);
 		}
 	}
 
 	revoke();
 
-	const withoutContext: boolean[] = [];
+	const withoutContext: RuleAnswer[] = [];
 	for (const [index, rule] of rules.entries()) {
 		try {
 			withoutContext.push(await ask(rule, attrs));
@@ -277,15 +294,16 @@ export async function assertRuleIndependentOfContext(
 	}
 
 	for (const [index, answer] of withoutContext.entries()) {
-		if (answer !== withContext[index]) {
+		if (!sameAnswer(answer, withContext[index])) {
 			throw new Error(
 				`${describeRule(rules[index], index)} changed its answer once the request was gone: ` +
-					`${String(withContext[index])} with the context, ${String(answer)} without it.`,
+					`${printed(withContext[index])} with the context, ${printed(answer)} without it.`,
 			);
 		}
 	}
 
-	return withoutContext;
+	// Pass / fail is what a caller asserts on; the whole answer is what was compared.
+	return withoutContext.map(ruleAnswerPassed);
 }
 
 /**

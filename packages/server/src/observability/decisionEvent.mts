@@ -14,7 +14,7 @@
  * and once for what must never leave the process. See {@link decisionEvent}.
  */
 
-import type { Decision, RuleGroupOutcome } from "@o3co/auth.policy-verifier.core";
+import type { Decision, RuleEvaluation, RuleGroupOutcome } from "@o3co/auth.policy-verifier.core";
 
 /**
  * Event name of the audit line. Alert and index on this, not on message text.
@@ -37,6 +37,38 @@ export interface DenyingGroup {
 	ruleType: string;
 	/** `code` of every rule in the group, in evaluation order — all of them refused. */
 	refused: string[];
+}
+
+/**
+ * What one rule reported about the evaluation behind its answer (#244), named
+ * the way this line names a rule. The evaluation's own fields are spread in
+ * beside the name, so the line stays flat and greppable: `status`, and then
+ * `revision` — with `loadedRevision` when it is `null` — unless the evaluator
+ * was never invoked, in which case there is no revision key of either kind.
+ */
+export type ReportedEvaluation = NamedRule & RuleEvaluation;
+
+/**
+ * Every evaluation the decision's rules reported, in evaluation order.
+ *
+ * All of them, not only the deciding rule's: a decision that ran two policy
+ * sources was decided under both revisions, and the revision of a group that
+ * passed is as much part of "what configuration produced this" as the one
+ * that refused. A rule that reported nothing is not listed — it has no policy
+ * source to name, and an entry for it would have to invent one.
+ *
+ * Exactly what the response carries under `verify.evaluationInResponse =
+ * "include"`, from the same `Decision`: the two are projections of one value,
+ * which is what makes the audit record and the caller's copy agree.
+ */
+function reportedEvaluations(decision: Decision): ReportedEvaluation[] {
+	return decision.reason.groups.flatMap((group) =>
+		group.evaluated.flatMap((outcome) =>
+			outcome.evaluation !== undefined
+				? [{ ruleType: group.ruleType, code: outcome.code, ...outcome.evaluation }]
+				: [],
+		),
+	);
 }
 
 /** Everything the router knows about one decision at the moment it emits the line. */
@@ -98,7 +130,11 @@ function satisfyingRule(group: RuleGroupOutcome): NamedRule | undefined {
  * **Carried:** subject (`sub`), resource, action, the decision, the deny
  * `code`, the deciding rule, the request id, and how long the decision took.
  * That is the set an operator needs to answer "why was this denied" and to
- * join the answer to the caller's own trace.
+ * join the answer to the caller's own trace. And, when any rule reported one,
+ * `evaluations` (#244): which policy revision each policy-backed rule
+ * evaluated, and whether it evaluated at all — see {@link reportedEvaluations}.
+ * A revision is a bounded `scheme:encoded` reference by the time it is on a
+ * `Decision` (core checks it), never a path and never policy text.
  *
  * **Deliberately absent**, because this line is written on every request —
  * including the ones that succeed — and shipped somewhere with a different
@@ -139,6 +175,12 @@ export function decisionEvent({
 		// milliseconds would round most of them to 0 and lose the tail entirely.
 		durationMs: Math.round(durationMs * 1000) / 1000,
 	};
+
+	// #244: absent rather than empty when no rule reported one, so a deployment
+	// with no policy-backed rule writes the line it always wrote. A decision the
+	// router built itself — a timeout, a conflict — has no groups and so none.
+	const evaluations = reportedEvaluations(decision);
+	if (evaluations.length > 0) event.evaluations = evaluations;
 
 	if (decision.decision === "allow") {
 		// Every group passed — AND across groups is what an allow means — so each

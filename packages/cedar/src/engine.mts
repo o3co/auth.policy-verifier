@@ -26,6 +26,24 @@ export interface CedarDecision {
 	 * agent's own string, or the JSON of a structured error.
 	 */
 	errors: readonly string[];
+	/**
+	 * The revision of the policy set this answer was evaluated against, when
+	 * the engine can vouch for it (#244) — the confirmation contract of the
+	 * port. It is per answer, not per load, because that is the only moment the
+	 * claim is true: a remote engine's set can be replaced or lost after `load`
+	 * returned.
+	 *
+	 * An engine names `PolicySource.revision` here only if the answer provably
+	 * came from the set compiled from that source. In-process that holds by
+	 * construction. Over a network it holds when the evaluator itself reports
+	 * what it evaluated — cedar-agent 0.2.x does not, so the http engine leaves
+	 * this absent, and the collector reports the revision as not established
+	 * rather than assuming the set it pushed at boot is still the one answering.
+	 *
+	 * Naming anything other than the loaded revision is an answer from a policy
+	 * set this verifier did not load; the collector fails it closed.
+	 */
+	revision?: string;
 }
 
 /** A compiled policy set that answers in-process, synchronously. */
@@ -93,6 +111,15 @@ export interface CedarEngine {
 	 * agree (`LoadedCedarPolicySet.async`), or the collector refuses it.
 	 */
 	readonly async: boolean;
+	/**
+	 * Whether every answer of this engine's policy sets names the revision it
+	 * was evaluated against ({@link CedarDecision.revision}, #244). Declared up
+	 * front for the reason `async` is: `requireConfirmedRevision` is refused at
+	 * boot over an engine that does not, instead of denying every request once
+	 * it is serving. Absent means `false`. The collector still checks each
+	 * answer, so a declaration that turns out wrong denies rather than lies.
+	 */
+	readonly confirmsRevision?: boolean;
 	/**
 	 * Boot: parse-checks and compiles the policy set — or hands it to the
 	 * process that will, which is why the result may be a promise. `source.files`

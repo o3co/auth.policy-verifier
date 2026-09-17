@@ -22,7 +22,20 @@
 		"the request carried is echoed on every response the two endpoints write when it is",
 		"at most `maxLength` characters matching `pattern`; any other value is treated as if",
 		"none was sent, and none is ever minted. The gate above answers before this surface",
-		"and does not echo it."
+		"and does not echo it.",
+		"`evaluation` (#244) is the one OPTIONAL key of a rule outcome: what a policy-backed",
+		"rule reported about the evaluation behind that answer — whether its evaluator ran,",
+		"and which policy revision it concerned. A deployment sends it only under",
+		"`verify.evaluationInResponse = \"include\"`, and only for a rule that reported one, so",
+		"ABSENCE IS THE MIXED-VERSION CASE AND MEANS UNKNOWN: an older verifier, a deployment",
+		"that did not opt in and a rule with no policy source all answer without it, and a",
+		"client that requires a revision must treat all three alike. `revision` is a claim",
+		"about what was EVALUATED: a string only when the evaluator vouched for it, `null` when",
+		"it ran and what it evaluated cannot be established (a remote engine that does not",
+		"say). What the verifier LOADED is then carried apart as `loadedRevision`, which is not",
+		"proof of what ran. `not_invoked` carries no revision key of either kind. A deny the",
+		"router made itself (`collector_timeout`, `rule_timeout`, `attribute_conflict`,",
+		"`no_applicable_rule`) has no groups and therefore no evaluation: no policy decided it."
 	],
 	"error": {
 		"keys": ["decision", "code", "message"],
@@ -43,7 +56,24 @@
 		"onlyOnAPassingGroup": ["satisfiedBy"]
 	},
 	"ruleOutcome": {
-		"keys": ["code", "message", "passed"]
+		"required": ["code", "message", "passed"],
+		"optional": ["evaluation"]
+	},
+	"evaluation": {
+		"statuses": ["completed", "failed", "not_invoked"],
+		"notInvoked": {
+			"keys": ["status"]
+		},
+		"evaluated": {
+			"statuses": ["completed", "failed"],
+			"required": ["status", "revision"],
+			"onlyWhenRevisionIsNull": ["loadedRevision"]
+		},
+		"revision": {
+			"pattern": "^[a-z0-9]+(?:[+._-][a-z0-9]+)*:[A-Za-z0-9=_-]+$",
+			"maxLength": 256,
+			"about": "scheme:encoded, the OCI digest grammar — `sha256:<64 lowercase hex>` for a content digest. Never a path, a label with spaces or policy text; `revision` may instead be null, `loadedRevision` may not."
+		}
 	},
 	"status": {
 		"allow": 200,

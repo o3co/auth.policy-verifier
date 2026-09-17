@@ -355,6 +355,12 @@ verify {
 
   batchConcurrency     = 8      # バッチのうち同時に決定する entry 数 (#183)
   batchConcurrency     = ${?VERIFY_BATCH_CONCURRENCY}
+
+  # 決定の RESPONSE に、policy を背後に持つ各 Rule の evaluation（status と、評価した
+  # policy revision）を載せるかどうか (#244)。`decision` ログイベントには常に載る。
+  # 下記「どの policy revision が決めたかを記録する」を参照。
+  evaluationInResponse = "omit" # または "include"
+  evaluationInResponse = ${?VERIFY_EVALUATION_IN_RESPONSE}
 }
 ```
 
@@ -527,6 +533,8 @@ oauth.jwt {
 
 allow のときは `deniedBy` の代わりに `satisfiedBy` が入り、各グループを満たしたルールを示します。N 件の `POST /verify/batch` は同一 `requestId` を持つ N 行を出力します。`durationMs` はパイプラインと evaluator に費やした時間であり、HTTP の往復時間ではありません。
 
+Rule が answer の背後にある evaluation を報告する場合（#244。`packages/cedar` は報告します）、この行には `evaluations` も入ります。報告した Rule ごとに 1 件、評価順です: `{"ruleType":"cedar","code":"cedar_deny","status":"completed","revision":"sha256:9f2c…"}`。[どの policy revision が決めたかを記録する](#どの-policy-revision-が決めたかを記録する) を参照してください。policy を背後に持つ Rule が無いデプロイでは、行はこれまでと同じです。
+
 スイッチは `logging.level`（`LOG_LEVEL`）です — この行は `info` なので `warn` にすればストリームごと止まり、2 つ目のフラグはありません。deny は decision point にとって障害ではなく正常な結果なので `warn` には送っていません。送れば任意の呼び出し元が warn レベルのノイズを製造できてしまいます。アラートはメトリクスに、「なぜ」はログに求めてください。
 
 **決してログに載らないもの:** 生の bearer トークン、`sub` を超えるクレーム集合、そして呼び出し元の `context` オブジェクト — 自由形式で collector にそのまま渡されるため、呼び出し側サービスのリクエストペイロードが行き着く場所そのものです。
@@ -551,6 +559,31 @@ allow のときは `deniedBy` の代わりに `satisfiedBy` が入り、各グ�
 router がこれらの行に加えるものは、資格情報・クレーム・`context` のいずれも含みません。category は列挙値です。collector はその decision についてコレクターのランナーが記録したもので、エラーから読んだ名前ではありません — 自分で作った `CollectorTimeoutError` を throw してもコレクターは名前を付け替えられません — 何も記録されていないタイムアウトは `collector: "unattributed"` です。ルールの `ruleType` と `code` はルールコレクターがリクエストごとに組み立てうるため、識別子の形（英字で始まり、英数字・`_`・`.`・`-` が続く 64 文字以内）の場合だけ載り、それ以外は `redacted` になります。リクエスト ID は下記のとおり検証済みです。`err` は throw されたエラーそのものですが、例外が 1 つあります: core が定義する 3 つの deny エラー（`CollectorTimeoutError`、`RuleTimeoutError`、`AttributeConflictError`）はメッセージと自身のフィールドにコレクター・ルール・属性キーを含むため、分類されたコレクターやルール、同じ識別子の形に制限した属性キー、ヘッダ行だけの stack で組み立て直したものを記録します。それ以外のエラーのメッセージは、その作者の責任です。
 
 **リクエストの相関.** 呼び出し元が送った `x-request-id` は、decision エンドポイントが返すすべての応答 — allow、deny、拒否、`500` — にレスポンスヘッダとしてそのまま返され、上記すべての行と `decision` 行に `requestId` として載ります。これで deny を enforcement 側サービス自身のログと突き合わせられます。載せるのは `A-Z a-z 0-9 - _ . : + / = #` からなる 1〜128 文字の場合だけです（UUID、ULID、16 進や W3C のトレース ID、base64、protobuf.interceptors 自身の ID はすべて収まります）。それ以外の値は送られなかったものとして扱い — 返さず、ログに出さず、コレクターにも渡しません — 呼び出し元が送らなかった場合にサーバー側で ID を採番することもありません。
+
+### どの policy revision が決めたかを記録する
+
+policy の更新後や rolling deployment の最中は、決定の結果と rule code だけでは、どの policy の *内容* がそれを生んだのかが分かりません。Cedar の policy は本文が変わっても id を保つからです。そこで policy evaluator を背後に持つ Rule は、answer ごとにその背後の evaluation を報告します（#244）:
+
+```json
+"evaluated": [{ "code": "cedar_deny", "message": "Denied by Cedar policy", "passed": false,
+                "evaluation": { "status": "completed", "revision": "sha256:9f2c…" } }]
+```
+
+| `evaluation` | 意味 |
+| --- | --- |
+| `{ "status": "completed", "revision": "sha256:…" }` | evaluator がその revision に対して答え（permit、forbid、または該当 policy なし）に到達し、それを保証している |
+| `{ "status": "failed", … }` | evaluator を呼んだが、きれいな答えが得られなかった（呼び出しの失敗、または Cedar の evaluation error）。Rule は fail-closed で失敗した。**この deny を生んだ policy は無い** |
+| `{ "status": "not_invoked" }` | evaluator に問う前に Rule が失敗した（request を組み立てられなかった）。revision 系のキーはどちらも無い。何も評価されていない |
+| `"revision": null` と `"loadedRevision": "sha256:…"` | evaluator は走ったが、何を評価したかを確定できない。out-of-process の `http` engine の answer はすべてこれ（cedar-agent は自分が何を保持しているかを言わない）。`loadedRevision` はこの verifier が boot 時に load したもの。記録する価値はあるが、**何が走ったかの証明ではない** |
+| 無い | Rule は何も報告していない。TypeScript の Rule には名指すべき policy source が無く、決めたのはデプロイされた版とその config。古い verifier や opt-in していない verifier の答えもこれ。**無い = 不明** |
+
+参照は報告した Rule の outcome に載るので、2 つの policy source の下で下された決定は 2 つの revision を持ち、1 つが両方を代表することはありません。batch では entry ごとに自分のものを持ちます。batch は snapshot を固定しませんし、policy set が boot 時に 1 回だけ load される間は固定する必要もありません。各 replica は *自分が* 評価した snapshot を報告するので、rolling deployment 中に同じ request への 2 つの答えを見分けられます。router 自身が作った deny（`collector_timeout`、`rule_timeout`、`attribute_conflict`、`no_applicable_rule`）は group を持たないので evaluation も無く、評価前に拒否された request（`400`、`401`）はそもそも決定ではありません。どちらも「policy が決めた」と記録されることはありません。
+
+**どこに出るか。** `decision` イベントには常に `evaluations` として載ります。response に載るのは `verify.evaluationInResponse = "include"` のときだけです（既定は `"omit"` で、その場合 response はキー単位でこれまでと同一）。XACML の `ReturnPolicyIdList` や OPA の `?provenance=true` と違って opt-in が呼び出し側ではなくデプロイ側にあるのは、これが「policy set がいつ変わったか」「deny が policy によるものか engine の失敗か」を、受理される token の保持者全員に伝えるからです。それが問題になる環境では [`http.callerAuth`](#設定) と併用してください。
+
+**アプリケーションが保存するもの。** 許可または拒否した操作ごとに、`decision`、deny の `code`、`reason`（各 `evaluation` を含む）、そして自分が送った `x-request-id`。PDP の `decision` イベントは同じ `requestId` と同じ `evaluations` を持つので、2 つの記録は id で結合できます。batch では id に加えて entry の `resource` と `action` で結合します。revision を *必須* とする client は、satisfy した outcome に文字列の `revision` が無い allow を「未確定」として扱い、どうするかを自分で決めます。PDP 側では、Cedar collector の `requireConfirmedRevision = true` がそのような answer を出ていく前に deny に変えます（決して満たせない engine は boot で拒否します）。
+
+**revision が約束しないこと。** revision が識別するのは policy の内容です。`packages/cedar` では `*.cedar` ファイルの名前と本文（[アルゴリズム](packages/cedar/README.md#policy-revision-which-policies-decided)）。attribute の mapping、`onNoDeterminingPolicy`、evaluator の版、決定に使われた attributes も答えを左右しますが、どれも revision には含まれません。決定を再現するにはそれらも必要です。revision が教えるのは「どの policy に対して再現すべきか」であって、「再現すれば一致する」ことではありません。
 
 ### メトリクス
 

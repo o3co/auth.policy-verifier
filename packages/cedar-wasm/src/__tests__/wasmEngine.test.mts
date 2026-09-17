@@ -4,6 +4,7 @@
 import {
 	CedarEngineError,
 	type CedarRequest,
+	computePolicyRevision,
 	type PolicySource,
 	type SyncCedarPolicySet,
 } from "@o3co/auth.policy-verifier.cedar";
@@ -11,7 +12,8 @@ import { describe, expect, it } from "vitest";
 import { cedarWasmEngine } from "../wasmEngine.mjs";
 
 function inline(text: string): PolicySource {
-	return { files: [{ source: "policies (inline)", text }], text, description: "inline policies" };
+	const files = [{ name: "policies", source: "policies (inline)", text }];
+	return { files, text, description: "inline policies", revision: computePolicyRevision(files) };
 }
 
 /** Loads inline text; the engine's type already says the set is synchronous. */
@@ -42,13 +44,19 @@ describe("cedarWasmEngine — load", () => {
 	});
 
 	it("names the offending file on a parse error, not the concatenation", () => {
+		const files = [
+			{
+				name: "ok.cedar",
+				source: "/policies/ok.cedar",
+				text: "permit(principal, action, resource);\n",
+			},
+			{ name: "broken.cedar", source: "/policies/broken.cedar", text: "permit(when;\n" },
+		];
 		const source: PolicySource = {
-			files: [
-				{ source: "/policies/ok.cedar", text: "permit(principal, action, resource);\n" },
-				{ source: "/policies/broken.cedar", text: "permit(when;\n" },
-			],
+			files,
 			text: "permit(principal, action, resource);\n\npermit(when;\n",
 			description: "/policies",
+			revision: computePolicyRevision(files),
 		};
 		expect(() => cedarWasmEngine.load(source)).toThrow(CedarEngineError);
 		expect(() => cedarWasmEngine.load(source)).toThrow(/broken\.cedar failed to parse/);
@@ -60,7 +68,12 @@ describe("cedarWasmEngine — load", () => {
 
 	it("loads the empty policy set — migration step one", () => {
 		const loaded = load("");
-		expect(loaded.isAuthorized(request())).toEqual({ decision: "deny", reason: [], errors: [] });
+		expect(loaded.isAuthorized(request())).toEqual({
+			decision: "deny",
+			reason: [],
+			errors: [],
+			revision: inline("").revision,
+		});
 	});
 });
 
@@ -92,7 +105,7 @@ describe("cedarWasmEngine — isAuthorized answers Cedar's own response", () => 
 				entities: [{ uid: principal, attrs: { dept: "sales" }, parents: [] }],
 			}),
 		);
-		expect(answer).toEqual({ decision: "deny", reason: [], errors: [] });
+		expect(answer).toMatchObject({ decision: "deny", reason: [], errors: [] });
 	});
 
 	it("reports evaluation errors naming the policy — the missing-attribute case", () => {
@@ -138,5 +151,47 @@ describe("cedarWasmEngine — isAuthorized answers Cedar's own response", () => 
 		expect(permits.isAuthorized(request()).decision).toBe("allow");
 		expect(forbids.isAuthorized(request()).decision).toBe("deny");
 		expect(permits.isAuthorized(request()).decision).toBe("allow");
+	});
+});
+
+/*
+ * #244: the confirmation contract, from the engine that can honour it. The set
+ * is compiled in this process, under an id nothing else holds, from the source
+ * `load` was handed — so an answer can only have come from that source, and
+ * the engine says so on every one of them.
+ */
+describe("cedarWasmEngine — vouches for the revision it evaluated", () => {
+	it("declares it, so requireConfirmedRevision boots over this engine", () => {
+		expect(cedarWasmEngine.confirmsRevision).toBe(true);
+	});
+
+	it("names the loaded source's revision on an allow, a deny and an erroring answer alike", () => {
+		const permit = inline("permit(principal, action, resource);");
+		expect(cedarWasmEngine.load(permit).isAuthorized(request())).toMatchObject({
+			decision: "allow",
+			revision: permit.revision,
+		});
+
+		const forbid = inline("forbid(principal, action, resource);");
+		expect(cedarWasmEngine.load(forbid).isAuthorized(request())).toMatchObject({
+			decision: "deny",
+			revision: forbid.revision,
+		});
+
+		const erroring = inline(
+			`permit(principal, action, resource) when { principal.dept == "eng" };`,
+		);
+		const answer = cedarWasmEngine.load(erroring).isAuthorized(request());
+		expect(answer.errors).toHaveLength(1);
+		expect(answer.revision).toBe(erroring.revision);
+	});
+
+	it("keeps concurrently loaded sets apart — each answers with its own revision", () => {
+		const one = inline("permit(principal, action, resource);");
+		const other = inline("forbid(principal, action, resource);");
+		const loadedOne = cedarWasmEngine.load(one);
+		const loadedOther = cedarWasmEngine.load(other);
+		expect(loadedOther.isAuthorized(request()).revision).toBe(other.revision);
+		expect(loadedOne.isAuthorized(request()).revision).toBe(one.revision);
 	});
 });

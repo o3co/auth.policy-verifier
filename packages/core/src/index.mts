@@ -73,11 +73,20 @@ export type {
 	ResourceParser,
 	Role,
 	Rule,
+	RuleAnswer,
 	RuleCollector,
+	RuleEvaluation,
+	RuleEvaluationStatus,
 	RuleGroupOutcome,
 	RuleOutcome,
+	RuleVerdict,
 	SubjectAttributes,
 } from "./types.mjs";
-export { isAsyncRule } from "./types.mjs";
+export {
+	isAsyncRule,
+	POLICY_REVISION_MAX_LENGTH,
+	POLICY_REVISION_PATTERN,
+	ruleAnswerPassed,
+} from "./types.mjs";
 export type { UntrustedRequestContext } from "./untrusted.mjs";
 export { markUntrustedRequestContext, readUntrustedRequestContext } from "./untrusted.mjs";

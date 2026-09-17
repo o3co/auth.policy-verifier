@@ -32,11 +32,11 @@ interface Rule {
   ruleType: string;
   code: string;
   message: string;
-  verify(attrs: ReadonlyAttributes): boolean;
+  verify(attrs: ReadonlyAttributes): RuleAnswer; // boolean | RuleVerdict
 }
 ```
 
-- `verify(attrs)` is the predicate. Return `true` to pass, `false` to fail. **Safe-deny convention:** missing, wrong-type, or malformed attributes must return `false`, not throw. Throwing turns a policy failure into an error response and leaks evaluation state.
+- `verify(attrs)` is the predicate. Return `true` to pass, `false` to fail. (A rule that fronts a policy evaluator may return a `RuleVerdict` instead — see [Reporting the evaluation behind an answer](#reporting-the-evaluation-behind-an-answer). A rule with nothing to report keeps returning a boolean.) **Safe-deny convention:** missing, wrong-type, or malformed attributes must return `false`, not throw. Throwing turns a policy failure into an error response and leaks evaluation state.
 - `attrs` is a `ReadonlyAttributes` (`ReadonlyMap<string, unknown>`), not the `Attributes` a collector returns. The evaluator hands the same live map to every rule in every group, so a rule that wrote into it would change what every later group is judged against — the read-only view makes that a compile error instead of a debugging session. Collectors still build and return a mutable `Map`.
 - `ruleType` is used by the evaluator to group rules. Rules sharing a `ruleType` are OR-combined (any one passing satisfies the group). Rules with different `ruleType`s are AND-combined across groups (all groups must be satisfied). **Default `ruleType`s must encode enough of the rule's configuration to avoid silent collisions.** For example, `AttrLiteralEqual` uses `attr_literal_equal:${a}:${typeof v}:${String(v)}` — the `typeof v` segment prevents `v=true` and `v="true"` from collapsing into the same `ruleType` and being OR-combined against intent.
 - `code` is a short, stable identifier (e.g. `"no_permission"`, `"attr_not_equal"`) suitable for downstream programmatic handling. **Keep the set of codes a rule can produce small and fixed.** `code` becomes the `code` label on the `auth_denials_total` metric and the `deniedBy` field of the decision log line, so a code derived per request — folding in the resource id, say — is an unbounded metric label, which is how a metrics endpoint takes down the monitoring meant to watch it. The server caps the label at 32 distinct values and collapses the rest into `code="other"`, so the failure mode is a useless metric rather than a dead Prometheus; put the varying part in `message`, which is never a label.
@@ -205,7 +205,7 @@ interface AsyncRule {
   code: string;
   message: string;
   readonly async: true; // the discriminant — isAsyncRule reads this, not the presence of decide
-  decide(attrs: ReadonlyAttributes, signal: AbortSignal): Promise<boolean>;
+  decide(attrs: ReadonlyAttributes, signal: AbortSignal): Promise<RuleAnswer>; // boolean | RuleVerdict
 }
 ```
 
@@ -215,6 +215,34 @@ A rule collector may return either kind, or both, in one list; `evaluate()` grou
 - **Pass `signal` to `fetch`.** It aborts when the rule's budget or the caller ends — under the server, the caller ending is the HTTP client closing the connection. The budget is `EvaluateOptions.ruleTimeoutMs` (default 2000 ms), or what is left of `EvaluateOptions.evaluateDeadlineMs` (default 5000 ms, all asynchronous rules of the decision together) if that is shorter — the server reads both from `verify.ruleTimeoutMs` / `verify.evaluateDeadlineMs` and hands them to `evaluate()`; a library consumer passes them directly. A rule that ignores it is still bounded — the evaluator races it — but keeps a socket open for an answer nobody will read.
 - **Own your engine's outage.** A rule that rejects is reporting a fault, and the request answers 500. If the engine being unreachable should be a deny — it usually should — catch, log, and return `false`. A rule that overruns its budget is a deny of its own (`rule_timeout`), never a pass.
 - **Asked one at a time.** Alternatives within a `ruleType` group run in order and stop at the first pass, so an expensive async rule placed after a cheap synchronous one in the same group is only consulted when the cheap one refused.
+
+## Reporting the evaluation behind an answer
+
+A rule that fronts a policy evaluator — a Cedar policy set, an OPA bundle, an OpenFGA model — fails for reasons that are not a policy's: the request could not be built, the engine did not answer, the evaluation raised errors. Each of those has to be a failing rule, because the rule fails closed. But to the evaluator they are all the same `code`, and an audit record that attributed every one of them to the policy set would name policies that did not decide, or never ran (#244). XACML keeps the same two things apart as `Decision` and `Status`.
+
+So `verify` / `decide` may answer a `RuleVerdict` instead of a boolean:
+
+```ts
+interface RuleVerdict {
+  readonly passed: boolean;
+  readonly evaluation?: RuleEvaluation;
+}
+
+type RuleEvaluation =
+  | { status: "not_invoked" }                                   // the evaluator was never asked
+  | { status: "completed" | "failed"; revision: string }        // it ran, and vouches for what it evaluated
+  | { status: "completed" | "failed"; revision: null; loadedRevision?: string }; // it ran; what it evaluated is not established
+```
+
+`evaluate()` checks the verdict, freezes a copy of `evaluation` and puts it on that invocation's `RuleOutcome`. From there it reaches the `decision` event always, and the response under `verify.evaluationInResponse = "include"`.
+
+- **It is the return value because it is a fact about one invocation.** One rule object answers concurrent decisions. Anything kept on the rule between them — a "last evaluation" field, a callback into shared state — is one decision's evaluation on another's record. Being part of the answer, it is under the purity contract with the rest of it: equal attributes, equal verdict. `describeRulePurityConformance` compares whole answers, so a rule that reported whichever revision it saw last fails it.
+- **`completed` means the evaluator ran to an answer**, whatever the answer was — a permit, a forbid, or no policy applying. **`failed`** means it was invoked and did not produce a clean answer. **`not_invoked`** means the rule failed before asking, and takes no revision key of either kind: an evaluator that was never asked evaluated nothing.
+- **`revision` is a claim about what was evaluated**, so it is a string only when the evaluator vouches for it. When it cannot — a remote engine that does not say what it ran — answer `revision: null` and, if you know it, what you *loaded* as `loadedRevision`. The two never share a name, so a consumer reading `revision` cannot take a snapshot nobody confirmed for one that was evaluated. Do not manufacture a revision from a URL, a deployment label or a modification time.
+- **A reference is `scheme:encoded`** — the OCI digest grammar, at most 256 characters: `sha256:<64 lowercase hex>` for a content digest, your own scheme for an engine whose versions are not digests (`POLICY_REVISION_PATTERN`). Core enforces it, because what a rule returns ends up on the wire and in the audit log. A verdict that does not read — a path, policy text, an unknown status, an extra key — is a `TypeError` attributed to the rule, and the request answers `500`. It is refused rather than trimmed: a wrong audit record that looks complete is worse than a loud fault.
+- **Read an answer with `ruleAnswerPassed(answer)`, never by truthiness.** A failing verdict is an object, and an object is truthy. Only code that asks a rule directly — a test — meets this; `evaluate()` reads it for you.
+
+`packages/cedar` is the worked example: `CedarPolicyRuleCollector` reports each row of its answer table, the revision is a digest of the loaded policy files, and the `CedarEngine` port says per answer whether the engine vouches for it.
 
 ## RuleCollector: when to write one
 

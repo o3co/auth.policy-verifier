@@ -1223,6 +1223,7 @@ describe("AppConfigSchema — the verify block's default names every knob", () =
 			collectorConcurrency: DEFAULT_COLLECTOR_CONCURRENCY,
 			batchConcurrency: DEFAULT_BATCH_CONCURRENCY,
 			credentialToCollectors: "never",
+			evaluationInResponse: "omit",
 		});
 	});
 

@@ -50,6 +50,7 @@ OAUTH_JWT_SECRET=$(openssl rand -hex 32) \
 | `RULE_ON_EMPTY_RULE_SET` | `deny` | ルールが 1 つも集まらなかったときの決定（`deny` \| `allow`） |
 | `VERIFY_MAX_BATCH_SIZE` | `50` | `POST /verify/batch` の件数上限 |
 | `VERIFY_CREDENTIAL_TO_COLLECTORS` | `never` | `expose` は生の資格情報を `context.credential` として collector に渡す — subject として下流 API を呼ぶ collector のためだけの設定。既定では collector は検証済みクレームだけを扱う。資格情報はリプレイ可能であり、context がログに出ればそれが漏れる |
+| `VERIFY_EVALUATION_IN_RESPONSE` | `omit` | `include` にすると、policy を背後に持つ各 Rule の `evaluation`（status と、評価した policy revision。#244）を決定の response に載せる。どの revision が操作を許可したかを記録する呼び出し側サービス向け。`decision` ログイベントにはどちらの設定でも載る。受理される token の保持者全員に「policy set がいつ変わったか」を伝えることになるので、それが問題になる環境では `HTTP_CALLER_AUTH_TOKEN` と併用する |
 | `LOG_LEVEL` | `info` | 出力する最低レベル: `trace`\|`debug`\|`info`\|`warn`\|`error`\|`fatal`\|`silent`。decision ログのスイッチも兼ねる — [可観測性](#可観測性)を参照 |
 
 ## HS256 シークレットの強度

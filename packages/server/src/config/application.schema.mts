@@ -24,6 +24,10 @@ import {
 	DEFAULT_RULE_TIMEOUT_MS,
 } from "./defaults.mjs";
 import {
+	checkEvaluationInResponse,
+	DEFAULT_EVALUATION_IN_RESPONSE,
+} from "./evaluationInResponse.mjs";
+import {
 	checkTokenAuthenticatorSelection,
 	JWT_TOKEN_AUTHENTICATOR,
 } from "./tokenAuthenticatorSelection.mjs";
@@ -589,6 +593,24 @@ export const AppConfigSchema = z.object({
 			 * schema a string, and an enum takes it without a coercion path.
 			 */
 			credentialToCollectors: z.enum(["never", "expose"]).default("never"),
+			/**
+			 * Whether the decision response carries each rule's `evaluation` —
+			 * its status and the policy revision (#244). `"omit"` (default):
+			 * the `decision` event carries it, the response does not. `"include"`:
+			 * the response does too, for a consuming service that records which
+			 * policy revision authorized an operation. Read through the shared
+			 * check, not a bare `z.enum`, so `createVerifyRouter` refuses a
+			 * hand-built config in the same words — see `evaluationInResponse.mts`.
+			 */
+			evaluationInResponse: z
+				.unknown()
+				.optional()
+				.transform((value, ctx) => {
+					const check = checkEvaluationInResponse(value);
+					if (check.ok) return check.value;
+					ctx.addIssue({ code: z.ZodIssueCode.custom, message: check.message });
+					return z.NEVER;
+				}),
 		})
 		/*
 		 * Taken verbatim, like `http` above — zod does not parse a default back
@@ -622,6 +644,7 @@ export const AppConfigSchema = z.object({
 			collectorConcurrency: DEFAULT_COLLECTOR_CONCURRENCY,
 			batchConcurrency: DEFAULT_BATCH_CONCURRENCY,
 			credentialToCollectors: "never" as const,
+			evaluationInResponse: DEFAULT_EVALUATION_IN_RESPONSE,
 		})),
 	// Defaulted (not shape-only): deployments mount an overlay config OVER the
 	// template's application.conf, so a section the overlay does not repeat is

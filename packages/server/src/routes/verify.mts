@@ -19,6 +19,10 @@ import {
 } from "@o3co/auth.policy-verifier.core";
 import express from "express";
 import { NUMERIC_BOUNDS, resolveBound } from "../config/bounds.mjs";
+import {
+	checkEvaluationInResponse,
+	type EvaluationInResponse,
+} from "../config/evaluationInResponse.mjs";
 import { acceptRequestId, REQUEST_ID_HEADER } from "../http/requestId.mjs";
 import {
 	createTokenAuthenticator,
@@ -159,6 +163,15 @@ export interface VerifyRouterConfig {
 	 * boolean invites the coercion-path drift o3co/auth.provider#288 documents.
 	 */
 	credentialToCollectors?: "never" | "expose";
+	/**
+	 * Whether a decision response carries each rule's `evaluation` — its status
+	 * and the policy revision it concerns (#244). `"omit"` (default): the
+	 * `decision` event carries it and the response does not, so the response is
+	 * key-for-key what it was. `"include"`: the response carries it as well.
+	 * Refused when it is neither, in `AppConfigSchema`'s words — see
+	 * `config/evaluationInResponse.mts` for why the opt-in is the deployment's.
+	 */
+	evaluationInResponse?: EvaluationInResponse;
 }
 
 /**
@@ -655,6 +668,14 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			: (config.authenticator as TokenAuthenticator);
 	// #175: resolved once — the per-request cost is a spread, not a branch tree.
 	const exposeCredential = config.credentialToCollectors === "expose";
+	// #244: resolved through the check the schema uses, and thrown rather than
+	// read leniently — a misspelt "include" running as "omit" would silently
+	// withhold the revisions a consuming service turned this on to record.
+	const evaluationInResponse = checkEvaluationInResponse(config.evaluationInResponse);
+	if (!evaluationInResponse.ok) {
+		throw new Error(`createVerifyRouter: ${evaluationInResponse.message}`);
+	}
+	const includeEvaluation = evaluationInResponse.value === "include";
 
 	/**
 	 * Counts a failure a collector is answerable for (#200). Called beside each
@@ -802,7 +823,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			durationSeconds: durationMs / 1000,
 		});
 
-		return toResponse(subjectId, entry, decision);
+		return toResponse(subjectId, entry, decision, includeEvaluation);
 	}
 
 	const router = express.Router();
@@ -1101,19 +1122,47 @@ function isBodyParserFailure(err: unknown): boolean {
  * Takes the already-derived `subject` id rather than the subject bag: the audit
  * line and this response must agree about whether the decision had one, and
  * reading `subject.sub` a second time here is what let them disagree (#158).
+ *
+ * `includeEvaluation` is `verify.evaluationInResponse` (#244). The `decision`
+ * event is built from the same `Decision` and always carries the evaluations,
+ * so what the response includes is the event's own values, and what it omits
+ * is still on the record.
  */
 function toResponse(
 	subject: string | undefined,
 	entry: DecisionRequest,
 	decision: Decision,
+	includeEvaluation: boolean,
 ): DecisionResponse {
 	const base = {
 		...(subject !== undefined ? { subject } : {}),
 		resource: entry.resource,
 		action: entry.action,
-		reason: decision.reason,
+		reason: includeEvaluation ? decision.reason : withoutEvaluations(decision.reason),
 	};
 	return decision.decision === "deny"
 		? { ...base, decision: "deny", code: decision.code, message: decision.message }
 		: { ...base, decision: "allow" };
+}
+
+/**
+ * The reason with every outcome's `evaluation` left out (#244) — and nothing
+ * else: whatever else an outcome carries stays. `satisfiedBy` is rebuilt as the
+ * last evaluated outcome, which is what it is (#135), so the two cannot differ
+ * in what was omitted.
+ */
+function withoutEvaluations(reason: DecisionReason): DecisionReason {
+	return {
+		groups: reason.groups.map((group) => {
+			const evaluated = group.evaluated.map(({ evaluation: _evaluation, ...outcome }) => outcome);
+			return group.passed
+				? {
+						ruleType: group.ruleType,
+						passed: true,
+						evaluated,
+						satisfiedBy: evaluated[evaluated.length - 1],
+					}
+				: { ruleType: group.ruleType, passed: false, evaluated };
+		}),
+	};
 }

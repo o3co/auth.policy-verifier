@@ -41,10 +41,16 @@ let policySetCounter = 0;
  * What this engine costs is paid at import: the wasm module (about 12 MB on
  * disk) is instantiated when the bindings load. That is why it lives in its
  * own package — a deployment that evaluates out of process never carries it.
+ *
+ * It vouches for the revision it evaluated (`confirmsRevision`, #244), and can:
+ * the set is compiled here, from the source `load` was handed, under an id
+ * minted here and known to nothing else. An answer through that id cannot have
+ * come from any other policies, so every answer names `source.revision`.
  */
 export const cedarWasmEngine: CedarWasmEngine = {
 	name: CEDAR_WASM_ENGINE_NAME,
 	async: false,
+	confirmsRevision: true,
 
 	load(source: PolicySource): SyncCedarPolicySet {
 		for (const file of source.files) {
@@ -76,6 +82,7 @@ export const cedarWasmEngine: CedarWasmEngine = {
 					decision,
 					reason: diagnostics.reason,
 					errors: diagnostics.errors.map((error) => `${error.policyId}: ${error.error.message}`),
+					revision: source.revision,
 				};
 			},
 		};

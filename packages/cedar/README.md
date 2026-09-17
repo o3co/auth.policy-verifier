@@ -155,6 +155,67 @@ same way — see [docs/extending.md](../../docs/extending.md#the-trust-boundary-
   need an entity store; needing them is the signal to move to a full Cedar
   deployment, which the same `.cedar` files already fit.
 
+## Policy revision: which policies decided
+
+Every answer of the rule reports the evaluation behind it (#244), and core
+carries that onto the decision — into the `decision` log event always, and into
+the response under `verify.evaluationInResponse = "include"`. A denial is
+`cedar_deny` whether or not a policy produced it; this is what tells them apart:
+
+| the rule answered because | `evaluation.status` | the revision |
+| --- | --- | --- |
+| Cedar answered without errors — a permit, a forbid, or no policy determining the request | `completed` | `revision`, when the engine vouches for it |
+| Cedar answered with evaluation errors | `failed` | `revision`, when the engine vouches for it |
+| the call itself failed | `failed` | `revision: null` — nothing answered, so nothing vouched |
+| the request could not be built from the attributes, so Cedar was not asked | `not_invoked` | no revision key at all |
+
+**What the revision is.** `sha256:` and the lowercase hex SHA-256 of
+
+```text
+auth.policy-verifier.cedar/policy-set/v1\n
+<bytes>:<name>,<bytes>:<text>,          ← once per *.cedar file, in load order
+```
+
+where `<bytes>` is the decimal UTF-8 byte length of what follows it, `<name>`
+is the file's bare name (`policies` for the inline set) and `<text>` its
+contents. `computePolicyRevision(files)` is exported, so CI can compute the
+revision of a directory and compare it with what production reports. It is
+computed once, at boot, from the very files handed to the engine.
+
+- **Same contents, same revision** — on any replica, at any mount path. The
+  directory is deliberately not part of it, and no path ever appears in a
+  decision.
+- **A changed policy changes it even when its policy id does not.** Policy ids
+  are positional (`policy0`) under wasm and file names under http; neither
+  moves when a policy's text is edited. The revision does.
+- **A rename changes it**, because under the http engine the file name *is* the
+  policy id the agent is given.
+- **The framing is there because concatenation is not injective**: `"X\n"` + `"Y"`
+  and `"X"` + `"\nY"` are one policy text and two policy sets.
+
+**What it does not cover.** The collector's mapping, `onNoDeterminingPolicy`,
+the engine and its version, and the attributes the request was decided over
+all shape an answer too. The revision says which policies were evaluated. It is
+not a promise that evaluating them again gives the same answer; to explain a
+decision later, keep the deployed version and its config beside it.
+
+**`revision` versus `loadedRevision`.** `revision` is a claim about what was
+*evaluated*, so it is set only when the engine vouches for that answer. The
+wasm engine does: the set is compiled in-process from the files that were
+hashed, under an id nothing else holds. The http engine cannot: cedar-agent
+answers `{ decision, diagnostics }` and does not say which policies it holds,
+and a restarted agent comes back empty. There the rule reports `revision: null`
+and the digest of what it pushed at boot as `loadedRevision` — worth recording,
+and not proof of what ran. An engine that names a revision *other* than the
+loaded one is answering from a policy set this verifier did not load, and the
+rule fails it closed.
+
+**`requireConfirmedRevision = true`** is for a deployment whose audit has to
+name the policies behind every decision: an answer nobody vouched for becomes a
+logged deny instead of a permit of unknown origin. It is refused at boot over
+an engine that does not declare `confirmsRevision` — today, `engine = "http"` —
+because there every answer would be that deny.
+
 ## Engines
 
 This package has no evaluator of its own. `CedarPolicyRuleCollector` loads the
@@ -166,12 +227,20 @@ both to a `CedarEngine`:
 interface CedarEngine {
   readonly name: string;                 // "wasm", "http", …
   readonly async: boolean;               // do its sets answer over I/O? declared before load
+  readonly confirmsRevision?: boolean;   // does every answer name the revision it evaluated? (#244)
   load(source: PolicySource): LoadedCedarPolicySet | Promise<LoadedCedarPolicySet>; // boot: parse-check and compile, or hand over
 }
 // A loaded set answers either synchronously (in-process) or asynchronously (over I/O):
 //   { async: false; isAuthorized(request): CedarDecision }
 //   { async: true;  isAuthorized(request, signal): Promise<CedarDecision> }
+// CedarDecision = { decision, reason, errors, revision? }
 ```
+
+`CedarDecision.revision` is the port's confirmation contract (see [Policy
+revision](#policy-revision-which-policies-decided)): an engine names
+`source.revision` on an answer only if that answer provably came from the set
+compiled from that source. It is per answer, not per `load`, because that is
+the only moment the claim is true of a remote engine.
 
 `load` may be asynchronous — a remote engine takes the policy set over the
 network — and a set that cannot be loaded still refuses to start: the
