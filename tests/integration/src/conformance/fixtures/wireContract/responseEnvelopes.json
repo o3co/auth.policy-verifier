@@ -37,9 +37,9 @@
 		"without a policy evaluation (`collector_timeout`, `rule_timeout`, `attribute_conflict`,",
 		"`no_applicable_rule`) has no groups and therefore no evaluation: no policy decided it.",
 		"The key sets under `evaluation` below are what THIS version sends, and the suite holds",
-		"a deployment to them exactly. A CLIENT must not: ignore keys inside `evaluation` you do",
-		"not know, because more will be added there (the determining policy ids of #199) and a",
-		"client that rejects an unknown key breaks on the verifier's next minor."
+		"a DEPLOYMENT to them exactly. A CLIENT reads the other way: it MUST IGNORE any key inside",
+		"`evaluation` that it does not know. More will be added there (the determining policy ids",
+		"of #199), and a client that rejects an unknown key breaks on the verifier's next minor."
 	],
 	"error": {
 		"keys": ["decision", "code", "message"],
