@@ -9,8 +9,8 @@
  * answer) — pinned here so a change on either side shows up as a test.
  */
 
-import type { Logger } from "@o3co/auth.policy-verifier.core";
-import { evaluate, isAsyncRule, ruleAnswerPassed } from "@o3co/auth.policy-verifier.core";
+import type { Logger, RuleEvaluation } from "@o3co/auth.policy-verifier.core";
+import { evaluate, isAsyncRule } from "@o3co/auth.policy-verifier.core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CedarPolicyRuleCollector } from "../CedarPolicyRuleCollector.mjs";
 import { CedarEngineError, type CedarEngineLoadContext } from "../engine.mjs";
@@ -641,7 +641,7 @@ describe("CedarPolicyRuleCollector on the http engine", () => {
 			["requestAction", "read"],
 			["requestResourceType", 'Document"; forbid(principal, action, resource);'],
 		]);
-		expect(ruleAnswerPassed(await rule.decide(attrs, NEVER_ABORTS))).toBe(false);
+		expect(await rule.decide(attrs, NEVER_ABORTS)).toBe(false);
 		expect(calls).toHaveLength(before);
 		expect(JSON.stringify((logger.error as ReturnType<typeof vi.fn>).mock.calls[0])).toMatch(
 			/not a Cedar entity type path/,
@@ -682,12 +682,20 @@ describe("CedarPolicyRuleCollector on the http engine", () => {
 			["requestResourceType", "Document"],
 		]);
 		const loadedRevision = inline(PERMIT_ALL).revision;
-		expect(await rule.decide(attrs, NEVER_ABORTS)).toEqual({
+		// Asked the way core asks: the boolean back, the evaluation to a reporter.
+		const ask = async () => {
+			let evaluation: RuleEvaluation | undefined;
+			const passed = await rule.decide(attrs, NEVER_ABORTS, (reported) => {
+				evaluation = reported;
+			});
+			return { passed, evaluation };
+		};
+		expect(await ask()).toEqual({
 			passed: true,
 			evaluation: { status: "completed", revision: null, loadedRevision },
 		});
 		up = false;
-		expect(await rule.decide(attrs, NEVER_ABORTS)).toEqual({
+		expect(await ask()).toEqual({
 			passed: false,
 			evaluation: { status: "failed", revision: null, loadedRevision },
 		});
@@ -728,9 +736,9 @@ describe("CedarPolicyRuleCollector on the http engine", () => {
 			["requestAction", "read"],
 			["requestResourceType", "Document"],
 		]);
-		expect(ruleAnswerPassed(await rule.decide(attrs, NEVER_ABORTS))).toBe(true);
+		expect(await rule.decide(attrs, NEVER_ABORTS)).toBe(true);
 		up = false;
-		expect(ruleAnswerPassed(await rule.decide(attrs, NEVER_ABORTS))).toBe(false);
+		expect(await rule.decide(attrs, NEVER_ABORTS)).toBe(false);
 		expect(logger.error).toHaveBeenCalledOnce();
 		expect(JSON.stringify((logger.error as ReturnType<typeof vi.fn>).mock.calls[0])).toMatch(
 			/"engine":"http".*authorization call failed/,

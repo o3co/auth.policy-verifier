@@ -110,18 +110,18 @@ describe("rule purity conformance — the check itself", () => {
 		);
 	});
 
-	it("accepts a rule that answers an equal verdict each time, in a fresh object (#244)", async () => {
-		// A verdict is compared by what it says, not by which object says it: a
+	it("accepts a rule that reports an equal evaluation each time, in a fresh object (#244)", async () => {
+		// A report is compared by what it says, not by which object says it: a
 		// policy-backed rule builds one per call.
 		const collect = async (): Promise<Rule[]> => [
 			{
 				ruleType: "cedar",
 				code: "cedar_deny",
 				message: "Denied by Cedar policy",
-				verify: () => ({
-					passed: true,
-					evaluation: { status: "completed", revision: `sha256:${"a".repeat(64)}` },
-				}),
+				verify: (_attrs, report) => {
+					report?.({ status: "completed", revision: `sha256:${"a".repeat(64)}` });
+					return true;
+				},
 			},
 		];
 		await expect(assertRuleIndependentOfContext(collect, scopeContext, attrs)).resolves.toEqual([
@@ -129,7 +129,7 @@ describe("rule purity conformance — the check itself", () => {
 		]);
 	});
 
-	it("rejects a verdict whose evaluation moves while its pass/fail does not (#244)", async () => {
+	it("rejects a report that moves while the pass/fail does not (#244)", async () => {
 		// The evaluation is part of the answer. A rule reporting whichever
 		// revision it saw last is reading state the engine cannot see — exactly
 		// the shared "last decision" slot the provenance contract rules out.
@@ -139,13 +139,41 @@ describe("rule purity conformance — the check itself", () => {
 				ruleType: "cedar",
 				code: "cedar_deny",
 				message: "Denied by Cedar policy",
-				verify: () => ({
-					passed: true,
-					evaluation: {
+				verify: (_attrs, report) => {
+					report?.({
 						status: "completed",
 						revision: `sha256:${(calls++ % 2 === 0 ? "a" : "b").repeat(64)}`,
-					},
-				}),
+					});
+					return true;
+				},
+			},
+		];
+		await expect(assertRuleIndependentOfContext(collect, scopeContext, attrs)).rejects.toThrow(
+			/not a deterministic function of its attributes/,
+		);
+	});
+
+	it("rejects it when the rule rewrites ONE evaluation object and reports it again (#244)", async () => {
+		// The shape a by-reference comparison cannot see: the rule keeps one
+		// object, mutates it on every call and hands the same object over each
+		// time. Compared by reference, the first report is overwritten by the
+		// second before anything looks at it, and the two read as equal. The
+		// suite therefore copies what is reported at the moment it is reported.
+		let calls = 0;
+		const kept: { status: "completed"; revision: string } = {
+			status: "completed",
+			revision: `sha256:${"a".repeat(64)}`,
+		};
+		const collect = async (): Promise<Rule[]> => [
+			{
+				ruleType: "cedar",
+				code: "cedar_deny",
+				message: "Denied by Cedar policy",
+				verify: (_attrs, report) => {
+					kept.revision = `sha256:${(calls++ % 2 === 0 ? "a" : "b").repeat(64)}`;
+					report?.(kept);
+					return true;
+				},
 			},
 		];
 		await expect(assertRuleIndependentOfContext(collect, scopeContext, attrs)).rejects.toThrow(

@@ -130,29 +130,41 @@ const tenantRuleCollector: RuleCollector = {
 
 /**
  * A rule group backed by a policy evaluator, as `packages/cedar` builds one:
- * it answers a verdict, and the verdict says how the evaluation went and which
- * policy revision it concerned (#244). Synthetic so that one deployment can
- * stage every shape of the evaluation envelope; the real collector's verdicts
- * are pinned against Cedar in `packages/cedar-wasm`. It passes whatever it is
- * asked about except where a shape implies a denial, so the scope and tenant
- * groups beside it keep deciding the cases they always decided.
+ * each rule answers a boolean and reports, to the reporter core hands it for
+ * that one call, how the evaluation went and which policy revision it
+ * concerned (#244). Synthetic so that one deployment can stage every shape of
+ * the evaluation envelope; the real collector's reports are pinned against
+ * Cedar in `packages/cedar-wasm`.
+ *
+ * The group is an OR of two policy sources. For the ordinary actions the first
+ * never reaches its evaluator and refuses, and the second evaluates and
+ * passes — so one response carries a `not_invoked` outcome beside a confirmed
+ * one, which is the shape a suite filtering on `revision !== null` mistook for
+ * a confirmed evaluation (`undefined !== null`). It passes whatever it is
+ * asked about except where a staged shape implies a denial, so the scope and
+ * tenant groups beside it keep deciding the cases they always decided.
  */
 const REVISION = `sha256:${"0123456789abcdef".repeat(4)}`;
 const policyBackedRuleCollector: RuleCollector = {
 	async collect(collectorContext: CollectorContext) {
-		const evaluation: RuleEvaluation =
-			collectorContext.action === NOT_INVOKED_ACTION
-				? { status: "not_invoked" }
-				: collectorContext.action === UNCONFIRMED_ACTION
-					? { status: "completed", revision: null, loadedRevision: REVISION }
-					: { status: "completed", revision: REVISION };
-		const rule: Rule = {
+		const reports = (passed: boolean, evaluation: RuleEvaluation): Rule => ({
 			ruleType: "policy",
 			code: "policy_deny",
 			message: "Denied by policy",
-			verify: () => ({ passed: evaluation.status !== "not_invoked", evaluation }),
-		};
-		return [rule];
+			verify: (_attrs, report) => {
+				report?.(evaluation);
+				return passed;
+			},
+		});
+		const unbuilt = reports(false, { status: "not_invoked" });
+		switch (collectorContext.action) {
+			case NOT_INVOKED_ACTION:
+				return [unbuilt];
+			case UNCONFIRMED_ACTION:
+				return [reports(true, { status: "completed", revision: null, loadedRevision: REVISION })];
+			default:
+				return [unbuilt, reports(true, { status: "completed", revision: REVISION })];
+		}
 	},
 };
 
@@ -306,9 +318,14 @@ const adapterFor = (
 	},
 });
 
-// The deployment as it ships: `verify.evaluationInResponse` left at "omit".
+// The deployment as it ships: `verify.evaluationInResponse` left at "omit". It
+// runs the policy-backed group too, so that what the suite holds to the
+// three-key outcome is a response that had an evaluation to leave out.
 describeWireContractConformance(
-	adapterFor("@o3co/auth.policy-verifier.server createVerifyRouter over HTTP", deployment()),
+	adapterFor(
+		"@o3co/auth.policy-verifier.server createVerifyRouter over HTTP",
+		deployment({}, [policyBackedRuleCollector]),
+	),
 );
 
 // …and the same one opted in (#244), with a policy-backed rule group beside the

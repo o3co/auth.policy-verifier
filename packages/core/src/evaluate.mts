@@ -8,7 +8,7 @@ import {
 } from "./collectorLimits.mjs";
 import { RuleTimeoutError } from "./errors.mjs";
 import type { FailureRecord, FailureSource } from "./failureSource.mjs";
-import { type ReadRuleAnswer, readRuleAnswer } from "./ruleVerdict.mjs";
+import { beginRuleInvocation, type RuleResult } from "./ruleEvaluation.mjs";
 import {
 	type AnyRule,
 	type AsyncRule,
@@ -16,7 +16,6 @@ import {
 	type Decision,
 	isAsyncRule,
 	type Rule,
-	type RuleAnswer,
 	type RuleGroupOutcome,
 	type RuleOutcome,
 } from "./types.mjs";
@@ -100,8 +99,9 @@ export interface EvaluateOptions {
  *   unchanged: a rule that owns its engine's outage answers `false` and logs;
  *   one that throws is reporting a fault. Which rule threw is recorded in
  *   `failures` beside the error rather than wrapped around it (#200).
- * @throws {TypeError} when a rule answers a verdict that does not read — see
- *   `readRuleAnswer` (#244). Attributed to the rule in `failures`, like a throw.
+ * @throws {TypeError} when a rule answers something other than a boolean, or
+ *   reports an evaluation that does not read — see `beginRuleInvocation`
+ *   (#244). Attributed to the rule in `failures`, like a throw.
  * @throws {RangeError} for an unusable `ruleTimeoutMs` or `evaluateDeadlineMs`,
  *   before any rule runs.
  */
@@ -193,10 +193,10 @@ async function evaluateGroup(
 		const { passed, evaluation } = isAsyncRule(rule)
 			? await runAsyncRule(rule, attrs, budget, caller, failures)
 			: verifyRule(rule, attrs, failures);
-		// #244: the evaluation is this invocation's, read off this answer — the
-		// outcome is the only place it is ever kept. Absent rather than
-		// `undefined` for a rule that reported none, so the outcome of a boolean
-		// rule is key-for-key what it was.
+		// #244: the evaluation is this invocation's, reported through the reporter
+		// made for this one call — the outcome is the only place it is ever kept.
+		// Absent rather than `undefined` for a rule that reported none, so such a
+		// rule's outcome is key-for-key what it was.
 		const outcome: RuleOutcome = {
 			code: rule.code,
 			message: rule.message,
@@ -216,19 +216,24 @@ function ruleSource(rule: AnyRule): FailureSource {
 
 /**
  * Asks a synchronous rule, recording it as the source of anything it throws
- * (#200) — an answer that does not read (#244) included, which is as much the
- * rule's fault as a throw is.
+ * (#200) — an answer or a report that does not read (#244) included, which is
+ * as much the rule's fault as a throw is.
  */
 function verifyRule(
 	rule: Rule,
 	attrs: Attributes,
 	failures: FailureRecord | undefined,
-): ReadRuleAnswer {
+): RuleResult {
+	// One invocation, one reporter (#244): nothing the rule reports can reach
+	// any outcome but this one.
+	const invocation = beginRuleInvocation();
 	try {
-		return readRuleAnswer(rule.verify(attrs));
+		return invocation.conclude(rule.verify(attrs, invocation.report));
 	} catch (error) {
 		failures?.record(error, ruleSource(rule));
 		throw error;
+	} finally {
+		invocation.close();
 	}
 }
 
@@ -247,7 +252,7 @@ async function runAsyncRule(
 	budget: RuleBudget,
 	caller: AbortSignal | undefined,
 	failures: FailureRecord | undefined,
-): Promise<ReadRuleAnswer> {
+): Promise<RuleResult> {
 	if (caller?.aborted) throw caller.reason;
 	const remaining = budget.deadlineAt - performance.now();
 	const phaseBinds = remaining < budget.ruleTimeoutMs;
@@ -278,6 +283,10 @@ async function runAsyncRule(
 		phaseBinds ? remaining : budget.ruleTimeoutMs,
 	);
 	const cancelled = rejectOnAbort(own.signal);
+	// #244: this invocation's reporter. Closed in `finally`, so a rule that
+	// reports after its budget is spent — or after the caller left — writes
+	// to nothing.
+	const invocation = beginRuleInvocation();
 	try {
 		return await Promise.race([
 			// A rule that honours its signal rejects on abort too — with fetch's
@@ -292,8 +301,8 @@ async function runAsyncRule(
 			//
 			// The answer is read inside the same chain (#244), so one that does
 			// not read is attributed to the rule by the same `catch`.
-			new Promise<RuleAnswer>((resolve) => resolve(rule.decide(attrs, own.signal)))
-				.then(readRuleAnswer)
+			new Promise<unknown>((resolve) => resolve(rule.decide(attrs, own.signal, invocation.report)))
+				.then((answer) => invocation.conclude(answer))
 				.catch((error: unknown) => {
 					if (own.signal.aborted) throw own.signal.reason;
 					failures?.record(error, ruleSource(rule));
@@ -302,6 +311,7 @@ async function runAsyncRule(
 			cancelled.promise,
 		]);
 	} finally {
+		invocation.close();
 		clearTimeout(timeout);
 		cancelled.dispose();
 		caller?.removeEventListener("abort", onCallerAbort);

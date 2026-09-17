@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { POLICY_REVISION_PATTERN } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
+import * as cedar from "../index.mjs";
 import { computePolicyRevision, loadPolicySource } from "../policySource.mjs";
 
 /** A fresh directory holding exactly these files. */
@@ -106,6 +107,25 @@ describe("loadPolicySource — the policy revision", () => {
 		const expected = `sha256:${createHash("sha256").update(preimage, "utf8").digest("hex")}`;
 
 		expect(loadPolicySource({ policyDir: policyDir(files) }).revision).toBe(expected);
+	});
+
+	it("matches known answers computed outside this codebase", () => {
+		// `printf '<preimage>' | shasum -a 256`, from the algorithm as documented.
+		// The case above re-derives the digest in the test; these are literals,
+		// so the implementation and its derivation cannot drift together.
+		expect(computePolicyRevision([])).toBe(
+			"sha256:27213d8c5fbd672a1b3d878f69e627fb2bd116415ecb1a15259d09102d519299",
+		);
+		expect(
+			computePolicyRevision([{ name: "policies", text: "permit(principal, action, resource);" }]),
+		).toBe("sha256:b7fa207de93d9b78564eac261a491cbb92e2bce4ce67827c1b0757df844193af");
+	});
+
+	it("is the package's to compute for a directory — CI compares it with what production reports", () => {
+		const dir = policyDir({ "10-permit.cedar": PERMIT });
+		expect(cedar.loadPolicySource({ policyDir: dir }).revision).toBe(
+			cedar.computePolicyRevision([{ name: "10-permit.cedar", text: PERMIT }]),
+		);
 	});
 
 	it("is the same for the same files in a different directory", () => {

@@ -9,8 +9,7 @@ import {
 	type CollectorRequest,
 	isAsyncRule,
 	type ReadonlyAttributes,
-	type RuleAnswer,
-	ruleAnswerPassed,
+	type RuleEvaluation,
 } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 
@@ -193,30 +192,46 @@ function isRevokedProxyError(error: unknown): boolean {
  * rule answers, not what it does when cancelled — and is held to the same
  * property as `verify`: the answer must come from `attrs` alone.
  *
- * The answer is kept whole (#244). A rule may answer a `RuleVerdict`, and the
- * `evaluation` on it is as much part of the answer as `passed` is: a rule that
- * reported whichever policy revision it saw last would pass a pass/fail
- * comparison while reading state the engine cannot see.
+ * The answer is kept whole (#244): the boolean, and whatever the rule reported
+ * about the evaluation behind it. The report is as much part of the answer as
+ * the boolean is — a rule that reported whichever policy revision it saw last
+ * would pass a pass/fail comparison while reading state the engine cannot see.
+ *
+ * The rule is asked the way `evaluate()` asks it, with a reporter made for
+ * this one call, and what it reports is **copied as it is reported**. Holding
+ * the reported object instead would let a rule that rewrites one object and
+ * reports it again overwrite the first reading before anything compared it:
+ * the two would be the same reference, and equal.
  */
-async function ask(rule: AnyRule, attrs: ReadonlyAttributes): Promise<RuleAnswer> {
-	return isAsyncRule(rule) ? rule.decide(attrs, new AbortController().signal) : rule.verify(attrs);
+async function ask(rule: AnyRule, attrs: ReadonlyAttributes): Promise<Answer> {
+	let evaluation: RuleEvaluation | undefined;
+	const report = (reported: RuleEvaluation): void => {
+		evaluation = structuredClone(reported);
+	};
+	const passed = isAsyncRule(rule)
+		? await rule.decide(attrs, new AbortController().signal, report)
+		: rule.verify(attrs, report);
+	return evaluation === undefined ? { passed } : { passed, evaluation };
+}
+
+/** What one rule answered for one map: the boolean, and the evaluation it reported, if any. */
+interface Answer {
+	passed: boolean;
+	evaluation?: RuleEvaluation;
 }
 
 /** {@link ask} for a whole list, in order. */
-async function askAll(rules: AnyRule[], attrs: ReadonlyAttributes): Promise<RuleAnswer[]> {
-	const answers: RuleAnswer[] = [];
+async function askAll(rules: AnyRule[], attrs: ReadonlyAttributes): Promise<Answer[]> {
+	const answers: Answer[] = [];
 	for (const rule of rules) answers.push(await ask(rule, attrs));
 	return answers;
 }
 
-/**
- * Whether two answers say the same thing. By value: a verdict is a fresh
- * object on every call, and it is what it says that has to hold still.
- */
-const sameAnswer = (one: RuleAnswer, other: RuleAnswer): boolean => isDeepStrictEqual(one, other);
+/** Whether two answers say the same thing, by value. */
+const sameAnswer = (one: Answer, other: Answer): boolean => isDeepStrictEqual(one, other);
 
 /** An answer as an assertion message prints it. */
-const printed = (answer: RuleAnswer): string => JSON.stringify(answer);
+const printed = (answer: Answer): string => JSON.stringify(answer);
 
 /** Names a rule in an assertion message the way a reader would look for it. */
 function describeRule(rule: AnyRule, index: number): string {
@@ -276,7 +291,7 @@ export async function assertRuleIndependentOfContext(
 
 	revoke();
 
-	const withoutContext: RuleAnswer[] = [];
+	const withoutContext: Answer[] = [];
 	for (const [index, rule] of rules.entries()) {
 		try {
 			withoutContext.push(await ask(rule, attrs));
@@ -303,7 +318,7 @@ export async function assertRuleIndependentOfContext(
 	}
 
 	// Pass / fail is what a caller asserts on; the whole answer is what was compared.
-	return withoutContext.map(ruleAnswerPassed);
+	return withoutContext.map((answer) => answer.passed);
 }
 
 /**

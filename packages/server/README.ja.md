@@ -67,6 +67,8 @@ interface VerifyRouterConfig {
   ruleTimeoutMs?: number | string;
   /** 1 決定の非同期 Rule すべてが合計で使える時間。既定は 5000 ms。 */
   evaluateDeadlineMs?: number | string;
+  /** response に各 Rule の `evaluation` を載せるか (#244)。既定は "omit"。どちらでもない値は拒否する。 */
+  evaluationInResponse?: "omit" | "include";
 }
 
 // `validate` による判別可能ユニオン。検証パラメータは検証するときにだけ存在する。
@@ -272,6 +274,14 @@ HTTP/1.1 403 Forbidden
 そのルールで終わり、決め手となったルールは `satisfiedBy`（通過グループにのみ存在し、失敗グループには
 付きません）として明示されます。
 `code` / `message` は従来どおり最初に失敗したグループから取ります。
+
+**`evaluation`（#244）。** policy evaluator を背後に持つ Rule（`CedarPolicyRuleCollector`）は、answer ごとに
+「evaluator が走ったか」「どの policy revision を評価したか」を報告し、その outcome には `passed` の隣に
+`"evaluation": { "status": "completed", "revision": "sha256:…" }` が載ります。`decision` ログイベントには
+常に `evaluations` として並びます。response に載るのは `verify.evaluationInResponse = "include"` のときだけで、
+既定の `"omit"` では上の response はキー単位でそのままです。evaluation は、受理される token の保持者全員に
+「policy set がいつ変わったか」「deny が engine の失敗だったか」を伝えるからです。各形の意味と、アプリケーションが
+保存すべきものは、ルート README の [どの policy revision が決めたかを記録する](../../README.ja.md#どの-policy-revision-が決めたかを記録する) にあります。
 
 **レスポンス — 不正なリクエスト**
 

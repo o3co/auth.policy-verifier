@@ -157,8 +157,10 @@ same way — see [docs/extending.md](../../docs/extending.md#the-trust-boundary-
 
 ## Policy revision: which policies decided
 
-Every answer of the rule reports the evaluation behind it (#244), and core
-carries that onto the decision — into the `decision` log event always, and into
+Every answer of the rule reports the evaluation behind it (#244) — to the
+reporter core hands `verify` / `decide` for that one call; the rule itself
+still answers a boolean, so an evaluator that predates the reporter reads a
+deny as a deny — and core carries that onto the decision — into the `decision` log event always, and into
 the response under `verify.evaluationInResponse = "include"`. A denial is
 `cedar_deny` whether or not a policy produced it; this is what tells them apart:
 
@@ -167,6 +169,8 @@ the response under `verify.evaluationInResponse = "include"`. A denial is
 | Cedar answered without errors — a permit, a forbid, or no policy determining the request | `completed` | `revision`, when the engine vouches for it |
 | Cedar answered with evaluation errors | `failed` | `revision`, when the engine vouches for it |
 | the call itself failed | `failed` | `revision: null` — nothing answered, so nothing vouched |
+| the engine named a revision other than the one loaded | `failed` | `revision: null` — it answered from a policy set this verifier did not load |
+| the engine named no revision, under `requireConfirmedRevision` | `failed` | `revision: null` |
 | the request could not be built from the attributes, so Cedar was not asked | `not_invoked` | no revision key at all |
 
 **What the revision is.** `sha256:` and the lowercase hex SHA-256 of
@@ -178,9 +182,12 @@ auth.policy-verifier.cedar/policy-set/v1\n
 
 where `<bytes>` is the decimal UTF-8 byte length of what follows it, `<name>`
 is the file's bare name (`policies` for the inline set) and `<text>` its
-contents. `computePolicyRevision(files)` is exported, so CI can compute the
-revision of a directory and compare it with what production reports. It is
-computed once, at boot, from the very files handed to the engine.
+contents. `loadPolicySource({ policyDir }).revision` gives it for a directory
+— the same filter, sort and decoding the collector uses — and
+`computePolicyRevision(files)` for a list already in hand, so CI can compute
+the revision of what it is about to ship and compare it with what production
+reports. It is computed once, at boot, from the very files handed to the
+engine.
 
 - **Same contents, same revision** — on any replica, at any mount path. The
   directory is deliberately not part of it, and no path ever appears in a
@@ -192,6 +199,14 @@ computed once, at boot, from the very files handed to the engine.
   policy id the agent is given.
 - **The framing is there because concatenation is not injective**: `"X\n"` + `"Y"`
   and `"X"` + `"\nY"` are one policy text and two policy sets.
+
+**It is the text as loaded that is hashed**, so what changes the text changes
+the revision, policy for policy identical or not. Three things do that across
+machines: line endings (a checkout with `core.autocrlf` turns `\n` into
+`\r\n`), a byte-order mark (kept as U+FEFF by the UTF-8 decoder), and the
+Unicode normalization of a non-ASCII file *name* (NFC on one filesystem, NFD on
+another). Pin line endings for `*.cedar` in `.gitattributes`, and keep file
+names ASCII, if replicas built on different machines must agree.
 
 **What it does not cover.** The collector's mapping, `onNoDeterminingPolicy`,
 the engine and its version, and the attributes the request was decided over
@@ -208,11 +223,13 @@ and a restarted agent comes back empty. There the rule reports `revision: null`
 and the digest of what it pushed at boot as `loadedRevision` — worth recording,
 and not proof of what ran. An engine that names a revision *other* than the
 loaded one is answering from a policy set this verifier did not load, and the
-rule fails it closed.
+rule fails it closed — and logs it whatever `logEvaluationErrors` says, because
+that is a fault of the deployment and not a policy reading a missing attribute.
 
 **`requireConfirmedRevision = true`** is for a deployment whose audit has to
 name the policies behind every decision: an answer nobody vouched for becomes a
-logged deny instead of a permit of unknown origin. It is refused at boot over
+deny — always logged, like the mismatch above — instead of a permit of unknown
+origin. It is refused at boot over
 an engine that does not declare `confirmsRevision` — today, `engine = "http"` —
 because there every answer would be that deny.
 

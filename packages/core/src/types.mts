@@ -131,8 +131,11 @@ export interface Rule {
 	ruleType: string;
 	code: string;
 	message: string;
-	/** A boolean, or a `RuleVerdict` when the rule has an evaluation to report. */
-	verify(attrs: ReadonlyAttributes): RuleAnswer;
+	/**
+	 * Answers a boolean. `report` is there for a rule that fronts a policy
+	 * evaluator — see `ReportRuleEvaluation`; every other rule ignores it.
+	 */
+	verify(attrs: ReadonlyAttributes, report?: ReportRuleEvaluation): boolean;
 }
 
 /**
@@ -196,40 +199,40 @@ export const POLICY_REVISION_PATTERN = /^[a-z0-9]+(?:[+._-][a-z0-9]+)*:[A-Za-z0-
 export const POLICY_REVISION_MAX_LENGTH = 256;
 
 /**
- * A rule's answer with an account of the evaluation behind it (#244).
+ * How a rule reports the {@link RuleEvaluation} behind one answer (#244).
  *
- * It is the return value, and not a field on the rule or a callback, because
- * it is a fact about one invocation: the same rule object answers concurrent
- * decisions, and anything it kept between them would be one decision's
- * evaluation on another's record. Being part of the answer, it falls under the
- * purity contract with the rest of it — equal attributes, equal verdict.
+ * The evaluator makes one of these for **each invocation** of a rule and hands
+ * it to `verify` / `decide`. The rule calls it at most once, before it
+ * answers; `evaluate()` checks what was reported, freezes a copy and puts it on
+ * that invocation's {@link RuleOutcome}.
  *
- * `evaluate()` copies `evaluation` onto this invocation's {@link RuleOutcome}
- * after checking it, and refuses a verdict it cannot read with a `TypeError`
- * attributed to the rule.
- */
-export interface RuleVerdict {
-	readonly passed: boolean;
-	readonly evaluation?: RuleEvaluation;
-}
-
-/**
- * What `verify` / `decide` may answer. A rule with nothing to report keeps
- * answering a boolean.
+ * **Why a reporter, and not a richer answer.** An evaluation is a fact about
+ * one invocation — one rule object answers concurrent decisions, so nothing
+ * may be kept on the rule between them — which leaves two places for it: what
+ * the rule returns, or something the evaluator hands in for that one call. A
+ * richer return value (`{ passed, evaluation }`) fails **open** wherever the
+ * evaluator does not know about it: an object is truthy, so an older copy of
+ * core in a mixed install, or a composite rule calling `verify` itself, reads
+ * every deny as a pass. A reporter fails the other way. An evaluator that
+ * passes none gets the boolean it always got and merely records no evaluation
+ * — which is what an absent `evaluation` already means: unknown.
  *
- * Read it with {@link ruleAnswerPassed}, never by truthiness: a failing
- * verdict is an object, and an object is truthy.
+ * **What it is to the purity contract.** Not the side effect the contract
+ * forbids. The reporter is the evaluator's own, made for this call and dead
+ * after it; nothing reaches another invocation through it. What is reported is
+ * part of the answer and is held to the same rule — equal attributes, equal
+ * report — and the purity conformance suite compares it.
+ *
+ * Reporting twice in one invocation, or reporting something that does not
+ * read, is a `TypeError` — thrown to the rule, and thrown again by `evaluate()`
+ * after the rule answers, so a rule that swallows it still cannot produce a
+ * decision that looks as if nothing had been reported. A report that arrives
+ * after the answer is ignored: the decision is made.
+ *
+ * Optional in the signatures because a rule may be asked without one; a rule
+ * that reports calls `report?.(…)`.
  */
-export type RuleAnswer = boolean | RuleVerdict;
-
-/**
- * Whether an answer is a pass — for code that asks a rule directly (a test, a
- * conformance suite) instead of through `evaluate()`. Strict on purpose: only
- * `true` and a verdict whose `passed` is `true` are a pass.
- */
-export function ruleAnswerPassed(answer: RuleAnswer): boolean {
-	return typeof answer === "object" && answer !== null ? answer.passed === true : answer === true;
-}
+export type ReportRuleEvaluation = (evaluation: RuleEvaluation) => void;
 
 /**
  * A rule whose answer comes from I/O — an out-of-process policy engine such as
@@ -258,8 +261,12 @@ export interface AsyncRule {
 	 * method must not be sent down the asynchronous path (v0.10.0 audit).
 	 */
 	readonly async: true;
-	/** A boolean, or a `RuleVerdict` when the rule has an evaluation to report. */
-	decide(attrs: ReadonlyAttributes, signal: AbortSignal): Promise<RuleAnswer>;
+	/** `report` as on `Rule.verify` — see `ReportRuleEvaluation`. */
+	decide(
+		attrs: ReadonlyAttributes,
+		signal: AbortSignal,
+		report?: ReportRuleEvaluation,
+	): Promise<boolean>;
 }
 
 /** Either kind of rule. A collector may return both in one list. */

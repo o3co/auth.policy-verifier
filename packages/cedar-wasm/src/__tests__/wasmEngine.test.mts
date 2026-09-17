@@ -186,6 +186,24 @@ describe("cedarWasmEngine — vouches for the revision it evaluated", () => {
 		expect(answer.revision).toBe(erroring.revision);
 	});
 
+	it("vouches for what it loaded, not for what the source says later", () => {
+		// The claim is about the set that was COMPILED. A `PolicySource` is a
+		// plain object the caller still holds; rewriting it after `load` changes
+		// nothing about the compiled policies, so it must change nothing about
+		// the revision an answer names (#244: capture it with the snapshot, do
+		// not read "the current revision" when answering).
+		const source = inline("permit(principal, action, resource);");
+		const loadedRevision = source.revision;
+		const loaded = cedarWasmEngine.load(source);
+		(source as { revision: string }).revision = inline(
+			"forbid(principal, action, resource);",
+		).revision;
+
+		const answer = loaded.isAuthorized(request());
+		expect(answer.decision).toBe("allow");
+		expect(answer.revision).toBe(loadedRevision);
+	});
+
 	it("keeps concurrently loaded sets apart — each answers with its own revision", () => {
 		const one = inline("permit(principal, action, resource);");
 		const other = inline("forbid(principal, action, resource);");

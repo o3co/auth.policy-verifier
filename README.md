@@ -540,7 +540,7 @@ One structured event per decision, named `decision`, at `info`:
 
 `satisfiedBy` replaces `deniedBy` on an allow, naming the rule that satisfied each group. A `POST /verify/batch` of N entries emits N lines sharing one `requestId`. `durationMs` is time in the pipelines and the evaluator, not the HTTP round trip.
 
-When a rule reports the evaluation behind its answer (#244) — `packages/cedar` does — the line also carries `evaluations`, one entry per reporting rule in evaluation order: `{"ruleType":"cedar","code":"cedar_deny","status":"completed","revision":"sha256:9f2c…"}`. See [Recording which policy revision decided](#recording-which-policy-revision-decided). A deployment with no policy-backed rule writes the line it always wrote.
+When a rule reports the evaluation behind its answer (#244) — `packages/cedar` does — the line also carries `evaluations`, one entry per reporting rule in evaluation order: `{"ruleType":"cedar","code":"cedar_deny","passed":false,"evaluation":{"status":"completed","revision":"sha256:9f2c…"}}`. `passed` is there because a group is an OR: a rule that forbade, followed by one that permitted, is an allow whose line lists both, and the first is the revision that *refused*. See [Recording which policy revision decided](#recording-which-policy-revision-decided). A deployment with no policy-backed rule writes the line it always wrote.
 
 `logging.level` (`LOG_LEVEL`) is the switch — the line is `info`, so `warn` turns the stream off, and there is no second flag. A deny is a normal outcome for a decision point rather than a fault, so it is not routed to `warn`: that would let any caller manufacture warn-level noise. Alert on the metrics, read the log for the "why".
 
@@ -579,7 +579,7 @@ After a policy update or during a rolling deployment, a decision's result and ru
 | `evaluation` | means |
 | --- | --- |
 | `{ "status": "completed", "revision": "sha256:…" }` | the evaluator ran to an answer — a permit, a forbid, or no policy applying — against that revision, and vouches for it |
-| `{ "status": "failed", … }` | the evaluator was invoked and did not produce a clean answer (the call failed, or Cedar raised evaluation errors). The rule failed closed; **no policy produced this denial** |
+| `{ "status": "failed", … }` | the evaluator was invoked and did not produce a clean answer: the call failed, Cedar raised evaluation errors, the engine answered from a policy set other than the one loaded, or it named no revision under `requireConfirmedRevision`. The rule failed closed; **no policy produced this denial** |
 | `{ "status": "not_invoked" }` | the rule failed before asking its evaluator (the request could not be built). No revision key of either kind: nothing was evaluated |
 | `"revision": null`, with `"loadedRevision": "sha256:…"` | the evaluator ran, and what it evaluated cannot be established — every answer of the out-of-process `http` engine, since cedar-agent does not say what it holds. `loadedRevision` is what this verifier loaded at boot: worth recording, **not proof of what ran** |
 | absent | the rule reported nothing — a TypeScript rule has no policy source to name; the deployed version and its config are what decided. Also what an older verifier, or one that has not opted in, answers: **absence means unknown** |

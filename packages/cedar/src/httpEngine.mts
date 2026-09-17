@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import { basename } from "node:path";
 import type { Logger } from "@o3co/auth.policy-verifier.core";
 import type { CedarEntityUid } from "./cedarJson.mjs";
 import {
@@ -130,7 +129,7 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 			loaded.set(agent, source.description);
 
 			const nonBlank = source.files.filter((file) => file.text.trim().length > 0);
-			const policies = nonBlank.map((file) => ({ id: policyId(file.source), content: file.text }));
+			const policies = nonBlank.map((file) => ({ id: policyId(file.name), content: file.text }));
 			for (const [index, policy] of policies.entries()) {
 				if (policy.id.length === 0) {
 					loaded.delete(agent);
@@ -272,9 +271,15 @@ async function pushPolicies(
 }
 
 /** cedar-agent policy ids are free-form; the file name reads best in `diagnostics.reason`. */
-function policyId(source: string): string {
-	if (source === "policies (inline)") return "policies";
-	return basename(source).replace(/\.cedar$/, "");
+/**
+ * The id the agent is given for a policy: the file's name without its
+ * extension. Derived from `PolicyFile.name` — the very string the policy
+ * revision hashes (#244) — so "a rename changes the revision because it
+ * changes the policy id" is true by construction rather than by two readings
+ * of the path agreeing. The inline set's name is `policies` already.
+ */
+function policyId(name: string): string {
+	return name.replace(/\.cedar$/, "");
 }
 
 // --- the endpoint -------------------------------------------------------------
