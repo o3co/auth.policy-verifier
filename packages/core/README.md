@@ -48,7 +48,7 @@ class AttributePipeline {
 }
 ```
 
-Runs the collectors concurrently — up to `verify.collectorConcurrency` at a time, the rest queued behind them — and merges the results. Array values are concatenated in collector order; any other value may be written once, or written again with the same value — two collectors writing *different* values to one key throw `AttributeConflictError`, which the server answers as a deny (#174).
+Runs the collectors concurrently — up to `CollectorLimits.concurrency` at a time, the rest queued behind them — and merges the results. Array values are concatenated in collector order; any other value may be written once, or written again with the same value — two collectors writing *different* values to one key throw `AttributeConflictError`, which the server answers as a deny (#174).
 
 The fan-out is bounded — see [Collector limits](#collector-limits). `collect` takes a `CollectorRequest` (the request without a `signal`); the pipeline supplies each collector its own.
 
@@ -61,7 +61,7 @@ class RulePipeline {
 }
 ```
 
-Runs the collectors concurrently under the same bounds as `AttributePipeline`, `verify.collectorConcurrency` included, and flattens their results into a single array. A collector may return synchronous `Rule`s, asynchronous `AsyncRule`s, or both.
+Runs the collectors concurrently under the same bounds as `AttributePipeline`, `CollectorLimits.concurrency` included, and flattens their results into a single array. A collector may return synchronous `Rule`s, asynchronous `AsyncRule`s, or both.
 
 ### Collector limits
 

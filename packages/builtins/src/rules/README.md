@@ -138,8 +138,11 @@ deployment that sets `claim` sets it on both. Imported by `../index.mts` and `..
 ## Failure and lifecycle
 
 Where there is configuration to refuse — the comparison rules, the scope collector — the
-constructor throws an `Error` naming the class and the field, at boot; `HasScope`,
-`HasPermission` and `ResourceActionPermissionRuleCollector` validate nothing. Nothing here
+constructor throws an `Error` naming the validating class and the field, at boot. That is the
+rule's own class everywhere but [`AttrMatchRule`](AttrMatchRule.mts), the deprecated wrapper,
+which extends `AttrPairEqual` and validates through `super`, so its refusals name
+`AttrPairEqual`. `HasScope`, `HasPermission` and `ResourceActionPermissionRuleCollector`
+validate nothing. Nothing here
 does I/O: a synchronous rule runs under no rule budget, the collectors run under the
 pipeline's per-collector timeout and deadline, which are in force — they do no I/O and complete
 within any usable bound, though an aborted caller, a sibling's failure or an expired deadline
