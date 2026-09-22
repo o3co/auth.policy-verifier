@@ -83,9 +83,13 @@ declares no `dependencies` (the tests import `vitest`). Imported as a dependency
   outcome alone; a non-boolean answer, a report that does not read or a pass reporting
   `failed` / `not_invoked` is a `TypeError` attributed to the rule even when the rule
   swallowed it — [`__tests__/ruleEvaluationReport.test.mts`](__tests__/ruleEvaluationReport.test.mts).
-- A failure is recorded beside the error, never wrapped around it, in a `FailureRecord` that
-  lives one decision; the first source wins; the caller's abort is attributed to nobody —
-  [`__tests__/failureSource.test.mts`](__tests__/failureSource.test.mts).
+- Attribution is opt-in and partial: only when the caller hands a `FailureRecord` in, and only
+  for what the runner and evaluator raise or observe themselves — a collector's failure or
+  budget, a pipeline's deadline, a rule's failure or budget — is the source recorded beside
+  the error, never wrapped around it. The record lives one decision; the first source wins;
+  the caller's abort is attributed to nobody, and neither is anything outside those paths (a
+  merge conflict, a parser's error, an unusable bound), so `sourceOf` answers `undefined` for
+  them — [`__tests__/failureSource.test.mts`](__tests__/failureSource.test.mts).
 - The reservation registry is live; a key has one owner; reserving is idempotent per owner
   and all-or-nothing per call — [`__tests__/keys.test.mts`](__tests__/keys.test.mts).
   `requestContext` cannot be read without the accessor, by type —
@@ -95,8 +99,9 @@ declares no `dependencies` (the tests import `vitest`). Imported as a dependency
 
 - Three failures are denies of their own, distinct classes so a transport answers them
   without a 500: `CollectorTimeoutError` (a collector's budget or a pipeline's deadline, #115),
-  `AttributeConflictError` (#174), `RuleTimeoutError` (#225). Each names the collector, key or
-  rule, never an attribute value.
+  `AttributeConflictError` (#174), `RuleTimeoutError` (#225). Each names what is answerable and
+  never an attribute value: the collector that overran its budget, or only the pipeline when
+  its deadline as a whole expired (`collector` is then absent); the conflicting key; the rule.
 - Everything else is rethrown unchanged: a collector's or rule's own error (a fault), the
   caller's abort reason (recognisable by identity), the `TypeError`s above. A `RangeError` for
   an unusable bound is thrown before anything runs; `ResourceParseError` is a parser's request
