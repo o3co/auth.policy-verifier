@@ -1347,6 +1347,90 @@ describe("createVerifyRouter — the credential reaches collectors only by state
 		expect(seen[0]?.credential).toBe(token);
 		expect(seen[0]?.subjectToken).toBeUndefined();
 	});
+
+	it('"expose" with an authenticator that supplies no credential: the context carries no credential key at all (#251)', async () => {
+		// Only a TokenAuthenticator written in JavaScript can produce this. The
+		// contract is about the key, so no credential is no key — not a key set
+		// to undefined.
+		const keys: string[][] = [];
+		const app = express();
+		app.use(
+			createVerifyRouter({
+				authenticator: {
+					authenticate: async () => ({
+						ok: true,
+						subject: { sub: "user-1" },
+						credential: undefined as unknown as string,
+					}),
+				},
+				resourceParser: new DotNotationResourceParser(),
+				attributePipeline: new AttributePipeline([
+					{
+						collect: async (context: CollectorContext) => {
+							keys.push(Object.keys(context));
+							return new Map<string, unknown>([["scopes", ["read:project"]]]);
+						},
+					},
+				]),
+				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
+				credentialToCollectors: "expose",
+			}),
+		);
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", "Bearer anything")
+			.send({ resource: "project:1", action: "read" });
+		expect(res.status).toBe(200);
+		expect(keys).toHaveLength(1);
+		expect(keys[0]).not.toContain("credential");
+	});
+});
+
+describe("POST /verify/batch — the input the entries share cannot leak between them (#251)", () => {
+	it("a collector that writes into context.headers in one entry is not seen by the next", async () => {
+		// The route builds one DecisionInput per request and every lane reads it;
+		// each decision hands its collectors its own copy of the headers, as the
+		// router built one per decision before the extraction. One lane, so the
+		// second entry runs after the first has written.
+		const seen: Array<Record<string, string> | undefined> = [];
+		const poisoning: AttributeCollector = {
+			collect: async (context: CollectorContext) => {
+				seen.push(context.headers === undefined ? undefined : { ...context.headers });
+				if (context.headers !== undefined) context.headers["x-poison"] = context.resource.raw;
+				return new Map<string, unknown>([["scopes", ["read:project"]]]);
+			},
+		};
+		const app = express();
+		app.use(
+			createVerifyRouter({
+				jwt: {
+					validate: true,
+					key: hs256Key.key,
+					algorithms: hs256Key.algorithms,
+					issuer: ISSUER,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				},
+				resourceParser: new DotNotationResourceParser(),
+				attributePipeline: new AttributePipeline([poisoning]),
+				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
+				batchConcurrency: 1,
+			}),
+		);
+		const token = await signHS256Token({ scope: "read:project" });
+		const res = await request(app)
+			.post("/verify/batch")
+			.set("Authorization", `Bearer ${token}`)
+			.set("x-request-id", "req-1")
+			.send({
+				decisions: [
+					{ resource: "project:1", action: "read" },
+					{ resource: "project:2", action: "read" },
+				],
+			});
+		expect(res.status).toBe(200);
+		expect(seen).toEqual([{ "x-request-id": "req-1" }, { "x-request-id": "req-1" }]);
+	});
 });
 
 describe("createVerifyRouter — collectors disagreeing on a scalar attribute deny (#174)", () => {

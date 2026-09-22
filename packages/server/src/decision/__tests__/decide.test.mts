@@ -371,6 +371,23 @@ describe("createDecider — one decision without Express (#251)", () => {
 		expect(seen[1].requestContext).toBeUndefined();
 	});
 
+	it("each decision gets its own copy of the shared headers: a collector's write does not reach the next decision (#251)", async () => {
+		const seen: Array<Record<string, string> | undefined> = [];
+		const { decide } = decider({
+			attributeCollectors: [
+				attributes((_attrs, context) => {
+					seen.push(context.headers === undefined ? undefined : { ...context.headers });
+					if (context.headers !== undefined) context.headers["x-poison"] = "yes";
+				}),
+			],
+		});
+		const shared = input({ headers: { "x-request-id": "req-1" }, requestId: "req-1" });
+		await decide(entry("project:1"), shared);
+		await decide(entry("project:2"), shared);
+		expect(seen).toEqual([{ "x-request-id": "req-1" }, { "x-request-id": "req-1" }]);
+		expect(shared.headers).toEqual({ "x-request-id": "req-1" });
+	});
+
 	it("the request id is on the decision line when there is one, and absent — not undefined — when there is none (#200)", async () => {
 		const { decide, events } = decider();
 		await decide(entry(), input({ requestId: "req-1" }));
