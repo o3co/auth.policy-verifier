@@ -27,10 +27,11 @@ untouched. A collector that reaches a store or an API is the consumer's to write
 ## Public contract
 
 The six classes, exported from [`../index.mts`](../index.mts) with the config types of the
-three that take a declaration — `PayloadScopeCollectorConfig`,
-`PayloadClaimAttributeCollectorConfig`, `RequestContextAttributeCollectorConfig` and the two
-`*Mapping` / `*Type` aliases; the static collectors take a plain `{ roles }` / `{ permissions }`
-and export no type. All six are registered under their class names by
+three that take one — `PayloadScopeCollectorConfig` (a `{ claim }`),
+`PayloadClaimAttributeCollectorConfig` and `RequestContextAttributeCollectorConfig` (a
+declaration each, with their `*Mapping` / `*Type` aliases, four in all); `PayloadSubjectIdCollector`
+takes none, and the static collectors take a plain `{ roles }` / `{ permissions }` and export no
+type. All six are registered under their class names by
 [`../module.mts`](../module.mts). The declaration the
 two mapping collectors share — `from`, `to`, `type` — is
 [`_attributeMapping.mts`](_attributeMapping.mts); the scope-claim reading is

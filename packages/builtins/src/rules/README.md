@@ -77,10 +77,10 @@ reach the wire and the failure lines.
 
 ## Dependencies
 
-Every rule imports `@o3co/auth.policy-verifier.core`; the eight comparison rules also import
-[`_sharedValidation.mts`](_sharedValidation.mts); the one rule → rule edge is `AttrMatchRule`
-subclassing `AttrPairEqual`; `HasScope` and `HasPermission` import core alone, and none
-imports `CollectorContext`. Each collector imports core and the rule it builds;
+Every rule but `AttrMatchRule` imports `@o3co/auth.policy-verifier.core`; the eight comparison
+rules also import [`_sharedValidation.mts`](_sharedValidation.mts); the one rule → rule edge is
+`AttrMatchRule` subclassing `AttrPairEqual`, which is all it imports; `HasScope` and
+`HasPermission` import core alone, and none imports `CollectorContext`. Each collector imports core and the rule it builds;
 `ResourceActionScopeRuleCollector` also imports
 [`../collectors/_claims.mts`](../collectors/_claims.mts) — the one edge from `rules/` into
 `collectors/`, so it and `PayloadScopeCollector` cannot disagree about which claim holds the
