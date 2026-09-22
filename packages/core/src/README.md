@@ -11,8 +11,9 @@ that reach one: the bounded fan-out of attribute collectors (`AttributePipeline`
 collectors (`RulePipeline`), then the evaluation of the collected rules over the merged
 attributes (`evaluate()`). It fixes their semantics — OR within a group, AND across, default
 deny, fail-closed bounds — with the errors, failure attribution and cancellation that go with
-them; it holds the five `ATTR_*` keys and their reservation registry, the `Logger` port (it
-writes no log line itself), and the `Module` / `Registry` shape a composition is built from.
+them; it holds the five `ATTR_*` keys and their reservation registry, the `Logger` port and
+its `console` sink (the engine writes no log line itself), and the `Module` / `Registry`
+shape a composition is built from.
 
 It does not verify a credential: `subject` arrives established by a transport, and
 `credential` is present only under the server's opt-in (#175) and read by nothing here. It
@@ -26,14 +27,16 @@ Every bound reaches it as a number; it reads no configuration.
 Everything on [`index.mts`](index.mts); [`../README.md`](../README.md) shows usage.
 
 - [`types.mts`](types.mts) — the contract types, `ReportRuleEvaluation` / `RuleEvaluation`
-  (#244), `isAsyncRule`; [`untrusted.mts`](untrusted.mts) — `UntrustedRequestContext`,
+  with the revision grammar `POLICY_REVISION_PATTERN` / `POLICY_REVISION_MAX_LENGTH` (#244),
+  `isAsyncRule`; [`untrusted.mts`](untrusted.mts) — `UntrustedRequestContext`,
   `markUntrustedRequestContext`, `readUntrustedRequestContext`.
 - [`AttributePipeline`](AttributePipeline.mts), [`RulePipeline`](RulePipeline.mts) and their
   bounds in [`collectorLimits.mts`](collectorLimits.mts); [`evaluate`](evaluate.mts) and
   `EvaluateOptions`; [`FailureRecord`](failureSource.mts) / `FailureSource` (#200);
   [`errors.mts`](errors.mts).
-- [`keys.mts`](keys.mts) — the `ATTR_*` constants, `reserveAttributeKeys`,
-  `RESERVED_ATTRIBUTE_KEYS`, `attributeKeyReservation`, `suggestUnreservedAttributeKey`.
+- [`keys.mts`](keys.mts) — the `ATTR_*` constants, `CORE_ATTRIBUTE_KEY_OWNER`,
+  `reserveAttributeKeys`, `RESERVED_ATTRIBUTE_KEYS`, `attributeKeyReservation`,
+  `suggestUnreservedAttributeKey`.
 - [`logging/`](logging/) — `Logger`, `EventLogger`, `consoleLogger`; [`modules/`](modules/) —
   `Module`, `ModuleContext`, the factory types, `Registry`.
 
@@ -41,12 +44,13 @@ Everything on [`index.mts`](index.mts); [`../README.md`](../README.md) shows usa
 
 - A pipeline takes a `CollectorRequest` — `subject`, `resource`, `action`, optional `headers`,
   `requestContext`, `credential` and the caller's `signal` — and hands each collector a
-  `CollectorContext`: the same, plus a `signal` minted per collector per decision. Every field
-  but one is vouched for by whoever built it; `requestContext` is the caller's and crosses
-  sealed — marked by the transport with `markUntrustedRequestContext`, unwrapped by a
-  collector with `readUntrustedRequestContext`, which is the acknowledgement.
-- `AttributePipeline.collect` returns one merged `Attributes`: array-valued keys union in
-  collector order, a scalar is written once or re-written identically, and two different
+  `CollectorContext`: the same, with the caller's `signal` replaced by one minted per collector
+  per decision and linked to it, so a collector never holds the caller's own. Every field but
+  one is vouched for by whoever built it; `requestContext` is the caller's and crosses sealed —
+  marked by the transport with `markUntrustedRequestContext`, unwrapped by a collector with
+  `readUntrustedRequestContext`, which is the acknowledgement.
+- `AttributePipeline.collect` returns one merged `Attributes`: array-valued keys concatenate
+  in collector order, a scalar is written once or re-written identically, and two different
   scalars under one key are an `AttributeConflictError`. `RulePipeline.collect` concatenates.
 - `evaluate(attrs, rules, options)` returns a `Decision`: allow, or deny with the `code` /
   `message` of the first rule of the first failing group; `reason` accounts for every group,

@@ -22,7 +22,7 @@ from the request at collect time.
   [`AttrPairCompare`](AttrPairCompare.mts) — an operator-named attribute against a literal or
   another attribute, with no coercion; the default `ruleType` is derived from the config so
   distinct requirements AND, and `group` makes two OR. [`AttrMatchRule`](AttrMatchRule.mts) is
-  the deprecated wrapper of `AttrPairEqual`, keeping its legacy `ruleType` and message.
+  the deprecated subclass of `AttrPairEqual`, keeping its legacy `ruleType` and message.
 
 Every rule here is a synchronous `Rule`; this package ships no `AsyncRule` (the Cedar rules
 are `packages/cedar`'s). Options and matching: [`../../README.md`](../../README.md#rules).
@@ -38,13 +38,15 @@ reads `context.resource.raw` and `context.action` and returns a `HasPermission` 
 `<resource.raw>.perm:<action>`. They are the only things here that see a `CollectorContext`:
 they read it inside `collect`, copy strings out, and the rule they return holds those strings
 and nothing of the request. That is the split — collectors read the request, rules read
-`attrs` — and o3co/auth.policy-verifier#251 holds V2 (moving this directory beside
-`../collectors/`) as decided by whether this README makes it clear.
+`attrs` (o3co/auth.policy-verifier#251, V2).
 
 ## Public contract
 
-The classes above and their config types, exported from [`../index.mts`](../index.mts); the
-two collectors are also registered by [`../module.mts`](../module.mts). What a rule is, is
+The classes above, exported from [`../index.mts`](../index.mts) with the types of those that
+take one — a `*Config` per comparison rule and for `AttrMatchRule`, `HasScopeOptions`,
+`ResourceActionScopeRuleCollectorConfig` / `ScopelessPolicy`; `HasPermission` and
+`ResourceActionPermissionRuleCollector` export none. The two collectors are also registered
+by [`../module.mts`](../module.mts). What a rule is, is
 core's `Rule` in [`types.mts`](../../../core/src/types.mts); what it must be is
 [AGENTS.md — Collector / Rule / Attribute Contract](../../../../AGENTS.md#collector--rule--attribute-contract),
 stated here as it stands there and not tightened:
@@ -69,17 +71,20 @@ stated here as it stands there and not tightened:
 
 A rule takes the merged `ReadonlyAttributes` and answers a boolean; a value under the wrong
 key, of the wrong type or malformed in any way answers `false` and never throws. A collector
-takes a `CollectorContext` and returns a fresh rule per request. `ruleType` and `code` reach
-the wire and the failure lines.
+takes a `CollectorContext` and returns a rule built fresh for that request — or, for the scope
+collector under `scopeless: "skip"` with no scope claim, no rule at all. `ruleType` and `code`
+reach the wire and the failure lines.
 
 ## Dependencies
 
-The rules import `@o3co/auth.policy-verifier.core` and
-[`_sharedValidation.mts`](_sharedValidation.mts) only; none imports `CollectorContext`. The
-collectors import core, the rule they build, and
+Every rule imports `@o3co/auth.policy-verifier.core`; the eight comparison rules also import
+[`_sharedValidation.mts`](_sharedValidation.mts); the one rule → rule edge is `AttrMatchRule`
+subclassing `AttrPairEqual`; `HasScope` and `HasPermission` import core alone, and none
+imports `CollectorContext`. Each collector imports core and the rule it builds;
+`ResourceActionScopeRuleCollector` also imports
 [`../collectors/_claims.mts`](../collectors/_claims.mts) — the one edge from `rules/` into
-`collectors/`, so the scope rule collector and `PayloadScopeCollector` cannot disagree about
-which claim holds the scopes. Imported by `../index.mts` and `../module.mts`.
+`collectors/`, so it and `PayloadScopeCollector` cannot disagree about which claim holds the
+scopes. Imported by `../index.mts` and `../module.mts`.
 
 ## Invariants
 
@@ -87,9 +92,10 @@ which claim holds the scopes. Imported by `../index.mts` and `../module.mts`.
   `describeRulePurityConformance` in
   [`rulePurity.mts`](../../../../tests/integration/src/conformance/rulePurity.mts) runs that,
   applied to both collectors in
-  [`rule-purity-conformance.test.mts`](../../../../tests/integration/src/rule-purity-conformance.test.mts).
-  The CI step "Assert no verify() body reads a collector context" in
-  [`ci.yml`](../../../../.github/workflows/ci.yml) greps `verify` bodies as a textual backstop;
+  [`rule-purity-conformance.test.mts`](../../../../tests/integration/src/rule-purity-conformance.test.mts);
+  apply it to every rule collector you add. The CI step "Assert no verify() body reads a
+  collector context" in [`ci.yml`](../../../../.github/workflows/ci.yml) greps `verify` bodies
+  as a textual backstop;
   the suite is the check. No builtin collector emits the comparison rules, so they are not run
   through the suite: beyond the grep, their purity is documented, not tested.
 - Malformed attributes never throw and never match; matching is exact and case-sensitive, a
@@ -111,10 +117,13 @@ which claim holds the scopes. Imported by `../index.mts` and `../module.mts`.
 
 ## Failure and lifecycle
 
-A constructor throws an `Error` naming the class and the field; that is the only place
-anything here throws, and it happens at boot. Nothing here does I/O, so no rule budget or
-collector deadline is ever spent on it, and `signal` is never read. A rule keeps only its
-configuration and may answer concurrent decisions; none reports an evaluation.
+Where there is configuration to refuse — the comparison rules, the scope collector — the
+constructor throws an `Error` naming the class and the field, at boot; `HasScope`,
+`HasPermission` and `ResourceActionPermissionRuleCollector` validate nothing. Nothing here
+does I/O: a synchronous rule runs under no rule budget, the collectors run under the
+pipeline's per-collector timeout and deadline, which are in force and never trip on them, and
+`signal` is never read. A rule keeps only its configuration and may answer concurrent
+decisions; none reports an evaluation.
 
 ## Contract tests
 

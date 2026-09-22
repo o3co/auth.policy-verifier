@@ -26,8 +26,12 @@ untouched. A collector that reaches a store or an API is the consumer's to write
 
 ## Public contract
 
-The six classes and their config types, exported from [`../index.mts`](../index.mts) and
-registered under their class names by [`../module.mts`](../module.mts). The declaration the
+The six classes, exported from [`../index.mts`](../index.mts) with the config types of the
+three that take a declaration — `PayloadScopeCollectorConfig`,
+`PayloadClaimAttributeCollectorConfig`, `RequestContextAttributeCollectorConfig` and the two
+`*Mapping` / `*Type` aliases; the static collectors take a plain `{ roles }` / `{ permissions }`
+and export no type. All six are registered under their class names by
+[`../module.mts`](../module.mts). The declaration the
 two mapping collectors share — `from`, `to`, `type` — is
 [`_attributeMapping.mts`](_attributeMapping.mts); the scope-claim reading is
 [`_claims.mts`](_claims.mts), which
@@ -43,11 +47,15 @@ Options and examples: [`../../README.md`](../../README.md#attribute-collectors).
   one line that reads it, in `RequestContextAttributeCollector.collect` —
   [docs/extending.md — The trust boundary](../../../../docs/extending.md#the-trust-boundary-requestcontext-is-the-callers).
 - A mapping reads the exact key when the source has one, else a dot path over own properties
-  only; a value is promoted only when it matches its declared type (`string`, `number`,
-  `boolean`, `string[]` — an empty string counts as absent, `NaN` is not a number), and a
-  list is copied. Nothing undeclared is promoted.
-- The output is one `Attributes` per collect, built fresh. Merging is core's: list keys union
-  across collectors, and a scalar written twice with different values denies the request — so
+  only; a value is promoted only when it matches its declared type — `string`, `number`,
+  `boolean`, `string[]`. An empty string is absent, and one empty entry drops a whole
+  `string[]`; a `number` must be finite, so `NaN` and `±Infinity` are dropped here, while the
+  rules layer's `requireNumber` in [`_sharedValidation.mts`](../rules/_sharedValidation.mts)
+  accepts `Infinity` as a comparand. A promoted list is a copy (documented, not tested).
+  Nothing undeclared is promoted.
+- The output is one `Attributes` per collect, built fresh. Merging is core's: list keys
+  concatenate across collectors, and a scalar written twice with different values denies the
+  request — so
   a claim mapping onto `userId` beside `PayloadSubjectIdCollector` is a configuration to avoid.
 
 ## Dependencies
@@ -65,8 +73,9 @@ deployment names these collectors through `builtinCollectorsModule`.
   `PayloadClaimAttributeCollector` lets a verified claim land on core's five and refuses the
   rest. The line is the trust boundary, not the source (`RESERVED_ATTRIBUTE_KEYS` in
   [`keys.mts`](../../../core/src/keys.mts)). Checked on the resolved key, so `to` defaulting
-  to `from` cannot slip past; refused at construction, naming the mapping's index, the owner
-  and an unreserved rename —
+  to `from` cannot slip past; refused at construction, naming the mapping's index and an
+  unreserved rename — and the owner for another package's key, while a core key is called
+  "the reserved core attribute" —
   [`RequestContextAttributeCollector.test.mts`](../__tests__/collectors/RequestContextAttributeCollector.test.mts),
   [`PayloadClaimAttributeCollector.test.mts`](../__tests__/collectors/PayloadClaimAttributeCollector.test.mts)
   and, across packages,
@@ -75,8 +84,9 @@ deployment names these collectors through `builtinCollectorsModule`.
   subject bag, never the request context" case of the claim collector's test; that the
   request-context collector reads nothing but `requestContext` is documented, not tested.
 - Nothing undeclared, mistyped or inherited is promoted — the "promotes nothing a mapping did
-  not declare", "skips a value whose type does not match" and "does not walk the prototype
-  chain" cases of both mapping tests.
+  not declare" and "does not walk the prototype chain" cases of both mapping tests, "skips a
+  value whose type does not match the declaration" in the request-context one and "skips a
+  claim the token omitted, and a value whose type does not match" in the claim one.
 - A claim that is not a non-empty string is not an identity; a scope claim that is not a
   scope list asserts no capability —
   [`PayloadSubjectIdCollector.test.mts`](../__tests__/collectors/PayloadSubjectIdCollector.test.mts),
@@ -88,18 +98,24 @@ deployment names these collectors through `builtinCollectorsModule`.
 
 ## Failure and lifecycle
 
-- A malformed declaration — an empty `attributes` list, a bad `from` / `to` / `type`, a
-  reserved destination, an empty or non-string `claim` — throws an `Error` naming the
-  collector and the field at construction, so a deployment that wrote it never serves a
-  decision.
-- `collect` does not throw on the shape of a claim or a field: what does not match is
-  dropped, and a request with no context yields an empty map. Nothing here can time out; the
-  pipeline's bounds are for collectors that do I/O. The static collectors hand out a fresh
-  copy of their list each time.
+- The mapping and claim collectors refuse a malformed declaration — an empty `attributes`
+  list, a bad `from` / `to` / `type`, a reserved destination, an empty or non-string `claim`
+  — with an `Error` naming the collector and the field at construction, so a deployment that
+  wrote it never serves a decision; their `collect` does not throw on the shape of a claim or
+  a field: what does not match is dropped, and a request with no context yields an empty map.
+- The static collectors validate nothing at construction: a `roles` / `permissions` that is
+  missing or not iterable throws a `TypeError` on the first `collect` instead (documented, not
+  tested). Each collect hands out a shallow copy of the configured list — the `Role` objects
+  are shared (documented, not tested).
+- The pipeline's per-collector timeout and deadline are in force on every collect and never
+  trip on these, which do no I/O; a fan-out that has already ended makes any collector throw
+  without running.
 
 ## Contract tests
 
-[`../__tests__/collectors/`](../__tests__/collectors/) — one file per collector, named above —
-and [`../__tests__/module.test.mts`](../__tests__/module.test.mts) for the registrations. The
+[`../__tests__/collectors/`](../__tests__/collectors/) — the four files named above, with
+[`StaticRoleCollector.test.mts`](../__tests__/collectors/StaticRoleCollector.test.mts) and
+[`StaticPermissionCollector.test.mts`](../__tests__/collectors/StaticPermissionCollector.test.mts)
+— and [`../__tests__/module.test.mts`](../__tests__/module.test.mts) for the registrations. The
 merge these collectors feed is pinned in core:
 [`AttributePipeline.test.mts`](../../../core/src/__tests__/AttributePipeline.test.mts).
