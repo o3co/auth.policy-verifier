@@ -110,9 +110,10 @@ deployment names these collectors through `builtinCollectorsModule`.
   missing or not iterable throws a `TypeError` on the first `collect` instead (documented, not
   tested). Each collect hands out a shallow copy of the configured list — the `Role` objects
   are shared (documented, not tested).
-- The pipeline's per-collector timeout and deadline are in force on every collect and never
-  trip on these, which do no I/O; a fan-out that has already ended makes any collector throw
-  without running.
+- The pipeline's per-collector timeout and deadline are in force on every collect. These do no
+  I/O and complete within any usable bound, but a bound is a bound: an already-aborted caller,
+  a sibling's failure or a deadline that expires while one is queued ends it before or during
+  `collect`, and a fan-out that has already ended makes any collector throw without running.
 
 ## Contract tests
 

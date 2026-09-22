@@ -17,8 +17,10 @@ shape a composition is built from.
 
 It does not verify a credential: `subject` arrives established by a transport, and
 `credential` is present only under the server's opt-in (#175) and read by nothing here. It
-does no HTTP and no I/O, contains no policy engine (`AsyncRule` is the seam one sits behind;
-`packages/cedar` is one), reads no field of `SubjectAttributes` (#170), and names no domain
+does no HTTP and, on the request path, no I/O of its own — `AsyncRule.decide` is the one seam
+through which a rule may, and `evaluate` runs it under the rule budget; the console logger in
+`logging/` is the one thing here that writes anywhere, an adapter a host replaces — contains no
+policy engine (`AsyncRule` is the seam one sits behind; `packages/cedar` is one), reads no field of `SubjectAttributes` (#170), and names no domain
 attribute key — [AGENTS.md — Core Vocabulary Scope](../../../AGENTS.md#core-vocabulary-scope).
 Every bound reaches it as a number; it reads no configuration.
 

@@ -127,8 +127,9 @@ Where there is configuration to refuse — the comparison rules, the scope colle
 constructor throws an `Error` naming the class and the field, at boot; `HasScope`,
 `HasPermission` and `ResourceActionPermissionRuleCollector` validate nothing. Nothing here
 does I/O: a synchronous rule runs under no rule budget, the collectors run under the
-pipeline's per-collector timeout and deadline, which are in force and never trip on them, and
-`signal` is never read. A rule keeps only its configuration and may answer concurrent
+pipeline's per-collector timeout and deadline, which are in force — they do no I/O and complete
+within any usable bound, though an aborted caller, a sibling's failure or an expired deadline
+ends them as it ends any collector — and `signal` is never read. A rule keeps only its configuration and may answer concurrent
 decisions; none reports an evaluation.
 
 ## Contract tests
