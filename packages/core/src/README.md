@@ -47,8 +47,10 @@ Everything on [`index.mts`](index.mts); [`../README.md`](../README.md) shows usa
 - A pipeline takes a `CollectorRequest` — `subject`, `resource`, `action`, optional `headers`,
   `requestContext`, `credential` and the caller's `signal` — and hands each collector a
   `CollectorContext`: the same, with the caller's `signal` replaced by one minted per collector
-  per decision and linked to it, so a collector never holds the caller's own. Every field but
-  one is vouched for by whoever built it; `requestContext` is the caller's and crosses sealed —
+  per decision and linked to it, so a collector never holds the caller's own. Of what carries
+  data, every field but one is vouched for by whoever built it — the caller's `signal` is the
+  caller's too, but it cancels rather than says anything, which is why it is replaced rather
+  than sealed. `requestContext` is the caller's and crosses sealed —
   marked by the transport with `markUntrustedRequestContext`, unwrapped by a collector with
   `readUntrustedRequestContext`, which is the acknowledgement.
 - `AttributePipeline.collect` returns one merged `Attributes`: array-valued keys concatenate

@@ -12,9 +12,12 @@ config object by reference and read `a`, `b`, `op` and `v` off it at verify time
 `ruleType` and `message` are computed once in the constructor — so a host that constructs one
 itself and then mutates the object it passed changes the answers, past the construction-time
 guards and out of step with the `ruleType` the evaluator groups by. `HasScope` and
-`HasPermission` take a string and keep nothing of the caller's. The bundled composition does not:
-[`module.mts`](../module.mts) builds each rule from the parsed config and keeps nothing.
-Whether construction should copy or freeze the object is #255.
+`HasPermission` take a string and keep nothing of the caller's. Nothing in the bundled
+composition is exposed to this: [`module.mts`](../module.mts) registers the attribute
+collectors, the two rule collectors and the resource parser — no comparison rule is
+constructed there — and the rule collectors build their rules per request from the request
+itself. It applies to a host that constructs one of these classes and keeps the object it
+passed. Whether construction should copy or freeze it is #255.
 
 - [`HasScope`](HasScope.mts) — `ATTR_SCOPES` contains the required scope; `ruleType` `scope`,
   `code` `invalid_scope`. Exact and case-sensitive; the bare `x` → `read:x` rewrite is opt-in
