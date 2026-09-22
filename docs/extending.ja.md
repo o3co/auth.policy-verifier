@@ -158,7 +158,7 @@ interface AttributeCollector {
 
 - 1 つの Collector は **焦点を絞った属性キー群**を生成してください。関係のない抽出をまとめないこと。IP アドレスと User-Agent を抽出するなら Collector を 2 つに分けてください。
 - 属性キーは文字列定数を使うこと。`@o3co/auth.policy-verifier.core` の `ATTR_SCOPES`、`ATTR_PERMISSIONS`、`ATTR_ROLES`、`ATTR_USER_ID`、`ATTR_CLIENT_ID` を参照。プロジェクト固有のキーは独自の定数を定義し、**core のキーを異なるセマンティクスで再利用しないこと**。
-- `AttributePipeline` は全 Collector を並列実行し、結果をマージします: 配列値は連結、スカラ／オブジェクトは後勝ち。この挙動に合わせて設計し、Collector の実行順序には依存しないこと。同時に走る本数には上限があり、各 Collector には時間制限があります — [デッドラインとキャンセル](#デッドラインとキャンセル) を参照。
+- `AttributePipeline` は Collector を並行実行し (同時に走るのは `verify.collectorConcurrency` 個まで、残りは待機)、結果をマージします: 配列値は Collector の順に連結され、配列以外の値は一度だけ書けます (同一の値での再書き込みは可)。2 つの Collector が同じキーに *異なる* 値を書くと `AttributeConflictError` を投げ、そのリクエストは deny になります (#174)。この挙動に合わせて設計し、スカラのキーはそれぞれ 1 つの Collector に所有させ、実行順序には依存しないこと。同時に走る本数には上限があり、各 Collector には時間制限があります — [デッドラインとキャンセル](#デッドラインとキャンセル) を参照。
 - `CollectorContext.requestContext` は意図的に型付けされていません。エンジンは汎用 `requestContext` Collector を提供しません。`requestContext` の形は consuming project のトランスポート層 / interceptor が定義するものであり、解釈はプロジェクトの責務だからです。必要なフィールドごとに焦点を絞った Collector を書き、形の検証はその Collector 内で行ってください。同時に唯一の未検証入力でもあります — 中身を読む前に [信頼境界](#信頼境界-requestcontext-は呼び出し側のもの) を参照してください。
 
 ### 実例: `ClientIpCollector`

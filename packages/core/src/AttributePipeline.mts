@@ -16,8 +16,10 @@ import type { AttributeCollector, Attributes, CollectorRequest } from "./types.m
  * their results into a single `Attributes` map.
  *
  * Merge semantics: when the same key is produced by multiple collectors,
- * array-valued entries concatenate (in collector order), and non-array values
- * are overwritten by later collectors.
+ * array-valued entries concatenate (in collector order); a non-array value may
+ * be written once, or re-written with the identical value, and two collectors
+ * writing different values to it throw {@link AttributeConflictError} (#174) —
+ * see `merge` below.
  *
  * The fan-out is bounded (#115): each collector gets its own timeout and an
  * `AbortSignal`, the wave as a whole gets a deadline, and only so many

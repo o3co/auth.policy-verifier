@@ -27,7 +27,8 @@ export interface ResourceActionScopeRuleCollectorConfig {
 	/**
 	 * The claim whose presence says the token asserted scopes (#219). Defaults
 	 * to `scope`; set it to what `PayloadScopeCollector` reads (`scp` for Okta)
-	 * so the two agree about which tokens are scopeless.
+	 * so the two agree about which tokens are scopeless — each keeps its own
+	 * option, and nothing checks that both were given the same name.
 	 */
 	claim?: string;
 }
