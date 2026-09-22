@@ -13,6 +13,7 @@ import {
 	AttributePipeline,
 	type Attributes,
 	type CollectorContext,
+	type EventLogger,
 	type ResourceParser,
 	type Rule,
 	type RuleCollector,
@@ -1346,6 +1347,90 @@ describe("createVerifyRouter — the credential reaches collectors only by state
 		expect(seen[0]?.credential).toBe(token);
 		expect(seen[0]?.subjectToken).toBeUndefined();
 	});
+
+	it('"expose" with an authenticator that supplies no credential: the context carries no credential key at all (#251)', async () => {
+		// Only a TokenAuthenticator written in JavaScript can produce this. The
+		// contract is about the key, so no credential is no key — not a key set
+		// to undefined.
+		const keys: string[][] = [];
+		const app = express();
+		app.use(
+			createVerifyRouter({
+				authenticator: {
+					authenticate: async () => ({
+						ok: true,
+						subject: { sub: "user-1" },
+						credential: undefined as unknown as string,
+					}),
+				},
+				resourceParser: new DotNotationResourceParser(),
+				attributePipeline: new AttributePipeline([
+					{
+						collect: async (context: CollectorContext) => {
+							keys.push(Object.keys(context));
+							return new Map<string, unknown>([["scopes", ["read:project"]]]);
+						},
+					},
+				]),
+				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
+				credentialToCollectors: "expose",
+			}),
+		);
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", "Bearer anything")
+			.send({ resource: "project:1", action: "read" });
+		expect(res.status).toBe(200);
+		expect(keys).toHaveLength(1);
+		expect(keys[0]).not.toContain("credential");
+	});
+});
+
+describe("POST /verify/batch — the input the entries share cannot leak between them (#251)", () => {
+	it("a collector that writes into context.headers in one entry is not seen by the next", async () => {
+		// The route builds one DecisionInput per request and every lane reads it;
+		// each decision hands its collectors its own copy of the headers, as the
+		// router built one per decision before the extraction. One lane, so the
+		// second entry runs after the first has written.
+		const seen: Array<Record<string, string> | undefined> = [];
+		const poisoning: AttributeCollector = {
+			collect: async (context: CollectorContext) => {
+				seen.push(context.headers === undefined ? undefined : { ...context.headers });
+				if (context.headers !== undefined) context.headers["x-poison"] = context.resource.raw;
+				return new Map<string, unknown>([["scopes", ["read:project"]]]);
+			},
+		};
+		const app = express();
+		app.use(
+			createVerifyRouter({
+				jwt: {
+					validate: true,
+					key: hs256Key.key,
+					algorithms: hs256Key.algorithms,
+					issuer: ISSUER,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				},
+				resourceParser: new DotNotationResourceParser(),
+				attributePipeline: new AttributePipeline([poisoning]),
+				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
+				batchConcurrency: 1,
+			}),
+		);
+		const token = await signHS256Token({ scope: "read:project" });
+		const res = await request(app)
+			.post("/verify/batch")
+			.set("Authorization", `Bearer ${token}`)
+			.set("x-request-id", "req-1")
+			.send({
+				decisions: [
+					{ resource: "project:1", action: "read" },
+					{ resource: "project:2", action: "read" },
+				],
+			});
+		expect(res.status).toBe(200);
+		expect(seen).toEqual([{ "x-request-id": "req-1" }, { "x-request-id": "req-1" }]);
+	});
 });
 
 describe("createVerifyRouter — collectors disagreeing on a scalar attribute deny (#174)", () => {
@@ -1853,6 +1938,103 @@ describe("POST /verify — asynchronous rules (#225)", () => {
 		});
 		await started;
 		await vi.waitFor(() => expect(handed?.aborted).toBe(true), { timeout: 2_000 });
+	});
+
+	/** A logger that keeps every line, so a test can say which were and were not written. */
+	function keptLines(): {
+		lines: Array<{ obj: Record<string, unknown>; msg: string }>;
+		logger: EventLogger;
+	} {
+		const lines: Array<{ obj: Record<string, unknown>; msg: string }> = [];
+		const keep = (obj: Record<string, unknown>, msg?: string) => {
+			lines.push({ obj, msg: msg ?? "" });
+		};
+		return { lines, logger: { info: keep, warn: keep, error: keep } };
+	}
+
+	it("reports the caller going away as verify_caller_gone for the route — no fault line, no decision line (#251)", async () => {
+		const { lines, logger } = keptLines();
+		const app = express();
+		app.use(
+			createVerifyRouter({
+				...pipelines([engine(() => new Promise<boolean>(() => {}))]),
+				ruleTimeoutMs: 60_000,
+				evaluateDeadlineMs: 60_000,
+				logger,
+			}),
+		);
+		const token = await signHS256Token({ scope: "read:project" });
+		await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" })
+			.timeout(80)
+			.catch(() => undefined);
+		await vi.waitFor(() => expect(lines.map((line) => line.msg)).toContain("verify_caller_gone"), {
+			timeout: 2_000,
+		});
+		expect(
+			lines.filter((line) => line.msg === "verify_caller_gone").map((line) => line.obj),
+		).toEqual([{ endpoint: "/verify" }]);
+		const written = lines.map((line) => line.msg);
+		expect(written).not.toContain("verify_internal_error");
+		expect(written).not.toContain("decision");
+	});
+
+	it("a caller leaving a batch is verify_caller_gone for the batch, and no further entry is started (#251)", async () => {
+		const { lines, logger } = keptLines();
+		const started: string[] = [];
+		const stalled: RuleCollector = {
+			async collect(context) {
+				const resource = context.resource.raw;
+				return [
+					{
+						ruleType: "cedar",
+						code: "cedar_deny",
+						message: "Denied",
+						async: true as const,
+						decide: () => {
+							started.push(resource);
+							return new Promise<boolean>(() => {});
+						},
+					},
+				];
+			},
+		};
+		const app = express();
+		app.use(
+			createVerifyRouter({
+				...pipelines([stalled]),
+				batchConcurrency: 1,
+				ruleTimeoutMs: 60_000,
+				evaluateDeadlineMs: 60_000,
+				logger,
+			}),
+		);
+		const token = await signHS256Token({ scope: "read:project" });
+		await request(app)
+			.post("/verify/batch")
+			.set("Authorization", `Bearer ${token}`)
+			.send({
+				decisions: [
+					{ resource: "project:1", action: "read" },
+					{ resource: "project:2", action: "read" },
+					{ resource: "project:3", action: "read" },
+				],
+			})
+			.timeout(80)
+			.catch(() => undefined);
+		await vi.waitFor(() => expect(lines.map((line) => line.msg)).toContain("verify_caller_gone"), {
+			timeout: 2_000,
+		});
+		expect(
+			lines.filter((line) => line.msg === "verify_caller_gone").map((line) => line.obj),
+		).toEqual([{ endpoint: "/verify/batch" }]);
+		// The lane stops pulling entries once the request is gone: with one
+		// lane, only the first entry was ever started — given a tick to prove it.
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(started).toEqual(["project:1"]);
+		expect(lines.map((line) => line.msg)).not.toContain("verify_internal_error");
 	});
 
 	it("still reports an internal fault that is not the caller's abort, even if the caller left (review)", async () => {

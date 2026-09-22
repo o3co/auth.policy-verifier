@@ -4,13 +4,8 @@
 import {
 	type AttributePipeline,
 	consoleLogger,
-	type Decision,
-	type DecisionReason,
 	type EvaluateOptions,
 	type EventLogger,
-	evaluate,
-	FailureRecord,
-	markUntrustedRequestContext,
 	type Resource,
 	ResourceParseError,
 	type ResourceParser,
@@ -23,20 +18,30 @@ import {
 	checkEvaluationInResponse,
 	type EvaluationInResponse,
 } from "../config/evaluationInResponse.mjs";
+import {
+	createDecider,
+	type DecisionInput,
+	type DecisionResponse,
+	unwrapFault,
+	type ValidatedDecisionRequest,
+} from "../decision/decide.mjs";
 import { acceptRequestId, REQUEST_ID_HEADER } from "../http/requestId.mjs";
 import {
 	createTokenAuthenticator,
 	type TokenAuthenticator,
 	type VerifyRouterJwtConfig,
 } from "../jwt/tokenAuthenticator.mjs";
-import { DECISION_EVENT, decisionEvent, present } from "../observability/decisionEvent.mjs";
 import {
 	type ClassifiedFailure,
-	classifyFailure,
-	type FailureCategory,
+	correlation,
+	countCollectorFailure,
 	loggableError,
 } from "../observability/failure.mjs";
 import type { DecisionMetrics } from "../observability/metrics.mjs";
+
+// The wire types of one decision, defined beside the decision that produces
+// them (#251) and re-exported here because the router is their public home.
+export type { DecisionRequest, DecisionResponse } from "../decision/decide.mjs";
 
 /**
  * Config for `createVerifyRouter`.
@@ -174,45 +179,6 @@ export interface VerifyRouterConfig {
 	evaluationInResponse?: EvaluationInResponse;
 }
 
-/**
- * One decision the caller is asking for. The subject is deliberately absent:
- * it comes from the verified token, never from the body — accepting one here
- * would let any token holder ask for a decision about somebody else.
- */
-export interface DecisionRequest {
-	resource: string;
-	action: string;
-	context?: Record<string, unknown>;
-}
-
-/**
- * What the endpoint decided, and for whom.
- *
- * The four inputs an engine needs — subject, resource, action, context — are
- * named explicitly, and the outcome carries a structured `reason` rather than a
- * bare allow/deny. That is what lets a heavy-class engine (OPA's
- * `input document → decision`, OpenFGA's `check(user, relation, object)`, Cedar)
- * sit behind this same contract: the request carries enough for each of them to
- * form its own query, and the response has somewhere to put what decided.
- */
-export interface DecisionResponse {
-	/**
-	 * JWT `sub` of the token presented. Absent when the token carries none — and
-	 * an empty `sub` counts as none, the disposition the audit line takes for the
-	 * same value (#158). `subject: ""` would name a subject that does not exist,
-	 * and every token without one would name the same one.
-	 */
-	subject?: string;
-	resource: string;
-	action: string;
-	decision: "allow" | "deny";
-	/** Present on deny — the first failing group's representative rule. */
-	code?: string;
-	/** Present on deny — the first failing group's representative rule. */
-	message?: string;
-	reason: DecisionReason;
-}
-
 /** Error envelope shared by every non-decision response. */
 interface ErrorBody {
 	decision: "deny";
@@ -225,81 +191,6 @@ const errorBody = (code: string, message: string): ErrorBody => ({
 	code,
 	message,
 });
-
-/**
- * The deny a collector fan-out that ran out of time is answered with (#115).
- *
- * A deny, and specifically not a 5xx. The caller asked whether this request is
- * authorized; what the verifier can stand behind when a collector stalled is
- * "not established", and the safe rendering of that is a refusal. A 500 invites
- * the enforcement layer to retry the same stalled dependency, or to conclude the
- * PDP is down and apply a fallback of its own — and a fallback nobody in this
- * repo wrote is precisely the fail-open being closed here.
- *
- * The message is fixed and says nothing about which collector or which bound:
- * that reaches the caller, and the collector set is deployment topology. The
- * detail is in the `collector_timeout` log line instead, where an operator can
- * act on it.
- */
-const COLLECTOR_TIMEOUT_CODE = "collector_timeout";
-/** An asynchronous rule that did not answer in time (#225): the same deny, its own code. */
-const RULE_TIMEOUT_CODE = "rule_timeout";
-const COLLECTOR_TIMEOUT_MESSAGE = "Authorization could not be decided in time";
-/**
- * Deliberately the collector timeout's wording: to the caller a rule that did
- * not answer in time is the same event as a collector that did not — a
- * deadline elapsed — and which internal stage stalled is the log's business,
- * not the response's. The alias exists so the reuse reads as intent.
- */
-const RULE_TIMEOUT_MESSAGE = COLLECTOR_TIMEOUT_MESSAGE;
-/**
- * What a decision that failed with a 500 throws out of `decide()`: the error as
- * thrown, and the classification only that decision's `FailureRecord` could
- * make (#200). Private to this router — the route unwraps it before anything
- * is logged or compared, so `err` is still the original error and the caller's
- * abort reason is still recognised by identity.
- */
-class DecisionFault extends Error {
-	constructor(
-		readonly original: unknown,
-		readonly failure: ClassifiedFailure,
-	) {
-		super("the decision failed");
-		this.name = "DecisionFault";
-	}
-}
-
-/**
- * What a route caught, unwrapped: a decision's fault with its classification,
- * or anything else — the resource parser, the authenticator, the router's own
- * bookkeeping — as `internal`, whatever its class.
- */
-function unwrapFault(thrown: unknown): { cause: unknown; failure: ClassifiedFailure } {
-	return thrown instanceof DecisionFault
-		? { cause: thrown.original, failure: thrown.failure }
-		: { cause: thrown, failure: { category: "internal" } };
-}
-
-const ATTRIBUTE_CONFLICT_CODE = "attribute_conflict";
-const ATTRIBUTE_CONFLICT_MESSAGE = "Authorization inputs conflicted";
-
-/**
- * The failure categories a decision is denied on rather than failed with, and
- * the deny each is answered with. Read off the category rather than tested
- * class by class, so the deny the caller gets and the `category` the log line
- * carries are one decision made once (#200).
- */
-const DENIED_FAILURES: Partial<Record<FailureCategory, { code: string; message: string }>> = {
-	collector_timeout: { code: COLLECTOR_TIMEOUT_CODE, message: COLLECTOR_TIMEOUT_MESSAGE },
-	rule_timeout: { code: RULE_TIMEOUT_CODE, message: RULE_TIMEOUT_MESSAGE },
-	attribute_conflict: { code: ATTRIBUTE_CONFLICT_CODE, message: ATTRIBUTE_CONFLICT_MESSAGE },
-};
-
-/** One validated entry: the request as sent, plus its resource already parsed. */
-interface ValidatedDecisionRequest {
-	request: DecisionRequest;
-	resource: Resource;
-}
 
 /** Outcome of validating one decision request: either the parsed entry or the reason it is unusable. */
 type ParsedDecisionRequest =
@@ -646,6 +537,9 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 		),
 	};
 	const logger = config.logger ?? consoleLogger;
+	// One binding for the metrics seam, read once here and handed to the decider
+	// and to the three fault paths alike, so all four count into the same sink.
+	const metrics = config.metrics;
 	// Exactly one way to authenticate (#219). Checked at runtime as well as in
 	// the type: this is the boundary a hand-built config reaches. Constructing
 	// the built-in authenticator runs assertVerifyRouterJwtConfig, so an invalid
@@ -677,154 +571,42 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	}
 	const includeEvaluation = evaluationInResponse.value === "include";
 
-	/**
-	 * Counts a failure a collector is answerable for (#200). Called beside each
-	 * log line that reports one, and only there, so the counter and the log
-	 * stream agree on how many there were: a timed-out batch entry is one line
-	 * and one count, and a batch that failed with a 500 — which speaks for the
-	 * whole request — is also one of each.
-	 */
-	const countCollectorFailure = (failure: ClassifiedFailure): void => {
-		if ("collector" in failure) {
-			config.metrics?.observeCollectorFailure?.({
-				collector: failure.collector,
-				category: failure.category,
-			});
-		}
-	};
+	// One decision, with nothing of the transport in it (#251): what `/verify`
+	// runs once and `/verify/batch` runs per entry. Everything resolved above is
+	// handed over once; per request, only the input below crosses.
+	const decide = createDecider({
+		attributePipeline: config.attributePipeline,
+		rulePipeline: config.rulePipeline,
+		evaluateOptions: config.evaluateOptions,
+		ruleTimeoutMs,
+		evaluateDeadlineMs,
+		includeEvaluation,
+		logger,
+		metrics,
+	});
 
-	/** Runs the pipelines and the evaluator for one already-validated entry. */
-	async function decide(
+	/**
+	 * What every decision of one request shares: the subject the authenticator
+	 * established; the credential only under the stated opt-in (#175); the
+	 * request id, both as the one header collectors may read and as the
+	 * correlation of every line about the decision (#200); and the caller's
+	 * signal. Built once per request, so a batch's entries share it.
+	 */
+	const decisionInput = (
 		req: express.Request,
 		auth: { subject: SubjectAttributes; credential: string },
-		{ request: entry, resource }: ValidatedDecisionRequest,
 		signal: AbortSignal,
-	): Promise<DecisionResponse> {
-		const subject = auth.subject;
-		// #200: the id is carried only in the shape `acceptRequestId` admits —
-		// the same value the response echoes and every line below logs.
+	): DecisionInput => {
 		const requestId = requestIdOf(req);
-		const headers = requestId !== undefined ? { [REQUEST_ID_HEADER]: requestId } : undefined;
-		// `subject` was populated from a credential the authenticator verified and
-		// `headers` were read off the transport; `entry.context` is whatever the
-		// caller put in the body, so it crosses into the collector layer marked as
-		// such. A collector has to unwrap it, which is where its author decides
-		// what a caller may choose — see `UntrustedRequestContext` in core.
-		const context = {
-			subject,
-			resource,
-			action: entry.action,
-			headers,
-			requestContext: entry.context ? markUntrustedRequestContext(entry.context) : undefined,
-			// #175: absent unless the composition said "expose" — see the
-			// config field's doc. Spread-conditional so the default context
-			// carries no `credential` key at all, not an undefined one.
+		return {
+			subject: auth.subject,
 			...(exposeCredential ? { credential: auth.credential } : {}),
-			// The caller going away cancels the collectors in flight (v0.10.0 audit).
+			...(requestId !== undefined
+				? { headers: { [REQUEST_ID_HEADER]: requestId }, requestId }
+				: {}),
 			signal,
 		};
-
-		// Timed from here so the measurement is the decision itself — the two
-		// pipelines plus evaluation — and not the HTTP round trip. One batch
-		// request is many decisions, and it is the per-decision cost that a
-		// collector reaching out to a store makes worse.
-		const startedAt = performance.now();
-		// #200: where this decision's failures came from, and only this one's.
-		// Both collects and the evaluator record into it; nothing is kept beside
-		// the error process-wide, where a concurrent decision failing on the same
-		// shared object could overwrite it.
-		const failures = new FailureRecord();
-		let decision: Decision;
-		try {
-			const [attrs, rules] = await Promise.all([
-				config.attributePipeline.collect(context, { failures }),
-				config.rulePipeline.collect(context, { failures }),
-			]);
-			// #225: the rule list may carry asynchronous rules — an out-of-process
-			// engine answers here, after both collects, where the evaluator
-			// always ran. `ruleTimeoutMs` bounds each of them, `evaluateDeadlineMs`
-			// all of them together.
-			decision = await evaluate(attrs, rules, {
-				...config.evaluateOptions,
-				ruleTimeoutMs,
-				evaluateDeadlineMs,
-				// …and the asynchronous rule in flight, instead of leaving an
-				// out-of-process call running to its budget for an answer nobody
-				// will read — which a retrying caller multiplies. Combined with a
-				// library consumer's own signal, never in place of it.
-				signal:
-					config.evaluateOptions?.signal === undefined
-						? signal
-						: AbortSignal.any([config.evaluateOptions.signal, signal]),
-				failures,
-			});
-		} catch (cause) {
-			// Three failures are denies of their own (#115 collector timeouts,
-			// #225 rule timeouts, #174 attribute conflicts); anything else is a
-			// genuine fault and keeps surfacing as a 500 — carrying the
-			// classification only this decision's record could make.
-			const failure = classifyFailure(cause, failures);
-			const denial = DENIED_FAILURES[failure.category];
-			if (denial === undefined) throw new DecisionFault(cause, failure);
-			// The evaluator is deliberately never reached: it is the one place a
-			// short rule list could still be read as a policy, and `onEmptyRuleSet:
-			// "allow"` would then turn a timed-out (or conflicted) pipeline into a
-			// permit. A deny is built here instead, with an empty `reason` because
-			// no rule group was evaluated — which is the honest account of what
-			// happened. The conflicted attribute KEY reaches the log line via the
-			// error — held to the identifier shape, as the rule a timeout names is
-			// (#200); the caller's message names neither key nor values.
-			logger.error(
-				{
-					err: loggableError(cause, failure),
-					resource: entry.resource,
-					action: entry.action,
-					...correlation(requestId),
-					...failure,
-				},
-				denial.code,
-			);
-			countCollectorFailure(failure);
-			decision = {
-				decision: "deny",
-				code: denial.code,
-				message: denial.message,
-				reason: { groups: [] },
-			};
-		}
-		const durationMs = performance.now() - startedAt;
-
-		// Derived once and spent twice — on the audit line below and on the
-		// response returned at the end (#158). An empty `sub` is absent from both,
-		// and the only way the two dispositions of one value cannot drift apart
-		// again is for there to be one value.
-		const subjectId = typeof subject.sub === "string" ? present(subject.sub) : undefined;
-
-		// #111: one structured line per decision, and the counters beside it. Both
-		// are emitted here rather than at each route so a decision is reported
-		// exactly once whether it came through `/verify` or one entry of a batch.
-		logger.info(
-			decisionEvent({
-				decision,
-				subject: subjectId,
-				resource: entry.resource,
-				action: entry.action,
-				requestId,
-				durationMs,
-			}),
-			DECISION_EVENT,
-		);
-		config.metrics?.observe({
-			decision: decision.decision,
-			// `resource` and `action` are deliberately not passed: they come from
-			// the request body and would be unbounded metric labels. They are on
-			// the log line above instead.
-			code: decision.decision === "deny" ? decision.code : undefined,
-			durationSeconds: durationMs / 1000,
-		});
-
-		return toResponse(subjectId, entry, decision, includeEvaluation);
-	}
+	};
 
 	const router = express.Router();
 	// #200: the caller's request id goes back on every response this router
@@ -860,7 +642,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				return;
 			}
 
-			const decision = await decide(req, auth, parsed.entry, signal);
+			const decision = await decide(parsed.entry, decisionInput(req, auth, signal));
 			res.status(decision.decision === "deny" ? 403 : 200).json(decision);
 		} catch (thrown) {
 			const { cause, failure } = unwrapFault(thrown);
@@ -879,7 +661,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				},
 				"verify_internal_error",
 			);
-			countCollectorFailure(failure);
+			countCollectorFailure(metrics, failure);
 			res.status(500).json(errorBody("internal_error", "Internal server error"));
 		}
 	});
@@ -957,12 +739,13 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			// slot, so the answer order is the request order however the lanes
 			// interleave.
 			const decisions = new Array<DecisionResponse>(entries.length);
+			const input = decisionInput(req, auth, signal);
 			let next = 0;
 			let abandoned = false;
 			const lane = async (): Promise<void> => {
 				while (!abandoned && next < entries.length) {
 					const index = next++;
-					decisions[index] = await decide(req, auth, entries[index], signal);
+					decisions[index] = await decide(entries[index], input);
 				}
 			};
 			try {
@@ -994,7 +777,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				},
 				"verify_internal_error",
 			);
-			countCollectorFailure(failure);
+			countCollectorFailure(metrics, failure);
 			res.status(500).json(errorBody("internal_error", "Internal server error"));
 		}
 	});
@@ -1043,7 +826,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			},
 			"verify_internal_error",
 		);
-		countCollectorFailure(failure);
+		countCollectorFailure(metrics, failure);
 		res.status(500).json(errorBody("internal_error", "Internal server error"));
 	};
 	router.use(denyOnBodyFailure);
@@ -1097,15 +880,6 @@ function requestIdOf(req: express.Request): string | undefined {
 }
 
 /**
- * The `requestId` field of a failure line: present when there is an id to
- * carry, and absent — not `undefined` — when there is none, the disposition the
- * `decision` line already takes (see `present` in `observability/decisionEvent`).
- */
-function correlation(requestId: string | undefined): { requestId?: string } {
-	return requestId !== undefined ? { requestId } : {};
-}
-
-/**
  * Whether `err` is one of body-parser's own failures: it tags every one it
  * raises with a string `type` (see {@link bodyParserFailure}). Asked only of
  * what reaches the terminal handler, where the parser is the one thing mounted
@@ -1114,51 +888,4 @@ function correlation(requestId: string | undefined): { requestId?: string } {
  */
 function isBodyParserFailure(err: unknown): boolean {
 	return typeof (err as { type?: unknown } | null)?.type === "string";
-}
-
-/**
- * Projects an engine `Decision` onto the wire contract, naming what it was about.
- *
- * Takes the already-derived `subject` id rather than the subject bag: the audit
- * line and this response must agree about whether the decision had one, and
- * reading `subject.sub` a second time here is what let them disagree (#158).
- *
- * `includeEvaluation` is `verify.evaluationInResponse` (#244). The `decision`
- * event is built from the same `Decision` and always carries the evaluations,
- * so what the response includes is the event's own values, and what it omits
- * is still on the record.
- */
-function toResponse(
-	subject: string | undefined,
-	entry: DecisionRequest,
-	decision: Decision,
-	includeEvaluation: boolean,
-): DecisionResponse {
-	const base = {
-		...(subject !== undefined ? { subject } : {}),
-		resource: entry.resource,
-		action: entry.action,
-		reason: includeEvaluation ? decision.reason : withoutEvaluations(decision.reason),
-	};
-	return decision.decision === "deny"
-		? { ...base, decision: "deny", code: decision.code, message: decision.message }
-		: { ...base, decision: "allow" };
-}
-
-/**
- * The reason with every outcome's `evaluation` left out (#244) — and nothing
- * else. Groups and outcomes are spread rather than rebuilt from a list of
- * keys, so whatever else either carries, now or later, stays. `satisfiedBy` is
- * rebuilt as the last evaluated outcome, which is what it is (#135), so the two
- * cannot differ in what was omitted.
- */
-function withoutEvaluations(reason: DecisionReason): DecisionReason {
-	return {
-		groups: reason.groups.map((group) => {
-			const evaluated = group.evaluated.map(({ evaluation: _evaluation, ...outcome }) => outcome);
-			return group.passed
-				? { ...group, evaluated, satisfiedBy: evaluated[evaluated.length - 1] }
-				: { ...group, evaluated };
-		}),
-	};
 }
