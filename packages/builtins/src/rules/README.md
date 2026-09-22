@@ -83,8 +83,10 @@ rules also import [`_sharedValidation.mts`](_sharedValidation.mts); the one rule
 `HasPermission` import core alone, and none imports `CollectorContext`. Each collector imports core and the rule it builds;
 `ResourceActionScopeRuleCollector` also imports
 [`../collectors/_claims.mts`](../collectors/_claims.mts) — the one edge from `rules/` into
-`collectors/`, so it and `PayloadScopeCollector` cannot disagree about which claim holds the
-scopes. Imported by `../index.mts` and `../module.mts`.
+`collectors/`: the same default claim name and the same refusal of a bad `claim` option as
+`PayloadScopeCollector`, so that, configured with the same `claim`, the two read the same token
+field. Each keeps its own option and nothing checks that both were given the same name, so a
+deployment that sets `claim` sets it on both. Imported by `../index.mts` and `../module.mts`.
 
 ## Invariants
 
@@ -98,11 +100,15 @@ scopes. Imported by `../index.mts` and `../module.mts`.
   as a textual backstop;
   the suite is the check. No builtin collector emits the comparison rules, so they are not run
   through the suite: beyond the grep, their purity is documented, not tested.
-- Malformed attributes never throw and never match; matching is exact and case-sensitive, a
-  multi-colon scope is one value, and a wildcard's halves do not overlap —
+- An attribute that is missing, `null` or of another type than the rule's literal never throws
+  and never matches; matching is exact and case-sensitive, a multi-colon scope is one value, and
+  a wildcard's halves do not overlap —
   [`HasScope.test.mts`](../__tests__/rules/HasScope.test.mts),
   [`HasPermission.test.mts`](../__tests__/rules/HasPermission.test.mts) (the "malformed" and
-  "(#180)" cases), and the safe-deny cases of each `Attr*` test.
+  "(#180)" cases), and the safe-deny cases of each `Attr*` test. `NaN` is a number, so the type
+  guard admits it: `AttrLiteralCompare` and `AttrPairCompare` refuse it explicitly, `Equal` / `In`
+  cannot match it, and `AttrLiteralNotEqual` / `AttrLiteralNotIn` pass it as they pass any other
+  unequal number — documented, not tested; whether that should be a deny is #254.
 - Configuration is refused at construction: an attribute name may not contain `:` (the
   `ruleType` separator), a literal may not be `NaN`, a value list is non-empty and
   homogeneous, `group` is a non-empty string; the default `ruleType` tells `1` from `"1"` and

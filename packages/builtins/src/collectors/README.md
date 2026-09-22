@@ -37,7 +37,9 @@ two mapping collectors share — `from`, `to`, `type` — is
 [`_attributeMapping.mts`](_attributeMapping.mts); the scope-claim reading is
 [`_claims.mts`](_claims.mts), which
 [`../rules/collectors/ResourceActionScopeRuleCollector.mts`](../rules/collectors/ResourceActionScopeRuleCollector.mts)
-also uses, so the two agree about which tokens are scopeless. Neither helper is exported.
+also uses for the default claim name and its validation — so the two agree about which tokens
+are scopeless only when given the same `claim`; each stores its own option, and nothing checks
+that they match. Neither helper is exported.
 Options and examples: [`../../README.md`](../../README.md#attribute-collectors).
 
 ## Inputs and outputs
