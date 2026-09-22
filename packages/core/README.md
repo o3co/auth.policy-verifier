@@ -48,7 +48,7 @@ class AttributePipeline {
 }
 ```
 
-Runs all collectors in parallel and merges the results. Array values are concatenated; for all other types, the last writer wins.
+Runs all collectors in parallel and merges the results. Array values are concatenated in collector order; any other value may be written once, or written again with the same value — two collectors writing *different* values to one key throw `AttributeConflictError`, which the server answers as a deny (#174).
 
 The fan-out is bounded — see [Collector limits](#collector-limits). `collect` takes a `CollectorRequest` (the request without a `signal`); the pipeline supplies each collector its own.
 

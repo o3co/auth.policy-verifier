@@ -40,7 +40,7 @@ Promotes declared claims of the **verified subject** into attributes (#219) — 
 
 Same mapping shape as `RequestContextAttributeCollector` (`{ from, to?, type? }`, an exact key winning over a dot path, own properties only). What differs is the source, and therefore the trust: the subject bag is what the authenticator verified, so a mapping **may** land on core's five keys — `scopes`, `permissions`, `roles`, `userId`, `clientId` — where the request-context collector refuses them. Two collectors writing one list key union it; that is the deployment composing two issuer-derived sources, and it says so in config. A *scalar* key written by two collectors with different values throws `AttributeConflictError` and denies every request — do not map onto `userId` / `clientId` while `PayloadSubjectIdCollector` also writes them. Keys another package reserved (cedar's `request*`) stay refused, because they are derived from the request, not from the subject. And map only claims the IdP populates from its own registration or admin data: a claim minted from user-editable metadata (Clerk's `unsafe_metadata`, Auth0's `user_metadata`) is signed, not trusted.
 
-For the scope claim specifically, prefer `PayloadScopeCollector { claim = "scp" }`, which also reads the space-delimited string form and pairs with `ResourceActionScopeRuleCollector { claim = "scp" }` so both agree about which tokens are scopeless.
+For the scope claim specifically, prefer `PayloadScopeCollector { claim = "scp" }`, which also reads the space-delimited string form and pairs with `ResourceActionScopeRuleCollector { claim = "scp" }` — set on both, since each keeps its own `claim` and nothing checks they match — so both agree about which tokens are scopeless.
 
 ### RequestContextAttributeCollector
 
@@ -158,7 +158,7 @@ new AttrLiteralNotEqual({ a: string, v: string | number | boolean, group?: strin
 
 - `code`: `"attr_equal"`.
 - Default `ruleType`: `` `attr_literal_not_equal:${a}:${typeof v}:${String(v)}` ``. The `typeof v` segment prevents silent collisions between distinct-type literals (same rationale as `AttrLiteralEqual`).
-- Passes when `attrs.get(a)` is the same type as `v` and strictly not equal to it. Missing or wrong-type attributes return `false` (safe-deny).
+- Passes when `attrs.get(a)` is the same type as `v` and strictly not equal to it. Missing or wrong-type attributes return `false` (safe-deny); a `NaN` attribute is a number and passes, as any other unequal number does (#254).
 
 ### AttrLiteralIn
 
@@ -178,7 +178,7 @@ new AttrLiteralNotIn({ a: string, values: (string | number | boolean)[], group?:
 
 - `code`: `"attr_in_set"`.
 - Default `ruleType`: `` `attr_literal_not_in:${a}:${type}:${count}:${hashPrefix}` `` — same stable, deduplication-aware hash scheme as `AttrLiteralIn`.
-- `values` must be a non-empty, homogeneous array. Passes when `attrs.get(a)` is NOT in the set. Duplicate elements in `values` are ignored.
+- `values` must be a non-empty, homogeneous array. Passes when `attrs.get(a)` is NOT in the set — a `NaN` attribute of a numeric set included, since it is in no set (#254). Duplicate elements in `values` are ignored.
 
 ### AttrLiteralCompare
 
