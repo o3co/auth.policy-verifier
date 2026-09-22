@@ -20,6 +20,9 @@ import {
 	RuleTimeoutError,
 } from "@o3co/auth.policy-verifier.core";
 import type { NamedRule } from "./decisionEvent.mjs";
+// Type only: `metrics.mts` loads express and prom-client, and the decision
+// module, which counts through this helper, must reach neither (#251).
+import type { DecisionMetrics } from "./metrics.mjs";
 
 /**
  * Every value `category` can take, in one closed set — so the log line and the
@@ -223,4 +226,32 @@ function ruleName(source: FailureSource | undefined): NamedRule {
 	return source?.kind === "rule"
 		? { ruleType: identifier(source.ruleType), code: identifier(source.code) }
 		: { ruleType: UNATTRIBUTED, code: UNATTRIBUTED };
+}
+
+/**
+ * The `requestId` field of a failure line: present when there is an id to
+ * carry, and absent — not `undefined` — when there is none, the disposition the
+ * `decision` line already takes (see `present` in `observability/decisionEvent`).
+ */
+export function correlation(requestId: string | undefined): { requestId?: string } {
+	return requestId !== undefined ? { requestId } : {};
+}
+
+/**
+ * Counts a failure a collector is answerable for (#200). Called beside each
+ * log line that reports one, and only there, so the counter and the log
+ * stream agree on how many there were: a timed-out batch entry is one line
+ * and one count, and a batch that failed with a 500 — which speaks for the
+ * whole request — is also one of each. No `metrics` counts nothing.
+ */
+export function countCollectorFailure(
+	metrics: DecisionMetrics | undefined,
+	failure: ClassifiedFailure,
+): void {
+	if ("collector" in failure) {
+		metrics?.observeCollectorFailure?.({
+			collector: failure.collector,
+			category: failure.category,
+		});
+	}
 }
