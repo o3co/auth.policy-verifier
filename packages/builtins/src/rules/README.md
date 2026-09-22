@@ -6,8 +6,14 @@ two rule collectors that build them from the request.
 ## Responsibility
 
 A rule here answers one question about `attrs` and holds nothing else: what it compares
-against is fixed when it is constructed — from configuration or, for the two collected rules,
-from the request at collect time.
+against comes from configuration, or for the two collected rules from the request at collect
+time, and the rule never writes to it. It is the caller's object, kept by reference — the
+comparison rules read `a`, `b`, `op` and `v` off it at verify time, while `ruleType` and
+`message` are computed once in the constructor — so a host that constructs a rule itself and
+then mutates the object it passed changes the answers, past the construction-time guards and
+out of step with the `ruleType` the evaluator groups by. The bundled composition does not:
+[`module.mts`](../module.mts) builds each rule from the parsed config and keeps nothing.
+Whether construction should copy or freeze the object is #255.
 
 - [`HasScope`](HasScope.mts) — `ATTR_SCOPES` contains the required scope; `ruleType` `scope`,
   `code` `invalid_scope`. Exact and case-sensitive; the bare `x` → `read:x` rewrite is opt-in

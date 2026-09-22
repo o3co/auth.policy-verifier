@@ -96,8 +96,11 @@ deployment names these collectors through `builtinCollectorsModule`.
   [`PayloadScopeCollector.test.mts`](../__tests__/collectors/PayloadScopeCollector.test.mts).
 - A collector holds nothing of the request past `collect` — no context, no `signal` — and
   writes nothing into its input (`subject` is read-only by type). Documented, not tested:
-  none of these keeps state between calls, and the rule-purity suite covers the rule side of
-  the same line.
+  none of these keeps request-derived state between calls. Configuration they do keep — the
+  mapping collectors their mappings, the static collectors the list they were given, whose
+  `Role` objects are shared with every collect (below) — and a rule's configuration is the
+  caller's object in the same way (#{n}); the rule-purity suite covers the rule side of the
+  same line.
 
 ## Failure and lifecycle
 
