@@ -98,9 +98,9 @@ deployment names these collectors through `builtinCollectorsModule`.
   writes nothing into its input (`subject` is read-only by type). Documented, not tested:
   none of these keeps request-derived state between calls. Configuration they do keep — the
   mapping collectors their mappings, the static collectors the list they were given, whose
-  `Role` objects are shared with every collect (below) — and a rule's configuration is the
-  caller's object in the same way (#{n}); the rule-purity suite covers the rule side of the
-  same line.
+  `Role` objects are shared with every collect (below). Holding the caller's *object* is a
+  different matter, and only the comparison rules do it (#255); the rule-purity suite covers
+  the rule side of this line.
 
 ## Failure and lifecycle
 

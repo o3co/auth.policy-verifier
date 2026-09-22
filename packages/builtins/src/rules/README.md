@@ -7,11 +7,12 @@ two rule collectors that build them from the request.
 
 A rule here answers one question about `attrs` and holds nothing else: what it compares
 against comes from configuration, or for the two collected rules from the request at collect
-time, and the rule never writes to it. It is the caller's object, kept by reference — the
-comparison rules read `a`, `b`, `op` and `v` off it at verify time, while `ruleType` and
-`message` are computed once in the constructor — so a host that constructs a rule itself and
-then mutates the object it passed changes the answers, past the construction-time guards and
-out of step with the `ruleType` the evaluator groups by. The bundled composition does not:
+time, and the rule never writes to it. The comparison rules keep the caller's
+config object by reference and read `a`, `b`, `op` and `v` off it at verify time, while
+`ruleType` and `message` are computed once in the constructor — so a host that constructs one
+itself and then mutates the object it passed changes the answers, past the construction-time
+guards and out of step with the `ruleType` the evaluator groups by. `HasScope` and
+`HasPermission` take a string and keep nothing of the caller's. The bundled composition does not:
 [`module.mts`](../module.mts) builds each rule from the parsed config and keeps nothing.
 Whether construction should copy or freeze the object is #255.
 
@@ -114,9 +115,14 @@ deployment that sets `claim` sets it on both. Imported by `../index.mts` and `..
   [`HasScope.test.mts`](../__tests__/rules/HasScope.test.mts),
   [`HasPermission.test.mts`](../__tests__/rules/HasPermission.test.mts) (the "malformed" and
   "(#180)" cases), and the safe-deny cases of each `Attr*` test. `NaN` is a number, so the type
-  guard admits it: `AttrLiteralCompare` and `AttrPairCompare` refuse it explicitly, `Equal` / `In`
-  cannot match it, and `AttrLiteralNotEqual` / `AttrLiteralNotIn` pass it as they pass any other
-  unequal number — documented, not tested; whether that should be a deny is #254.
+  guard admits it, and what happens next differs by rule: the comparison rules answer `false`
+  for every operator because a relational comparison with `NaN` is `false`, not because they
+  check for it — [`AttrLiteralCompare.test.mts`](../__tests__/rules/AttrLiteralCompare.test.mts)
+  and [`AttrPairCompare.test.mts`](../__tests__/rules/AttrPairCompare.test.mts) pin all four;
+  `Equal` / `In` cannot match it; `AttrLiteralNotEqual` / `AttrLiteralNotIn` pass it as they
+  pass any other unequal number, which is the one part documented and not tested, and whether
+  it should be a deny is #254. A `NaN` *literal* is a different thing and is refused at
+  construction, with its own case in each test.
 - Configuration is refused at construction: an attribute name may not contain `:` (the
   `ruleType` separator), a literal may not be `NaN`, a value list is non-empty and
   homogeneous, `group` is a non-empty string; the default `ruleType` tells `1` from `"1"` and
