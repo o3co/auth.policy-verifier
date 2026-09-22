@@ -141,8 +141,9 @@ deployment that sets `claim` sets it on both. Imported by `../index.mts` and `..
 ## Failure and lifecycle
 
 Where there is configuration to refuse — the comparison rules, the scope collector — the
-constructor throws an `Error` naming the validating class and the field, at boot. That is the
-rule's own class everywhere but [`AttrMatchRule`](AttrMatchRule.mts), the deprecated wrapper,
+constructor throws an `Error` naming the validating class and the field, when the rule is
+constructed — at boot for a deployment that builds its rules from configuration at startup,
+and whenever it constructs one otherwise. That is the rule's own class everywhere but [`AttrMatchRule`](AttrMatchRule.mts), the deprecated wrapper,
 which extends `AttrPairEqual` and validates through `super`, so its refusals name
 `AttrPairEqual`. `HasScope`, `HasPermission` and `ResourceActionPermissionRuleCollector`
 validate nothing. Nothing here

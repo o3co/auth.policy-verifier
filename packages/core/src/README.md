@@ -58,7 +58,9 @@ Everything on [`index.mts`](index.mts); [`../README.md`](../README.md) shows usa
   scalars under one key are an `AttributeConflictError`. `RulePipeline.collect` concatenates.
 - `evaluate(attrs, rules, options)` returns a `Decision`: allow, or deny with the `code` /
   `message` of the first rule of the first failing group; `reason` accounts for every group,
-  each outcome carrying what its rule reported (#244).
+  each outcome carrying what its rule reported (#244). An empty rule set has no rule to be
+  denied by and is the one deny of core's own words — `no_applicable_rule` — under the default
+  `onEmptyRuleSet: "deny"`.
 
 ## Dependencies
 
