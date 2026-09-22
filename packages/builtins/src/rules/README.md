@@ -69,8 +69,10 @@ stated here as it stands there and not tightened:
 
 ## Inputs and outputs
 
-A rule takes the merged `ReadonlyAttributes` and answers a boolean; a value under the wrong
-key, of the wrong type or malformed in any way answers `false` and never throws. A collector
+A rule takes the merged `ReadonlyAttributes` and answers a boolean; a value that is missing,
+`null` or of another type than the rule's literal answers `false` and never throws (the one
+number the type guard admits but no rule wants, `NaN`, is the exception under
+[Invariants](#invariants)). A collector
 takes a `CollectorContext` and returns a rule built fresh for that request — or, for the scope
 collector under `scopeless: "skip"` with no scope claim, no rule at all. `ruleType` and `code`
 reach the wire and the failure lines.
