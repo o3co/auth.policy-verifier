@@ -27,6 +27,7 @@ import {
 } from "@o3co/auth.policy-verifier.builtins";
 import {
 	AttributePipeline,
+	consoleLogger,
 	type EventLogger,
 	type Rule,
 	type RuleCollector,
@@ -36,7 +37,11 @@ import express from "express";
 import { errors, SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { HS256KeyResolverFactory, type VerifyRouterJwtConfig } from "#/jwt/index.mjs";
+import {
+	createTokenAuthenticator,
+	HS256KeyResolverFactory,
+	type VerifyRouterJwtConfig,
+} from "#/jwt/index.mjs";
 import { createVerifyRouter } from "#/routes/verify.mjs";
 
 /** 64 hex characters each — 32 decoded bytes, the entropy floor #114 enforces. */
@@ -126,7 +131,10 @@ function createTestApp(overrides: {
 	const app = express();
 	app.use(
 		createVerifyRouter({
-			jwt: overrides.jwt ?? verifyingJwt,
+			authenticator: createTokenAuthenticator(
+				overrides.jwt ?? verifyingJwt,
+				overrides.logger ?? consoleLogger,
+			),
 			logger: overrides.logger,
 			resourceParser: new DotNotationResourceParser(),
 			attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),

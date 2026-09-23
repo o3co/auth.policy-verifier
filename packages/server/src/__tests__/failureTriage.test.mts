@@ -46,7 +46,7 @@ import express from "express";
 import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { HS256KeyResolverFactory } from "#/jwt/index.mjs";
+import { createTokenAuthenticator, HS256KeyResolverFactory } from "#/jwt/index.mjs";
 import { classifyFailure, FAILURE_CATEGORIES, loggableError } from "#/observability/failure.mjs";
 import { createMetrics, MAX_COLLECTOR_LABELS } from "#/observability/metrics.mjs";
 import { createVerifyRouter, type VerifyRouterConfig } from "#/routes/verify.mjs";
@@ -115,14 +115,17 @@ function createTestApp(options: AppOptions = {}) {
 	if (options.before) app.use(options.before);
 	app.use(
 		createVerifyRouter({
-			jwt: {
-				validate: true,
-				key: hs256Key.key,
-				algorithms: hs256Key.algorithms,
-				issuer: ISSUER,
-				audience: AUDIENCE,
-				tokenType: "at+jwt",
-			},
+			authenticator: createTokenAuthenticator(
+				{
+					validate: true,
+					key: hs256Key.key,
+					algorithms: hs256Key.algorithms,
+					issuer: ISSUER,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				},
+				logger,
+			),
 			logger,
 			metrics: metrics.decisions,
 			resourceParser: new DotNotationResourceParser(),
@@ -457,7 +460,6 @@ describe("verify_internal_error names what failed (#200)", () => {
 		const forgedName = "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEifQ.sig";
 		const { app, events } = createTestApp({
 			router: {
-				jwt: undefined,
 				authenticator: {
 					authenticate: async () => {
 						throw new CollectorTimeoutError({
@@ -929,7 +931,6 @@ describe("redaction: nothing request-derived reaches a failure line or a label (
 		const forgedCode = "victim@example.com";
 		const { app, events } = createTestApp({
 			router: {
-				jwt: undefined,
 				authenticator: {
 					authenticate: async () => {
 						throw new RuleTimeoutError({ ruleType: "cedar", code: forgedCode, timeoutMs: 1 });

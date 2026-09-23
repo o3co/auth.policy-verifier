@@ -6,8 +6,12 @@ import {
 	PayloadScopeCollector,
 	ResourceActionScopeRuleCollector,
 } from "@o3co/auth.policy-verifier.builtins";
-import { AttributePipeline, RulePipeline } from "@o3co/auth.policy-verifier.core";
-import { createVerifyRouter, type VerifyRouterJwtConfig } from "@o3co/auth.policy-verifier.server";
+import { AttributePipeline, consoleLogger, RulePipeline } from "@o3co/auth.policy-verifier.core";
+import {
+	createTokenAuthenticator,
+	createVerifyRouter,
+	type VerifyRouterJwtConfig,
+} from "@o3co/auth.policy-verifier.server";
 import express from "express";
 import { SignJWT } from "jose";
 import request from "supertest";
@@ -29,7 +33,7 @@ function createApp(jwt: VerifyRouterJwtConfig) {
 	const app = express();
 	app.use(
 		createVerifyRouter({
-			jwt,
+			authenticator: createTokenAuthenticator(jwt, consoleLogger),
 			resourceParser: new DotNotationResourceParser(),
 			attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
 			rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),

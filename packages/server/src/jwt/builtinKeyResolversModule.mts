@@ -19,9 +19,10 @@ import {
 	type JWSHeaderParameters,
 	type JWTVerifyGetKey,
 } from "jose";
+import type { KeyResolver, KeyResolverFactory } from "../auth/keyResolver.mjs";
+import type { ServerModuleContext } from "../auth/serverModuleContext.mjs";
 import { type Hs256RotationConfig, parseHs256Rotation } from "./hs256Rotation.mjs";
 import { type JwksFetchConfig, parseJwksUri, resolveJwksFetchBounds } from "./jwks.mjs";
-import type { KeyResolver, KeyResolverFactory, ServerModuleContext } from "./keyResolver.mjs";
 
 interface JwtFactoryInput extends JwksFetchConfig, Hs256RotationConfig {
 	secret?: string;

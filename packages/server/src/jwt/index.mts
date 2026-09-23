@@ -36,16 +36,8 @@ export {
 	JWT_TOKEN_AUTHENTICATOR,
 	JwtTokenAuthenticatorFactory,
 } from "./jwtTokenAuthenticatorFactory.mjs";
-export type {
-	KeyResolver,
-	KeyResolverFactory,
-	ServerModuleContext,
-	TokenAuthenticatorDependencies,
-	TokenAuthenticatorFactory,
-} from "./keyResolver.mjs";
 export {
 	type AssertedJwtConfig,
-	type AuthenticationResult,
 	assertVerifyRouterJwtConfig,
 	createTokenAuthenticator,
 	type DecodingJwtConfig,
@@ -53,7 +45,6 @@ export {
 	type JwtTimeClaimBounds,
 	type JwtTimeClaimConfig,
 	resolveJwtTimeClaimBounds,
-	type TokenAuthenticator,
 	type UncheckedJwtConfig,
 	type VerifyingJwtConfig,
 	type VerifyRouterJwtConfig,

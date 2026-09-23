@@ -38,7 +38,7 @@ import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { acceptRequestId, MAX_REQUEST_ID_LENGTH, REQUEST_ID_HEADER } from "#/http/requestId.mjs";
-import { HS256KeyResolverFactory } from "#/jwt/index.mjs";
+import { createTokenAuthenticator, HS256KeyResolverFactory } from "#/jwt/index.mjs";
 import { createVerifyRouter } from "#/routes/verify.mjs";
 
 /** 64 hex characters — 32 decoded bytes, the entropy floor #114 enforces. */
@@ -95,14 +95,17 @@ function createTestApp() {
 	const app = express();
 	app.use(
 		createVerifyRouter({
-			jwt: {
-				validate: true,
-				key: hs256Key.key,
-				algorithms: hs256Key.algorithms,
-				issuer: ISSUER,
-				audience: AUDIENCE,
-				tokenType: "at+jwt",
-			},
+			authenticator: createTokenAuthenticator(
+				{
+					validate: true,
+					key: hs256Key.key,
+					algorithms: hs256Key.algorithms,
+					issuer: ISSUER,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				},
+				logger,
+			),
 			logger,
 			resourceParser: new DotNotationResourceParser(),
 			attributePipeline: new AttributePipeline([new PayloadScopeCollector(), recording.collector], {
@@ -228,7 +231,10 @@ describe("x-request-id on the decision endpoints (#200)", () => {
 		});
 		app.use(
 			createVerifyRouter({
-				jwt: { validate: false, allowInsecureDecode: true },
+				authenticator: createTokenAuthenticator(
+					{ validate: false, allowInsecureDecode: true },
+					logger,
+				),
 				logger,
 				resourceParser: new DotNotationResourceParser(),
 				attributePipeline: new AttributePipeline([]),

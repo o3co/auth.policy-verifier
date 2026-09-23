@@ -2,6 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export { type CreateAppOptions, createApp } from "./app.mjs";
+export type {
+	AuthenticationResult,
+	KeyResolver,
+	KeyResolverFactory,
+	ServerModuleContext,
+	TokenAuthenticator,
+	TokenAuthenticatorDependencies,
+	TokenAuthenticatorFactory,
+} from "./auth/index.mjs";
 export {
 	type AppConfig,
 	AppConfigSchema,
@@ -45,7 +54,6 @@ export {
 export {
 	type AssertedJwtConfig,
 	type AudienceClaimCheck,
-	type AuthenticationResult,
 	assertVerifyRouterJwtConfig,
 	audienceMatches,
 	builtinKeyResolversModule,
@@ -71,17 +79,11 @@ export {
 	type JwtTimeClaimBounds,
 	type JwtTimeClaimConfig,
 	JwtTokenAuthenticatorFactory,
-	type KeyResolver,
-	type KeyResolverFactory,
 	parseHs256Rotation,
 	parseJwksUri,
 	RS256KeyResolverFactory,
 	resolveJwksFetchBounds,
 	resolveJwtTimeClaimBounds,
-	type ServerModuleContext,
-	type TokenAuthenticator,
-	type TokenAuthenticatorDependencies,
-	type TokenAuthenticatorFactory,
 	UNPINNED_TOKEN_TYPE,
 	type UncheckedJwtConfig,
 	type VerifyingJwtConfig,

@@ -8,8 +8,8 @@ import {
 	ResourceActionScopeRuleCollector,
 } from "@o3co/auth.policy-verifier.builtins";
 import type { Attributes, Rule, RuleCollector } from "@o3co/auth.policy-verifier.core";
-import { AttributePipeline, RulePipeline } from "@o3co/auth.policy-verifier.core";
-import { createVerifyRouter } from "@o3co/auth.policy-verifier.server";
+import { AttributePipeline, consoleLogger, RulePipeline } from "@o3co/auth.policy-verifier.core";
+import { createTokenAuthenticator, createVerifyRouter } from "@o3co/auth.policy-verifier.server";
 import express from "express";
 import { SignJWT } from "jose";
 import request from "supertest";
@@ -43,14 +43,17 @@ const tenantRuleCollector: RuleCollector = {
 const app = express();
 app.use(
 	createVerifyRouter({
-		jwt: {
-			validate: true,
-			key: secret,
-			algorithms: ["HS256"],
-			issuer: ISSUER,
-			audience: AUDIENCE,
-			tokenType: "at+jwt",
-		},
+		authenticator: createTokenAuthenticator(
+			{
+				validate: true,
+				key: secret,
+				algorithms: ["HS256"],
+				issuer: ISSUER,
+				audience: AUDIENCE,
+				tokenType: "at+jwt",
+			},
+			consoleLogger,
+		),
 		resourceParser: new DotNotationResourceParser(),
 		attributePipeline: new AttributePipeline([
 			new PayloadScopeCollector(),

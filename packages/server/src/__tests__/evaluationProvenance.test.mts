@@ -28,12 +28,12 @@ import {
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
+import type { TokenAuthenticator } from "#/auth/tokenAuthenticator.mjs";
 import { AppConfigSchema } from "#/config/application.schema.mjs";
 import {
 	checkEvaluationInResponse,
 	EVALUATION_IN_RESPONSE_VALUES,
 } from "#/config/evaluationInResponse.mjs";
-import type { TokenAuthenticator } from "#/jwt/tokenAuthenticator.mjs";
 import { decisionEvent } from "#/observability/decisionEvent.mjs";
 import { createVerifyRouter, type VerifyRouterConfig } from "#/routes/verify.mjs";
 

@@ -26,9 +26,10 @@ import {
 	SignJWT,
 } from "jose";
 import { afterEach, describe, expect, it } from "vitest";
+import type { KeyResolverFactory } from "#/auth/keyResolver.mjs";
+import type { TokenAuthenticatorFactory } from "#/auth/tokenAuthenticator.mjs";
 import { MAX_PREVIOUS_SECRETS } from "#/config/defaults.mjs";
 import { builtinKeyResolversModule } from "#/jwt/builtinKeyResolversModule.mjs";
-import type { KeyResolverFactory, TokenAuthenticatorFactory } from "#/jwt/keyResolver.mjs";
 
 const generateKeyPairAsync = promisify(generateKeyPair);
 

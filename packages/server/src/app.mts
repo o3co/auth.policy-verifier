@@ -25,6 +25,9 @@ import {
 	RulePipeline,
 } from "@o3co/auth.policy-verifier.core";
 import express from "express";
+import type { KeyResolverFactory } from "./auth/keyResolver.mjs";
+import type { ServerModuleContext } from "./auth/serverModuleContext.mjs";
+import type { TokenAuthenticatorFactory } from "./auth/tokenAuthenticator.mjs";
 import type { AppConfig } from "./config/application.schema.mjs";
 import { assertConfigObject } from "./config/assertConfigObject.mjs";
 import { NUMERIC_BOUNDS, resolveBound } from "./config/bounds.mjs";
@@ -35,11 +38,6 @@ import {
 } from "./config/tokenAuthenticatorSelection.mjs";
 import { createCallerAuthMiddleware, resolveCallerAuth } from "./http/callerAuth.mjs";
 import { JwtTokenAuthenticatorFactory } from "./jwt/jwtTokenAuthenticatorFactory.mjs";
-import type {
-	KeyResolverFactory,
-	ServerModuleContext,
-	TokenAuthenticatorFactory,
-} from "./jwt/keyResolver.mjs";
 import { isLoopbackBindAddress } from "./net/loopback.mjs";
 import { createMetrics } from "./observability/metrics.mjs";
 import { createHealthcheckRouter } from "./routes/healthcheck.mjs";
