@@ -37,7 +37,7 @@ npm install @o3co/auth.policy-verifier.builtins
 | `RequestContextAttributeCollector` | `requestContext` の宣言済みフィールド | 運用者が決めたキー | `{ attributes: Mapping[] }` |
 | `PayloadClaimAttributeCollector` | 検証済み `subject` の宣言済みクレーム | 運用者が決めたキー、または core の 5 キー | `{ attributes: Mapping[] }` (#219) |
 
-`StaticPermissionCollector` と `StaticRoleCollector` は、リクエストのコンテキストに関わらず、コンストラクタに渡した値を常に出力します。渡された値は構築時にコピーされます — 配列、そして `StaticRoleCollector` では各 `Role` とその `permissions` も — ので、構築後に config を変更しても出力は変わりません（#255）。
+`StaticPermissionCollector` と `StaticRoleCollector` は、リクエストのコンテキストに関わらず、コンストラクタに渡した値を常に出力します。渡された値は構築時にコピーされます — 配列、そして `StaticRoleCollector` では各 `Role` とその `permissions` も — ので、構築後に config を変更しても出力は変わりません（#255）。`permissions` と `roles` は配列でなければなりません。それ以外の値は、文字列も含めて（`["posts.*"]` のつもりで `permissions = "posts.*"` と書いた場合など）構築時に `TypeError` で拒否され、デプロイは起動時に失敗します（#264）。
 
 ### PayloadClaimAttributeCollector
 

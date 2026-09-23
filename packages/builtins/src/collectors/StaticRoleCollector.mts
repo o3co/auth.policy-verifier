@@ -23,15 +23,17 @@ import { ATTR_ROLES } from "@o3co/auth.policy-verifier.core";
  * role's `permissions` array (#255): a caller that mutates the config, its
  * array or a `Role` in it afterwards changes nothing this collector emits.
  *
- * Nothing is validated: a missing or non-iterable `roles` throws a `TypeError`
- * from the constructor, and a malformed `Role` entry is copied as it is (see
- * `copyRole`). Each collect returns a shallow copy of the list, so its `Role`
- * copies are shared between the outputs of different collects.
+ * Only an array is accepted (#264). Anything else — a missing field, `null`, a
+ * number, an object, a string — is refused with a `TypeError` naming the
+ * collector and the field, so a misconfigured deployment fails at boot. A
+ * string is iterable and would otherwise be split into single characters, as
+ * it would be in `StaticPermissionCollector`.
  *
- * Known issue (#264): a string `roles` is iterable, so
- * it is split into single characters rather than refused, as a string
- * `permissions` is in `StaticPermissionCollector`. Here the characters are
- * inert: `HasPermission` ignores those entries, since they are not objects.
+ * The entries are not checked: a malformed `Role` entry is copied as it is
+ * (see `copyRole`). It is inert: `HasPermission` ignores a role that is not an
+ * object or whose `permissions` is not an array, and a non-string permission
+ * inside a role. Each collect returns a shallow copy of the list, so its `Role`
+ * copies are shared between the outputs of different collects.
  */
 export class StaticRoleCollector implements AttributeCollector {
 	private readonly roles: readonly Role[];
