@@ -6,8 +6,8 @@ import {
 	PayloadScopeCollector,
 	ResourceActionScopeRuleCollector,
 } from "@o3co/auth.policy-verifier.builtins";
-import { AttributePipeline, RulePipeline } from "@o3co/auth.policy-verifier.core";
-import { createVerifyRouter } from "@o3co/auth.policy-verifier.server";
+import { AttributePipeline, consoleLogger, RulePipeline } from "@o3co/auth.policy-verifier.core";
+import { createTokenAuthenticator, createVerifyRouter } from "@o3co/auth.policy-verifier.server";
 import express from "express";
 import { SignJWT } from "jose";
 import request from "supertest";
@@ -27,7 +27,10 @@ const secret = new TextEncoder().encode("token-validation-conformance-secret");
 const app = express();
 app.use(
 	createVerifyRouter({
-		jwt: { validate: true, key: secret, algorithms: ["HS256"], ...ACCEPTED },
+		authenticator: createTokenAuthenticator(
+			{ validate: true, key: secret, algorithms: ["HS256"], ...ACCEPTED },
+			consoleLogger,
+		),
 		resourceParser: new DotNotationResourceParser(),
 		attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
 		rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),

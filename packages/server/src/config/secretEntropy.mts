@@ -20,8 +20,8 @@
  * the operator were fine — so the reading below is the same reading, down to its
  * treatment of malformed base64 padding.
  *
- * Deliberately dependency-free, like `jwt/jwks.mts` and `config/bounds.mts`:
- * `AppConfigSchema` reaches it through `jwt/hs256Rotation.mts`, so a weak secret
+ * Deliberately dependency-free, like `config/jwks.mts` and `config/bounds.mts`:
+ * `AppConfigSchema` reaches it through `config/hs256Rotation.mts`, so a weak secret
  * fails at config-parse time (at boot, where an operator sees it) rather than at
  * the first request, and config-only consumers of the schema must not pull jose
  * or express in behind it.

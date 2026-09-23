@@ -9,9 +9,7 @@
  */
 
 import { z } from "zod";
-import { checkAudienceClaim, DEFAULT_AUDIENCE_CLAIM } from "../jwt/audienceClaim.mjs";
-import { checkHs256Rotation } from "../jwt/hs256Rotation.mjs";
-import { checkJwksUri } from "../jwt/jwks.mjs";
+import { checkAudienceClaim, DEFAULT_AUDIENCE_CLAIM } from "./audienceClaim.mjs";
 import { type BoundSpec, NUMERIC_BOUNDS, resolveBound } from "./bounds.mjs";
 import {
 	DEFAULT_BATCH_CONCURRENCY,
@@ -34,6 +32,8 @@ import {
 	checkEvaluationInResponse,
 	DEFAULT_EVALUATION_IN_RESPONSE,
 } from "./evaluationInResponse.mjs";
+import { checkHs256Rotation } from "./hs256Rotation.mjs";
+import { checkJwksUri } from "./jwks.mjs";
 import {
 	checkTokenAuthenticatorSelection,
 	JWT_TOKEN_AUTHENTICATOR,
@@ -171,7 +171,7 @@ const OAuthJwtSchema = z
 		 * operator moves the same pair of values on both sides.
 		 *
 		 * Capped at `MAX_PREVIOUS_SECRETS` and checked again in
-		 * `jwt/hs256Rotation.mts`: a token carrying no `kid` is tried
+		 * `config/hs256Rotation.mts`: a token carrying no `kid` is tried
 		 * against every configured secret, so the list length is the work
 		 * one unauthenticated request can force. Each entry's `secret`
 		 * clears the same entropy floor the current one does (#114) — a
@@ -199,7 +199,7 @@ const OAuthJwtSchema = z
 		/**
 		 * JWKS endpoint for the asymmetric algorithms. Must be https — or
 		 * http on a loopback host, the development carve-out documented in
-		 * `jwt/jwks.mts` (#109). The scheme is checked in `superRefine`
+		 * `config/jwks.mts` (#109). The scheme is checked in `superRefine`
 		 * below so a plaintext endpoint fails at config-parse time, at boot,
 		 * rather than at the first request that misses the key cache.
 		 */
@@ -342,7 +342,7 @@ const OAuthJwtSchema = z
 			// #112 / #114. The HS256 secret contract — the rotation shape,
 			// and the entropy floor over `secret` and every
 			// `previousSecrets[].secret` — is stated once, in
-			// `jwt/hs256Rotation.mts`, and spent twice: here for config
+			// `config/hs256Rotation.mts`, and spent twice: here for config
 			// files, and in the HS256 KeyResolverFactory for hand-built
 			// configs that never met this schema. Every issue is reported
 			// at the path the operator wrote, so a rotation block with two

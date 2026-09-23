@@ -3,19 +3,18 @@
 
 /*
  * The built-in `jwt` token authenticator factory: re-checks the `oauth.jwt`
- * block of a config and builds the bearer-JWT authentication the verify router
- * authenticates the subject with (decode-only under
- * `mode = "insecure-decode"`).
+ * block of a config and builds the bearer-JWT authenticator `createApp` hands
+ * the verify router (decode-only under `mode = "insecure-decode"`).
  */
 
+import type { TokenAuthenticatorFactory } from "../auth/tokenAuthenticator.mjs";
 import {
 	JWT_MODE_MIGRATION_MESSAGE,
 	JWT_MODE_REMOVED_KEYS,
 } from "../config/application.schema.mjs";
 import { assertConfigObject } from "../config/assertConfigObject.mjs";
+import { checkAudienceClaim } from "../config/audienceClaim.mjs";
 import { JWT_TOKEN_AUTHENTICATOR } from "../config/tokenAuthenticatorSelection.mjs";
-import { checkAudienceClaim } from "./audienceClaim.mjs";
-import type { TokenAuthenticatorFactory } from "./keyResolver.mjs";
 import {
 	assertVerifyRouterJwtConfig,
 	createTokenAuthenticator,
@@ -32,8 +31,8 @@ export { JWT_TOKEN_AUTHENTICATOR };
  * a deployment that authenticates some other way registers its own factory
  * under its own name and selects it with `oauth.authenticator`.
  *
- * This is the step that mapped the wire `oauth.jwt.mode` onto the router's
- * internal discriminated union (#134), moved behind the port unchanged.
+ * This is the step that maps the wire `oauth.jwt.mode` onto the
+ * authenticator's internal discriminated union (#134), moved behind the port unchanged.
  * `AppConfigSchema` already enforces the wire invariants (the mode enum,
  * iss/aud/typ presence, rejection of the removed keys) for schema-validated
  * configs; everything is re-checked here (#106) — see AGENTS.md, "Two-Boundary

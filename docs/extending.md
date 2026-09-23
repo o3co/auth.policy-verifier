@@ -354,7 +354,7 @@ Notes:
 - **Everything the built-in path enforces is now yours to enforce.** The JWT path verifies the signature, pins `iss`, the audience and `typ`, requires `exp` and `iat`, applies `maxTokenAgeSeconds` / `clockToleranceSeconds` and `nbf`, refuses `cnf`-bound tokens, and records `authScheme`. None of that runs for an authenticator you register: do what applies before returning `ok: true`. The `credential` you return is whatever you choose, and it reaches collectors under `credentialToCollectors = "expose"`.
 - A refusal is a 401 wearing the deny envelope, with your `code` and `message`. Log the reason yourself (the built-in path emits `jwt_token_rejected` / `jwt_verification_unavailable`) — the router logs nothing about *why* an authenticator refused.
 - Sender-constrained tokens (`cnf`) stay refused on the built-in path (#209). A registered authenticator is handed only the `Authorization` header — no proof, no client certificate, not the original request — so it cannot verify possession itself. Accept a bound token only when an authentication boundary upstream of this server has already verified possession for the original protected request, and you can trust that it did.
-- `createVerifyRouter` takes an already-built `authenticator` in place of `jwt` for a library consumer that composes without `createApp`.
+- A library consumer that composes without `createApp` hands `createVerifyRouter` a built `authenticator` — yours, or `createTokenAuthenticator(jwt, logger)` for the built-in bearer-JWT path. The router builds none of its own (#259). The contract types are declared in [`packages/server/src/auth/`](../packages/server/src/auth/), which loads neither the JWT implementation nor jose.
 
 ## Further reading
 

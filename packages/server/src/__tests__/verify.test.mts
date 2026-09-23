@@ -13,6 +13,7 @@ import {
 	AttributePipeline,
 	type Attributes,
 	type CollectorContext,
+	consoleLogger,
 	type EventLogger,
 	type ResourceParser,
 	type Rule,
@@ -24,10 +25,14 @@ import {
 import express from "express";
 import { exportSPKI, SignJWT } from "jose";
 import request from "supertest";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { AppConfigSchema } from "#/config/application.schema.mjs";
+import {
+	createTokenAuthenticator,
+	type TokenAuthenticator,
+	type VerifyRouterJwtConfig,
+} from "#/index.mjs";
 import { HS256KeyResolverFactory, RS256KeyResolverFactory } from "#/jwt/index.mjs";
-import type { TokenAuthenticator } from "#/jwt/tokenAuthenticator.mjs";
 import { createVerifyRouter, type VerifyRouterConfig } from "#/routes/verify.mjs";
 
 const generateKeyPairAsync = promisify(generateKeyPair);
@@ -64,18 +69,30 @@ async function signHS256Token(
 	);
 }
 
+/**
+ * The built-in bearer-JWT authenticator over the HS256 key these cases sign
+ * with — what a consumer mounting the router hands it (#259), with the
+ * console-backed logger the router itself defaults to.
+ */
+function hs256Authenticator(): TokenAuthenticator {
+	return createTokenAuthenticator(
+		{
+			validate: true,
+			key: hs256Key.key,
+			algorithms: hs256Key.algorithms,
+			issuer: ISSUER,
+			audience: AUDIENCE,
+			tokenType: "at+jwt",
+		},
+		consoleLogger,
+	);
+}
+
 function createTestApp(resourceParser?: ResourceParser, ruleCollectors?: RuleCollector[]) {
 	const app = express();
 	app.use(
 		createVerifyRouter({
-			jwt: {
-				validate: true,
-				key: hs256Key.key,
-				algorithms: hs256Key.algorithms,
-				issuer: ISSUER,
-				audience: AUDIENCE,
-				tokenType: "at+jwt",
-			},
+			authenticator: hs256Authenticator(),
 			resourceParser: resourceParser ?? new DotNotationResourceParser(),
 			attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
 			rulePipeline: new RulePipeline(ruleCollectors ?? [new ResourceActionScopeRuleCollector()]),
@@ -219,14 +236,7 @@ describe("POST /verify", () => {
 		const app = express();
 		app.use(
 			createVerifyRouter({
-				jwt: {
-					validate: true,
-					key: hs256Key.key,
-					algorithms: hs256Key.algorithms,
-					issuer: ISSUER,
-					audience: AUDIENCE,
-					tokenType: "at+jwt",
-				},
+				authenticator: hs256Authenticator(),
 				resourceParser: new DotNotationResourceParser(),
 				attributePipeline: new AttributePipeline([new SubscriberDidCollector()]),
 				rulePipeline: new RulePipeline([new RequireSubscriberDidCollector()]),
@@ -279,14 +289,7 @@ describe("POST /verify", () => {
 		const recordingApp = express();
 		recordingApp.use(
 			createVerifyRouter({
-				jwt: {
-					validate: true,
-					key: hs256Key.key,
-					algorithms: hs256Key.algorithms,
-					issuer: ISSUER,
-					audience: AUDIENCE,
-					tokenType: "at+jwt",
-				},
+				authenticator: hs256Authenticator(),
 				resourceParser: new DotNotationResourceParser(),
 				attributePipeline: new AttributePipeline([recordingCollector]),
 				rulePipeline: new RulePipeline([]),
@@ -317,14 +320,7 @@ describe("POST /verify", () => {
 		const recordingApp = express();
 		recordingApp.use(
 			createVerifyRouter({
-				jwt: {
-					validate: true,
-					key: hs256Key.key,
-					algorithms: hs256Key.algorithms,
-					issuer: ISSUER,
-					audience: AUDIENCE,
-					tokenType: "at+jwt",
-				},
+				authenticator: hs256Authenticator(),
 				resourceParser: new DotNotationResourceParser(),
 				attributePipeline: new AttributePipeline([recordingCollector]),
 				rulePipeline: new RulePipeline([]),
@@ -377,14 +373,17 @@ describe("POST /verify with RS256", () => {
 		const app = express();
 		app.use(
 			createVerifyRouter({
-				jwt: {
-					validate: true,
-					key: rs256Resolver.key,
-					algorithms: rs256Resolver.algorithms,
-					issuer: ISSUER,
-					audience: AUDIENCE,
-					tokenType: "at+jwt",
-				},
+				authenticator: createTokenAuthenticator(
+					{
+						validate: true,
+						key: rs256Resolver.key,
+						algorithms: rs256Resolver.algorithms,
+						issuer: ISSUER,
+						audience: AUDIENCE,
+						tokenType: "at+jwt",
+					},
+					consoleLogger,
+				),
 				resourceParser: new DotNotationResourceParser(),
 				attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
 				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
@@ -419,14 +418,17 @@ describe("POST /verify with RS256", () => {
 		const app = express();
 		app.use(
 			createVerifyRouter({
-				jwt: {
-					validate: true,
-					key: rs256Resolver.key,
-					algorithms: rs256Resolver.algorithms,
-					issuer: ISSUER,
-					audience: AUDIENCE,
-					tokenType: "at+jwt",
-				},
+				authenticator: createTokenAuthenticator(
+					{
+						validate: true,
+						key: rs256Resolver.key,
+						algorithms: rs256Resolver.algorithms,
+						issuer: ISSUER,
+						audience: AUDIENCE,
+						tokenType: "at+jwt",
+					},
+					consoleLogger,
+				),
 				resourceParser: new DotNotationResourceParser(),
 				attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
 				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
@@ -547,14 +549,7 @@ describe("POST /verify — scopeless JWT (DID grant) (#27, #104)", () => {
 		const didApp = express();
 		didApp.use(
 			createVerifyRouter({
-				jwt: {
-					validate: true,
-					key: hs256Key.key,
-					algorithms: hs256Key.algorithms,
-					issuer: ISSUER,
-					audience: AUDIENCE,
-					tokenType: "at+jwt",
-				},
+				authenticator: hs256Authenticator(),
 				resourceParser: new DotNotationResourceParser(),
 				attributePipeline: new AttributePipeline([
 					new PayloadScopeCollector(),
@@ -826,50 +821,46 @@ describe("POST /verify — RFC 9068 §4 token validation (#105)", () => {
 		expect(res.body.decision).toBe("allow");
 	});
 
-	it("refuses to build a verifying router without an issuer", () => {
+	// The router builds no authenticator since #259; these invariants hold
+	// where a consumer mounting it builds one, at the same package boundary.
+	it("refuses to build a verifying authenticator without an issuer", () => {
 		expect(() =>
-			createVerifyRouter({
-				jwt: {
+			createTokenAuthenticator(
+				{
 					validate: true,
 					key: hs256Key.key,
 					algorithms: hs256Key.algorithms,
 					audience: AUDIENCE,
 					tokenType: "at+jwt",
-				} as unknown as Parameters<typeof createVerifyRouter>[0]["jwt"],
-				resourceParser: new DotNotationResourceParser(),
-				attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
-				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
-			}),
+				} as unknown as VerifyRouterJwtConfig,
+				consoleLogger,
+			),
 		).toThrow(/issuer/);
 	});
 
-	it("refuses to build a verifying router without an audience", () => {
+	it("refuses to build a verifying authenticator without an audience", () => {
 		expect(() =>
-			createVerifyRouter({
-				jwt: {
+			createTokenAuthenticator(
+				{
 					validate: true,
 					key: hs256Key.key,
 					algorithms: hs256Key.algorithms,
 					issuer: ISSUER,
 					tokenType: "at+jwt",
-				} as unknown as Parameters<typeof createVerifyRouter>[0]["jwt"],
-				resourceParser: new DotNotationResourceParser(),
-				attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
-				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
-			}),
+				} as unknown as VerifyRouterJwtConfig,
+				consoleLogger,
+			),
 		).toThrow(/audience/);
 	});
 
-	it("refuses to build a decode-only router without the acknowledgment (#106)", () => {
+	it("refuses to build a decode-only authenticator without the acknowledgment (#106)", () => {
 		// The double opt-in must hold at the server package's API boundary too:
-		// wiring the router directly is not a way around it.
+		// building the authenticator by hand is not a way around it.
 		expect(() =>
-			createVerifyRouter({
-				jwt: { validate: false } as unknown as Parameters<typeof createVerifyRouter>[0]["jwt"],
-				resourceParser: new DotNotationResourceParser(),
-				attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
-				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
-			}),
+			createTokenAuthenticator(
+				{ validate: false } as unknown as VerifyRouterJwtConfig,
+				consoleLogger,
+			),
 		).toThrow(/allowInsecureDecode/);
 	});
 });
@@ -1063,14 +1054,7 @@ describe("POST /verify/batch (#124)", () => {
 		const recordingApp = express();
 		recordingApp.use(
 			createVerifyRouter({
-				jwt: {
-					validate: true,
-					key: hs256Key.key,
-					algorithms: hs256Key.algorithms,
-					issuer: ISSUER,
-					audience: AUDIENCE,
-					tokenType: "at+jwt",
-				},
+				authenticator: hs256Authenticator(),
 				resourceParser: new DotNotationResourceParser(),
 				attributePipeline: new AttributePipeline([new PayloadScopeCollector(), recordingCollector]),
 				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
@@ -1145,14 +1129,7 @@ describe("POST /verify/batch (#124)", () => {
 		const cappedApp = express();
 		cappedApp.use(
 			createVerifyRouter({
-				jwt: {
-					validate: true,
-					key: hs256Key.key,
-					algorithms: hs256Key.algorithms,
-					issuer: ISSUER,
-					audience: AUDIENCE,
-					tokenType: "at+jwt",
-				},
+				authenticator: hs256Authenticator(),
 				resourceParser: new DotNotationResourceParser(),
 				attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
 				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
@@ -1219,14 +1196,7 @@ describe("createVerifyRouter — maxBatchSize, one reader at both boundaries (#1
 	// through as a cap that rejects every batch there is.
 	const buildRouter = (maxBatchSize: unknown) => () =>
 		createVerifyRouter({
-			jwt: {
-				validate: true,
-				key: hs256Key.key,
-				algorithms: hs256Key.algorithms,
-				issuer: ISSUER,
-				audience: AUDIENCE,
-				tokenType: "at+jwt",
-			},
+			authenticator: hs256Authenticator(),
 			resourceParser: new DotNotationResourceParser(),
 			attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
 			rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
@@ -1303,14 +1273,7 @@ describe("createVerifyRouter — the credential reaches collectors only by state
 		const app = express();
 		app.use(
 			createVerifyRouter({
-				jwt: {
-					validate: true,
-					key: hs256Key.key,
-					algorithms: hs256Key.algorithms,
-					issuer: ISSUER,
-					audience: AUDIENCE,
-					tokenType: "at+jwt",
-				},
+				authenticator: hs256Authenticator(),
 				resourceParser: new DotNotationResourceParser(),
 				attributePipeline: new AttributePipeline([capturing()]),
 				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
@@ -1403,14 +1366,7 @@ describe("POST /verify/batch — the input the entries share cannot leak between
 		const app = express();
 		app.use(
 			createVerifyRouter({
-				jwt: {
-					validate: true,
-					key: hs256Key.key,
-					algorithms: hs256Key.algorithms,
-					issuer: ISSUER,
-					audience: AUDIENCE,
-					tokenType: "at+jwt",
-				},
+				authenticator: hs256Authenticator(),
 				resourceParser: new DotNotationResourceParser(),
 				attributePipeline: new AttributePipeline([poisoning]),
 				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
@@ -1446,14 +1402,7 @@ describe("createVerifyRouter — collectors disagreeing on a scalar attribute de
 		const app = express();
 		app.use(
 			createVerifyRouter({
-				jwt: {
-					validate: true,
-					key: hs256Key.key,
-					algorithms: hs256Key.algorithms,
-					issuer: ISSUER,
-					audience: AUDIENCE,
-					tokenType: "at+jwt",
-				},
+				authenticator: hs256Authenticator(),
 				resourceParser: new DotNotationResourceParser(),
 				attributePipeline: new AttributePipeline([
 					writesDepartment("sales"),
@@ -1496,14 +1445,7 @@ describe("createVerifyRouter — a collector that runs out of time denies (#115)
 		const app = express();
 		app.use(
 			createVerifyRouter({
-				jwt: {
-					validate: true,
-					key: hs256Key.key,
-					algorithms: hs256Key.algorithms,
-					issuer: ISSUER,
-					audience: AUDIENCE,
-					tokenType: "at+jwt",
-				},
+				authenticator: hs256Authenticator(),
 				resourceParser: new DotNotationResourceParser(),
 				// Bounds low enough that the stall is answered well inside the
 				// test's own timeout.
@@ -1602,14 +1544,7 @@ describe("POST /verify/batch — decisions in flight are bounded (#183)", () => 
 		const app = express();
 		app.use(
 			createVerifyRouter({
-				jwt: {
-					validate: true,
-					key: hs256Key.key,
-					algorithms: hs256Key.algorithms,
-					issuer: ISSUER,
-					audience: AUDIENCE,
-					tokenType: "at+jwt",
-				},
+				authenticator: hs256Authenticator(),
 				resourceParser: new DotNotationResourceParser(),
 				attributePipeline: new AttributePipeline([gauge]),
 				rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),
@@ -1748,45 +1683,70 @@ describe("createVerifyRouter — an already-built authenticator (#219)", () => {
 		});
 	});
 
-	it("refuses a config carrying both jwt and authenticator", () => {
-		expect(() =>
-			createVerifyRouter({ jwt, authenticator: stub, ...pipelines } as VerifyRouterConfig),
-		).toThrow("createVerifyRouter: exactly one of jwt or authenticator must be supplied");
+	it("VerifyRouterConfig requires an authenticator and has no jwt field (#259)", () => {
+		expectTypeOf<VerifyRouterConfig["authenticator"]>().toEqualTypeOf<TokenAuthenticator>();
+		expectTypeOf<VerifyRouterConfig>().not.toHaveProperty("jwt");
 	});
 
-	it("refuses a config carrying neither", () => {
-		expect(() => createVerifyRouter({ ...pipelines } as VerifyRouterConfig)).toThrow(
-			"createVerifyRouter: exactly one of jwt or authenticator must be supplied",
-		);
-	});
-
-	it("refuses null for either, rather than reading it as absent", () => {
-		// The rule the `previousSecrets` `null` contract set (#147): a `null` in a
-		// hand-built config was produced rather than written, and reading it as
-		// "omitted" would let `{ jwt: null, authenticator }` mean something the
-		// caller never said. Refused by name, not as a TypeError off `.validate`.
+	it("refuses a config carrying jwt, with or without an authenticator: the router builds none (#259)", () => {
+		// A JavaScript caller written against the old option. Refused by name,
+		// with the migration, rather than as a missing authenticator or — worse,
+		// with both present — by silently running the authenticator and ignoring
+		// the JWT config the caller thought was in force.
 		for (const config of [
-			{ jwt: null, authenticator: stub, ...pipelines },
-			{ jwt, authenticator: null, ...pipelines },
-			{ jwt: null, ...pipelines },
+			{ jwt, ...pipelines },
+			{ jwt, authenticator: stub, ...pipelines },
+			// A spread of an old config whose jwt was unset still names the option.
+			{ jwt: undefined, authenticator: stub, ...pipelines },
 		]) {
 			expect(() => createVerifyRouter(config as unknown as VerifyRouterConfig)).toThrow(
-				"createVerifyRouter: jwt and authenticator are omitted rather than null",
+				"createVerifyRouter: jwt is no longer accepted (#259) — pass an authenticator " +
+					"(createTokenAuthenticator(jwt, logger) builds the bearer-JWT one), or use createApp",
 			);
 		}
+	});
+
+	it("refuses a config carrying no authenticator, null included", () => {
+		// `null` is refused by name rather than read as absent — the rule the
+		// `previousSecrets` `null` contract set (#147) — and in the same words as
+		// an omitted one, since either way the router has nothing to run.
+		for (const config of [
+			{ ...pipelines },
+			{ authenticator: null, ...pipelines },
+			{ authenticator: {}, ...pipelines },
+		]) {
+			expect(() => createVerifyRouter(config as unknown as VerifyRouterConfig)).toThrow(
+				"createVerifyRouter: authenticator is required — a TokenAuthenticator; " +
+					"createTokenAuthenticator builds the bearer-JWT one",
+			);
+		}
+	});
+
+	it("runs the built-in bearer-JWT authenticator when handed one (#259)", async () => {
+		const silent: EventLogger = { info() {}, warn() {}, error() {} };
+		const app = express();
+		app.use(
+			createVerifyRouter({ authenticator: createTokenAuthenticator(jwt, silent), ...pipelines }),
+		);
+		const token = await signHS256Token({ scope: "read:project" });
+		const allowed = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+		expect(allowed.status).toBe(200);
+		expect(allowed.body.decision).toBe("allow");
+		const refused = await request(app)
+			.post("/verify")
+			.set("Authorization", "Bearer not-a-jwt")
+			.send({ resource: "project:1", action: "read" });
+		expect(refused.status).toBe(401);
+		expect(refused.body.code).toBe("invalid_token");
 	});
 });
 
 describe("POST /verify — asynchronous rules (#225)", () => {
 	const pipelines = (rules: RuleCollector[]) => ({
-		jwt: {
-			validate: true as const,
-			key: hs256Key.key,
-			algorithms: hs256Key.algorithms,
-			issuer: ISSUER,
-			audience: AUDIENCE,
-			tokenType: "at+jwt",
-		},
+		authenticator: hs256Authenticator(),
 		resourceParser: new DotNotationResourceParser(),
 		attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
 		rulePipeline: new RulePipeline(rules),
@@ -2057,10 +2017,9 @@ describe("POST /verify — asynchronous rules (#225)", () => {
 			failed = resolve;
 		});
 		const app = express();
-		const { jwt: _jwt, ...rest } = pipelines([]);
 		app.use(
 			createVerifyRouter({
-				...rest,
+				...pipelines([]),
 				authenticator: {
 					async authenticate() {
 						await new Promise((resolve) => setTimeout(resolve, 150));

@@ -28,12 +28,17 @@ import type {
 } from "@o3co/auth.policy-verifier.core";
 import {
 	AttributePipeline,
+	consoleLogger,
 	evaluate,
 	POLICY_REVISION_MAX_LENGTH,
 	POLICY_REVISION_PATTERN,
 	RulePipeline,
 } from "@o3co/auth.policy-verifier.core";
-import { createVerifyRouter, type VerifyRouterConfig } from "@o3co/auth.policy-verifier.server";
+import {
+	createTokenAuthenticator,
+	createVerifyRouter,
+	type VerifyRouterConfig,
+} from "@o3co/auth.policy-verifier.server";
 import express from "express";
 import { SignJWT } from "jose";
 import type { Test } from "supertest";
@@ -193,14 +198,17 @@ function deployment(
 
 function referenceConfig(ruleCollectors: RuleCollector[]): VerifyRouterConfig {
 	return {
-		jwt: {
-			validate: true,
-			key: secret,
-			algorithms: ["HS256"],
-			issuer: ISSUER,
-			audience: AUDIENCE,
-			tokenType: "at+jwt",
-		},
+		authenticator: createTokenAuthenticator(
+			{
+				validate: true,
+				key: secret,
+				algorithms: ["HS256"],
+				issuer: ISSUER,
+				audience: AUDIENCE,
+				tokenType: "at+jwt",
+			},
+			consoleLogger,
+		),
 		resourceParser: new DotNotationResourceParser(),
 		attributePipeline: new AttributePipeline(
 			[

@@ -4,7 +4,8 @@
 /*
  * Where the audience is read from, and whether the `typ` header is pinned
  * (#219) — the two knobs that let the built-in JWT path accept an external
- * IdP's token without a custom authenticator.
+ * IdP's token without a custom authenticator. The comparison itself is the
+ * authenticator's (`audienceMatches` in `jwt/tokenAuthenticator.mts`).
  *
  * RFC 9068 §4 has a resource server check `aud`. Not every issuer puts the
  * binding there: a Clerk session token carries no `aud` at all and binds the
@@ -13,8 +14,9 @@
  * it never removes it, and `audience` stays required.
  *
  * Dependency-free on purpose, like `checkJwksUri`: `AppConfigSchema` imports
- * it, so anything it reached back for would arrive as a cycle — see AGENTS.md,
- * "Two-Boundary Config Validation".
+ * it, and the built-in authenticator in `jwt/` reads the same verdict through
+ * it — see AGENTS.md, "Two-Boundary Config Validation". It lives in `config/`
+ * so that the dependency runs one way, `jwt/` → `config/` (#260).
  */
 
 /** The claim RFC 9068 §4 names, and the default `audienceClaim`. */
@@ -46,23 +48,4 @@ export function checkAudienceClaim(value: unknown): AudienceClaimCheck {
 		return { ok: false, message: "audienceClaim must be a non-empty string" };
 	}
 	return { ok: true, claim: value };
-}
-
-/**
- * Whether a claim value satisfies the configured audience, at least as strict
- * as jose's rule for `aud` (RFC 7519 §4.1.3): a string equal to an accepted
- * value, or an array of strings containing one. Anything else — absent, a
- * number, an array with a non-string in it (which jose would tolerate) — does
- * not.
- */
-export function audienceMatches(value: unknown, accepted: string | readonly string[]): boolean {
-	const acceptedList = typeof accepted === "string" ? [accepted] : accepted;
-	if (typeof value === "string") return acceptedList.includes(value);
-	if (Array.isArray(value)) {
-		return (
-			value.every((entry) => typeof entry === "string") &&
-			value.some((entry) => acceptedList.includes(entry))
-		);
-	}
-	return false;
 }

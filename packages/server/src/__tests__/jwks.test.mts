@@ -7,7 +7,7 @@ import {
 	DEFAULT_JWKS_COOLDOWN_MS,
 	DEFAULT_JWKS_TIMEOUT_MS,
 } from "#/config/defaults.mjs";
-import { checkJwksUri, parseJwksUri, resolveJwksFetchBounds } from "#/jwt/jwks.mjs";
+import { checkJwksUri, parseJwksUri, resolveJwksFetchBounds } from "#/config/jwks.mjs";
 
 describe("checkJwksUri — transport security (#109)", () => {
 	it("accepts an https URI", () => {

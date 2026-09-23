@@ -27,16 +27,17 @@
  * the current one can. One rule over both is what keeps either of them from
  * quietly becoming the laxer half.
  *
- * Deliberately dependency-free, like `jwt/jwks.mts` next to it: `AppConfigSchema`
+ * Deliberately dependency-free, like `jwks.mts` next to it: `AppConfigSchema`
  * imports it so a malformed rotation block fails at config-parse time (at boot,
  * where an operator sees it) rather than at the first request, and config-only
- * consumers of the schema must not pull jose or express in behind it. The
- * `KeyResolverFactory` re-checks at construction, through this same function —
- * see AGENTS.md, "Two-Boundary Config Validation".
+ * consumers of the schema must not pull jose or express in behind it. The HS256
+ * `KeyResolverFactory` in `jwt/` re-checks at construction, through this same
+ * function — see AGENTS.md, "Two-Boundary Config Validation". It lives in
+ * `config/` so that the dependency runs one way, `jwt/` → `config/` (#260).
  */
 
-import { MAX_PREVIOUS_SECRETS, MIN_SECRET_ENTROPY_BYTES } from "../config/defaults.mjs";
-import { describeWeakSecret, measureSecretEntropyBytes } from "../config/secretEntropy.mjs";
+import { MAX_PREVIOUS_SECRETS, MIN_SECRET_ENTROPY_BYTES } from "./defaults.mjs";
+import { describeWeakSecret, measureSecretEntropyBytes } from "./secretEntropy.mjs";
 
 /**
  * One retired secret and the window it stays a verification key for.

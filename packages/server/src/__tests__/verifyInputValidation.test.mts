@@ -33,6 +33,7 @@ import {
 	type AttributeCollector,
 	AttributePipeline,
 	type CollectorContext,
+	consoleLogger,
 	RulePipeline,
 	readUntrustedRequestContext,
 } from "@o3co/auth.policy-verifier.core";
@@ -48,7 +49,7 @@ import {
 	DEFAULT_MAX_CONTEXT_VALUE_LENGTH,
 	DEFAULT_MAX_RESOURCE_LENGTH,
 } from "#/config/defaults.mjs";
-import { HS256KeyResolverFactory } from "#/jwt/index.mjs";
+import { createTokenAuthenticator, HS256KeyResolverFactory } from "#/jwt/index.mjs";
 import { createVerifyRouter, type VerifyRouterConfig } from "#/routes/verify.mjs";
 
 /** Repo root, four levels up from `packages/server/src/__tests__`. */
@@ -99,14 +100,17 @@ function createTestApp(overrides: Partial<VerifyRouterConfig> = {}) {
 	const app = express();
 	app.use(
 		createVerifyRouter({
-			jwt: {
-				validate: true,
-				key: hs256Key.key,
-				algorithms: hs256Key.algorithms,
-				issuer: ISSUER,
-				audience: AUDIENCE,
-				tokenType: "at+jwt",
-			},
+			authenticator: createTokenAuthenticator(
+				{
+					validate: true,
+					key: hs256Key.key,
+					algorithms: hs256Key.algorithms,
+					issuer: ISSUER,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				},
+				consoleLogger,
+			),
 			resourceParser: new DotNotationResourceParser(),
 			attributePipeline: new AttributePipeline([new PayloadScopeCollector()]),
 			rulePipeline: new RulePipeline([new ResourceActionScopeRuleCollector()]),

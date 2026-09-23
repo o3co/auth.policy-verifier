@@ -19,9 +19,10 @@ import {
 	type JWSHeaderParameters,
 	type JWTVerifyGetKey,
 } from "jose";
-import { type Hs256RotationConfig, parseHs256Rotation } from "./hs256Rotation.mjs";
-import { type JwksFetchConfig, parseJwksUri, resolveJwksFetchBounds } from "./jwks.mjs";
-import type { KeyResolver, KeyResolverFactory, ServerModuleContext } from "./keyResolver.mjs";
+import type { KeyResolver, KeyResolverFactory } from "../auth/keyResolver.mjs";
+import type { ServerModuleContext } from "../auth/serverModuleContext.mjs";
+import { type Hs256RotationConfig, parseHs256Rotation } from "../config/hs256Rotation.mjs";
+import { type JwksFetchConfig, parseJwksUri, resolveJwksFetchBounds } from "../config/jwks.mjs";
 
 interface JwtFactoryInput extends JwksFetchConfig, Hs256RotationConfig {
 	secret?: string;
@@ -35,7 +36,7 @@ interface JwtFactoryInput extends JwksFetchConfig, Hs256RotationConfig {
  * file path (in that priority). Throws if no key source is configured.
  *
  * A JWKS URI must be https, or http on a loopback host — see the trust
- * assumption and the carve-out in `jwt/jwks.mts` (#109). Checked here as well as
+ * assumption and the carve-out in `config/jwks.mts` (#109). Checked here as well as
  * in `AppConfigSchema`, through the one shared function — see AGENTS.md,
  * "Two-Boundary Config Validation".
  */

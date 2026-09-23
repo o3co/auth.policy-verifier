@@ -19,6 +19,7 @@ import {
 	type SubjectAttributes,
 } from "@o3co/auth.policy-verifier.core";
 import express from "express";
+import type { TokenAuthenticator } from "../auth/tokenAuthenticator.mjs";
 import { NUMERIC_BOUNDS, resolveBound } from "../config/bounds.mjs";
 import {
 	checkEvaluationInResponse,
@@ -32,11 +33,6 @@ import {
 	type ValidatedDecisionRequest,
 } from "../decision/decide.mjs";
 import { acceptRequestId, REQUEST_ID_HEADER } from "../http/requestId.mjs";
-import {
-	createTokenAuthenticator,
-	type TokenAuthenticator,
-	type VerifyRouterJwtConfig,
-} from "../jwt/tokenAuthenticator.mjs";
 import { countCollectorFailure, type DecisionMetrics } from "../observability/decisionMetrics.mjs";
 import { type ClassifiedFailure, correlation, loggableError } from "../observability/failure.mjs";
 
@@ -45,29 +41,18 @@ import { type ClassifiedFailure, correlation, loggableError } from "../observabi
 // are not exported from the package index.
 export type { DecisionRequest, DecisionResponse } from "../decision/decide.mjs";
 
-/**
- * Config for `createVerifyRouter`.
- *
- * Exactly one of `jwt` and `authenticator` says how the subject is
- * authenticated; construction refuses both and neither. Two optional fields
- * rather than a discriminated union on purpose: this is the boundary a
- * hand-built config reaches, and a consumer assembling one from pieces
- * (`{ ...base, jwt }`) should not have to fight the type for a rule the
- * runtime check states in one sentence.
- */
+/** Config for `createVerifyRouter`. */
 export interface VerifyRouterConfig {
 	/**
-	 * The built-in bearer-JWT path, constructed here. The `key` type is
-	 * library-specific and is narrowed at call time.
-	 */
-	jwt?: VerifyRouterJwtConfig;
-	/**
-	 * An already-built {@link TokenAuthenticator} (#219): what `createApp`
-	 * hands in after resolving `oauth.authenticator`, and what a library
-	 * consumer passes to run this router over a subject established some
+	 * How the subject is authenticated: a built {@link TokenAuthenticator}
+	 * (#219). The router runs it and builds none of its own (#259) — it
+	 * depends on the authentication contract, never on an implementation.
+	 * `createApp` hands in the one `oauth.authenticator` selects; a library
+	 * consumer passes `createTokenAuthenticator(jwt, logger)` for the
+	 * built-in bearer-JWT path, or its own over a subject established some
 	 * other way — introspection, an IdP SDK, a gateway's attestation.
 	 */
-	authenticator?: TokenAuthenticator;
+	authenticator: TokenAuthenticator;
 	resourceParser: ResourceParser;
 	attributePipeline: AttributePipeline;
 	rulePipeline: RulePipeline;
@@ -556,26 +541,35 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	// One binding for the metrics seam, read once here and handed to the decider
 	// and to the three fault paths alike, so all four count into the same sink.
 	const metrics = config.metrics;
-	// Exactly one way to authenticate (#219). Checked at runtime as well as in
-	// the type: this is the boundary a hand-built config reaches. Constructing
-	// the built-in authenticator runs assertVerifyRouterJwtConfig, so an invalid
-	// hand-built jwt config still fails here, at router construction.
-	//
-	// `null` is refused by name rather than read as "omitted" — the rule the
-	// `previousSecrets` contract set (#147): a `null` in a hand-built config was
-	// produced rather than written, and reading `{ jwt: null, authenticator }`
-	// as a choice the caller made would be a guess. Without this line it fell
-	// through to the guard as a bare TypeError off `.validate`.
-	if (config.jwt === null || config.authenticator === null) {
-		throw new Error("createVerifyRouter: jwt and authenticator are omitted rather than null");
+	// The router runs an authenticator and builds none (#259). Checked at
+	// runtime as well as in the type: this is the boundary a hand-built config
+	// reaches. A config still carrying the removed `jwt` option is refused by
+	// name, with the migration — alongside an authenticator it would otherwise
+	// be silently ignored, and the caller would believe a JWT config was in
+	// force that is not.
+	// Key presence, not value: a spread of an old config whose jwt was unset
+	// still names the removed option.
+	if (Object.hasOwn(config, "jwt")) {
+		throw new Error(
+			"createVerifyRouter: jwt is no longer accepted (#259) — pass an authenticator " +
+				"(createTokenAuthenticator(jwt, logger) builds the bearer-JWT one), or use createApp",
+		);
 	}
-	if ((config.jwt === undefined) === (config.authenticator === undefined)) {
-		throw new Error("createVerifyRouter: exactly one of jwt or authenticator must be supplied");
+	// `null` is refused like an omission rather than read as a choice — the
+	// rule the `previousSecrets` contract set (#147): a `null` in a hand-built
+	// config was produced rather than written.
+	const candidate: unknown = config.authenticator;
+	if (
+		typeof candidate !== "object" ||
+		candidate === null ||
+		typeof (candidate as { authenticate?: unknown }).authenticate !== "function"
+	) {
+		throw new Error(
+			"createVerifyRouter: authenticator is required — a TokenAuthenticator; " +
+				"createTokenAuthenticator builds the bearer-JWT one",
+		);
 	}
-	const authenticator =
-		config.jwt !== undefined
-			? createTokenAuthenticator(config.jwt, logger)
-			: (config.authenticator as TokenAuthenticator);
+	const authenticator = candidate as TokenAuthenticator;
 	// #175: resolved once — the per-request cost is a spread, not a branch tree.
 	const exposeCredential = config.credentialToCollectors === "expose";
 	// #244: resolved through the check the schema uses, and thrown rather than

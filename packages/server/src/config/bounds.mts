@@ -27,7 +27,7 @@
  *
  * Which is also why this module imports nothing but `config/defaults.mts`. The
  * arrows all point *at* it: `AppConfigSchema` imports it to read config files,
- * and `jwt/jwks.mts`, `jwt/tokenAuthenticator.mts` and `routes/verify.mts`
+ * and `config/jwks.mts`, `jwt/tokenAuthenticator.mts` and `routes/verify.mts`
  * import it to read the hand-built ones. Anything it reached back for would
  * arrive in every one of those — a config-only consumer of the schema included,
  * which must not end up with jose or express behind a numeric bound.

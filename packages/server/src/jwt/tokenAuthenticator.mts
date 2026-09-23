@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Bearer-token authentication for the verify endpoints: the JWT config union,
- * its construction-time invariants, and the request-time token checks.
+ * The built-in bearer-JWT implementation of the `TokenAuthenticator` port
+ * (`auth/tokenAuthenticator.mts`): the JWT config union, its construction-time
+ * invariants, and the request-time token checks.
  *
  * The verifying path (`jwtVerify`) and the decode-only path
  * (`decodeJwt` + `assertTimeClaims`) are two halves of one contract and are
@@ -23,22 +24,22 @@
  * disagreeing about the same token.
  */
 
-import type { EventLogger, SubjectAttributes } from "@o3co/auth.policy-verifier.core";
+import type { EventLogger } from "@o3co/auth.policy-verifier.core";
 import { decodeJwt, errors, type JWTPayload, jwtVerify } from "jose";
-import { NUMERIC_BOUNDS, resolveBound } from "../config/bounds.mjs";
+import type { AuthenticationResult, TokenAuthenticator } from "../auth/tokenAuthenticator.mjs";
 import {
-	audienceMatches,
 	checkAudienceClaim,
 	DEFAULT_AUDIENCE_CLAIM,
 	UNPINNED_TOKEN_TYPE,
-} from "./audienceClaim.mjs";
+} from "../config/audienceClaim.mjs";
+import { NUMERIC_BOUNDS, resolveBound } from "../config/bounds.mjs";
 
 /**
  * Bounds on a presented token's own lifetime (#110), settable in either mode
  * because both modes enforce them.
  *
  * Each admits the string a HOCON env substitution delivers as well as a number,
- * for the same reason the JWKS fetch bounds in `jwt/jwks.mts` do: `createApp`
+ * for the same reason the JWKS fetch bounds in `config/jwks.mts` do: `createApp`
  * accepts hand-built config objects, and a consumer assembling one from
  * `process.env` supplies strings.
  */
@@ -91,8 +92,9 @@ const REQUIRED_CLAIMS = ["exp"] as const;
  * `AppConfigSchema` reads a config file through (#157), so the two boundaries
  * cannot diverge on what a knob admits or on how it says so.
  *
- * @param path Config path of the JWT block at the calling boundary. The router
- * sees it as `jwt`; `createApp` passes `oauth.jwt`, the key the operator wrote.
+ * @param path Config path of the JWT block at the calling boundary.
+ * `createTokenAuthenticator` sees it as `jwt`; `createApp` passes `oauth.jwt`,
+ * the key the operator wrote.
  */
 export function resolveJwtTimeClaimBounds(
 	config: JwtTimeClaimConfig,
@@ -152,16 +154,20 @@ export interface VerifyingJwtConfig extends JwtTimeClaimConfig {
  * wire this shape is selected by the single self-documenting key
  * `oauth.jwt.mode = "insecure-decode"` (#134);
  * internally the interlock stays a two-key literal, and the acknowledgment is
- * re-checked at construction time — so wiring the router directly with a
- * hand-built config is not a way around the explicit consent `createApp`
- * demands.
+ * re-checked at construction time — so building the authenticator directly
+ * from a hand-built config is not a way around the explicit consent
+ * `createApp` demands.
  */
 export interface DecodingJwtConfig extends JwtTimeClaimConfig {
 	validate: false;
 	allowInsecureDecode: true;
 }
 
-/** JWT half of `VerifyRouterConfig`, discriminated on `validate`. */
+/**
+ * The config {@link createTokenAuthenticator} takes, discriminated on
+ * `validate`. Named for the `jwt` option `createVerifyRouter` took until #259;
+ * the router now takes the built authenticator instead.
+ */
 export type VerifyRouterJwtConfig = VerifyingJwtConfig | DecodingJwtConfig;
 
 /**
@@ -190,7 +196,8 @@ export type AssertedJwtConfig =
 /**
  * Where a guard failure is reported from, for operator-facing error messages:
  * the boundary the operator actually called and the config path as they wrote
- * it (`createApp` sees the JWT block at `oauth.jwt`, the router at `jwt`).
+ * it (`createApp` sees the JWT block at `oauth.jwt`, `createTokenAuthenticator`
+ * at `jwt`).
  */
 export interface JwtConfigErrorContext {
 	/** Boundary named in the message, e.g. `"createApp"`. */
@@ -199,8 +206,8 @@ export interface JwtConfigErrorContext {
 	path: string;
 	/**
 	 * How the operator selects verifying mode at this boundary, completing the
-	 * sentence "<field> is required when <verifyCondition>". The router's
-	 * internal union is discriminated on `validate`, so the default is
+	 * sentence "<field> is required when <verifyCondition>". The
+	 * authenticator's internal union is discriminated on `validate`, so the default is
 	 * `"<path>.validate is true"`; `createApp` passes the wire spelling
 	 * `oauth.jwt.mode is "verify"`, because `validate` is no longer a wire key
 	 * (#134) and the message must name what the operator actually wrote.
@@ -300,6 +307,25 @@ export function assertVerifyRouterJwtConfig<T extends UncheckedJwtConfig>(
 	if (!audienceClaim.ok) {
 		throw new Error(`${caller}: ${path}.${audienceClaim.message}`);
 	}
+}
+
+/**
+ * Whether a claim value satisfies the configured audience, at least as strict
+ * as jose's rule for `aud` (RFC 7519 §4.1.3): a string equal to an accepted
+ * value, or an array of strings containing one. Anything else — absent, a
+ * number, an array with a non-string in it (which jose would tolerate) — does
+ * not.
+ */
+export function audienceMatches(value: unknown, accepted: string | readonly string[]): boolean {
+	const acceptedList = typeof accepted === "string" ? [accepted] : accepted;
+	if (typeof value === "string") return acceptedList.includes(value);
+	if (Array.isArray(value)) {
+		return (
+			value.every((entry) => typeof entry === "string") &&
+			value.some((entry) => acceptedList.includes(entry))
+		);
+	}
+	return false;
 }
 
 /**
@@ -491,31 +517,19 @@ export function assertTimeClaims(payload: JWTPayload, bounds: JwtTimeClaimBounds
 }
 
 /**
- * Outcome of authenticating a caller. On failure the authenticator names the
- * machine-readable code and the caller-safe message; what HTTP status that
- * maps to (401 for all of them today) is the route's concern, not this
- * module's.
+ * Builds the bearer-JWT authenticator: extracts the bearer token and runs it
+ * down the path the config selects. Runs {@link assertVerifyRouterJwtConfig}
+ * first, so an invalid hand-built config fails at construction rather than
+ * accept tokens.
  *
- * `subject` is core's neutral `SubjectAttributes` bag, and this module is the
- * one edge that populates it (#170): the verified JWT's claims are spread in,
- * so under this server the bag's keys are the token's claims. Core never
- * learns that — the claim vocabulary ends here and in the collectors that
- * narrow it back out.
- */
-export type AuthenticationResult =
-	| { ok: true; subject: SubjectAttributes; credential: string }
-	| { ok: false; code: "missing_token" | "unsupported_scheme" | "invalid_token"; message: string };
-
-/** Authenticates one `Authorization` header value into verified subject attributes. */
-export interface TokenAuthenticator {
-	authenticate(authorizationHeader: string | undefined): Promise<AuthenticationResult>;
-}
-
-/**
- * Builds the bearer-token authenticator shared by the verify endpoints:
- * extracts the bearer token and runs it down the path the config selects.
- * Runs {@link assertVerifyRouterJwtConfig} first, so an invalid hand-built
- * config fails at construction rather than accept tokens.
+ * This is the one edge that populates core's neutral `SubjectAttributes` bag
+ * under this server (#170): the verified JWT's claims are spread in, so the
+ * bag's keys are the token's claims. Core never learns that — the claim
+ * vocabulary ends here and in the collectors that narrow it back out.
+ *
+ * `createApp` builds it from `oauth.jwt`; a consumer mounting
+ * `createVerifyRouter` on their own app builds it here and hands it over as
+ * the router's `authenticator` (#259).
  */
 export function createTokenAuthenticator(
 	jwt: VerifyRouterJwtConfig,
