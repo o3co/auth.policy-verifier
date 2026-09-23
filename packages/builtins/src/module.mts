@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The `Module` that registers this package's attribute collectors, rule
+ * collectors and resource parser with a host's registries.
+ */
+
 import type { Module } from "@o3co/auth.policy-verifier.core";
 import { PayloadClaimAttributeCollector } from "./collectors/PayloadClaimAttributeCollector.mjs";
 import { PayloadScopeCollector } from "./collectors/PayloadScopeCollector.mjs";

@@ -1,6 +1,12 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The rule collector that emits one `HasScope` rule for the request's
+ * `{action}:{resourceType}` scope, with a configurable treatment of tokens that
+ * carry no scope claim.
+ */
+
 import type { CollectorContext, Rule, RuleCollector } from "@o3co/auth.policy-verifier.core";
 import { DEFAULT_SCOPE_CLAIM, resolveClaimName } from "../../collectors/_claims.mjs";
 import { HasScope } from "../HasScope.mjs";
@@ -27,8 +33,11 @@ export interface ResourceActionScopeRuleCollectorConfig {
 	/**
 	 * The claim whose presence says the token asserted scopes (#219). Defaults
 	 * to `scope`; set it to what `PayloadScopeCollector` reads (`scp` for Okta)
-	 * so the two agree about which tokens are scopeless — each keeps its own
-	 * option, and nothing checks that both were given the same name.
+	 * so the two look at the same claim — each keeps its own option, and
+	 * nothing checks that both were given the same name. Only presence is
+	 * checked here: a claim holding no usable scope list (`""`, a number)
+	 * yields no scopes from `PayloadScopeCollector` but still counts as scoped
+	 * under `scopeless: "skip"`.
 	 */
 	claim?: string;
 }

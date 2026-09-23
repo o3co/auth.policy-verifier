@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The plug-in surface: the `Module` a package exports, the `ModuleContext` of
+ * registries it registers into, and the factory types those registries hold.
+ */
+
 import type { AttributeCollector, ResourceParser, RuleCollector } from "../types.mjs";
 import type { Registry } from "./Registry.mjs";
 

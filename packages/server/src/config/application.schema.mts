@@ -1,6 +1,13 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The zod schema for the HOCON application config (`AppConfigSchema`) and the
+ * type inferred from it. It is the first of the two config boundaries:
+ * `createApp` re-checks what a hand-built config, which never passed through
+ * this schema, could get wrong.
+ */
+
 import { z } from "zod";
 import { checkAudienceClaim, DEFAULT_AUDIENCE_CLAIM } from "../jwt/audienceClaim.mjs";
 import { checkHs256Rotation } from "../jwt/hs256Rotation.mjs";

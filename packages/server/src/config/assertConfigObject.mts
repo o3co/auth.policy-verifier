@@ -1,6 +1,14 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The shape guard run before indexing into a config block. It runs only where
+ * it is called: `createApp` calls it on `oauth` and `http`, and the built-in
+ * JWT authenticator factory on `oauth` and `oauth.jwt`. Those calls run on
+ * every config — schema-validated or hand-built — since a hand-built config
+ * can put anything in those blocks.
+ */
+
 /**
  * Asserts that a config block a hand-built config supplies is actually an
  * object, so the checks that follow can index into it. `createApp` accepts

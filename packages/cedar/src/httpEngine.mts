@@ -1,6 +1,13 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The `http` engine: evaluates the policy set out of process by pushing it to a
+ * cedar-agent at load and asking the agent per request. Also holds its endpoint
+ * and token resolution and the rendering of Cedar entity references; the
+ * package index registers it.
+ */
+
 import type { Logger } from "@o3co/auth.policy-verifier.core";
 import type { CedarEntityUid } from "./cedarJson.mjs";
 import {

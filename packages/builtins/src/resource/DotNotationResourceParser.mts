@@ -1,6 +1,12 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The resource parser for dot-separated, colon-qualified resource strings such
+ * as `org:123.document:42`, which refuses anything outside its grammar rather
+ * than repairing it.
+ */
+
 import type { Resource, ResourceParser } from "@o3co/auth.policy-verifier.core";
 import { ResourceParseError } from "@o3co/auth.policy-verifier.core";
 

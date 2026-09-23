@@ -1,6 +1,13 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * Reads the Cedar policy files a `CedarPolicyRuleCollector` evaluates, from
+ * `policyDir` or inline `policies`, and computes the revision a decision's
+ * provenance names for them. Reading only: parsing and compiling are the
+ * engine's job.
+ */
+
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";

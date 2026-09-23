@@ -1,6 +1,12 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The attribute collector that promotes operator-declared claims of the
+ * verified subject into attributes, refusing at construction a mapping onto a
+ * key another package reserved.
+ */
+
 import type {
 	AttributeCollector,
 	AttributeKeyReservation,

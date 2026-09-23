@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The attribute collector that promotes the `sub` and `azp` claims into
+ * `ATTR_USER_ID` and `ATTR_CLIENT_ID`.
+ */
+
 import type {
 	AttributeCollector,
 	Attributes,

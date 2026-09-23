@@ -1,6 +1,12 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The `POST /verify` and `POST /verify/batch` router: validates and bounds the
+ * request body, authenticates the subject, runs each decision and turns its
+ * outcome or failure into the HTTP response.
+ */
+
 import {
 	type AttributePipeline,
 	consoleLogger,
@@ -35,7 +41,8 @@ import { countCollectorFailure, type DecisionMetrics } from "../observability/de
 import { type ClassifiedFailure, correlation, loggableError } from "../observability/failure.mjs";
 
 // The wire types of one decision, defined beside the decision that produces
-// them (#251) and re-exported here because the router is their public home.
+// them (#251) and re-exported here, beside the router that serves them. They
+// are not exported from the package index.
 export type { DecisionRequest, DecisionResponse } from "../decision/decide.mjs";
 
 /**

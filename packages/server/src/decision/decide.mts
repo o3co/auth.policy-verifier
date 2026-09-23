@@ -19,6 +19,10 @@
  * is answered with — is reported here, once, at the moment it is made. A
  * decision that could not be made throws a {@link DecisionFault}, reports
  * nothing, and the route reports the fault once per request.
+ *
+ * The only deadlines applied here are the rules' — `ruleTimeoutMs` for each
+ * asynchronous rule, `evaluateDeadlineMs` for all of them together; the
+ * collector deadlines are the pipelines' own.
  */
 
 import {

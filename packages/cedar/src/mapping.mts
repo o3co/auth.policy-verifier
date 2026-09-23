@@ -1,6 +1,13 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * Turns the merged attributes into one Cedar authorization request: validates
+ * the principal, action, resource and context mapping of a collector's config
+ * at boot, and builds the request from it per call as a pure function of the
+ * attributes.
+ */
+
 import type { ReadonlyAttributes } from "@o3co/auth.policy-verifier.core";
 import { ATTR_USER_ID } from "@o3co/auth.policy-verifier.core";
 import type { CedarContext, CedarEntity, CedarEntityUid, CedarValue } from "./cedarJson.mjs";

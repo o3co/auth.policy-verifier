@@ -1,6 +1,14 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The rule collector that puts a Cedar policy set into core's evaluation as a
+ * single rule. `create` resolves the engine and loads the policy set once, at
+ * boot; `collect` hands back that one rule, which builds the Cedar request from
+ * the merged attributes on each call and reports how the evaluation behind its
+ * answer went.
+ */
+
 import type {
 	AnyRule,
 	AsyncRule,

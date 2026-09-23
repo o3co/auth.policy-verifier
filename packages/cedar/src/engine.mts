@@ -1,6 +1,13 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The `CedarEngine` port an evaluator plugs into, the shapes of what it loads
+ * and answers, and the registry engines are selected from. The registry lives
+ * in one process-wide slot so that every copy of this package on the dependency
+ * graph sees the same engines.
+ */
+
 import type { Logger } from "@o3co/auth.policy-verifier.core";
 import type { CedarRequest } from "./mapping.mjs";
 import type { PolicySource } from "./policySource.mjs";

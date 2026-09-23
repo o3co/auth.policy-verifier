@@ -1,6 +1,12 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The attribute collector that promotes operator-declared fields of the
+ * caller-supplied `requestContext` into attributes, refusing at construction a
+ * mapping onto any reserved key.
+ */
+
 import type {
 	AttributeCollector,
 	AttributeKeyReservation,

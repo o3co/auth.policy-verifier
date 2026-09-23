@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.server
 
-最終更新: 2026-09-23
+最終更新: 2026-09-24
 
 auth.policy-verifier 向けの Express HTTP サーバーです。モジュールと設定からアプリケーションを組み立てる `createApp` と、認可判定を行う `POST /verify` / `POST /verify/batch` を提供します。
 
@@ -14,7 +14,7 @@ auth.policy-verifier 向けの Express HTTP サーバーです。モジュール
 
 **別パッケージである理由:** core は実行時依存を持たず edge ランタイムでも動きます。このパッケージは Node 専用で、`express`、`jose`、`prom-client`、`zod` を持ち込みます。これらをここに閉じ込めることで、評価だけを行う利用者（edge function、テスト）はどれも持ち込まずに core を使えます。
 
-パッケージ内部のソースの分け方: [`src/README.md`](src/README.md)。
+ソースディレクトリの責務・役割・不変条件: [`src/README.md`](src/README.md)。
 
 ## Bearer 認証の境界
 

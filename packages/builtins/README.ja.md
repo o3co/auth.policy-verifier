@@ -14,7 +14,7 @@ core のインターフェースを実装した、小さな既製のセットで
 - **所有しないもの:** パイプライン、グルーピング、判定（core）、認証や HTTP（`server`）、ポリシーエンジンや `AsyncRule`（`cedar`）、I/O を行う collector（利用側が書くもの。[docs/extending.ja.md](../../docs/extending.ja.md)）。
 - **core と別パッケージである理由:** core はエンジン中立の契約で、subject のフィールドを一切名指ししません（#170）。クレームの語彙と具体的な照合はその線の反対側、つまりここに置きます（[AGENTS.md — Core Vocabulary Scope](../../AGENTS.md#core-vocabulary-scope)）。また任意導入でもあります: builtins は意図的に基本セットであってカタログではない（[docs/extending.ja.md](../../docs/extending.ja.md)）ので、collector と rule を自前で書くデプロイメントはインストール不要で、core もこれに合わせて肥大化しません。
 
-モジュール構成・不変条件・契約テスト（英語）:
+各ソースディレクトリの責務・役割・不変条件（英語）:
 [`src/collectors/README.md`](src/collectors/README.md)（attribute collector）、
 [`src/rules/README.md`](src/rules/README.md)（rule と rule collector）。
 
@@ -54,7 +54,7 @@ npm install @o3co/auth.policy-verifier.builtins
 
 マッピングの形は `RequestContextAttributeCollector` と同じです（`{ from, to?, type? }`、完全一致するキーが dot path より優先、own property のみ）。違うのは読み取り元であり、したがって信頼度です: subject バッグは authenticator が検証したものなので、request-context コレクターが拒否する core の 5 キー — `scopes`、`permissions`、`roles`、`userId`、`clientId` — にもマッピングを着地させて**かまいません**。2 つのコレクターが 1 つのリストキーに書けば union されます。それはデプロイが issuer 由来の 2 つのソースを合成しているということであり、config にそう書かれています。一方、2 つのコレクターが異なる値で書いた*スカラー*キーは `AttributeConflictError` を投げ、すべてのリクエストを deny します — `PayloadSubjectIdCollector` も `userId` / `clientId` を書いている間は、そこへマッピングしないでください。別のパッケージが予約したキー（cedar の `request*`）は引き続き拒否されます。それらは subject ではなくリクエストから導出されるものだからです。そして、マッピングするのは IdP が自身の登録データや管理データから埋めるクレームだけにしてください: ユーザーが編集できるメタデータ（Clerk の `unsafe_metadata`、Auth0 の `user_metadata`）から発行されたクレームは、署名されてはいても信頼できるものではありません。
 
-scope クレームについては `PayloadScopeCollector { claim = "scp" }` を優先してください。こちらはスペース区切り文字列の形も読み、`ResourceActionScopeRuleCollector { claim = "scp" }` と組にすることで、どのトークンが scopeless かについて両者の判断が一致します。
+scope クレームについては `PayloadScopeCollector { claim = "scp" }` を優先してください。こちらはスペース区切り文字列の形も読み、`ResourceActionScopeRuleCollector { claim = "scp" }` と組にすることで、両者が同じ claim を見ます（それぞれが自分の `claim` を持ち、一致は検査されないので両方に設定してください）。rule collector は claim の有無だけを見ます — 使える scope リストを持たない claim（`""`、数値）は scope を生まない一方、`scopeless = "skip"` では scope ありとして扱われます。
 
 ### RequestContextAttributeCollector
 
@@ -333,7 +333,7 @@ import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
 
 ## 関連
 
-- [`src/collectors/README.md`](src/collectors/README.md)、[`src/rules/README.md`](src/rules/README.md) — このパッケージのモジュール構成、不変条件、契約テスト（英語）
+- [`src/collectors/README.md`](src/collectors/README.md)、[`src/rules/README.md`](src/rules/README.md) — このパッケージのソースディレクトリの責務・役割・不変条件（英語）
 - [拡張ガイド (`docs/extending.ja.md`)](../../docs/extending.ja.md) — カスタム `Rule` / `AttributeCollector` の書き方と、`builtins` が基本セットとして位置づけられている理由
 - [`@o3co/auth.policy-verifier.core`](../core/README.ja.md) — コアインターフェースと attribute 定数
 - [auth.policy-verifier ルート README](../../README.ja.md) — 完全なセットアップと設定のリファレンス

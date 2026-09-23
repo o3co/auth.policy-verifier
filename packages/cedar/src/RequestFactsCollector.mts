@@ -1,6 +1,12 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The attribute collector that copies the parsed request — action, resource
+ * type, id and raw string — into attributes, so that the Cedar rule can build
+ * its request without holding `CollectorContext`.
+ */
+
 import type {
 	AttributeCollector,
 	Attributes,

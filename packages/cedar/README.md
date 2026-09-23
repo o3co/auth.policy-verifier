@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.cedar
 
-Last updated: 2026-09-23
+Last updated: 2026-09-24
 
 Co-resident [Cedar](https://www.cedarpolicy.com/) policy evaluation for
 [auth.policy-verifier](https://github.com/o3co/auth.policy-verifier), as an
@@ -63,7 +63,7 @@ keys, entity mapping) stays out of core, whose `ATTR_*` constants are
 reserved for OAuth/OIDC/RBAC concepts. The evaluator lives one package further
 out so that which evaluator runs is a dependency choice, not a config change.
 
-How the source is laid out, file by file: [src/README.md](src/README.md).
+Responsibility, role and invariants of the source directory: [src/README.md](src/README.md).
 
 ## Usage
 

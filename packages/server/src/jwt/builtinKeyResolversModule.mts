@@ -1,6 +1,12 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The key resolver factories for the built-in JWT algorithms — HS256 with
+ * secret rotation, and RS256 / ES256 / EdDSA from a JWKS URI or PEM — and the
+ * `Module` that registers them.
+ */
+
 import { createSecretKey, type KeyObject } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type { Module } from "@o3co/auth.policy-verifier.core";

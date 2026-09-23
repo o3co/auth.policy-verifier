@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The attribute collector that emits a configured, constant role list under
+ * `ATTR_ROLES`.
+ */
+
 import type {
 	AttributeCollector,
 	Attributes,
@@ -17,6 +22,16 @@ import { ATTR_ROLES } from "@o3co/auth.policy-verifier.core";
  * The list is copied at construction, and so is each role in it and each
  * role's `permissions` array (#255): a caller that mutates the config, its
  * array or a `Role` in it afterwards changes nothing this collector emits.
+ *
+ * Nothing is validated: a missing or non-iterable `roles` throws a `TypeError`
+ * from the constructor, and a malformed `Role` entry is copied as it is (see
+ * `copyRole`). Each collect returns a shallow copy of the list, so its `Role`
+ * copies are shared between the outputs of different collects.
+ *
+ * Known issue (#264): a string `roles` is iterable, so
+ * it is split into single characters rather than refused, as a string
+ * `permissions` is in `StaticPermissionCollector`. Here the characters are
+ * inert: `HasPermission` ignores those entries, since they are not objects.
  */
 export class StaticRoleCollector implements AttributeCollector {
 	private readonly roles: readonly Role[];

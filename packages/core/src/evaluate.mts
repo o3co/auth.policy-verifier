@@ -1,6 +1,13 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The evaluator: `evaluate()` groups the collected rules by `ruleType`, ORs
+ * within a group and ANDs across groups, runs asynchronous rules under their
+ * deadlines, and returns the allow/deny decision with a reason naming every
+ * group.
+ */
+
 import {
 	rejectOnAbort,
 	resolveEvaluateDeadlineMs,

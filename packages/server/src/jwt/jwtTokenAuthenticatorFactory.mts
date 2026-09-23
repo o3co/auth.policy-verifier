@@ -1,6 +1,13 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The built-in `jwt` token authenticator factory: re-checks the `oauth.jwt`
+ * block of a config and builds the bearer-JWT authentication the verify router
+ * authenticates the subject with (decode-only under
+ * `mode = "insecure-decode"`).
+ */
+
 import {
 	JWT_MODE_MIGRATION_MESSAGE,
 	JWT_MODE_REMOVED_KEYS,
