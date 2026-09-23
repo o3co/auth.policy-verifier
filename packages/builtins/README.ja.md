@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.builtins
 
-最終更新: 2026-09-23
+最終更新: 2026-09-24
 
 auth.policy-verifier 向けの組み込み attribute collector、rule collector、および resource parser です。
 
@@ -37,7 +37,7 @@ npm install @o3co/auth.policy-verifier.builtins
 | `RequestContextAttributeCollector` | `requestContext` の宣言済みフィールド | 運用者が決めたキー | `{ attributes: Mapping[] }` |
 | `PayloadClaimAttributeCollector` | 検証済み `subject` の宣言済みクレーム | 運用者が決めたキー、または core の 5 キー | `{ attributes: Mapping[] }` (#219) |
 
-`StaticPermissionCollector` と `StaticRoleCollector` は、リクエストのコンテキストに関わらず、コンストラクタに渡した値を常に出力します。渡された配列は参照のまま保持するため、構築後にその配列を変更すると出力も変わります（#255 — [`src/collectors/README.md`](src/collectors/README.md#known-issues) を参照）。
+`StaticPermissionCollector` と `StaticRoleCollector` は、リクエストのコンテキストに関わらず、コンストラクタに渡した値を常に出力します。渡された値は構築時にコピーされます — 配列、そして `StaticRoleCollector` では各 `Role` とその `permissions` も — ので、構築後に config を変更しても出力は変わりません（#255）。
 
 ### PayloadClaimAttributeCollector
 
@@ -237,6 +237,10 @@ new AttrPairCompare({ a: string, op: "lt" | "le" | "gt" | "ge", b: string, group
 ### グルーピング: 既定は AND、OR にするには `group` を指定
 
 属性比較 Rule はすべて、上記 `AttrMatchRule` と同じグルーピング規則に従います。既定では各 Rule の `ruleType` は識別用パラメータから導出されるため、異なる要件は評価器によって AND 結合されます。2 つの Rule に同じ `group` 文字列を渡すと、両者は同じ `ruleType` を持つようになり、評価器は OR 結合します（どちらか一方が成立すれば要件を満たす）。
+
+### config は構築時にコピーされる
+
+属性比較 Rule はすべて、config の各フィールドを一度だけ読んで検証し、自身のコピーとして保持します（#255）。構築後に config オブジェクトを変更しても — `a`、`b`、`op`、`v` の置き換えや `values` の編集 — Rule の応答も `ruleType` と `message` も変わらず、コンストラクタが拒否する値（`NaN` リテラルなど）を後から差し込むこともできません。
 
 ## Rule Collectors
 

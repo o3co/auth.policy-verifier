@@ -1,6 +1,6 @@
 # Rules
 
-Last updated: 2026-09-23
+Last updated: 2026-09-24
 
 The built-in rules — predicates over attributes — and, under [`collectors/`](collectors/), the
 two rule collectors that build them from the request.
@@ -22,8 +22,8 @@ the request, rules read `attrs`.
 
 A rule here answers one question about `attrs` and holds nothing else: what it compares
 against comes from configuration, or for the two collected rules from the request at collect
-time, and the rule never writes to it. How the comparison rules hold their configuration is
-under [Known issues](#known-issues).
+time, and the rule never writes to it. A comparison rule keeps its own copy of its
+configuration, taken at construction — see [Invariants](#invariants).
 
 - [`HasScope`](HasScope.mts) — `ATTR_SCOPES` contains the required scope; `ruleType` `scope`,
   `code` `invalid_scope`. Exact and case-sensitive; the bare `x` → `read:x` rewrite is opt-in
@@ -137,27 +137,23 @@ deployment that sets `claim` sets it on both. Imported by `../index.mts` and `..
   homogeneous, `group` is a non-empty string; the default `ruleType` tells `1` from `"1"` and
   ignores value order and duplicates —
   [`_sharedValidation.test.mts`](../__tests__/rules/_sharedValidation.test.mts).
+- Configuration is copied at construction (#255): each comparison rule reads every field of
+  its config once, validates it, and keeps the validated value in a field of its own, not the
+  caller's object. A caller that mutates the object afterwards — replacing `a`, `b`, `op` or
+  `v`, pushing to or splicing `values` — changes neither the answers nor `ruleType` and
+  `message`, and cannot install a value the constructor refuses, so construction-time
+  validation holds for the rule's life. `HasScope` and `HasPermission` take a string.
+  Pinned by "comparison rules copy their config at construction (#255)" in
+  [`configCopiedAtConstruction.test.mts`](../__tests__/rules/configCopiedAtConstruction.test.mts):
+  one "`<Rule>: <mutation>` after construction changes nothing" case per rule and field it
+  compares by, two of them installing a `NaN` literal; `AttrMatchRule`, which inherits
+  `verify` from `AttrPairEqual`, has the one for `a`.
 - The scope collector emits its rule for a scopeless token unless `scopeless: "skip"` is
   opted into, decides scopeless-ness from the configured `claim`, and refuses an unrecognised
   policy, a non-boolean rewrite flag or an empty claim at construction —
   [`ResourceActionScopeRuleCollector.test.mts`](../__tests__/rules/collectors/ResourceActionScopeRuleCollector.test.mts);
   the permission string is `<resource.raw>.perm:<action>` —
   [`ResourceActionPermissionRuleCollector.test.mts`](../__tests__/rules/collectors/ResourceActionPermissionRuleCollector.test.mts).
-
-## Known issues
-
-- The comparison rules keep the caller's config object by reference and read `a`, `b`, `op`
-  and `v` off it at verify time, while `ruleType` and `message` are computed once in the
-  constructor — so a host that constructs one itself and then mutates the object it passed
-  changes the answers, past the construction-time guards and out of step with the `ruleType`
-  the evaluator groups by. `HasScope` and `HasPermission` take a string and keep nothing of
-  the caller's. Nothing in the bundled composition is exposed to this:
-  [`module.mts`](../module.mts) registers the attribute collectors, the two rule collectors
-  and the resource parser — no comparison rule is constructed there — and the rule collectors
-  build their rules per request from the request itself. It applies to a host that constructs
-  one of these classes and keeps the object it passed. Whether construction should copy or
-  freeze it is #255, which also covers the static attribute collectors' configured arrays —
-  [`../collectors/README.md`](../collectors/README.md#known-issues).
 
 ## Failure and lifecycle
 
@@ -171,13 +167,15 @@ validate nothing. Nothing here
 does I/O: a synchronous rule runs under no rule budget, the collectors run under the
 pipeline's per-collector timeout and deadline, which are in force — they do no I/O and complete
 within any usable bound, though an aborted caller, a sibling's failure or an expired deadline
-ends them as it ends any collector — and `signal` is never read. A rule keeps only its configuration and may answer concurrent
+ends them as it ends any collector — and `signal` is never read. A rule keeps only its own copy of its configuration and may answer concurrent
 decisions; none reports an evaluation.
 
 ## Contract tests
 
-[`../__tests__/rules/`](../__tests__/rules/) — one file per rule, the shared validation, and
-[`collectors/`](../__tests__/rules/collectors/) for the two collectors; the purity suite and
+[`../__tests__/rules/`](../__tests__/rules/) — one file per rule, the shared validation, the
+config copy across the comparison rules
+([`configCopiedAtConstruction.test.mts`](../__tests__/rules/configCopiedAtConstruction.test.mts)),
+and [`collectors/`](../__tests__/rules/collectors/) for the two collectors; the purity suite and
 its application named above; and the grouping the comparison rules rely on, end to end
 through `evaluate()`, in
 [`evaluate-with-rules.test.mts`](../../../../tests/integration/src/evaluate-with-rules.test.mts).

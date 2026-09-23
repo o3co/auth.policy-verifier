@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.builtins
 
-Last updated: 2026-09-23
+Last updated: 2026-09-24
 
 Built-in attribute collectors, rule collectors, and resource parser for auth.policy-verifier.
 
@@ -52,7 +52,7 @@ All collectors implement `AttributeCollector`.
 | `RequestContextAttributeCollector` | declared fields of `requestContext` | the operator's own keys | `{ attributes: Mapping[] }` |
 | `PayloadClaimAttributeCollector` | declared claims of the verified `subject` | the operator's own keys, or core's five | `{ attributes: Mapping[] }` (#219) |
 
-`StaticPermissionCollector` and `StaticRoleCollector` always emit the values supplied at construction time, regardless of request context. They keep the array they were given by reference, so mutating it after construction changes what they emit (#255 — see [`src/collectors/README.md`](src/collectors/README.md#known-issues)).
+`StaticPermissionCollector` and `StaticRoleCollector` always emit the values supplied at construction time, regardless of request context. They copy what they were given at construction — the array, and for `StaticRoleCollector` each `Role` and its `permissions` — so mutating the config afterwards changes nothing they emit (#255).
 
 ### PayloadClaimAttributeCollector
 
@@ -252,6 +252,10 @@ new AttrPairCompare({ a: string, op: "lt" | "le" | "gt" | "ge", b: string, group
 ### Grouping: AND by default, `group` for OR
 
 All attribute comparison rules follow the same grouping semantics described for `AttrMatchRule` above. By default, each rule's `ruleType` is derived from its distinguishing parameters so that distinct requirements are AND-combined by the evaluator. Pass the same `group` string to two rules to give them the same `ruleType` — the evaluator then OR-combines them (either condition satisfies the requirement).
+
+### Configuration is copied at construction
+
+Every attribute comparison rule reads each field of its config once, validates it, and keeps its own copy (#255). Mutating the config object afterwards — replacing `a`, `b`, `op` or `v`, or editing `values` — changes neither the rule's answers nor its `ruleType` and `message`, and a value the constructor would refuse (such as a `NaN` literal) cannot be installed after it.
 
 ## Rule Collectors
 
