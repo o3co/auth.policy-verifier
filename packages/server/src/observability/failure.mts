@@ -20,9 +20,6 @@ import {
 	RuleTimeoutError,
 } from "@o3co/auth.policy-verifier.core";
 import type { NamedRule } from "./decisionEvent.mjs";
-// Type only: `metrics.mts` loads express and prom-client, and the decision
-// module, which counts through this helper, must reach neither (#251).
-import type { DecisionMetrics } from "./metrics.mjs";
 
 /**
  * Every value `category` can take, in one closed set — so the log line and the
@@ -30,21 +27,22 @@ import type { DecisionMetrics } from "./metrics.mjs";
  * them is written against everything there is.
  *
  * - `collector_timeout` — a collector overran `collectorTimeoutMs`, or its
- *   pipeline overran `collectorDeadlineMs`. Answered `403 collector_timeout`.
- * - `collector_threw` — a collector rejected or threw. Answered `500`.
+ *   pipeline overran `collectorDeadlineMs`.
+ * - `collector_threw` — a collector rejected or threw.
  * - `attribute_conflict` — two attribute collectors wrote different values to
- *   one scalar key. Answered `403 attribute_conflict`; no one collector is
- *   answerable, so none is named.
+ *   one scalar key. No one collector is answerable, so none is named.
  * - `rule_timeout` — an asynchronous rule overran `ruleTimeoutMs`, or the rule
- *   phase overran `evaluateDeadlineMs`. Answered `403 rule_timeout`.
- * - `rule_threw` — a rule's `verify` threw or its `decide` rejected. Answered
- *   `500`.
+ *   phase overran `evaluateDeadlineMs`.
+ * - `rule_threw` — a rule's `verify` threw or its `decide` rejected.
  * - `body_rejected` — the JSON body parser failed in a way the deny envelope
  *   does not map to a 4xx (a stream something upstream already read or set an
- *   encoding on, a length mismatch). Answered `500`.
+ *   encoding on, a length mismatch).
  * - `internal` — anything that did not come out of a decision's own collect
  *   or evaluation: a resource parser or authenticator that threw, whatever
- *   class it threw. Answered `500`.
+ *   class it threw.
+ *
+ * What the caller is answered for each is the router's to say, and it says it
+ * on `createVerifyRouter` (`routes/verify.mts`); this set only sorts.
  *
  * **Not a category: an unreachable JWKS.** The built-in authenticator answers
  * it `401 invalid_token` and logs `jwt_verification_unavailable` at error; it
@@ -235,23 +233,4 @@ function ruleName(source: FailureSource | undefined): NamedRule {
  */
 export function correlation(requestId: string | undefined): { requestId?: string } {
 	return requestId !== undefined ? { requestId } : {};
-}
-
-/**
- * Counts a failure a collector is answerable for (#200). Called beside each
- * log line that reports one, and only there, so the counter and the log
- * stream agree on how many there were: a timed-out batch entry is one line
- * and one count, and a batch that failed with a 500 — which speaks for the
- * whole request — is also one of each. No `metrics` counts nothing.
- */
-export function countCollectorFailure(
-	metrics: DecisionMetrics | undefined,
-	failure: ClassifiedFailure,
-): void {
-	if ("collector" in failure) {
-		metrics?.observeCollectorFailure?.({
-			collector: failure.collector,
-			category: failure.category,
-		});
-	}
 }

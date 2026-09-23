@@ -33,7 +33,7 @@ import {
 	unwrapFault,
 	type ValidatedDecisionRequest,
 } from "#/decision/decide.mjs";
-import type { DecisionMetrics } from "#/observability/metrics.mjs";
+import type { DecisionMetrics } from "#/observability/decisionMetrics.mjs";
 
 interface Captured {
 	level: "info" | "warn" | "error";

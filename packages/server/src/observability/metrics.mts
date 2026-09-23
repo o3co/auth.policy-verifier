@@ -40,7 +40,9 @@
 
 import express from "express";
 import { Counter, collectDefaultMetrics, Histogram, Registry } from "prom-client";
-import type { CollectorFailureCategory } from "./failure.mjs";
+// The port this implements lives apart from it (#258), so that what only
+// reports through it reaches neither express nor prom-client.
+import type { DecisionMetrics } from "./decisionMetrics.mjs";
 
 /** Namespace for the Node process defaults, so they cannot collide with anything else scraped. */
 const PROCESS_METRICS_PREFIX = "auth_policy_verifier_";
@@ -151,44 +153,6 @@ function processDefaultsRegistry(): Registry {
 		collectDefaultMetrics({ register: processDefaults, prefix: PROCESS_METRICS_PREFIX });
 	}
 	return processDefaults;
-}
-
-/** One decision, as the metrics seam sees it. */
-export interface DecisionObservation {
-	decision: "allow" | "deny";
-	/** Deny code. Absent on an allow; bounded by {@link MAX_DENY_CODE_LABELS} when present. */
-	code?: string;
-	/** How long collecting and evaluating took, in seconds. */
-	durationSeconds: number;
-}
-
-/** One collector failure that kept a decision from being made, as the metrics seam sees it (#200). */
-export interface CollectorFailureObservation {
-	/**
-	 * `attribute.collectors[1] (EntitlementStoreCollector)`, or the list itself
-	 * (`attribute.collectors`) when the pipeline's deadline ran out. Bounded by
-	 * {@link MAX_COLLECTOR_LABELS} when published.
-	 */
-	collector: string;
-	category: CollectorFailureCategory;
-}
-
-/**
- * The narrow seam the verify router reports decisions through.
- *
- * An interface rather than the concrete registry, so the router carries no
- * dependency on prom-client and a deployment can count decisions somewhere
- * else entirely.
- */
-export interface DecisionMetrics {
-	observe(observation: DecisionObservation): void;
-	/**
-	 * Called once per collector failure the router logs (#200) — a
-	 * `collector_timeout` deny, or a `verify_internal_error` a collector threw.
-	 * Optional, so an implementation written against the seam before it
-	 * existed still satisfies it and simply does not count them.
-	 */
-	observeCollectorFailure?(observation: CollectorFailureObservation): void;
 }
 
 /** Options accepted by {@link createMetrics}. */

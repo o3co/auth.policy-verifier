@@ -31,13 +31,8 @@ import {
 	type TokenAuthenticator,
 	type VerifyRouterJwtConfig,
 } from "../jwt/tokenAuthenticator.mjs";
-import {
-	type ClassifiedFailure,
-	correlation,
-	countCollectorFailure,
-	loggableError,
-} from "../observability/failure.mjs";
-import type { DecisionMetrics } from "../observability/metrics.mjs";
+import { countCollectorFailure, type DecisionMetrics } from "../observability/decisionMetrics.mjs";
+import { type ClassifiedFailure, correlation, loggableError } from "../observability/failure.mjs";
 
 // The wire types of one decision, defined beside the decision that produces
 // them (#251) and re-exported here because the router is their public home.
@@ -452,6 +447,20 @@ function parseDecisionRequest(
  * the resource grammar included; `http.callerAuth` (#108) is the gate for
  * deployments that must not disclose even that, and it stays ahead of this
  * router and of `express.json()`.
+ *
+ * A decision that could not be made is answered by the category
+ * `observability/failure.mts` sorts its failure into (#200):
+ *
+ * - `collector_timeout`, `rule_timeout`, `attribute_conflict` — a deny with that
+ *   code (#115, #225, #174): `403` from `/verify`, and that entry's answer
+ *   inside a batch's `200`.
+ * - `collector_threw`, `rule_threw`, `internal` — `500 internal_error`, one for
+ *   the whole request, a batch included.
+ * - `body_rejected` — `500 internal_error`, from the router's terminal error
+ *   handler, the only place a body-parser failure is told apart.
+ *
+ * An unreachable JWKS is none of these: the built-in authenticator answers it
+ * `401 invalid_token`.
  *
  * Every decision — one per `/verify` call, one per entry of a batch — emits a
  * `decision` event at info and, when `metrics` is wired, increments the

@@ -35,17 +35,17 @@ import {
 	type SubjectAttributes,
 } from "@o3co/auth.policy-verifier.core";
 import { DECISION_EVENT, decisionEvent, present } from "../observability/decisionEvent.mjs";
+// The port, not `metrics.mts`: that module loads express and prom-client, and
+// the decision reaches it through no import at all, not even a type — held by
+// `__tests__/dependencies.test.mts` (#258).
+import { countCollectorFailure, type DecisionMetrics } from "../observability/decisionMetrics.mjs";
 import {
 	type ClassifiedFailure,
 	classifyFailure,
 	correlation,
-	countCollectorFailure,
 	type FailureCategory,
 	loggableError,
 } from "../observability/failure.mjs";
-// Type only, on purpose: `metrics.mts` loads express and prom-client, and the
-// decision reaches neither — `__tests__/dependencies.test.mts` holds that.
-import type { DecisionMetrics } from "../observability/metrics.mjs";
 
 /**
  * One decision the caller is asking for. The subject is deliberately absent:
