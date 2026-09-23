@@ -31,13 +31,8 @@ import {
 	type TokenAuthenticator,
 	type VerifyRouterJwtConfig,
 } from "../jwt/tokenAuthenticator.mjs";
-import {
-	type ClassifiedFailure,
-	correlation,
-	countCollectorFailure,
-	loggableError,
-} from "../observability/failure.mjs";
-import type { DecisionMetrics } from "../observability/metrics.mjs";
+import { countCollectorFailure, type DecisionMetrics } from "../observability/decisionMetrics.mjs";
+import { type ClassifiedFailure, correlation, loggableError } from "../observability/failure.mjs";
 
 // The wire types of one decision, defined beside the decision that produces
 // them (#251) and re-exported here because the router is their public home.
@@ -420,6 +415,20 @@ function parseDecisionRequest(
 }
 
 /**
+ * A signal that aborts when the response closes before it was finished — the
+ * caller went away (v0.10.0 audit). Handed to the collectors and the evaluator
+ * as the caller's signal, so a caller that timed out and retried does not leave
+ * an out-of-process engine call, or a collector's fetch, running to its budget.
+ */
+function callerSignal(res: express.Response): AbortSignal {
+	const controller = new AbortController();
+	res.on("close", () => {
+		if (!res.writableFinished) controller.abort(new Error("the caller closed the connection"));
+	});
+	return controller.signal;
+}
+
+/**
  * Builds the Express router serving the decision endpoints.
  *
  * `POST /verify` — `Authorization: Bearer <jwt>`, body
@@ -453,6 +462,20 @@ function parseDecisionRequest(
  * deployments that must not disclose even that, and it stays ahead of this
  * router and of `express.json()`.
  *
+ * A decision that could not be made is answered according to its failure
+ * category, which `observability/failure.mts` assigns (#200):
+ *
+ * - `collector_timeout`, `rule_timeout`, `attribute_conflict` — a deny with that
+ *   code (#115, #225, #174): `403` from `/verify`, and that entry's answer
+ *   inside a batch's `200`.
+ * - `collector_threw`, `rule_threw`, `internal` — `500 internal_error`, one for
+ *   the whole request, a batch included.
+ * - `body_rejected` — `500 internal_error`, from the router's terminal error
+ *   handler, the only place a body-parser failure is told apart.
+ *
+ * An unreachable JWKS is none of these: the built-in authenticator answers it
+ * `401 invalid_token`.
+ *
  * Every decision — one per `/verify` call, one per entry of a batch — emits a
  * `decision` event at info and, when `metrics` is wired, increments the
  * decision counters (#111). Requests that never reached the evaluator (401,
@@ -466,20 +489,6 @@ function parseDecisionRequest(
  * safe charset (`acceptRequestId`). Any other value is treated as absent, and
  * none is minted.
  */
-/**
- * A signal that aborts when the response closes before it was finished — the
- * caller went away (v0.10.0 audit). Handed to the collectors and the evaluator
- * as the caller's signal, so a caller that timed out and retried does not leave
- * an out-of-process engine call, or a collector's fetch, running to its budget.
- */
-function callerSignal(res: express.Response): AbortSignal {
-	const controller = new AbortController();
-	res.on("close", () => {
-		if (!res.writableFinished) controller.abort(new Error("the caller closed the connection"));
-	});
-	return controller.signal;
-}
-
 export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	// Resolved rather than defaulted with `??` (#157): this is the boundary a
 	// hand-built config reaches, so it must refuse what `AppConfigSchema` refuses

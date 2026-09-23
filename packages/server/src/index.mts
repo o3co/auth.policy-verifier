@@ -95,6 +95,11 @@ export {
 	decisionEvent,
 	type NamedRule,
 } from "./observability/decisionEvent.mjs";
+export type {
+	CollectorFailureObservation,
+	DecisionMetrics,
+	DecisionObservation,
+} from "./observability/decisionMetrics.mjs";
 export {
 	type ClassifiedFailure,
 	type CollectorFailureCategory,
@@ -102,12 +107,9 @@ export {
 	type FailureCategory,
 } from "./observability/failure.mjs";
 export {
-	type CollectorFailureObservation,
 	type CreateMetricsOptions,
 	createMetrics,
 	DEFAULT_METRICS_PATH,
-	type DecisionMetrics,
-	type DecisionObservation,
 	MAX_COLLECTOR_LABELS,
 	MAX_DENY_CODE_LABELS,
 	type Metrics,

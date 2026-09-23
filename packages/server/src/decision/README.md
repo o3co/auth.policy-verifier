@@ -1,6 +1,6 @@
 # Decision
 
-Last updated: 2026-09-23
+Last updated: 2026-09-24
 
 One decision, without the transport (o3co/auth.policy-verifier#251).
 
@@ -73,14 +73,16 @@ Internal to the server package; nothing here is exported from
 Imports `@o3co/auth.policy-verifier.core` (the pipelines, `evaluate`,
 `FailureRecord`, `markUntrustedRequestContext`) and
 [`../observability/`](../observability/) (the decision line, the failure
-sorting, the counter helper). It must not reach `express`, `prom-client`,
+sorting, and the `DecisionMetrics` port with its counter helper in
+`decisionMetrics.mts`). It must not reach `express`, `prom-client`,
 `../http/`, `../jwt/`, `../config/` or `../routes/` — directly or through
-anything it imports: `observability/metrics.mts` loads express and prom-client,
-so the decision takes only the `DecisionMetrics` type from it, and the counter
-helper lives in `observability/failure.mts`.
+anything it imports. `observability/metrics.mts`, the Prometheus
+implementation, loads express and prom-client, so the decision does not import
+it at all, not even for a type: it counts through the port (#258).
 [`__tests__/dependencies.test.mts`](__tests__/dependencies.test.mts) walks the
-value imports transitively and holds this; it also shows on the router that the
-walk fires. [`../routes/verify.mts`](../routes/verify.mts) imports this module;
+value imports transitively and holds this, walks every import — type-only
+included — to hold that `metrics.mts` is reached through none, and shows on the
+router and on `metrics.mts` that each walk fires. [`../routes/verify.mts`](../routes/verify.mts) imports this module;
 nothing else does.
 
 ## Invariants
