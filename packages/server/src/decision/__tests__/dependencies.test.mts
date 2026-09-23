@@ -29,6 +29,9 @@ const SRC = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 /** One `import … from "…"` statement, however many lines it spans. */
 const IMPORT = /^import\s+(type\s+)?([\s\S]*?)\s+from\s+"([^"]+)";?$/gm;
 
+/** One side-effect `import "…";`: it names nothing, but it loads the module. */
+const SIDE_EFFECT = /^import\s+"([^"]+)";?$/gm;
+
 /** One `export { … } from "…"` or `export * from "…"` re-export. */
 const RE_EXPORT = /^export\s+(type\s+)?(\{[^}]*\}|\*(?:\s+as\s+\w+)?)\s+from\s+"([^"]+)";?$/gm;
 
@@ -57,15 +60,19 @@ const valueImports: Imports = (file) => {
 		}
 		found.push(specifier);
 	}
+	for (const [, specifier] of text.matchAll(SIDE_EFFECT)) found.push(specifier);
 	return found;
 };
 
 /** Every specifier a file imports or re-exports, type-only included. */
 const allImports: Imports = (file) => {
 	const text = readFileSync(file, "utf8");
-	return [...text.matchAll(IMPORT), ...text.matchAll(RE_EXPORT)].map(
-		([, , , specifier]) => specifier,
-	);
+	return [
+		...[...text.matchAll(IMPORT), ...text.matchAll(RE_EXPORT)].map(
+			([, , , specifier]) => specifier,
+		),
+		...[...text.matchAll(SIDE_EFFECT)].map(([, specifier]) => specifier),
+	];
 };
 
 /** The source file a relative specifier in `file` names. */
