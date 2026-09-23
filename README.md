@@ -1,5 +1,7 @@
 # auth.policy-verifier
 
+Last updated: 2026-09-23
+
 [![CI](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth.policy-verifier.core)](https://www.npmjs.com/package/@o3co/auth.policy-verifier.core)
 [![codecov](https://codecov.io/gh/o3co/auth.policy-verifier/graph/badge.svg)](https://codecov.io/gh/o3co/auth.policy-verifier)
@@ -12,6 +14,38 @@ Attribute-based access control (ABAC) engine for microservice authorization. Rec
 - Drop-in replaceable with OPA or Cedar — [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) can route to this service, OPA, or Cedar Agent via a common `VerifierEndpoint` interface
 - Runs as an HTTP sidecar — swapping engines is a config change, not a code change
 - Configurable JWT verification — HS256, RS256, ES256, EdDSA with JWKS or direct public key
+
+## Responsibility
+
+**Role.** The authorization *decision* point of the [auth](https://github.com/o3co/auth)
+stack. A calling service — typically the enforcement layer
+([protobuf.interceptors](https://github.com/o3co/protobuf.interceptors)) — sends a
+subject token plus the `resource`, `action` and optional `context` it is about to
+act on, and gets back `allow` / `deny` with a structured `reason`.
+
+**Owns:**
+
+- verifying the subject token it is handed (signature, `iss`, `aud`, `typ`,
+  `exp` / `iat`) against the keys and issuer the deployment configures;
+- gathering the facts a decision needs (attribute collectors) and the rules that
+  apply (rule collectors), and evaluating them — OR within a rule group, AND across
+  groups, fail-closed;
+- the wire contract of `POST /verify` and `POST /verify/batch`, and the decision
+  log and metrics that make each answer explainable afterwards.
+
+**Does not own:**
+
+- authentication and token issuance — [auth.provider](https://github.com/o3co/auth.provider)
+  mints the tokens; this repo only verifies them;
+- enforcement — acting on the answer (refusing the call) is the caller's job;
+- what an operation means — the caller decides which `resource` / `action` a call
+  maps to and what goes in `context`;
+- a policy or permission store — facts come from collectors; a deployment that
+  keeps permissions in its own store writes a collector that reads it.
+
+**Why a separate service.** The decision is a replaceable component: the
+enforcement layer reaches it through a common `VerifierEndpoint`, so it can be
+swapped for OPA or a Cedar Agent without touching callers.
 
 ## How It Works
 
@@ -135,14 +169,34 @@ curl -X POST http://localhost:3000/verify/batch \
 ## Architecture
 
 ```text
-standalone → server   → core
-          → builtins  → core
+templates/standalone ─→ server ───→ core
+                     ├─→ builtins ─→ core
+                     └─→ core
+cedar-wasm ─→ cedar ─→ core            (optional; a composition opts in)
+create-app  ── copies templates/standalone; imports no package
 ```
 
 - **core** — Types, `evaluate()`, `AttributePipeline`, `RulePipeline`, Module infrastructure. No runtime dependencies. Engine-neutral input: core consumes `(subject, resource, action, requestContext)` where `subject` is an attribute bag — it never sees a JWT. The default server populates the bag from verified JWT claims; that mapping lives at the server's edge, which is what keeps the engine swappable.
 - **builtins** — Built-in collectors (scope, permission, role, subject ID), rules (HasScope, HasPermission, attribute comparison rules), DotNotation resource parser. Does not depend on server. See [`docs/extending.md`](docs/extending.md) for writing custom rules and collectors.
 - **server** — Express HTTP server, `createApp()`, `POST /verify` route, JWT key resolution, config schema. Does not depend on builtins.
+- **cedar** — Optional Cedar policy evaluation as one rule group, behind the `CedarEngine` port; also ships the out-of-process `http` engine that talks to a cedar-agent. Depends on core only.
+- **cedar-wasm** — The in-process Cedar engine (`@cedar-policy/cedar-wasm`), registered behind cedar's port when imported.
 - **standalone** — Composition root: reads HOCON config, selects modules, starts the server.
+- **create-app** — The `npx` scaffolder that copies `templates/standalone` into a new project.
+
+### Package map
+
+Why each package is its own package — the boundary each one holds:
+
+| Package | Role | Why separate |
+| --- | --- | --- |
+| core | Contract and evaluator every other package builds on | Zero runtime dependencies, so collectors, rules and engines can depend on it without pulling in Express, JWT or metrics libraries |
+| builtins | Ready-made collectors, rules and resource parser | Replaceable: depends on core only, and server does not depend on it (dev-only, for tests), so a deployment can drop it or supply its own |
+| server | HTTP and token edge: `createApp`, routes, JWT verification, config schema, metrics | The only library package that brings in `express`, `jose`, `prom-client` and `zod`; keeping them here keeps core engine-neutral |
+| cedar | Cedar as an optional rule group, behind a `CedarEngine` port | Opt-in: nothing of Cedar loads unless a deployment imports it, and its vocabulary stays out of core |
+| cedar-wasm | In-process Cedar evaluator | Which evaluator runs is a dependency choice; the ~12 MB wasm module is paid only by deployments that import it |
+| templates/standalone | Composition root and starting point for a deployment | Holds the per-deployment choices (modules, config, logger, shutdown, Docker); private, copied rather than imported |
+| create-app | Scaffolder CLI | Published on its own with a `bin` so it runs via `npx`; carries its own copy of the template |
 
 ## Packages
 
@@ -155,6 +209,18 @@ standalone → server   → core
 | [`packages/server`](packages/server/) | `@o3co/auth.policy-verifier.server` | Express server, `createApp`, `POST /verify`, JWT key resolver |
 | [`templates/standalone`](templates/standalone/) | — | Deployable server template (composition root) |
 | [`create-app`](create-app/) | `@o3co/create-auth-policy-verifier` | CLI scaffolder |
+
+Each package's README states its role and boundaries. Inside the packages, these
+pages map the source directory by directory — read the one for the directory you
+are changing:
+
+- [`packages/core/src/README.md`](packages/core/src/README.md) — the engine core
+- [`packages/builtins/src/collectors/README.md`](packages/builtins/src/collectors/README.md) — built-in attribute collectors
+- [`packages/builtins/src/rules/README.md`](packages/builtins/src/rules/README.md) — built-in rules and rule collectors
+- [`packages/server/src/README.md`](packages/server/src/README.md) — the server's source layout
+- [`packages/server/src/decision/README.md`](packages/server/src/decision/README.md) — the per-request decision pipeline
+- [`packages/server/src/routes/README.md`](packages/server/src/routes/README.md) — the HTTP routes
+- [`packages/cedar/src/README.md`](packages/cedar/src/README.md) — the Cedar port, engines and module
 
 ## Evaluation Logic
 

@@ -1,6 +1,36 @@
 # @o3co/auth-policy-verifier-standalone
 
+最終更新: 2026-09-23
+
 auth.policy-verifier のデプロイ可能なサーバーテンプレートです。このパッケージはコンポジションルートとして機能し、設定の読み込み・モジュールのロード・Express サーバーの起動を担います。`@o3co/create-auth-policy-verifier` によって生成されます。
+
+## 責務と役割
+
+**役割.** コンポジションルートであり、デプロイメントの出発点です。ライブラリではなく、
+これを import するものはありません。`@o3co/create-auth-policy-verifier` が新しい
+プロジェクトにコピーし、以後はオペレーターがそのコピーを所有・編集します。
+ライブラリ群の上に位置し、`@o3co/auth.policy-verifier.server`（`createApp`、
+`AppConfigSchema`、`builtinKeyResolversModule`）、`@o3co/auth.policy-verifier.builtins`
+（`builtinCollectorsModule`）、`@o3co/auth.policy-verifier.core`（`Logger` 型）を使います。
+
+**所有するもの** — デプロイメントごとに決まる選択:
+
+- アプリに組み込むモジュール — [`src/main.mts`](src/main.mts)
+- 設定の読み込み元と `{ENV}.conf` オーバーレイの重ね方 —
+  [`src/configPath.ts`](src/configPath.ts)、[`src/loadConfig.ts`](src/loadConfig.ts)
+  — および [`config/application.conf`](config/application.conf) の出荷時ポリシー
+- 具体的なロガー（pino） — [`src/logger.ts`](src/logger.ts)
+- プロセスのライフサイクル: drain の期限付きの SIGTERM 処理 —
+  [`src/shutdown.ts`](src/shutdown.ts)
+- パッケージング: `Dockerfile`、`docker-compose*.yml`、コンテナの healthcheck
+
+**所有しないもの.** HTTP API、判定パイプライン、トークン検証、設定スキーマ（いずれも
+`server`）、collector / rule / parser の実装（`builtins`）、`Module` 契約（`core`）。
+これらはここではなく上流で変更します。
+
+**別パッケージである理由.** 上記はすべてデプロイメントごとの判断なので、公開ライブラリ
+から切り離し、オペレーターが書き換えることを前提としたツリーに置いています。
+`"private": true` で、それ自体は公開されず、スキャフォルダー経由でのみ利用者に届きます。
 
 ## 使い方
 
@@ -225,18 +255,33 @@ scrape_configs:
 
 ## デフォルトコレクター
 
-以下のコレクターが `builtinCollectorsModule` を通じて登録されます。
+ここで問題になる一覧は 2 つあり、同じではありません。
 
-**Attribute collectors**:
+**登録済み** — `builtinCollectorsModule`（`src/main.mts` で組み込み）が名前で
+*利用可能にする* もの。登録だけでは何も起きず、`config/application.conf` が名前を
+挙げたときに初めて使われます。このモジュールは attribute collector を 6 つ
+（`PayloadScopeCollector`、`PayloadSubjectIdCollector`、`StaticPermissionCollector`、
+`StaticRoleCollector`、`RequestContextAttributeCollector`、
+`PayloadClaimAttributeCollector`）、rule collector を 2 つ
+（`ResourceActionScopeRuleCollector`、`ResourceActionPermissionRuleCollector`）、
+resource parser を 1 つ（`DotNotationResourceParser`）登録します。各エントリの設定を含む
+正式な一覧は builtins の README —
+[Attribute Collectors](../../packages/builtins/README.ja.md#attribute-collectors)、
+[Rule Collectors](../../packages/builtins/README.ja.md#rule-collectors)、
+[builtinCollectorsModule](../../packages/builtins/README.ja.md#builtincollectorsmodule)
+— で、ソースは [`packages/builtins/src/module.mts`](../../packages/builtins/src/module.mts) です。
 
-- `PayloadScopeCollector` — 検証済みサブジェクト属性（JWT のクレーム）から OAuth スコープを抽出する
-- `PayloadSubjectIdCollector` — 検証済みサブジェクト属性（JWT のクレーム）からサブジェクト識別子を抽出する
-- `RequestContextAttributeCollector` — リクエストボディの `context` の宣言済みフィールドを属性に昇格させる（既定では未接続。`attribute.collectors` に `attributes` マッピングを付けて追加する）
+**既定の設定で有効なもの** — 出荷時の `config/application.conf` が実際に接続しているもの:
 
-**Rule collectors**（認可ルールを解決）:
+- `attribute.collectors`: `PayloadScopeCollector`（検証済みトークンのクレームから
+  OAuth スコープ）と `PayloadSubjectIdCollector`（サブジェクト識別子）
+- `rule.collectors`: `ResourceActionScopeRuleCollector` — トークンがスコープ
+  `<action>:<resourceType>` を持つことを要求する
+- `resource.parser`: `DotNotationResourceParser`
 
-- `ResourceActionScopeRuleCollector` — トークンがスコープ `<action>:<resourceType>` を持つことを要求する
-- `ResourceActionPermissionRuleCollector` — パーミッション `<resource.raw>.perm:<action>` を要求する（既定では未接続。下記参照）
+それ以外は登録済みだが無効です。特に `ResourceActionPermissionRuleCollector`
+（パーミッション `<resource.raw>.perm:<action>` を要求する）は意図的に有効化していません
+— 下記参照。
 
 ### 出荷時のポリシー
 
@@ -284,9 +329,10 @@ const app = await createApp({
 | スクリプト | コマンド | 説明 |
 |---|---|---|
 | `build` | `tsc` | TypeScript を `dist/` にコンパイルする |
+| `typecheck` | `tsc --noEmit -p tsconfig.typecheck.json` | 出力せずにソースとテストを型検査する |
 | `start` | `node dist/main.mjs` | コンパイル済みサーバーを起動する |
 | `debug` | `NODE_OPTIONS='--conditions=development' tsx watch src/main.mts` | ホットリロードで開発サーバーを起動する |
-| `test` | `echo 'no tests configured'` | プレースホルダー（テスト未設定） |
+| `test` | `vitest run` | `src/__tests__` のテンプレートのテストを実行する |
 
 ## Docker
 

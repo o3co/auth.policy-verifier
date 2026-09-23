@@ -1,9 +1,20 @@
 # Collectors
 
+Last updated: 2026-09-23
+
 The built-in attribute collectors: the layer that reads the request and writes the
 attributes the rules decide from.
 
 ## Responsibility
+
+The attribute side of `@o3co/auth.policy-verifier.builtins`: core's `AttributePipeline` runs
+these collectors (a deployment names them through `builtinCollectorsModule`), and they use
+only core. They own the reading of one request source each and the narrowing of what is
+promoted; they do not own the merge, the bounds or the decision (core's), the rules
+([`../rules/`](../rules/)), or anything that needs I/O — a collector that reaches a store or
+an API is the consumer's to write. They are a directory apart from `../rules/` because that
+is the split the engine rests on: collectors read the request, rules read `attrs`
+(o3co/auth.policy-verifier#251).
 
 Each collector reads one source and writes one slice of the `Attributes` map, under core's
 keys or the operator's own, narrowing what it promotes. This is where claim vocabulary lives
@@ -97,10 +108,9 @@ deployment names these collectors through `builtinCollectorsModule`.
 - A collector holds nothing of the request past `collect` — no context, no `signal` — and
   writes nothing into its input (`subject` is read-only by type). Documented, not tested:
   none of these keeps request-derived state between calls. Configuration they do keep — the
-  mapping collectors their mappings, the static collectors the list they were given, whose
-  `Role` objects are shared with every collect (below). Holding the caller's *object* is a
-  different matter, and only the comparison rules do it (#255); the rule-purity suite covers
-  the rule side of this line.
+  mapping collectors a copy of their mappings, built at construction; the static collectors
+  the list they were given (below). The rule-purity suite covers the rule side of this line.
+  Holding the caller's *object* is covered under [Known issues](#known-issues).
 
 ## Failure and lifecycle
 
@@ -112,11 +122,27 @@ deployment names these collectors through `builtinCollectorsModule`.
 - The static collectors validate nothing at construction: a `roles` / `permissions` that is
   missing or not iterable throws a `TypeError` on the first `collect` instead (documented, not
   tested). Each collect hands out a shallow copy of the configured list — the `Role` objects
-  are shared (documented, not tested).
+  are shared (documented, not tested). The configured list itself is the caller's array, held
+  by reference — see [Known issues](#known-issues).
 - The pipeline's per-collector timeout and deadline are in force on every collect. These do no
   I/O and complete within any usable bound, but a bound is a bound: an already-aborted caller,
   a sibling's failure or a deadline that expires while one is queued ends it before or during
   `collect`, and a fan-out that has already ended makes any collector throw without running.
+
+## Known issues
+
+- [`StaticRoleCollector`](StaticRoleCollector.mts) and
+  [`StaticPermissionCollector`](StaticPermissionCollector.mts) keep the array in their config
+  by reference (`this.roles = config.roles`, `this.permissions = config.permissions`) and copy
+  it only on each `collect`. A host that constructs one itself and then mutates the array it
+  passed — or a `Role` in it — changes what every later collect emits, and so the decisions,
+  with no validation. The comparison rules keep their config object the same way
+  ([`../rules/README.md`](../rules/README.md#known-issues)); both fall under #255, which is to
+  decide whether construction copies (or freezes) or the caller carries the obligation. The
+  factories in [`../module.mts`](../module.mts) pass the config entry through unchanged, and
+  the server's `createApp` hands them the entry from the config it was given — so the same
+  holds for a host that mutates that config after boot. The mapping collectors and
+  `PayloadScopeCollector` build what they keep at construction and are not affected.
 
 ## Contract tests
 

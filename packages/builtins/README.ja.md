@@ -1,8 +1,22 @@
 # @o3co/auth.policy-verifier.builtins
 
+最終更新: 2026-09-23
+
 auth.policy-verifier 向けの組み込み attribute collector、rule collector、および resource parser です。
 
 **Runtime:** `BigInt` と `Map.groupBy` をサポートするサーバー／エッジ JavaScript ランタイムが対象です — Node.js 22+（`engines.node` で宣言しており、古い Node ではインストール時にブロックされます）、Cloudflare Workers、Vercel Edge、Deno、Bun。ブラウザは設計上対象外です（認可判定はサーバー側で enforcement する必要があるため）。同梱の `server` パッケージは引き続き Node 専用です。
+
+## 責務と役割
+
+core のインターフェースを実装した、小さな既製のセットです: attribute collector、rule、rule collector、resource parser、そしてそれらを server の `createApp` などのホストに登録する `builtinCollectorsModule`。依存は `@o3co/auth.policy-verifier.core` だけです。`templates/standalone` がこれを組み込み、`server` はテストでのみ使います（`devDependencies`）。
+
+- **所有するもの:** これらの実装が何を読み、何を書き、どう照合するか — JWT クレーム（`sub`、`azp`、`scope`、宣言したクレーム）から属性キーへの対応（#170）、`HasScope` / `HasPermission` と比較ルールの照合規則、ドット記法のリソース文法。
+- **所有しないもの:** パイプライン、グルーピング、判定（core）、認証や HTTP（`server`）、ポリシーエンジンや `AsyncRule`（`cedar`）、I/O を行う collector（利用側が書くもの。[docs/extending.ja.md](../../docs/extending.ja.md)）。
+- **core と別パッケージである理由:** core はエンジン中立の契約で、subject のフィールドを一切名指ししません（#170）。クレームの語彙と具体的な照合はその線の反対側、つまりここに置きます（[AGENTS.md — Core Vocabulary Scope](../../AGENTS.md#core-vocabulary-scope)）。また任意導入でもあります: builtins は意図的に基本セットであってカタログではない（[docs/extending.ja.md](../../docs/extending.ja.md)）ので、collector と rule を自前で書くデプロイメントはインストール不要で、core もこれに合わせて肥大化しません。
+
+モジュール構成・不変条件・契約テスト（英語）:
+[`src/collectors/README.md`](src/collectors/README.md)（attribute collector）、
+[`src/rules/README.md`](src/rules/README.md)（rule と rule collector）。
 
 ## インストール
 
@@ -23,7 +37,7 @@ npm install @o3co/auth.policy-verifier.builtins
 | `RequestContextAttributeCollector` | `requestContext` の宣言済みフィールド | 運用者が決めたキー | `{ attributes: Mapping[] }` |
 | `PayloadClaimAttributeCollector` | 検証済み `subject` の宣言済みクレーム | 運用者が決めたキー、または core の 5 キー | `{ attributes: Mapping[] }` (#219) |
 
-`StaticPermissionCollector` と `StaticRoleCollector` は、リクエストのコンテキストに関わらず、コンストラクタに渡した値を常に出力します。
+`StaticPermissionCollector` と `StaticRoleCollector` は、リクエストのコンテキストに関わらず、コンストラクタに渡した値を常に出力します。渡された配列は参照のまま保持するため、構築後にその配列を変更すると出力も変わります（#255 — [`src/collectors/README.md`](src/collectors/README.md#known-issues) を参照）。
 
 ### PayloadClaimAttributeCollector
 
@@ -299,6 +313,8 @@ tchar    = %x21 / %x23-2D / %x2F-39 / %x3B-5B / %x5D-7E
 import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
 ```
 
+以下は執筆時点の登録内容です。正は [`src/module.mts`](src/module.mts) です。
+
 | レジストリ | 名前 | ファクトリ |
 | --- | --- | --- |
 | `attributeCollector` | `"PayloadScopeCollector"` | `(config) => new PayloadScopeCollector(config)` |
@@ -313,6 +329,7 @@ import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
 
 ## 関連
 
+- [`src/collectors/README.md`](src/collectors/README.md)、[`src/rules/README.md`](src/rules/README.md) — このパッケージのモジュール構成、不変条件、契約テスト（英語）
 - [拡張ガイド (`docs/extending.ja.md`)](../../docs/extending.ja.md) — カスタム `Rule` / `AttributeCollector` の書き方と、`builtins` が基本セットとして位置づけられている理由
 - [`@o3co/auth.policy-verifier.core`](../core/README.ja.md) — コアインターフェースと attribute 定数
 - [auth.policy-verifier ルート README](../../README.ja.md) — 完全なセットアップと設定のリファレンス

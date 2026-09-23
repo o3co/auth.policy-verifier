@@ -1,5 +1,7 @@
 # @o3co/auth.policy-verifier.cedar
 
+Last updated: 2026-09-23
+
 Co-resident [Cedar](https://www.cedarpolicy.com/) policy evaluation for
 [auth.policy-verifier](https://github.com/o3co/auth.policy-verifier), as an
 optional plugin package.
@@ -21,6 +23,47 @@ TypeScript — no DSL is ever required — and a deployment that adopts Cedar he
 is not binding itself to this verifier: the same `.cedar` files load unchanged
 into an embedded evaluator later, or into a cedar-agent when laid out one
 policy per file (see [Running out of process](#running-out-of-process)). Design: [#185](https://github.com/o3co/auth.policy-verifier/issues/185).
+
+## Responsibility
+
+**Role.** An optional plugin. A composition passes `cedarPolicyModule` to the
+server's `createApp`, which registers `RequestFactsCollector` and
+`CedarPolicyRuleCollector` for config to name. It depends on
+`@o3co/auth.policy-verifier.core` only; neither core nor the server depends on
+it, and engine packages such as
+[`cedar-wasm`](../cedar-wasm/README.md) depend on it.
+
+**Owns.**
+
+- Policy loading and the policy revision (`loadPolicySource`,
+  `computePolicyRevision`).
+- The mapping from merged attributes to a Cedar request, with entities
+  synthesized inline.
+- The rule: how an engine's answer becomes pass, fail or a logged deny
+  (`onNoDeterminingPolicy`, evaluation errors, the revision check).
+- The `CedarEngine` port and the process-wide engine registry and selection.
+- The four attribute keys it reserves (see
+  [Reserved attribute keys](#reserved-attribute-keys)).
+- The out-of-process `http` engine (a cedar-agent client).
+
+**Does not own.**
+
+- An in-process evaluator. It has no Cedar dependency;
+  [`cedar-wasm`](../cedar-wasm/README.md) supplies one and pins its version.
+- An entity store. Entities are built per request, one hop deep.
+- How rule groups combine. That is core's AND-evaluation; the Cedar policy set
+  is one group in it.
+- Parsing the request. The server does that, through the configured resource
+  parser, before any collector runs; `RequestFactsCollector` only copies the
+  result into attributes.
+
+**Why a separate package.** Cedar is opt-in: nothing of it loads unless a
+deployment imports this package. Its vocabulary (the `request*` attribute
+keys, entity mapping) stays out of core, whose `ATTR_*` constants are
+reserved for OAuth/OIDC/RBAC concepts. The evaluator lives one package further
+out so that which evaluator runs is a dependency choice, not a config change.
+
+How the source is laid out, file by file: [src/README.md](src/README.md).
 
 ## Usage
 
@@ -241,20 +284,26 @@ because there every answer would be that deny.
 This package has no evaluator of its own. `CedarPolicyRuleCollector` loads the
 policy set, builds the Cedar request — principal, action, resource, context
 and the synthesized entities, inline — from the merged attributes, and hands
-both to a `CedarEngine`:
+both to a `CedarEngine`. The port and its types are defined, with their
+documentation, in [`src/engine.mts`](src/engine.mts); the contract in short:
 
-```ts
-interface CedarEngine {
-  readonly name: string;                 // "wasm", "http", …
-  readonly async: boolean;               // do its sets answer over I/O? declared before load
-  readonly confirmsRevision?: boolean;   // does every answer name the revision it evaluated? (#244)
-  load(source: PolicySource): LoadedCedarPolicySet | Promise<LoadedCedarPolicySet>; // boot: parse-check and compile, or hand over
-}
-// A loaded set answers either synchronously (in-process) or asynchronously (over I/O):
-//   { async: false; isAuthorized(request): CedarDecision }
-//   { async: true;  isAuthorized(request, signal): Promise<CedarDecision> }
-// CedarDecision = { decision, reason, errors, revision? }
-```
+- An engine has a `name` (the registry key and the config value that selects
+  it), declares up front whether its policy sets answer asynchronously
+  (`async`), and may declare that every answer names the revision it evaluated
+  (`confirmsRevision`, #244). Both declarations come before `load`, so the
+  collector can refuse an unsafe configuration before loading has side
+  effects.
+- `load` is called at boot with the `PolicySource` and a load context carrying
+  the collector's whole config entry (an engine reads and validates its own
+  keys there, such as the http engine's `endpoint`) and a logger. It returns
+  the loaded set, possibly as a promise, or throws `CedarEngineError` to
+  refuse the set.
+- A loaded set answers either synchronously (in-process), or asynchronously
+  with an `AbortSignal` for the rule's deadline (over I/O). Its `async` must
+  match the engine's declaration.
+- An answer is a `CedarDecision`: the decision, the determining policies and
+  the evaluation errors as text, and optionally the revision it was evaluated
+  against. A call that failed outright rejects with `CedarEngineError`.
 
 `CedarDecision.revision` is the port's confirmation contract (see [Policy
 revision](#policy-revision-which-policies-decided)): an engine names
@@ -275,7 +324,8 @@ decision reports are identical across engines. Switching engines is a
 dependency change, not a config change (#225).
 
 An engine package registers itself when imported (`registerCedarEngine`, at
-module scope), and the collector picks one by its config `engine` key:
+module scope), and the collector picks one by its config `engine` key
+(`resolveCedarEngine` in [`src/engine.mts`](src/engine.mts)):
 
 | config `engine` | result |
 | --- | --- |
@@ -374,7 +424,8 @@ docker compose --profile cedar up --build
   `verify.ruleTimeoutMs` (default 2000 ms), answering `rule_timeout` when the
   agent is slower than that.
 - **Two Cedar versions.** cedar-agent 0.2.2 evaluates with cedar-policy 2.4;
-  the wasm package with Cedar 4.12. Policies written to the older grammar run
+  the wasm package with the Cedar 4 release it pins (see
+  [Version pinning](#version-pinning)). Policies written to the older grammar run
   under both; a policy using a newer construct will be refused by the agent at
   boot, which is the right place to find out.
 - **The response contract is cedar-agent 0.2.x's.** `POST /v1/is_authorized`
@@ -433,5 +484,6 @@ How to read it:
 
 The Cedar evaluator's version is the engine package's concern:
 `@o3co/auth.policy-verifier.cedar-wasm` pins `@cedar-policy/cedar-wasm`
-exactly, because Cedar minor releases can carry policy-language changes and
+exactly (the version is in its [`package.json`](../cedar-wasm/package.json)),
+because Cedar minor releases can carry policy-language changes and
 upgrades should be deliberate. This package depends on no evaluator.

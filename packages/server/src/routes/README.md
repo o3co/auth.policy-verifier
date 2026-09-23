@@ -1,5 +1,7 @@
 # Routes
 
+Last updated: 2026-09-23
+
 The HTTP surface of the verifier: the decision endpoints and the liveness
 route.
 
@@ -17,12 +19,26 @@ both routes call.
 [`healthcheck.mts`](healthcheck.mts) answers liveness on the path `createApp`
 mounts it at, with no dependency on the decision.
 
+The router also chooses the default authenticator: given `jwt` rather than an
+`authenticator`, `createVerifyRouter` builds the built-in bearer-JWT one itself
+(`createTokenAuthenticator`, a value import from
+[`../jwt/tokenAuthenticator.mts`](../jwt/tokenAuthenticator.mts)). So the router
+depends on the JWT implementation, not only on the `TokenAuthenticator`
+contract; moving that contract out of `../jwt/` is a known issue, not yet tracked in an
+issue (see [`../README.md`](../README.md)).
+
+It is separate from [`../app.mts`](../app.mts) so that the endpoints can be
+mounted without the rest of the assembly — `createVerifyRouter` is public for a
+consumer mounting it on their own Express app — and separate from
+`../decision/` so that the transport stays out of the decision.
+
 ## Public contract
 
 - [`createVerifyRouter(config)`](verify.mts) and `VerifyRouterConfig`, exported
   from [`../index.mts`](../index.mts). The wire types `DecisionRequest` and
   `DecisionResponse` are re-exported from here.
-- `createHealthcheckRouter(path)`.
+- `createHealthcheckRouter(path)` — internal: not exported from
+  `../index.mts`; only [`../app.mts`](../app.mts) uses it.
 
 ## Inputs and outputs
 
@@ -40,8 +56,9 @@ mounts it at, with no dependency on the decision.
 
 `express`, [`../config/`](../config/) (`resolveBound`, the evaluation-in-response
 check), [`../decision/`](../decision/), [`../http/`](../http/),
-[`../jwt/`](../jwt/) and [`../observability/`](../observability/). Only
-[`../app.mts`](../app.mts) and the public index import this directory.
+[`../jwt/`](../jwt/) (the `TokenAuthenticator` and `VerifyRouterJwtConfig` types and, for the
+default path, `createTokenAuthenticator`) and [`../observability/`](../observability/).
+Only [`../app.mts`](../app.mts) and the public index import this directory.
 
 ## Invariants
 

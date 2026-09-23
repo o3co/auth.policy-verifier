@@ -1,8 +1,20 @@
 # @o3co/auth.policy-verifier.core
 
+最終更新: 2026-09-23
+
 auth.policy-verifier の型定義・評価エンジン・モジュール基盤。コレクター、ルール、モジュールが実装すべきインターフェースを定義するパッケージです。
 
 **Runtime:** `Map.groupBy` をサポートするサーバー／エッジ JavaScript ランタイムが対象です — Node.js 22+（`engines.node` で宣言しており、古い Node ではインストール時にブロックされます）、Cloudflare Workers、Vercel Edge、Deno、Bun。ブラウザは設計上対象外です（認可判定はサーバー側で enforcement する必要があるため）。同梱の `server` パッケージは引き続き Node 専用です。
+
+## 責務と役割
+
+auth.policy-verifier の最下層です。`builtins`、`cedar`、`server` がこのパッケージに依存し、このパッケージは何にも依存しません（`package.json` に `dependencies` はありません）。
+
+- **所有するもの:** 判定の語彙となる契約 — `CollectorContext`、`Attributes`、コレクターとルールのインターフェース、`Decision` — と、判定に至る手順: 上限付きのコレクターパイプラインと `evaluate()`、その意味論（`ruleType` グループ内は OR、グループ間は AND、デフォルト deny、上限超過は fail-closed）、エラーと失敗元の記録。5 つの `ATTR_*` キーと属性キーの予約レジストリ、`Logger` ポート、合成の単位となる `Module` / `Registry` の形。
+- **所有しないもの:** トランスポート（HTTP は `server`）、クレデンシャル検証（subject は確立済みで届く。`KeyResolver` とトークン認証器は `server`）、ポリシーエンジン（`AsyncRule` がその接続点で、`cedar` がその一つ）、具体的なコレクターとルール（`builtins` または利用側）、ドメイン固有の属性語彙、設定の読み込み（上限値はすべて数値として渡されます）。
+- **別パッケージである理由:** すべてのコレクター・ルール・モジュールが実装する契約なので、トランスポート・クレデンシャル・ポリシーエンジンへの依存を持ち込まず、上記のエッジランタイムで動きます（`server` は Node 専用のまま）。デプロイメントは server や builtins を差し替えてもこのパッケージはそのまま使えます。
+
+モジュール構成・不変条件・契約テスト: [`src/README.md`](src/README.md)（英語）。
 
 ## インストール
 
@@ -11,6 +23,8 @@ npm install @o3co/auth.policy-verifier.core
 ```
 
 ## パブリック API
+
+以下のシグネチャは読むための補助です。正は [`src/index.mts`](src/index.mts) の export（契約型は [`src/types.mts`](src/types.mts)）です。
 
 ### evaluate
 
@@ -133,7 +147,7 @@ interface ModuleContext {
 }
 ```
 
-モジュールは `init` 内で attribute collector・rule collector・resource parser のファクトリーをレジストリに登録します。設定値は `config` を通じて渡されます。ホスト側はこれより広いコンテキストでモジュールを初期化できます: デフォルト server の `ServerModuleContext`（`@o3co/auth.policy-verifier.server`）はここに JWT 鍵リゾルバーのレジストリを足しており、それを必要とするモジュールは `Module<ServerModuleContext>` を宣言します。
+モジュールは `init` 内で attribute collector・rule collector・resource parser のファクトリーをレジストリに登録します。設定値は `config` を通じて渡されます。ホスト側はこれより広いコンテキストでモジュールを初期化できます: デフォルト server の `ServerModuleContext`（`@o3co/auth.policy-verifier.server`、定義は [`jwt/keyResolver.mts`](../server/src/jwt/keyResolver.mts)）はここに 2 つのレジストリを足しています — JWT 鍵リゾルバーの `keyResolverRegistry` と、トークン認証器の `tokenAuthenticatorRegistry`（#219。`createApp` がどのモジュールより先に組み込みの `"jwt"` を登録し、モジュールは独自の名前で代替を追加でき、`oauth.authenticator` がどれを使うかを選びます）。どちらかを必要とするモジュールは `Module<ServerModuleContext>` を宣言します。
 
 ### 型一覧
 
@@ -272,6 +286,7 @@ export const customModule: Module = {
 
 ## 関連
 
+- [`src/README.md`](src/README.md) — このパッケージのモジュール構成、不変条件、失敗時の意味論、契約テスト（英語）
 - [ルート README](../../README.ja.md) — セットアップ全体、設定、サーバー利用方法
 - [`@o3co/auth.policy-verifier.builtins`](../builtins/README.ja.md) — 組み込みコレクター、ルール、リソースパーサー
 - [`@o3co/auth.policy-verifier.server`](../server/README.ja.md) — Express HTTP サーバーと `createApp`

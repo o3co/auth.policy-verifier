@@ -1,6 +1,20 @@
 # @o3co/auth.policy-verifier.server
 
+最終更新: 2026-09-23
+
 auth.policy-verifier 向けの Express HTTP サーバーです。モジュールと設定からアプリケーションを組み立てる `createApp` と、認可判定を行う `POST /verify` / `POST /verify/batch` を提供します。
+
+## 責務と役割
+
+**役割。** [`@o3co/auth.policy-verifier.core`](../core/README.ja.md) の pipeline と評価器を HTTP の判定エンドポイントにする、Node 専用のホストです。コンポジションルート — [standalone テンプレート](../../templates/standalone/README.ja.md)、または [`create-app`](../../create-app/README.ja.md) で生成したプロジェクト — が設定とモジュールを渡して `createApp` を呼びます。このパッケージが依存するワークスペースパッケージは core だけです（[`@o3co/auth.policy-verifier.builtins`](../builtins/README.ja.md) の組み込み collector は import せず、モジュールとして渡されます）。
+
+**持つもの:** HTTP の面（`/verify`、`/verify/batch`、liveness probe、`/metrics`）とそのステータスコード・deny エンベロープ。subject の認証（組み込みの bearer-JWT authenticator、key resolver、モジュールが別の authenticator を供給するための registry）。呼び出し元サービスの認証（`http.callerAuth`）。アプリケーション設定スキーマと、両方の設定境界がすべての knob を同じ方法で読むというルール。1 つの判定の実行とその報告（`decision` 行、失敗カテゴリ、Prometheus カウンタ）。
+
+**持たないもの:** 評価のセマンティクスと `Rule` / collector / `Module` の契約（core）。具体的な collector・rule・resource parser（builtins、cedar、またはデプロイ自身のモジュール）。プロセスのライフサイクル — 設定ファイルの読み込み、`app.listen`、シグナル処理 — はコンポジションルートに残ります。
+
+**別パッケージである理由:** core は実行時依存を持たず edge ランタイムでも動きます。このパッケージは Node 専用で、`express`、`jose`、`prom-client`、`zod` を持ち込みます。これらをここに閉じ込めることで、評価だけを行う利用者（edge function、テスト）はどれも持ち込まずに core を使えます。
+
+パッケージ内部のソースの分け方: [`src/README.md`](src/README.md)。
 
 ## Bearer 認証の境界
 
@@ -22,15 +36,12 @@ npm install @o3co/auth.policy-verifier.server
 
 ### createApp
 
-```typescript
-interface CreateAppOptions {
-  pathResolver: PathResolver;
-  config: AppConfig;
-  modules: Module[];
-}
+`createApp(options): Promise<express.Express>` — options の型は [`src/app.mts`](src/app.mts) の `CreateAppOptions` で、そちらが正です。各 knob:
 
-function createApp(options: CreateAppOptions): Promise<express.Express>
-```
+- `pathResolver` — コンポジションルート側の `import.meta.resolve`（または互換リゾルバー）を渡します。モジュール相対パスの解決が必要なモジュールに渡されます。
+- `config` — `AppConfig`（[AppConfigSchema](#appconfigschema--appconfig) を参照）。スキーマを通っていない設定も受け付け、実行時に同じ関数で改めて検査します。
+- `modules` — サーバーの `ServerModuleContext` で順に初期化されるので、素の core `Module`（collector、rule、parser）も `Module<ServerModuleContext>`（key resolver、token authenticator）も受け付けます。
+- `logger`（任意）— 起動時の警告と、verify router の失敗イベント・`decision` イベントを書く構造化ロガー。pino 互換。既定は `config.logging.level` のコンソールロガーで、何も配線しなくても失敗が黙って消えることはありません。
 
 設定済みの Express アプリケーションを組み立てて返します。リスニングは開始しません — 別途 `app.listen(...)` を呼び出してください。
 
@@ -40,58 +51,28 @@ function createApp(options: CreateAppOptions): Promise<express.Express>
 2. `modules` の各モジュールに対して `mod.init(context)` を順に呼び出し、各モジュールがファクトリ関数を登録できるようにする。
 3. `config.attribute.collectors` と `config.rule.collectors` の各エントリについて、`collector` 名で登録済みファクトリを検索して AttributeCollector と RuleCollector を生成する。
 4. `config.resource.parser` から ResourceParser を、`config.oauth.authenticator` が指す token authenticator を生成する — 組み込みの authenticator は `config.oauth.jwt.algorithm` を key resolver 経由で解決する。
-5. `config.http.pathPrefix` 以下に liveness probe（`GET /_healthcheck` — スタックの全コンポーネントが応答するパス。`GET /healthcheck` は互換 alias として残す）・任意の caller 認証ゲート・`POST /verify` と `POST /verify/batch` をこの順にマウントする。
+5. metrics middleware をアプリ全体に（すべてを計測するため最初に）マウントし、続いて `config.http.pathPrefix` 以下に liveness probe（`GET /_healthcheck` — スタックの全コンポーネントが応答するパス。`GET /healthcheck` は互換 alias として残す）・`/metrics` スクレイプエンドポイント・任意の caller 認証ゲート・`POST /verify` と `POST /verify/batch` をこの順にマウントする。
 6. 設定済みの `express.Express` インスタンスを返す。
-
-`pathResolver` には、コンポジションルート側の `import.meta.resolve`（または互換リゾルバー）を渡します。モジュール相対パスの解決が必要なモジュールに渡されます。
 
 ### createVerifyRouter
 
-```typescript
-interface VerifyRouterConfig {
-  // 2 つのうちちょうど一方 (#219): 組み込みの bearer-JWT 経路か、構築済みの
-  // TokenAuthenticator — `oauth.authenticator` を解決した後に createApp が
-  // 渡すのは後者。
-  jwt?: VerifyRouterJwtConfig;
-  authenticator?: TokenAuthenticator;
-  resourceParser: ResourceParser;
-  attributePipeline: AttributePipeline;
-  rulePipeline: RulePipeline;
-  /** 評価セマンティクスの上書き。省略時は空 rule set を deny。Rule の期限は下のフィールドで設定し、ここに含めると拒否される。 */
-  evaluateOptions?: Omit<EvaluateOptions, "ruleTimeoutMs" | "evaluateDeadlineMs">;
-  /** POST /verify/batch の 1 リクエストあたり件数上限。既定は 50。 */
-  maxBatchSize?: number | string;
-  /** バッチのうち同時に決定する entry 数 (#183)。既定は 8。 */
-  batchConcurrency?: number | string;
-  /** 非同期 Rule 1 つが応答までに使える時間 (#225)。既定は 2000 ms。 */
-  ruleTimeoutMs?: number | string;
-  /** 1 決定の非同期 Rule すべてが合計で使える時間。既定は 5000 ms。 */
-  evaluateDeadlineMs?: number | string;
-  /** response に各 Rule の `evaluation` を載せるか (#244)。既定は "omit"。どちらでもない値は拒否する。 */
-  evaluationInResponse?: "omit" | "include";
-}
+`createVerifyRouter(config: VerifyRouterConfig): express.Router` — `VerifyRouterConfig` はフィールドごとの doc comment 付きで [`src/routes/verify.mts`](src/routes/verify.mts) に定義されており、そちらが正です。`createApp` は `AppConfig` からこれを組み立て、`jwt` ではなく解決済みの `authenticator` を渡します。各 knob の意味:
 
-// `validate` による判別可能ユニオン。検証パラメータは検証するときにだけ存在する。
-// 時刻クレームの上限は両方の枝に載る — どちらの枝も同じように強制するため。
-type JwtTimeClaimConfig = {
-  maxTokenAgeSeconds?: number | string;    // now - iat の上限。既定 86400
-  clockToleranceSeconds?: number | string; // クロックずれ許容幅 0–300。既定 0
-};
+- **subject の認証 — `jwt` と `authenticator` のちょうど一方** (#219)。両方・どちらもなし・どちらかが `null` は構築時に拒否されます。
+  - `jwt` — 組み込みの bearer-JWT 経路で、router 自身が構築します。型は [`src/jwt/tokenAuthenticator.mts`](src/jwt/tokenAuthenticator.mts) の `VerifyRouterJwtConfig` で、`validate` で判別されます: `validate: true` は `key`（`KeyResolverFactory` が返す鍵）、`algorithms`、`issuer`、`audience`、任意の `audienceClaim`（既定 `"aud"`）、`tokenType`（`"*"` は何も pin しない）を持ち、`validate: false` は `allowInsecureDecode: true` を必須とするテスト専用です。どちらの枝も `maxTokenAgeSeconds`（既定 86400）と `clockToleranceSeconds`（0–300、既定 0）を取ります。
+  - `authenticator` — 構築済みの `TokenAuthenticator`。`oauth.authenticator` を解決した後に `createApp` が渡すもので、ライブラリ利用者が別の方法で確立した subject の上で router を動かすときに渡すものでもあります。
+- `resourceParser`、`attributePipeline`、`rulePipeline` — 必須。collector の上限（`collectorTimeoutMs`、`collectorDeadlineMs`、`collectorConcurrency`）は pipeline 側のもので、この config には含まれません。
+- `evaluateOptions` — 評価セマンティクスの上書き。省略時は空 rule set を deny。`ruleTimeoutMs`・`evaluateDeadlineMs`・`failures` をここに含めると構築時に拒否されます: 期限はこの config 自身のフィールドであり、router は判定ごとに 1 つの failure record を持つので (#200)、渡された `failures` はすべての判定で共有されてしまうためです。`signal` は呼び出し元のものと合成され、置き換えられることはありません。
+- `maxBatchSize`（既定 50）— `POST /verify/batch` が 1 リクエストで判定する件数の上限。
+- `batchConcurrency`（既定 8）— バッチのうち同時に判定する entry 数 (#183)。
+- `ruleTimeoutMs`（既定 2000）/ `evaluateDeadlineMs`（既定 5000）— 非同期 Rule 1 つの予算と、1 判定の非同期 Rule 全体の予算 (#225)。超過は `rule_timeout` の deny。
+- リクエストの上限 (#118): `maxBodyBytes`（既定 65536。`express.json()` に渡す `limit` で、バッチでは外側の包み）、`maxResourceLength`（既定 512 文字）、`maxActionLength`（既定 64）、`maxContextEntries`（既定 64。`context` のあらゆる深さのプロパティと配列要素をすべて数えるので、深さも縛る）、`maxContextValueLength`（既定 1024 文字。プロパティ名も含む）。
+- `logger` — router の失敗イベントと判定ごとの `decision` 行 (#111) の出力先。既定はコンソールロガー。
+- `metrics` — 任意の `DecisionMetrics` seam (#111)。省略時は判定はログに出るが計数されない。`createApp` は Prometheus 実装を配線します。
+- `credentialToCollectors` — `"never"`（既定）または `"expose"`: 生の credential を `CollectorContext.credential` として collector に渡すか (#175)。
+- `evaluationInResponse` — `"omit"`（既定）または `"include"`: response に各 Rule の `evaluation` を載せるか (#244)。それ以外は拒否。
 
-type VerifyRouterJwtConfig =
-  | (JwtTimeClaimConfig & {
-      validate: true;
-      key: unknown;             // KeyResolverFactory が返す鍵
-      algorithms: string[];
-      issuer: string | string[];    // RFC 9068 §4 iss
-      audience: string | string[];  // RFC 9068 §4 aud
-      audienceClaim?: string;       // audience を読む claim。既定は "aud" (#219)
-      tokenType: string;            // 受け入れる typ ヘッダ（例: "at+jwt"）。"*" は何も pin しない
-    })
-  | (JwtTimeClaimConfig & { validate: false; allowInsecureDecode: true });
-
-function createVerifyRouter(config: VerifyRouterConfig): express.Router
-```
+数値の knob はすべて HOCON の環境変数置換が生む文字列形も受け付け、`AppConfigSchema` と同じ範囲で `resolveBound` が読みます (#157)。
 
 `POST /verify` と `POST /verify/batch` を処理する Express Router を返します。`createApp` が内部で呼び出すため、通常は直接使用する必要はありません。ルーターを独立してマウントしたい場合のみ直接利用してください。
 

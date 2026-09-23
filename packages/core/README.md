@@ -1,8 +1,33 @@
 # @o3co/auth.policy-verifier.core
 
+Last updated: 2026-09-23
+
 Types, evaluation engine, and module infrastructure for auth.policy-verifier. This package defines the interfaces that collectors, rules, and modules implement.
 
 **Runtime:** Server- and edge-side JavaScript runtimes that support `Map.groupBy` — Node.js 22+ (declared via `engines.node` so older Node installs are blocked at install time), Cloudflare Workers, Vercel Edge, Deno, Bun. Browsers are out of scope by design: authorization decisions must be enforced server-side. The `server` companion package remains Node-only.
+
+## Responsibility
+
+The bottom layer of auth.policy-verifier: `builtins`, `cedar` and `server` depend on it, and it
+depends on nothing (`package.json` declares no `dependencies`).
+
+- **Owns** the contract a decision is made in — `CollectorContext`, `Attributes`, the collector
+  and rule interfaces, `Decision` — and the steps that reach one: the bounded collector
+  pipelines and `evaluate()`, with their semantics (OR within a `ruleType` group, AND across,
+  default deny, fail-closed bounds), errors and failure attribution; the five `ATTR_*` keys and
+  the attribute-key reservation registry; the `Logger` port; the `Module` / `Registry` shape a
+  composition is built from.
+- **Does not own** a transport (HTTP is `server`'s), credential verification (the subject
+  arrives established; `KeyResolver` and the token authenticator are `server`'s), a policy
+  engine (`AsyncRule` is the seam one sits behind; `cedar` is one), the concrete collectors and
+  rules (`builtins` or the consumer), domain attribute vocabulary, or configuration — every
+  bound reaches it as a number.
+- **Why a separate package:** it is the contract every collector, rule and module is written
+  against, so it carries no transport, credential or policy-engine dependency with it and runs
+  on the edge runtimes listed above while `server` stays Node-only; a deployment can replace
+  the server or the builtins and keep it.
+
+Module map, invariants and contract tests: [`src/README.md`](src/README.md).
 
 ## Install
 
@@ -11,6 +36,10 @@ npm install @o3co/auth.policy-verifier.core
 ```
 
 ## Public API
+
+The signatures below are a reading aid; the source of truth is what
+[`src/index.mts`](src/index.mts) exports (the contract types are in
+[`src/types.mts`](src/types.mts)).
 
 ### evaluate
 
@@ -127,7 +156,7 @@ interface ModuleContext {
 }
 ```
 
-A module registers attribute-collector, rule-collector, and resource-parser factories into the provided registries during `init`. Configuration is passed through `config`. A host may initialize modules with a wider context: the default server's `ServerModuleContext` (in `@o3co/auth.policy-verifier.server`) extends this with a JWT key-resolver registry, and a module that needs it declares `Module<ServerModuleContext>`.
+A module registers attribute-collector, rule-collector, and resource-parser factories into the provided registries during `init`. Configuration is passed through `config`. A host may initialize modules with a wider context: the default server's `ServerModuleContext` (in `@o3co/auth.policy-verifier.server`, defined in [`jwt/keyResolver.mts`](../server/src/jwt/keyResolver.mts)) extends this with two registries — `keyResolverRegistry` for JWT key resolvers and `tokenAuthenticatorRegistry` for token authenticators (#219; `createApp` registers the built-in `"jwt"` entry before any module runs, a module may add an alternative under its own name, and `oauth.authenticator` selects one) — and a module that needs either declares `Module<ServerModuleContext>`.
 
 ### Types
 
@@ -274,6 +303,7 @@ For the full extension guide — including how to author custom `Rule` implement
 
 ## See Also
 
+- [`src/README.md`](src/README.md) — module map, invariants, failure semantics and contract tests of this package
 - [Root README](../../README.md) — full setup, configuration, and server usage
 - [`@o3co/auth.policy-verifier.builtins`](../builtins/README.md) — built-in collectors, rules, and resource parser
 - [`@o3co/auth.policy-verifier.server`](../server/README.md) — Express HTTP server and `createApp`

@@ -1,5 +1,7 @@
 # Decision
 
+Last updated: 2026-09-23
+
 One decision, without the transport (o3co/auth.policy-verifier#251).
 
 ## Responsibility
@@ -15,6 +17,18 @@ or `Response`. It does not read configuration or default anything: every bound
 is resolved by the router at its own boundary (#157) and handed over as a
 number.
 
+It is a directory of its own so that the decision can be held to a dependency
+boundary the router cannot be (see Dependencies): what one decision does is
+testable without Express, and `/verify` and `/verify/batch` cannot drift
+apart, because both call the same `Decider`.
+
+It lives in the server and not in core because it is the server's decision,
+not the engine's: it writes the server's `decision` line, sorts failures into
+the server's closed `FAILURE_CATEGORIES`, and counts through the server's
+`DecisionMetrics` seam — all in [`../observability/`](../observability/). Core
+stays dependency-free and runtime-neutral and provides only the pipelines and
+`evaluate` it composes.
+
 ## Public contract
 
 Internal to the server package; nothing here is exported from
@@ -28,7 +42,9 @@ Internal to the server package; nothing here is exported from
   handed to the route.
 - `DecisionRequest` and `DecisionResponse` — the wire types, defined here and
   re-exported by [`../routes/verify.mts`](../routes/verify.mts), where they were
-  exported from before. Neither is on `../index.mts`.
+  exported from before. Neither is on `../index.mts`. They are defined here
+  rather than in the router because the decision consumes the one and produces
+  the other, and the decision must not import `../routes/` (see Dependencies).
 
 ## Inputs and outputs
 
@@ -100,9 +116,21 @@ nothing else does.
 ## Contract tests
 
 - [`__tests__/decide.test.mts`](__tests__/decide.test.mts) — the invariants
-  above through `createDecider` alone, with two exceptions that are documented
-  rather than tested: the per-decision `FailureRecord` is not observable from
-  outside, and `durationMs` is asserted to be a number only.
+  and the failure rules above through `createDecider` alone, except:
+  - the per-decision `FailureRecord` is not observable from outside, and
+    `durationMs` is asserted to be a number only — documented, not tested;
+  - that `onEmptyRuleSet: "allow"` cannot turn a timeout into a permit is not
+    in `decide.test.mts`, whose timeout cases leave `onEmptyRuleSet` at its
+    default. The collector-timeout case is pinned end to end in
+    [`../__tests__/app.test.mts`](../__tests__/app.test.mts) ("still denies
+    where the same request with no rules at all would be allowed"); a rule
+    timeout or an attribute conflict under `"allow"` is not tested;
+  - that the caller's `signal` cancels the collectors in flight is not asserted
+    here or through the router: `decide.test.mts` checks the caller's signal
+    against the asynchronous rule only. The pipeline half — collectors aborted
+    when the signal they were handed fires — is in core's
+    [`collectorLimits.test.mts`](../../../core/src/__tests__/collectorLimits.test.mts);
+    that the decision hands the caller's signal to the pipelines is untested.
 - [`__tests__/dependencies.test.mts`](__tests__/dependencies.test.mts) — the
   dependency boundary.
 - The same contracts on the wire, through the router:

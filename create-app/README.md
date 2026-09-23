@@ -1,6 +1,31 @@
 # @o3co/create-auth-policy-verifier
 
+Last updated: 2026-09-23
+
 CLI scaffolder for auth.policy-verifier. Generates a new standalone server project from the built-in template.
+
+## Responsibility
+
+**Role.** The `npm create` / `npx` entry point that turns the in-repo template
+[`templates/standalone`](../templates/standalone) into a new, independent project.
+It runs once, on the operator's machine; nothing in the generated project imports
+it, and it imports none of the `packages/*` libraries.
+
+**Owns.** Project-name and directory validation, copying the template, rewriting
+the generated `package.json` (name, `workspace:*` → published versions), and the
+one-time `pnpm-lock.yaml` resolution.
+
+**Does not own.** The content of the generated project — source, config, Dockerfile,
+tests — which is the template's (edit `templates/standalone`, not this package).
+Runtime behaviour belongs to `@o3co/auth.policy-verifier.server` and the libraries
+the template depends on.
+
+**Why a separate package.** It is published on its own with a `bin`, so it can be
+run with `npx` without installing the verifier. Its build step
+([`scripts/copy-templates.mjs`](scripts/copy-templates.mjs)) embeds a copy of the
+template and the current library versions (`templates/versions.json`), and inlines
+`tsconfig.base.json` into the template's `tsconfig.json`, because the monorepo
+tree is not present in the published tarball.
 
 ## Usage
 
@@ -41,7 +66,7 @@ cd verifier
 2. Derives the target directory name: `--dir <value>` if given, else the unscoped part of a scoped name, else the name itself.
 3. Aborts with an error if the target directory already exists.
 4. Copies `templates/standalone/` to the target directory, excluding `node_modules/` and `dist/`.
-5. Rewrites `package.json`: sets `name` to `<project-name>` verbatim (scope-preserving), removes `private`, and replaces `workspace:*` dependency versions with published semver versions from `templates/versions.json`.
+5. Rewrites `package.json`: sets `name` to `<project-name>` verbatim (scope-preserving), keeps `"private": true` on purpose (#126: a scaffolded authorization service should not be publishable by accident — remove the field yourself if you really intend to publish), and replaces each `workspace:*` dependency version with `^<version>` from `templates/versions.json`.
 6. Resolves that dependency set into `pnpm-lock.yaml` (`pnpm install --lockfile-only --ignore-workspace`), unless `--no-lockfile` was passed.
 7. Prints next-step instructions.
 
@@ -79,20 +104,13 @@ The bundled template's `README.md` / `README.ja.md` still carry the upstream tit
 
 ## Generated Structure
 
-```
-<project-name>/
-├── config/
-│   └── application.conf    # HOCON config (env var overrides)
-├── src/
-│   └── main.mts            # Composition root — loads config and starts server
-├── Dockerfile
-├── Makefile
-├── docker-compose.yml
-├── docker-compose.test.yml
-├── package.json
-├── pnpm-lock.yaml          # Generated at scaffold time — commit it
-└── tsconfig.json
-```
+The generated project is the whole of [`templates/standalone`](../templates/standalone)
+— every file and directory, including dotfiles, tests and the template's own READMEs —
+except `node_modules/` and `dist/` (`EXCLUDED_DIRS` in [`src/index.mts`](src/index.mts)).
+The files that differ from the in-repo template are `tsconfig.json` (the base config
+is inlined into it when the scaffolder is built), `package.json` (step 5) and the
+newly resolved `pnpm-lock.yaml` (step 6; commit it). See the template's README for
+what each file does.
 
 ## Programmatic API
 
