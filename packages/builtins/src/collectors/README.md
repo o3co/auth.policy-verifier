@@ -83,12 +83,14 @@ or `../resource/`. The one edge into this directory from elsewhere in the packag
   naming the collector and the field at construction, so a deployment that wrote it never
   serves a decision. `collect` does not throw on the shape of a claim or a field: what does
   not match is dropped.
+- The static collectors accept only an array for their list field and refuse anything else
+  with a `TypeError` naming the collector and the field at construction (#264) — a string
+  above all, which is iterable and would be split into characters, a lone `*` among them
+  being a grant-all to `HasPermission`. Their entries are not checked: an entry that is not
+  a string permission or a role object is inert to `HasPermission`. Pinned by
+  [`StaticPermissionCollector.test.mts`](../__tests__/collectors/StaticPermissionCollector.test.mts),
+  [`StaticRoleCollector.test.mts`](../__tests__/collectors/StaticRoleCollector.test.mts) and
+  [`module.test.mts`](../__tests__/module.test.mts).
 - The pipeline's per-collector timeout and deadline are in force on every collect. These do
   no I/O and complete within any usable bound, but an already-aborted caller, a sibling's
   failure or a deadline that expires while one is queued ends it like any collector.
-
-## Known issues
-
-- #264: `StaticPermissionCollector` splits a string `permissions` into
-  single characters (a string is iterable), and a lone `*` among them is treated by
-  `HasPermission` as grant-all.

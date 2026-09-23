@@ -19,19 +19,30 @@ import { ATTR_PERMISSIONS } from "@o3co/auth.policy-verifier.core";
  * environments where permissions are static per deployment.
  *
  * The list is copied at construction (#255): a caller that mutates the config
- * or its array afterwards changes nothing this collector emits. Nothing is
- * validated: a missing or non-iterable `permissions` throws a `TypeError` from
- * the constructor.
+ * or its array afterwards changes nothing this collector emits.
  *
- * Known issue (#264): a string `permissions` is
- * iterable, so it is split into single characters rather than refused — and a
- * lone `*` among them is treated by `HasPermission` as grant-all.
+ * Only an array is accepted (#264). Anything else — a missing field, `null`, a
+ * number, an object, a string — is refused with a `TypeError` naming the
+ * collector and the field, so a misconfigured deployment fails at boot. A
+ * string is the case that matters: it is iterable, so copying it would split
+ * `"posts.*"` into single characters, and `HasPermission` honours a lone `*`
+ * as grant-all.
+ *
+ * The entries are not checked, and a non-string one is copied as it is. It is
+ * inert: `HasPermission` skips every permission that is not a string, so such
+ * an entry matches no requirement and grants nothing.
  */
 export class StaticPermissionCollector implements AttributeCollector {
 	private readonly permissions: readonly string[];
 
 	constructor(config: { permissions: string[] }) {
-		this.permissions = [...config.permissions];
+		const { permissions } = config;
+		if (!Array.isArray(permissions)) {
+			throw new TypeError(
+				`StaticPermissionCollector: permissions must be an array (got ${permissions === null ? "null" : typeof permissions})`,
+			);
+		}
+		this.permissions = [...permissions];
 	}
 
 	async collect(_context: CollectorContext): Promise<Attributes> {

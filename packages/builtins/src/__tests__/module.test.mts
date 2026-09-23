@@ -93,4 +93,31 @@ describe("builtinCollectorsModule", () => {
 
 		expect(attrs.get("permissions")).toEqual(["admin", "read"]);
 	});
+
+	// #264: the factory is handed the config entry as the operator wrote it,
+	// and the config schema passes a collector entry's fields through
+	// unchecked. A string where a list was meant must stop the boot.
+	it.each([
+		["StaticPermissionCollector", { permissions: "posts.*" }, /permissions must be an array/],
+		["StaticRoleCollector", { roles: "admin" }, /roles must be an array/],
+	])(
+		"refuses a %s config entry whose list field is a string (#264)",
+		async (name, fields, message) => {
+			const attributeCollectorRegistry = new Registry<AttributeCollectorFactory>();
+			const ruleCollectorRegistry = new Registry<RuleCollectorFactory>();
+			const resourceParserRegistry = new Registry<ResourceParserFactory>();
+
+			await builtinCollectorsModule.init({
+				pathResolver: (s: string) => s,
+				config: {},
+				attributeCollectorRegistry,
+				ruleCollectorRegistry,
+				resourceParserRegistry,
+			});
+
+			const factory = attributeCollectorRegistry.get(name);
+			expect(() => factory({ collector: name, ...fields })).toThrow(TypeError);
+			expect(() => factory({ collector: name, ...fields })).toThrow(message);
+		},
+	);
 });

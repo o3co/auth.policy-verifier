@@ -52,7 +52,7 @@ All collectors implement `AttributeCollector`.
 | `RequestContextAttributeCollector` | declared fields of `requestContext` | the operator's own keys | `{ attributes: Mapping[] }` |
 | `PayloadClaimAttributeCollector` | declared claims of the verified `subject` | the operator's own keys, or core's five | `{ attributes: Mapping[] }` (#219) |
 
-`StaticPermissionCollector` and `StaticRoleCollector` always emit the values supplied at construction time, regardless of request context. They copy what they were given at construction — the array, and for `StaticRoleCollector` each `Role` and its `permissions` — so mutating the config afterwards changes nothing they emit (#255).
+`StaticPermissionCollector` and `StaticRoleCollector` always emit the values supplied at construction time, regardless of request context. They copy what they were given at construction — the array, and for `StaticRoleCollector` each `Role` and its `permissions` — so mutating the config afterwards changes nothing they emit (#255). `permissions` and `roles` must be arrays: anything else, a string included (`permissions = "posts.*"` where `["posts.*"]` was meant), is refused with a `TypeError` at construction, so the deployment fails at boot (#264).
 
 ### PayloadClaimAttributeCollector
 

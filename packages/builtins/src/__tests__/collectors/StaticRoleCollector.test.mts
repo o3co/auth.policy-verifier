@@ -30,14 +30,23 @@ describe("StaticRoleCollector", () => {
 		expect(entry).toEqual(["admin", "read"]);
 	});
 
+	// #264: only an array is accepted. A string is iterable, so a copy by
+	// spread would split it into characters rather than refuse it.
 	it.each([
 		["missing", undefined],
 		["null", null],
 		["a number", 42],
 		["a plain object", {}],
-	])("throws a TypeError at construction when `roles` is %s (#255)", (_label, value) => {
-		expect(() => new StaticRoleCollector({ roles: value } as never)).toThrow(TypeError);
-	});
+		["a string", "posts.*"],
+		["a lone wildcard string", "*"],
+	])(
+		"refuses at construction a `roles` that is %s, with a TypeError naming the field (#264)",
+		(_label, value) => {
+			const construct = () => new StaticRoleCollector({ roles: value } as never);
+			expect(construct).toThrow(TypeError);
+			expect(construct).toThrow("StaticRoleCollector: roles must be an array");
+		},
+	);
 
 	it("returns configured roles", async () => {
 		const roles = [
