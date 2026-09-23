@@ -1696,6 +1696,8 @@ describe("createVerifyRouter — an already-built authenticator (#219)", () => {
 		for (const config of [
 			{ jwt, ...pipelines },
 			{ jwt, authenticator: stub, ...pipelines },
+			// A spread of an old config whose jwt was unset still names the option.
+			{ jwt: undefined, authenticator: stub, ...pipelines },
 		]) {
 			expect(() => createVerifyRouter(config as unknown as VerifyRouterConfig)).toThrow(
 				"createVerifyRouter: jwt is no longer accepted (#259) — pass an authenticator " +
