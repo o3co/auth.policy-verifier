@@ -36,10 +36,10 @@ The source falls into four parts, separated by what changes them:
 - **The process** — the rule collector, the request-facts collector, the mapping, the Cedar
   JSON vocabulary, the keys and the policy source. These change with the verifier's
   semantics: mapping options, the answer table, revision rules.
-- **The external engine** — `httpEngine.mts`, the one file that talks to another process.
-- **Assembly** — [`module.mts`](module.mts), the one place that knows the collector names
-  config uses and the registries they go into, and [`index.mts`](index.mts), the package's
-  public surface.
+- **The external engine** — talking to a Cedar evaluator in another process. It changes with
+  that process's wire protocol, and nothing else in the package does I/O over the network.
+- **Assembly** — registering the collectors under the names configuration uses, and the
+  package's public surface. It changes when a collector or an export is added.
 
 ## Dependencies
 
