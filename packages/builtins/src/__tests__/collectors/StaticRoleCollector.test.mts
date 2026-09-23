@@ -21,6 +21,15 @@ const stubContext: CollectorContext = {
 };
 
 describe("StaticRoleCollector", () => {
+	it("copies a malformed array entry as an array, keeping its shape (#255)", async () => {
+		const malformed = ["admin", "read"] as unknown as Role;
+		const collector = new StaticRoleCollector({ roles: [malformed] });
+		const attrs = await collector.collect(stubContext);
+		const [entry] = attrs.get(ATTR_ROLES) as unknown[];
+		expect(Array.isArray(entry)).toBe(true);
+		expect(entry).toEqual(["admin", "read"]);
+	});
+
 	it.each([
 		["missing", undefined],
 		["null", null],
