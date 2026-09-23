@@ -25,8 +25,11 @@ act on, and gets back `allow` / `deny` with a structured `reason`.
 
 **Owns:**
 
-- verifying the subject token it is handed (signature, `iss`, `aud`, `typ`,
-  `exp` / `iat`) against the keys and issuer the deployment configures;
+- authenticating the subject through the configured token authenticator
+  (`oauth.authenticator`) — the built-in one verifies a bearer JWT (signature,
+  `iss`, `aud`, `typ`, `exp` / `iat`) against the keys and issuer the deployment
+  configures, and a module can register another (introspection, an IdP SDK, a
+  gateway's attestation);
 - gathering the facts a decision needs (attribute collectors) and the rules that
   apply (rule collectors), and evaluating them — OR within a rule group, AND across
   groups, fail-closed;
@@ -35,8 +38,8 @@ act on, and gets back `allow` / `deny` with a structured `reason`.
 
 **Does not own:**
 
-- authentication and token issuance — [auth.provider](https://github.com/o3co/auth.provider)
-  mints the tokens; this repo only verifies them;
+- token issuance — [auth.provider](https://github.com/o3co/auth.provider) (or the
+  deployment's IdP) mints the tokens; this repo only authenticates what it is handed;
 - enforcement — acting on the answer (refusing the call) is the caller's job;
 - what an operation means — the caller decides which `resource` / `action` a call
   maps to and what goes in `context`;

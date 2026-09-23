@@ -25,8 +25,10 @@
 
 **所有するもの:**
 
-- 渡されたサブジェクトトークンの検証（署名、`iss`、`aud`、`typ`、`exp` / `iat`）。
-  鍵と issuer はデプロイメントの設定に従う
+- 設定された token authenticator（`oauth.authenticator`）によるサブジェクトの認証。
+  組み込みのものは bearer JWT を検証し（署名、`iss`、`aud`、`typ`、`exp` / `iat`）、
+  鍵と issuer はデプロイメントの設定に従う。モジュールは別の authenticator
+  （introspection、IdP SDK、ゲートウェイの attestation など）を登録できる
 - 判定に必要な事実の収集（attribute collector）と適用するルールの収集（rule collector）、
   およびその評価 — ルールグループ内は OR、グループ間は AND、fail-closed
 - `POST /verify` と `POST /verify/batch` のワイヤ契約、および各応答を事後に説明可能に
@@ -34,8 +36,8 @@
 
 **所有しないもの:**
 
-- 認証とトークン発行 — トークンを発行するのは [auth.provider](https://github.com/o3co/auth.provider)
-  で、このリポジトリは検証するだけ
+- トークン発行 — トークンを発行するのは [auth.provider](https://github.com/o3co/auth.provider)
+  （またはデプロイメントの IdP）で、このリポジトリは渡されたものを認証するだけ
 - 認可の実施 — 応答に従って呼び出しを拒否するのは呼び出し側の仕事
 - 操作の意味づけ — ある呼び出しをどの `resource` / `action` に対応づけ、`context` に
   何を入れるかは呼び出し側が決める

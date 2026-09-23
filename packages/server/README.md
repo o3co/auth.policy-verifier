@@ -94,65 +94,17 @@ Request flow:
 
 ### AppConfigSchema / AppConfig
 
-```typescript
-const AppConfigSchema = z.object({
-  http: z.object({
-    hostname: z.string().default("127.0.0.1"),   // loopback — see Trust boundary
-    port: boundedNumber(NUMERIC_BOUNDS.port, "http"),               // 1..65535, default 3000
-    pathPrefix: z.string().default(""),
-    callerAuth: z.object({                        // optional — see Trust boundary
-      header: z.string().min(1).default("x-caller-token"),
-      token: z.string().min(1).optional(),
-    }).optional(),
-  }),
-  oauth: z.object({
-    authenticator: z.string().default("jwt"),   // "jwt", or a name a module registered (#219)
-    // Required under authenticator "jwt", refused under any other name.
-    jwt: z.object({
-      secret: z.string().optional(),                                   // HS256: >= 32 decoded bytes
-      mode: z.enum(["verify", "insecure-decode"]).default("verify"),
-      issuer: z.union([z.string(), z.array(z.string())]).optional(),   // required when mode is "verify"
-      audience: z.union([z.string(), z.array(z.string())]).optional(), // required when mode is "verify"
-      audienceClaim: z.string().default("aud"),                        // claim the audience is read from (#219)
-      tokenType: z.string().default("at+jwt"),                         // "*" pins nothing
-      maxTokenAgeSeconds: boundedNumber(NUMERIC_BOUNDS.maxTokenAgeSeconds, "oauth.jwt"),
-      clockToleranceSeconds: boundedNumber(NUMERIC_BOUNDS.clockToleranceSeconds, "oauth.jwt"),
-    }).optional(),
-  }).passthrough(),                             // another authenticator's own sub-block rides along
-  attribute: z.object({
-    collectors: z.array(z.object({ collector: z.string() }).passthrough()),
-  }),
-  rule: z.object({
-    collectors: z.array(z.object({ collector: z.string() }).passthrough()),
-  }),
-  resource: z.object({
-    parser: z.string().default("DotNotationResourceParser"),
-  }),
-  verify: z.object({
-    maxBatchSize: boundedNumber(NUMERIC_BOUNDS.maxBatchSize, "verify"),           // default 50
-    // What one decision request may carry (#118).
-    maxBodyBytes: boundedNumber(NUMERIC_BOUNDS.maxBodyBytes, "verify"),           // default 65536
-    maxResourceLength: boundedNumber(NUMERIC_BOUNDS.maxResourceLength, "verify"), // default 512
-    maxActionLength: boundedNumber(NUMERIC_BOUNDS.maxActionLength, "verify"),     // default 64
-    maxContextEntries: boundedNumber(NUMERIC_BOUNDS.maxContextEntries, "verify"), // default 64
-    maxContextValueLength:
-      boundedNumber(NUMERIC_BOUNDS.maxContextValueLength, "verify"),              // default 1024
-    // Bounds on the collector fan-out (#115). Exceeding any of them denies.
-    collectorTimeoutMs: boundedNumber(NUMERIC_BOUNDS.collectorTimeoutMs, "verify"),   // default 2000
-    collectorDeadlineMs: boundedNumber(NUMERIC_BOUNDS.collectorDeadlineMs, "verify"), // default 5000
-    // Asynchronous rules (#225): one rule's budget, and the whole rule phase's.
-    ruleTimeoutMs: boundedNumber(NUMERIC_BOUNDS.ruleTimeoutMs, "verify"),             // default 2000
-    evaluateDeadlineMs: boundedNumber(NUMERIC_BOUNDS.evaluateDeadlineMs, "verify"),   // default 5000
-    collectorConcurrency:
-      boundedNumber(NUMERIC_BOUNDS.collectorConcurrency, "verify"),               // default 8
-    // How many of a batch's entries are decided at once (#183). The collector
-    // bounds are per decision; this bounds their product with the batch.
-    batchConcurrency: boundedNumber(NUMERIC_BOUNDS.batchConcurrency, "verify"),   // default 8
-  }),
-});
+`AppConfigSchema` (zod) and `AppConfig` (its inferred type) are defined in [`src/config/application.schema.mts`](src/config/application.schema.mts), with a doc comment on each knob; that file is the reference. Every numeric knob's default, range and unit is stated once in `NUMERIC_BOUNDS` in [`src/config/bounds.mts`](src/config/bounds.mts), and the other defaults live in [`src/config/defaults.mts`](src/config/defaults.mts). The annotated HOCON form, with the environment variable behind each key, is the root README's [Configuration](../../README.md#configuration) section.
 
-type AppConfig = z.infer<typeof AppConfigSchema>;
-```
+The top-level sections:
+
+- `http` — where the server listens and who may call it: `hostname` (default `127.0.0.1`, see [Trust boundary](#trust-boundary)), `port` (default 3000), `pathPrefix`, and the optional `callerAuth` (`header`, default `x-caller-token`, and `token`). The whole block may be omitted.
+- `oauth` — how the subject is authenticated. `authenticator` names the token authenticator (default `"jwt"`, or a name a module registered, #219). Under `"jwt"` the `jwt` block is required and configures the built-in bearer-JWT path — algorithm and key material, `mode` (`"verify"` or the test-only `"insecure-decode"`), `issuer` / `audience` / `audienceClaim` / `tokenType`, and the token-lifetime bounds; under any other name a `jwt` block is refused, and that authenticator's own sub-block (`oauth.<name>`) passes through unparsed for its factory to validate.
+- `attribute.collectors` / `rule.collectors` — required lists of collector entries; see below.
+- `rule.onEmptyRuleSet` — `"deny"` (default) or `"allow"`: the decision when no rules are collected.
+- `resource.parser` — the registered resource parser name (default `DotNotationResourceParser`).
+- `verify` — the decision endpoint's bounds and disclosures. `createApp` hands the collector bounds (`collectorTimeoutMs`, `collectorDeadlineMs`, `collectorConcurrency`) to the pipelines it builds, and the rest — `maxBatchSize`, `batchConcurrency`, the request limits, `ruleTimeoutMs` / `evaluateDeadlineMs`, `credentialToCollectors` and `evaluationInResponse` — to [`createVerifyRouter`](#createverifyrouter), whose list above says what each means. The whole block may be omitted, and every knob in it has a default.
+- `logging.level` — the console logger's threshold (default `info`).
 
 **Every numeric knob is read by one function at both boundaries** (#157). `boundedNumber` wraps
 `resolveBound` from [`config/bounds.mts`](src/config/bounds.mts), where `NUMERIC_BOUNDS` states each

@@ -92,65 +92,17 @@ npm install @o3co/auth.policy-verifier.server
 
 ### AppConfigSchema / AppConfig
 
-```typescript
-const AppConfigSchema = z.object({
-  http: z.object({
-    hostname: z.string().default("127.0.0.1"),   // ループバック — 「信頼境界」を参照
-    port: boundedNumber(NUMERIC_BOUNDS.port, "http"),               // 1..65535、既定 3000
-    pathPrefix: z.string().default(""),
-    callerAuth: z.object({                        // 任意 — 「信頼境界」を参照
-      header: z.string().min(1).default("x-caller-token"),
-      token: z.string().min(1).optional(),
-    }).optional(),
-  }),
-  oauth: z.object({
-    authenticator: z.string().default("jwt"),   // "jwt"、またはモジュールが登録した名前 (#219)
-    // authenticator が "jwt" のとき必須、それ以外の名前では拒否される。
-    jwt: z.object({
-      secret: z.string().optional(),                                   // HS256: デコード後 32 バイト以上
-      mode: z.enum(["verify", "insecure-decode"]).default("verify"),
-      issuer: z.union([z.string(), z.array(z.string())]).optional(),   // mode = "verify" のとき必須
-      audience: z.union([z.string(), z.array(z.string())]).optional(), // mode = "verify" のとき必須
-      audienceClaim: z.string().default("aud"),                        // audience を読む claim (#219)
-      tokenType: z.string().default("at+jwt"),                         // "*" は何もピンしない
-      maxTokenAgeSeconds: boundedNumber(NUMERIC_BOUNDS.maxTokenAgeSeconds, "oauth.jwt"),
-      clockToleranceSeconds: boundedNumber(NUMERIC_BOUNDS.clockToleranceSeconds, "oauth.jwt"),
-    }).optional(),
-  }).passthrough(),                             // 別の authenticator 自身のサブブロックはそのまま載る
-  attribute: z.object({
-    collectors: z.array(z.object({ collector: z.string() }).passthrough()),
-  }),
-  rule: z.object({
-    collectors: z.array(z.object({ collector: z.string() }).passthrough()),
-  }),
-  resource: z.object({
-    parser: z.string().default("DotNotationResourceParser"),
-  }),
-  verify: z.object({
-    maxBatchSize: boundedNumber(NUMERIC_BOUNDS.maxBatchSize, "verify"),           // 既定 50
-    // 1 件の決定リクエストが運べる量 (#118)。
-    maxBodyBytes: boundedNumber(NUMERIC_BOUNDS.maxBodyBytes, "verify"),           // 既定 65536
-    maxResourceLength: boundedNumber(NUMERIC_BOUNDS.maxResourceLength, "verify"), // 既定 512
-    maxActionLength: boundedNumber(NUMERIC_BOUNDS.maxActionLength, "verify"),     // 既定 64
-    maxContextEntries: boundedNumber(NUMERIC_BOUNDS.maxContextEntries, "verify"), // 既定 64
-    maxContextValueLength:
-      boundedNumber(NUMERIC_BOUNDS.maxContextValueLength, "verify"),              // 既定 1024
-    // collector fan-out の上限 (#115)。超えた決定は deny になる。
-    collectorTimeoutMs: boundedNumber(NUMERIC_BOUNDS.collectorTimeoutMs, "verify"),   // 既定 2000
-    collectorDeadlineMs: boundedNumber(NUMERIC_BOUNDS.collectorDeadlineMs, "verify"), // 既定 5000
-    // 非同期 Rule (#225): Rule 1 つの予算と、Rule フェーズ全体の予算。
-    ruleTimeoutMs: boundedNumber(NUMERIC_BOUNDS.ruleTimeoutMs, "verify"),             // 既定 2000
-    evaluateDeadlineMs: boundedNumber(NUMERIC_BOUNDS.evaluateDeadlineMs, "verify"),   // 既定 5000
-    collectorConcurrency:
-      boundedNumber(NUMERIC_BOUNDS.collectorConcurrency, "verify"),               // 既定 8
-    // バッチのうち同時に決定する entry 数 (#183)。collector の上限は decision 単位
-    // なので、バッチとの積を抑えるのがこの knob。
-    batchConcurrency: boundedNumber(NUMERIC_BOUNDS.batchConcurrency, "verify"),   // 既定 8
-  }),
-});
+`AppConfigSchema`（zod）と `AppConfig`（その推論型）は、knob ごとの doc comment 付きで [`src/config/application.schema.mts`](src/config/application.schema.mts) に定義されており、そちらが正です。数値 knob の既定値・範囲・単位は [`src/config/bounds.mts`](src/config/bounds.mts) の `NUMERIC_BOUNDS` に一度だけ記述され、それ以外の既定値は [`src/config/defaults.mts`](src/config/defaults.mts) にあります。各キーに対応する環境変数まで注記した HOCON 形は、ルート README の [設定](../../README.ja.md#設定) 節にあります。
 
-type AppConfig = z.infer<typeof AppConfigSchema>;
-```
+トップレベルのセクション:
+
+- `http` — どこで listen し、誰が呼べるか: `hostname`（既定 `127.0.0.1`。[信頼境界](#信頼境界) を参照）、`port`（既定 3000）、`pathPrefix`、任意の `callerAuth`（`header` — 既定 `x-caller-token` — と `token`）。ブロックごと省略できます。
+- `oauth` — subject をどう認証するか。`authenticator` が token authenticator を名指しします（既定 `"jwt"`、またはモジュールが登録した名前、#219）。`"jwt"` のときは `jwt` ブロックが必須で、組み込みの bearer-JWT 経路を設定します — アルゴリズムと鍵素材、`mode`（`"verify"` またはテスト専用の `"insecure-decode"`）、`issuer` / `audience` / `audienceClaim` / `tokenType`、トークン寿命の上限。それ以外の名前では `jwt` ブロックは拒否され、その authenticator 自身のサブブロック（`oauth.<name>`）はパースされずにそのまま渡り、ファクトリが検証します。
+- `attribute.collectors` / `rule.collectors` — 必須の collector エントリのリスト。下記を参照。
+- `rule.onEmptyRuleSet` — `"deny"`（既定）または `"allow"`: Rule が 1 つも集まらなかったときの判定。
+- `resource.parser` — 登録済みの resource parser 名（既定 `DotNotationResourceParser`）。
+- `verify` — 判定エンドポイントの上限と開示範囲。`createApp` は collector の上限（`collectorTimeoutMs`、`collectorDeadlineMs`、`collectorConcurrency`）を自身が組み立てる pipeline に渡し、残り — `maxBatchSize`、`batchConcurrency`、リクエストの上限、`ruleTimeoutMs` / `evaluateDeadlineMs`、`credentialToCollectors`、`evaluationInResponse` — を [`createVerifyRouter`](#createverifyrouter) に渡します。各 knob の意味は上のリストを参照してください。ブロックごと省略でき、すべての knob に既定値があります。
+- `logging.level` — コンソールロガーの閾値（既定 `info`）。
 
 **数値ノブはすべて、両方の境界で 1 つの関数から読まれます** (#157)。`boundedNumber` は
 [`config/bounds.mts`](src/config/bounds.mts) の `resolveBound` をラップしたもので、各ノブの既定値・
