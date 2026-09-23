@@ -34,4 +34,25 @@ describe("StaticPermissionCollector", () => {
 		const attrs = await collector.collect(stubContext);
 		expect(attrs.get(ATTR_PERMISSIONS)).toEqual([]);
 	});
+
+	// #255: the collector answers from what it was given at construction. A
+	// host that keeps the config and changes it afterwards changes nothing.
+	it.each<[string, (config: { permissions: string[] }) => void]>([
+		["pushing to the permissions array", (c) => c.permissions.push("*")],
+		["splicing the permissions array", (c) => c.permissions.splice(0, 1, "*")],
+		[
+			"replacing the permissions field",
+			(c) => {
+				c.permissions = ["*"];
+			},
+		],
+	])("%s after construction changes nothing it collects (#255)", async (_name, mutate) => {
+		const config = { permissions: ["project:*.perm:read", "document:*.perm:write"] };
+		const collector = new StaticPermissionCollector(config);
+
+		mutate(config);
+
+		const attrs = await collector.collect(stubContext);
+		expect(attrs.get(ATTR_PERMISSIONS)).toEqual(["project:*.perm:read", "document:*.perm:write"]);
+	});
 });
