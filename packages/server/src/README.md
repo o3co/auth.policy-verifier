@@ -1,6 +1,6 @@
 # Server source map
 
-Last updated: 2026-09-23
+Last updated: 2026-09-24
 
 How `@o3co/auth.policy-verifier.server` is divided. The package's public API is
 described in the [package README](../README.md); this page is where each piece
@@ -66,31 +66,37 @@ authenticator when it is given `jwt`.
 
 What the server says about its decisions, and in which words. It owns the
 `decision` audit line (`decisionEvent.mts`, #111); the closed set of failure
-categories, the sorting of a failure into one, the loggable form of an error
-and the collector-failure counter helper (`failure.mts`, #200); and the
-`DecisionMetrics` seam with its Prometheus implementation — the request
-histogram middleware, the `/metrics` router and the decision counters
-(`metrics.mts`, #111). It does not own when a line is written or a counter
-bumped — [`decision/`](decision/README.md) and [`routes/`](routes/README.md)
-decide that — nor where `/metrics` is mounted (`app.mts`). It is separate so
-that the log and metric vocabulary is defined once for the router and the
-decision alike, and so that label bounding and redaction are in one place.
+categories, the sorting of a failure into one and the loggable form of an error
+(`failure.mts`, #200); the `DecisionMetrics` port — the observation types and
+the `countCollectorFailure` helper — (`decisionMetrics.mts`, #258); and the
+port's Prometheus implementation — the request histogram middleware, the
+`/metrics` router and the decision counters (`metrics.mts`, #111). It does not
+own when a line is written or a counter bumped —
+[`decision/`](decision/README.md) and [`routes/`](routes/README.md) decide
+that — nor where `/metrics` is mounted (`app.mts`), nor what status a failure
+category is answered with (`routes/verify.mts`). It is separate so that the log
+and metric vocabulary is defined once for the router and the decision alike,
+and so that label bounding and redaction are in one place.
 
-Known issues (#258): `metrics.mts` holds both the
-`DecisionMetrics` port and its `prom-client` / `express` implementation, so the
-decision may import only its type — which is why `countCollectorFailure` lives
-in `failure.mts` rather than beside the port. `failure.mts` and `metrics.mts`
-import each other's types (`DecisionMetrics` one way,
-`CollectorFailureCategory` the other): a type-only cycle, erased at runtime.
-`failure.mts` also documents the HTTP status each category is answered with,
-which is the router's concern.
+The port and its implementation are separate files so that the dependency runs
+one way (#258). `decisionMetrics.mts` imports nothing but types from
+`failure.mts`, and neither `express` nor `prom-client`, so the decision and the
+router report through it without naming the implementation at all;
+`metrics.mts` imports the port it implements, and nothing in the directory
+imports `metrics.mts` back.
 
 ## Dependencies between directories
 
 - `routes/` → `config/`, `decision/`, `http/`, `jwt/`, `observability/`.
-- `decision/` → `observability/` only (value imports stop short of
-  `metrics.mts`); held by
+- `decision/` → `observability/` only, and through no import — type-only
+  included — to `metrics.mts`: it reports through the `decisionMetrics.mts`
+  port. Held by
   [`decision/__tests__/dependencies.test.mts`](decision/__tests__/dependencies.test.mts).
+- Inside `observability/`: `metrics.mts` → `decisionMetrics.mts` →
+  `failure.mts` → `decisionEvent.mts`, with no cycle (type-only imports
+  counted); held by the same test. `routes/` imports the port, not
+  `metrics.mts`; of the shipped source, only `app.mts` and `index.mts` import
+  `metrics.mts`.
 - `jwt/` → `config/`, `net/`. `http/` → `config/`.
 - `app.mts` → every directory except `decision/`.
 - Nothing here imports `app.mts` except `index.mts`.

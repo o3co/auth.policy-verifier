@@ -1,6 +1,6 @@
 # Routes
 
-Last updated: 2026-09-23
+Last updated: 2026-09-24
 
 The HTTP surface of the verifier: the decision endpoints and the liveness
 route.
@@ -82,6 +82,11 @@ Only [`../app.mts`](../app.mts) and the public index import this directory.
   `maxBodyBytes`, 415 unreadable content type, 500 anything unexpected; the
   body-parser failures reach the envelope through `denyOnBodyFailure`, mounted
   on the router so a consumer mounting it on their own app inherits it.
+- A decision that could not be made is answered by the failure category
+  [`../observability/failure.mts`](../observability/failure.mts) sorts it into:
+  a timeout or an attribute conflict is a deny carrying that code, anything
+  else a 500. The per-category answers are written on `createVerifyRouter` in
+  [`verify.mts`](verify.mts); `failure.mts` only sorts (#258).
 - `callerSignal` aborts the decision when the response closes before it was
   finished; what is already in flight settles on its own, a batch's lanes start
   no further entry, and the route writes `verify_caller_gone` and no fault line.
