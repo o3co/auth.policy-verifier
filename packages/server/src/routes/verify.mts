@@ -547,7 +547,9 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	// name, with the migration — alongside an authenticator it would otherwise
 	// be silently ignored, and the caller would believe a JWT config was in
 	// force that is not.
-	if ((config as { jwt?: unknown }).jwt !== undefined) {
+	// Key presence, not value: a spread of an old config whose jwt was unset
+	// still names the removed option.
+	if (Object.hasOwn(config, "jwt")) {
 		throw new Error(
 			"createVerifyRouter: jwt is no longer accepted (#259) — pass an authenticator " +
 				"(createTokenAuthenticator(jwt, logger) builds the bearer-JWT one), or use createApp",
