@@ -415,6 +415,20 @@ function parseDecisionRequest(
 }
 
 /**
+ * A signal that aborts when the response closes before it was finished — the
+ * caller went away (v0.10.0 audit). Handed to the collectors and the evaluator
+ * as the caller's signal, so a caller that timed out and retried does not leave
+ * an out-of-process engine call, or a collector's fetch, running to its budget.
+ */
+function callerSignal(res: express.Response): AbortSignal {
+	const controller = new AbortController();
+	res.on("close", () => {
+		if (!res.writableFinished) controller.abort(new Error("the caller closed the connection"));
+	});
+	return controller.signal;
+}
+
+/**
  * Builds the Express router serving the decision endpoints.
  *
  * `POST /verify` — `Authorization: Bearer <jwt>`, body
@@ -475,20 +489,6 @@ function parseDecisionRequest(
  * safe charset (`acceptRequestId`). Any other value is treated as absent, and
  * none is minted.
  */
-/**
- * A signal that aborts when the response closes before it was finished — the
- * caller went away (v0.10.0 audit). Handed to the collectors and the evaluator
- * as the caller's signal, so a caller that timed out and retried does not leave
- * an out-of-process engine call, or a collector's fetch, running to its budget.
- */
-function callerSignal(res: express.Response): AbortSignal {
-	const controller = new AbortController();
-	res.on("close", () => {
-		if (!res.writableFinished) controller.abort(new Error("the caller closed the connection"));
-	});
-	return controller.signal;
-}
-
 export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	// Resolved rather than defaulted with `??` (#157): this is the boundary a
 	// hand-built config reaches, so it must refuse what `AppConfigSchema` refuses
