@@ -24,8 +24,8 @@ The router also chooses the default authenticator: given `jwt` rather than an
 (`createTokenAuthenticator`, a value import from
 [`../jwt/tokenAuthenticator.mts`](../jwt/tokenAuthenticator.mts)). So the router
 depends on the JWT implementation, not only on the `TokenAuthenticator`
-contract; moving that contract out of `../jwt/` is a known issue, not yet tracked in an
-issue (see [`../README.md`](../README.md)).
+contract; moving that contract out of `../jwt/` is tracked in #259 (see
+[`../README.md`](../README.md)).
 
 It is separate from [`../app.mts`](../app.mts) so that the endpoints can be
 mounted without the rest of the assembly — `createVerifyRouter` is public for a

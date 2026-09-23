@@ -54,7 +54,7 @@ deployment that authenticates another way registers its own
 `TokenAuthenticatorFactory` and never runs any of it. The key-resolver
 vocabulary lived in core until #170 and moved here for the same reason.
 
-Known issue, not yet tracked in an issue: the contract types are not separated from
+Known issue (#259): the contract types are not separated from
 the implementation. `TokenAuthenticator` is declared in `tokenAuthenticator.mts`
 beside the JWT implementation, and `ServerModuleContext` and
 `TokenAuthenticatorFactory` in `keyResolver.mts`; and
@@ -76,7 +76,7 @@ decide that — nor where `/metrics` is mounted (`app.mts`). It is separate so
 that the log and metric vocabulary is defined once for the router and the
 decision alike, and so that label bounding and redaction are in one place.
 
-Known issues, not yet tracked in an issue: `metrics.mts` holds both the
+Known issues (#258): `metrics.mts` holds both the
 `DecisionMetrics` port and its `prom-client` / `express` implementation, so the
 decision may import only its type — which is why `countCollectorFailure` lives
 in `failure.mts` rather than beside the port. `failure.mts` and `metrics.mts`
@@ -95,7 +95,7 @@ which is the router's concern.
 - `app.mts` → every directory except `decision/`.
 - Nothing here imports `app.mts` except `index.mts`.
 
-Known issue, not yet tracked in an issue: `config/` and `jwt/` import each
+Known issue (#260): `config/` and `jwt/` import each
 other. `config/application.schema.mts` imports the JWT checks from
 `jwt/audienceClaim.mts`, `jwt/hs256Rotation.mts` and `jwt/jwks.mts`, while
 `jwt/` imports `config/` for bounds, defaults, the entropy check,
