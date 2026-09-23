@@ -31,25 +31,40 @@ export interface AttrLiteralCompareConfig {
  *   `attr_literal_compare:{a}:{op}:{String(v)}`
  *
  * Pass an explicit `group` string to override the default ruleType entirely.
+ *
+ * ## Configuration is copied at construction
+ *
+ * The constructor reads each field of `config` once, validates it, and keeps
+ * the validated value in a field of its own; the object is not retained (#255).
+ * A caller that mutates the config afterwards changes nothing: the rule answers
+ * from the values it validated, and `ruleType` and `message` keep describing
+ * them.
  */
 export class AttrLiteralCompare implements Rule {
 	readonly ruleType: string;
 	readonly code = "attr_compare_violated";
 	readonly message: string;
 
-	constructor(private readonly config: AttrLiteralCompareConfig) {
-		requireAttrName("AttrLiteralCompare", "a", config.a);
-		requireNumber("AttrLiteralCompare", "v", config.v);
-		requireCompareOp("AttrLiteralCompare", config.op);
+	private readonly a: string;
+	private readonly op: CompareOp;
+	private readonly v: number;
+
+	constructor(config: AttrLiteralCompareConfig) {
+		const a = requireAttrName("AttrLiteralCompare", "a", config.a);
+		const v = requireNumber("AttrLiteralCompare", "v", config.v);
+		const op = requireCompareOp("AttrLiteralCompare", config.op);
 		const group = requireOptionalGroup("AttrLiteralCompare", config.group);
 
-		this.ruleType = group ?? `attr_literal_compare:${config.a}:${config.op}:${String(config.v)}`;
-		this.message = `Attribute constraint not satisfied: ${config.a} must be ${config.op} ${String(config.v)}.`;
+		this.a = a;
+		this.op = op;
+		this.v = v;
+		this.ruleType = group ?? `attr_literal_compare:${a}:${op}:${String(v)}`;
+		this.message = `Attribute constraint not satisfied: ${a} must be ${op} ${String(v)}.`;
 	}
 
 	verify(attrs: ReadonlyAttributes): boolean {
-		const x = attrs.get(this.config.a);
+		const x = attrs.get(this.a);
 		if (typeof x !== "number") return false;
-		return applyCompare(this.config.op, x, this.config.v);
+		return applyCompare(this.op, x, this.v);
 	}
 }

@@ -12,12 +12,15 @@ import { ATTR_PERMISSIONS } from "@o3co/auth.policy-verifier.core";
  * Attribute collector that returns a configured constant permission list under
  * `ATTR_PERMISSIONS`, independent of the JWT payload. Useful for
  * environments where permissions are static per deployment.
+ *
+ * The list is copied at construction (#255): a caller that mutates the config
+ * or its array afterwards changes nothing this collector emits.
  */
 export class StaticPermissionCollector implements AttributeCollector {
-	private permissions: string[];
+	private readonly permissions: readonly string[];
 
 	constructor(config: { permissions: string[] }) {
-		this.permissions = config.permissions;
+		this.permissions = [...config.permissions];
 	}
 
 	async collect(_context: CollectorContext): Promise<Attributes> {

@@ -35,25 +35,37 @@ export interface AttrLiteralEqualConfig {
  *
  * Pass a shared `group` string to two instances to opt into OR semantics
  * (e.g. "role is admin" OR "role is superuser" under one group).
+ *
+ * ## Configuration is copied at construction
+ *
+ * The constructor reads each field of `config` once, validates it, and keeps
+ * the validated value in a field of its own; the object is not retained (#255).
+ * A caller that mutates the config afterwards changes nothing: the rule answers
+ * from the values it validated, and `ruleType` and `message` keep describing
+ * them.
  */
 export class AttrLiteralEqual implements Rule {
 	readonly ruleType: string;
 	readonly code = "attr_not_equal";
 	readonly message: string;
 
-	constructor(private readonly config: AttrLiteralEqualConfig) {
-		requireAttrName("AttrLiteralEqual", "a", config.a);
-		requireLiteralValue("AttrLiteralEqual", "v", config.v);
+	private readonly a: string;
+	private readonly v: LiteralValue;
+
+	constructor(config: AttrLiteralEqualConfig) {
+		const a = requireAttrName("AttrLiteralEqual", "a", config.a);
+		const v = requireLiteralValue("AttrLiteralEqual", "v", config.v);
 		const group = requireOptionalGroup("AttrLiteralEqual", config.group);
 
-		this.ruleType =
-			group ?? `attr_literal_equal:${config.a}:${typeof config.v}:${String(config.v)}`;
-		this.message = `Attribute constraint not satisfied: ${config.a} must equal ${String(config.v)}.`;
+		this.a = a;
+		this.v = v;
+		this.ruleType = group ?? `attr_literal_equal:${a}:${typeof v}:${String(v)}`;
+		this.message = `Attribute constraint not satisfied: ${a} must equal ${String(v)}.`;
 	}
 
 	verify(attrs: ReadonlyAttributes): boolean {
-		const x = attrs.get(this.config.a);
-		if (typeof x !== typeof this.config.v) return false;
-		return x === this.config.v;
+		const x = attrs.get(this.a);
+		if (typeof x !== typeof this.v) return false;
+		return x === this.v;
 	}
 }
