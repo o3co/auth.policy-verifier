@@ -130,9 +130,10 @@ deployment names these collectors through `builtinCollectorsModule`.
   — with an `Error` naming the collector and the field at construction, so a deployment that
   wrote it never serves a decision; their `collect` does not throw on the shape of a claim or
   a field: what does not match is dropped, and a request with no context yields an empty map.
-- The static collectors validate nothing at construction, but they copy there: a `roles` /
-  `permissions` that is missing or not iterable throws a `TypeError` from the constructor
-  (documented, not tested). A malformed `Role` entry is copied as it is, not coerced —
+- The static collectors validate nothing at construction, but they copy there: a missing or
+  non-iterable top-level `roles` (`StaticRoleCollector`) or `permissions`
+  (`StaticPermissionCollector`) throws a `TypeError` from the constructor. Inside a role,
+  nothing is checked: a malformed `Role` entry is copied as it is, not coerced —
   `HasPermission` ignores one that is not an object or whose `permissions` is not an array.
   Each collect hands out a shallow copy of the collector's own list — its `Role` copies are
   shared between the collects' outputs (documented, not tested).

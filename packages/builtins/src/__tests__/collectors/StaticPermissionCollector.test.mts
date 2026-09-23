@@ -21,6 +21,15 @@ const stubContext: CollectorContext = {
 };
 
 describe("StaticPermissionCollector", () => {
+	it.each([
+		["missing", undefined],
+		["null", null],
+		["a number", 42],
+		["a plain object", {}],
+	])("throws a TypeError at construction when `permissions` is %s (#255)", (_label, value) => {
+		expect(() => new StaticPermissionCollector({ permissions: value } as never)).toThrow(TypeError);
+	});
+
 	it("returns configured permissions", async () => {
 		const collector = new StaticPermissionCollector({
 			permissions: ["project:*.perm:read", "document:*.perm:write"],

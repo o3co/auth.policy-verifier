@@ -21,6 +21,15 @@ const stubContext: CollectorContext = {
 };
 
 describe("StaticRoleCollector", () => {
+	it.each([
+		["missing", undefined],
+		["null", null],
+		["a number", 42],
+		["a plain object", {}],
+	])("throws a TypeError at construction when `roles` is %s (#255)", (_label, value) => {
+		expect(() => new StaticRoleCollector({ roles: value } as never)).toThrow(TypeError);
+	});
+
 	it("returns configured roles", async () => {
 		const roles = [
 			{ name: "admin", permissions: ["*"] },
