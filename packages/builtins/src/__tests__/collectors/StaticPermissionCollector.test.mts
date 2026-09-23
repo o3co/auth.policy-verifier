@@ -5,6 +5,7 @@ import type { CollectorContext, SubjectAttributes } from "@o3co/auth.policy-veri
 import { ATTR_PERMISSIONS } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 import { StaticPermissionCollector } from "#/collectors/StaticPermissionCollector.mjs";
+import { HasPermission } from "#/rules/HasPermission.mjs";
 
 /**
  * `CollectorContext.signal` is required (#115): a pipeline supplies one per
@@ -21,13 +22,36 @@ const stubContext: CollectorContext = {
 };
 
 describe("StaticPermissionCollector", () => {
+	// #264: only an array is accepted. A string is iterable, so a copy by
+	// spread would split it into characters — and a lone "*" among them is a
+	// grant-all to HasPermission.
 	it.each([
 		["missing", undefined],
 		["null", null],
 		["a number", 42],
 		["a plain object", {}],
-	])("throws a TypeError at construction when `permissions` is %s (#255)", (_label, value) => {
-		expect(() => new StaticPermissionCollector({ permissions: value } as never)).toThrow(TypeError);
+		["a string", "posts.*"],
+		["a lone wildcard string", "*"],
+	])(
+		"refuses at construction a `permissions` that is %s, with a TypeError naming the field (#264)",
+		(_label, value) => {
+			const construct = () => new StaticPermissionCollector({ permissions: value } as never);
+			expect(construct).toThrow(TypeError);
+			expect(construct).toThrow("StaticPermissionCollector: permissions must be an array");
+		},
+	);
+
+	it("cannot be configured into granting every permission with a string `permissions` (#264)", async () => {
+		// The misconfiguration the issue describes, where `[ "posts.*" ]` was
+		// meant. Split into characters it collected a lone "*", which
+		// HasPermission honours as grant-all; refused at construction, it
+		// never reaches a rule.
+		const grants = async () => {
+			const collector = new StaticPermissionCollector({ permissions: "posts.*" as never });
+			const attrs = await collector.collect(stubContext);
+			return new HasPermission("admin.delete").verify(attrs);
+		};
+		await expect(grants()).rejects.toThrow(TypeError);
 	});
 
 	it("returns configured permissions", async () => {
