@@ -462,8 +462,8 @@ function callerSignal(res: express.Response): AbortSignal {
  * deployments that must not disclose even that, and it stays ahead of this
  * router and of `express.json()`.
  *
- * A decision that could not be made is answered by the category
- * `observability/failure.mts` sorts its failure into (#200):
+ * A decision that could not be made is answered according to its failure
+ * category, which `observability/failure.mts` assigns (#200):
  *
  * - `collector_timeout`, `rule_timeout`, `attribute_conflict` — a deny with that
  *   code (#115, #225, #174): `403` from `/verify`, and that entry's answer
