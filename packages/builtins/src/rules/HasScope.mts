@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The `HasScope` rule: the token's scopes include a required scope, compared
+ * exactly and case-sensitively.
+ */
+
 import type { ReadonlyAttributes, Rule } from "@o3co/auth.policy-verifier.core";
 import { ATTR_SCOPES } from "@o3co/auth.policy-verifier.core";
 

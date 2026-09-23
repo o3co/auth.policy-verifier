@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.server
 
-Last updated: 2026-09-23
+Last updated: 2026-09-24
 
 Express HTTP server for auth.policy-verifier. Provides `createApp` to assemble the application from modules and config, and `POST /verify` / `POST /verify/batch` for authorization decisions.
 
@@ -14,7 +14,7 @@ Express HTTP server for auth.policy-verifier. Provides `createApp` to assemble t
 
 **Why a separate package:** core has no runtime dependencies and runs on edge runtimes; this package is Node-only and brings `express`, `jose`, `prom-client` and `zod`. Keeping them here lets a consumer that only evaluates (an edge function, a test) take core without any of them.
 
-How the source is divided inside this package: [`src/README.md`](src/README.md).
+Responsibility, role and invariants of the source directories: [`src/README.md`](src/README.md).
 
 ## Bearer authentication boundary
 

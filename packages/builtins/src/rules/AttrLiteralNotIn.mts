@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The `AttrLiteralNotIn` rule: an attribute of the values' type that is none of
+ * a configured set of literals.
+ */
+
 import type { ReadonlyAttributes, Rule } from "@o3co/auth.policy-verifier.core";
 import {
 	computeValuesKey,
@@ -20,7 +25,8 @@ export interface AttrLiteralNotInConfig {
  * Rule that passes when a named attribute is present, matches the element type
  * of the configured values array, and is NOT included in that array. No type
  * coercion is performed. If the attribute is missing, null, or of the wrong
- * type the rule returns false (safe-deny).
+ * type the rule returns false (safe-deny). A `NaN` attribute against number
+ * values is in none of them and passes; whether it should deny is #254.
  *
  * ## Grouping and the default ruleType
  *

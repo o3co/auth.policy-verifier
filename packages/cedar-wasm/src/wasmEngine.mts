@@ -1,6 +1,12 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The `wasm` engine: evaluates the policy set in process through the official
+ * `@cedar-policy/cedar-wasm` bindings, compiling it once at load and answering
+ * synchronously. The package index registers it.
+ */
+
 import {
 	checkParsePolicySet,
 	type DetailedError,

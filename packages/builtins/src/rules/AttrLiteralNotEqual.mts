@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The `AttrLiteralNotEqual` rule: an attribute of the literal's type that is
+ * not equal to a configured literal.
+ */
+
 import type { ReadonlyAttributes, Rule } from "@o3co/auth.policy-verifier.core";
 import {
 	type LiteralValue,
@@ -19,7 +24,8 @@ export interface AttrLiteralNotEqualConfig {
  * Rule that passes when a named attribute is present, matches the type of the
  * configured literal value, and is strictly NOT equal to it. No type coercion
  * is performed. If the attribute is missing, null, or of the wrong type the
- * rule returns false (safe-deny).
+ * rule returns false (safe-deny). A `NaN` attribute against a number literal
+ * is an unequal number and passes; whether it should deny is #254.
  *
  * ## Grouping and the default ruleType
  *

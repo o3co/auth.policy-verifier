@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The `AttrPairNotEqual` rule: two non-empty string attributes that differ.
+ */
+
 import type { ReadonlyAttributes, Rule } from "@o3co/auth.policy-verifier.core";
 import { requireAttrName, requireOptionalGroup } from "./_sharedValidation.mjs";
 

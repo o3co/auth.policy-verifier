@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.core
 
-最終更新: 2026-09-23
+最終更新: 2026-09-24
 
 auth.policy-verifier の型定義・評価エンジン・モジュール基盤。コレクター、ルール、モジュールが実装すべきインターフェースを定義するパッケージです。
 
@@ -14,7 +14,7 @@ auth.policy-verifier の最下層です。`builtins`、`cedar`、`server` がこ
 - **所有しないもの:** トランスポート（HTTP は `server`）、クレデンシャル検証（subject は確立済みで届く。`KeyResolver` とトークン認証器は `server`）、ポリシーエンジン（`AsyncRule` がその接続点で、`cedar` がその一つ）、具体的なコレクターとルール（`builtins` または利用側）、ドメイン固有の属性語彙、設定の読み込み（上限値はすべて数値として渡されます）。
 - **別パッケージである理由:** すべてのコレクター・ルール・モジュールが実装する契約なので、トランスポート・クレデンシャル・ポリシーエンジンへの依存を持ち込まず、上記のエッジランタイムで動きます（`server` は Node 専用のまま）。デプロイメントは server や builtins を差し替えてもこのパッケージはそのまま使えます。
 
-モジュール構成・不変条件・契約テスト: [`src/README.md`](src/README.md)（英語）。
+ソースディレクトリの責務・役割・不変条件: [`src/README.md`](src/README.md)（英語）。
 
 ## インストール
 
@@ -207,7 +207,7 @@ export const customModule: Module = {
 
 ## 関連
 
-- [`src/README.md`](src/README.md) — このパッケージのモジュール構成、不変条件、失敗時の意味論、契約テスト（英語）
+- [`src/README.md`](src/README.md) — このパッケージのソースディレクトリの責務・役割・不変条件（英語）
 - [ルート README](../../README.ja.md) — セットアップ全体、設定、サーバー利用方法
 - [`@o3co/auth.policy-verifier.builtins`](../builtins/README.ja.md) — 組み込みコレクター、ルール、リソースパーサー
 - [`@o3co/auth.policy-verifier.server`](../server/README.ja.md) — Express HTTP サーバーと `createApp`

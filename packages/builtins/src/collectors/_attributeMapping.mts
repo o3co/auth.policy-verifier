@@ -8,7 +8,7 @@
  * body; `PayloadClaimAttributeCollector` reads them out of the verified
  * subject bag. What differs between the two is the source and therefore the
  * trust — which is why the reserved-key policy is the caller's to supply, not
- * something this module decides.
+ * something this module decides. Not exported from the package.
  */
 
 import type { AttributeKeyReservation, Attributes } from "@o3co/auth.policy-verifier.core";
@@ -110,7 +110,12 @@ export function readPath(root: Record<string, unknown>, path: string): unknown {
 	return current;
 }
 
-/** Whether `value` is usable as the declared type. Empty strings count as absent. */
+/**
+ * Whether `value` is usable as the declared type. Empty strings count as
+ * absent, so one empty entry disqualifies a whole `string[]`. A `number` must
+ * be finite: `NaN` and `±Infinity` are dropped here, while a rule's comparand
+ * (`requireNumber` in `../rules/_sharedValidation.mts`) may be `Infinity`.
+ */
 export function matchesType(value: unknown, type: AttributeMappingType): boolean {
 	switch (type) {
 		case "string":
@@ -124,7 +129,10 @@ export function matchesType(value: unknown, type: AttributeMappingType): boolean
 	}
 }
 
-/** Promotes every declared field whose value matches its declared type. */
+/**
+ * Promotes every declared field whose value matches its declared type, into a
+ * fresh map; a promoted list is a copy, not the source's array.
+ */
 export function promoteMappings(
 	mappings: readonly ResolvedAttributeMapping[],
 	source: Record<string, unknown>,

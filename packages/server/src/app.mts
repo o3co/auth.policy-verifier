@@ -1,6 +1,13 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * `createApp`: builds the Express application from a validated config and a
+ * list of modules — initializes the registries, resolves the collectors,
+ * resource parser and token authenticator the config names, and mounts the
+ * liveness probe, the caller-auth gate and the verify router.
+ */
+
 import {
 	type AttributeCollectorFactory,
 	AttributePipeline,

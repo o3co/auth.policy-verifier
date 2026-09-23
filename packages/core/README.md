@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.core
 
-Last updated: 2026-09-23
+Last updated: 2026-09-24
 
 Types, evaluation engine, and module infrastructure for auth.policy-verifier. This package defines the interfaces that collectors, rules, and modules implement.
 
@@ -27,7 +27,7 @@ depends on nothing (`package.json` declares no `dependencies`).
   on the edge runtimes listed above while `server` stays Node-only; a deployment can replace
   the server or the builtins and keep it.
 
-Module map, invariants and contract tests: [`src/README.md`](src/README.md).
+Responsibility, role and invariants of the source directory: [`src/README.md`](src/README.md).
 
 ## Install
 
@@ -222,7 +222,7 @@ For the full extension guide — including how to author custom `Rule` implement
 
 ## See Also
 
-- [`src/README.md`](src/README.md) — module map, invariants, failure semantics and contract tests of this package
+- [`src/README.md`](src/README.md) — responsibility, role and invariants of this package's source directory
 - [Root README](../../README.md) — full setup, configuration, and server usage
 - [`@o3co/auth.policy-verifier.builtins`](../builtins/README.md) — built-in collectors, rules, and resource parser
 - [`@o3co/auth.policy-verifier.server`](../server/README.md) — Express HTTP server and `createApp`

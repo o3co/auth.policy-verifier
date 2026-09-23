@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The name-keyed registry that modules register collector, rule-collector and
+ * parser factories into.
+ */
+
 /**
  * Name-keyed registry of instances. Duplicate registrations and missing lookups
  * throw — callers can treat registered names as always present after `register`.

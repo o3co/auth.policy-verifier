@@ -1,14 +1,17 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-// Attribute keys written by `RequestFactsCollector` and read (by default) by
-// `CedarPolicyRuleCollector`. They exist because the rule pipeline never sees
-// `CollectorContext`: a rule is a function of the merged attributes alone, so
-// the request facts a Cedar policy set decides over — action, resource type,
-// resource id — must be promoted into attributes by a collector first. These
-// are this package's vocabulary, not core's: core's `ATTR_*` constants are
-// reserved for OAuth/OIDC/RBAC concepts (AGENTS.md "Core Vocabulary Scope"),
-// and "the parsed request" is not one.
+/*
+ * This package's attribute keys — the parsed request, written by
+ * `RequestFactsCollector` and read by default by `CedarPolicyRuleCollector` —
+ * and their reservation in core's key registry, made when this module is
+ * imported. They exist because a rule is a function of the merged attributes
+ * alone, so the request facts a Cedar policy set decides over (action, resource
+ * type, resource id) must be promoted into attributes by a collector first.
+ * They are this package's vocabulary, not core's: core's `ATTR_*` constants are
+ * reserved for OAuth/OIDC/RBAC concepts (AGENTS.md "Core Vocabulary Scope"),
+ * and "the parsed request" is not one.
+ */
 
 import { reserveAttributeKeys } from "@o3co/auth.policy-verifier.core";
 

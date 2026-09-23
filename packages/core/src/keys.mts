@@ -1,6 +1,13 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * Core's attribute-key vocabulary and the registry of reserved keys. A package
+ * reserves the keys it owns here (`reserveAttributeKeys`), so that a collector
+ * promoting caller- or claim-supplied data can refuse a reserved key, name its
+ * owner and suggest an unreserved one.
+ */
+
 // Canonical attribute keys used by built-in collectors and rules. Consumers
 // should reference these constants instead of raw strings so that renames stay
 // centralized and TypeScript can infer literal types.

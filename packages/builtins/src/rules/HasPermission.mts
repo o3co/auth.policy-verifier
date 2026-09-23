@@ -1,6 +1,12 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The `HasPermission` rule: the subject holds a required permission, directly
+ * or through one of its roles, compared exactly except where a grant carries a
+ * single `*` wildcard.
+ */
+
 import type { ReadonlyAttributes, Role, Rule } from "@o3co/auth.policy-verifier.core";
 import { ATTR_PERMISSIONS, ATTR_ROLES } from "@o3co/auth.policy-verifier.core";
 

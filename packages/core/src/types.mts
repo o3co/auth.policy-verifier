@@ -1,6 +1,13 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The shared types every package builds on: the resource and its parser, the
+ * request collectors read (`CollectorContext`), attributes, sync and async
+ * rules and their collectors, the evaluation a rule reports (with the
+ * policy-revision shape it is held to), and the decision `evaluate()` returns.
+ */
+
 import type { UntrustedRequestContext } from "./untrusted.mjs";
 
 /** Structured form of a resource string after parsing. */

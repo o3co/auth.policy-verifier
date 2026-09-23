@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The default `Logger`: a leveled implementation over `console.*`, with
+ * pino-style child bindings, used when a host injects no logger of its own.
+ */
+
 import type { Logger, LogLevel } from "./Logger.mjs";
 
 /**

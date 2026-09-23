@@ -29,7 +29,7 @@ a host such as the server's `createApp`. It depends on `@o3co/auth.policy-verifi
   so a deployment that writes its own collectors and rules does not have to install it, and
   core does not grow with it.
 
-Module maps, invariants and contract tests:
+Responsibility, role and invariants of each source directory:
 [`src/collectors/README.md`](src/collectors/README.md) (attribute collectors) and
 [`src/rules/README.md`](src/rules/README.md) (rules and rule collectors).
 
@@ -69,7 +69,7 @@ Promotes declared claims of the **verified subject** into attributes (#219) — 
 
 Same mapping shape as `RequestContextAttributeCollector` (`{ from, to?, type? }`, an exact key winning over a dot path, own properties only). What differs is the source, and therefore the trust: the subject bag is what the authenticator verified, so a mapping **may** land on core's five keys — `scopes`, `permissions`, `roles`, `userId`, `clientId` — where the request-context collector refuses them. Two collectors writing one list key union it; that is the deployment composing two issuer-derived sources, and it says so in config. A *scalar* key written by two collectors with different values throws `AttributeConflictError` and denies every request — do not map onto `userId` / `clientId` while `PayloadSubjectIdCollector` also writes them. Keys another package reserved (cedar's `request*`) stay refused, because they are derived from the request, not from the subject. And map only claims the IdP populates from its own registration or admin data: a claim minted from user-editable metadata (Clerk's `unsafe_metadata`, Auth0's `user_metadata`) is signed, not trusted.
 
-For the scope claim specifically, prefer `PayloadScopeCollector { claim = "scp" }`, which also reads the space-delimited string form and pairs with `ResourceActionScopeRuleCollector { claim = "scp" }` — set on both, since each keeps its own `claim` and nothing checks they match — so both agree about which tokens are scopeless.
+For the scope claim specifically, prefer `PayloadScopeCollector { claim = "scp" }`, which also reads the space-delimited string form and pairs with `ResourceActionScopeRuleCollector { claim = "scp" }` — set on both, since each keeps its own `claim` and nothing checks they match — so both look at the same claim. The rule collector checks only that the claim is present: a claim holding no usable scope list (`""`, a number) yields no scopes but still counts as scoped under `scopeless = "skip"`.
 
 ### RequestContextAttributeCollector
 
@@ -350,7 +350,7 @@ Registrations as of this writing; the source of truth is [`src/module.mts`](src/
 
 ## See Also
 
-- [`src/collectors/README.md`](src/collectors/README.md), [`src/rules/README.md`](src/rules/README.md) — module maps, invariants and contract tests of this package
+- [`src/collectors/README.md`](src/collectors/README.md), [`src/rules/README.md`](src/rules/README.md) — responsibility, role and invariants of this package's source directories
 - [Extension guide (`docs/extending.md`)](../../docs/extending.md) — how to write custom `Rule` and `AttributeCollector` implementations; positioning of `builtins` as a basic set
 - [`@o3co/auth.policy-verifier.core`](../core/README.md) — core interfaces and attribute constants
 - [auth.policy-verifier root README](../../README.md) — full setup and configuration reference

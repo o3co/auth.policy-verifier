@@ -2,9 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Which claim carries the scopes, and how its value is read (#219). Shared by
- * the collector that promotes scopes and the rule collector that has to know
- * whether a token asserted any, so the two cannot disagree about a token.
+ * Which claim carries the scopes, and how its value is read (#219).
+ * `PayloadScopeCollector` and `ResourceActionScopeRuleCollector` share the
+ * default claim name and refuse the same bad `claim` option; only
+ * `PayloadScopeCollector` reads the value (`scopesFrom`), while the rule
+ * collector checks only whether the claim is present. Each keeps its own
+ * `claim` option, and nothing checks that both were given the same name. Not
+ * exported from the package.
  */
 
 /** The claim RFC 8693 §4.2 / RFC 9068 §2.2.3 name, and the default. */

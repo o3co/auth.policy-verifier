@@ -1,6 +1,12 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * Runs every rule collector for a request under the collector bounds and
+ * concatenates their rules, failing the collect rather than returning a partial
+ * rule list.
+ */
+
 import {
 	type CollectOptions,
 	type CollectorLimits,

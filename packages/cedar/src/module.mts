@@ -1,6 +1,12 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The `Module` that registers this package's two collectors,
+ * `CedarPolicyRuleCollector` and `RequestFactsCollector`, with a host's
+ * registries.
+ */
+
 import type { Module } from "@o3co/auth.policy-verifier.core";
 import { CedarPolicyRuleCollector } from "./CedarPolicyRuleCollector.mjs";
 import { RequestFactsCollector } from "./RequestFactsCollector.mjs";

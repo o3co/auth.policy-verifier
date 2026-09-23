@@ -1,6 +1,12 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The error classes core raises and a host tells apart: a refused resource
+ * string, a collector fan-out that tripped a bound, conflicting attribute
+ * writes, and an asynchronous rule that overran its deadline.
+ */
+
 /**
  * Raised by a {@link ResourceParser} when the resource string does not belong
  * to the syntax it parses.

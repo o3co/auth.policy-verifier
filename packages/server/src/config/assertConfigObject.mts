@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The shape guard `createApp` and the built-in authenticator run on each config
+ * block a hand-built config supplies, before reading into it.
+ */
+
 /**
  * Asserts that a config block a hand-built config supplies is actually an
  * object, so the checks that follow can index into it. `createApp` accepts

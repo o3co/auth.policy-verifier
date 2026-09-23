@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The attribute collector that emits a configured, constant permission list
+ * under `ATTR_PERMISSIONS`.
+ */
+
 import type {
 	AttributeCollector,
 	Attributes,
@@ -14,7 +19,9 @@ import { ATTR_PERMISSIONS } from "@o3co/auth.policy-verifier.core";
  * environments where permissions are static per deployment.
  *
  * The list is copied at construction (#255): a caller that mutates the config
- * or its array afterwards changes nothing this collector emits.
+ * or its array afterwards changes nothing this collector emits. Nothing is
+ * validated: a missing or non-iterable `permissions` throws a `TypeError` from
+ * the constructor.
  */
 export class StaticPermissionCollector implements AttributeCollector {
 	private readonly permissions: readonly string[];

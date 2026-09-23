@@ -1,6 +1,12 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/*
+ * The sealed wrapper for the caller-supplied request `context`: the transport
+ * marks it, and a collector must go through an explicit, named accessor to read
+ * it.
+ */
+
 /**
  * Brand key carrying the caller-supplied record. Deliberately not exported: it
  * is what makes {@link UntrustedRequestContext} opaque, so the accessor below is
