@@ -18,7 +18,8 @@
  * implementation's module, or a decision that does, depends on that module in
  * every sense but the loader's.
  */
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -160,5 +161,14 @@ describe("the metrics port, apart from its prom-client implementation (#258)", (
 		const metrics = reach([METRICS], allImports);
 		expect(metrics.packages).toContain("express");
 		expect(metrics.packages).toContain("prom-client");
+	});
+});
+
+describe("the import walk itself", () => {
+	it("sees a side-effect import, which loads a module without naming anything from it", () => {
+		const file = join(mkdtempSync(join(tmpdir(), "deps-")), "sideEffect.mts");
+		writeFileSync(file, 'import "express";\nimport "./local.mjs";\n');
+		expect(valueImports(file)).toEqual(["express", "./local.mjs"]);
+		expect(allImports(file)).toEqual(["express", "./local.mjs"]);
 	});
 });
