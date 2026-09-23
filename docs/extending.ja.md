@@ -354,7 +354,7 @@ oauth {
 - **組み込み経路が強制していることは、すべて自分で強制する必要があります。** JWT 経路は署名を検証し、`iss`・audience・`typ` を pin し、`exp` と `iat` を必須とし、`maxTokenAgeSeconds` / `clockToleranceSeconds` と `nbf` を適用し、`cnf` に束縛されたトークンを拒否し、`authScheme` を記録します。登録した authenticator ではそのどれも実行されません: `ok: true` を返す前に、該当するものを行ってください。返す `credential` は何を選んでもよく、`credentialToCollectors = "expose"` の下では collector に届きます。
 - 拒否は deny エンベロープをまとった 401 で、`code` と `message` は自分が返したものになります。理由は自分でログに出してください（組み込み経路は `jwt_token_rejected` / `jwt_verification_unavailable` を出力します） — authenticator が*なぜ*拒否したかについて、router は何もログに出しません。
 - sender-constrained トークン（`cnf`）は組み込み経路では引き続き拒否されます (#209)。登録した authenticator に渡されるのは `Authorization` ヘッダーだけで、proof もクライアント証明書も元のリクエストも届かないため、authenticator 自身は所持を検証できません。束縛トークンを受け入れてよいのは、このサーバーより上流の認証境界が元の保護対象リクエストについて所持をすでに検証しており、それを信頼できる場合だけです。
-- `createApp` を使わずに組み立てるライブラリ利用者向けに、`createVerifyRouter` は `jwt` の代わりに構築済みの `authenticator` を受け取ります。
+- `createApp` を使わずに組み立てるライブラリ利用者は、構築済みの `authenticator` を `createVerifyRouter` に渡します — 自分のもの、または組み込みの bearer-JWT 経路なら `createTokenAuthenticator(jwt, logger)` です。router 自身は authenticator を構築しません (#259)。契約の型は [`packages/server/src/auth/`](../packages/server/src/auth/) で宣言されており、JWT 実装も jose も読み込みません。
 
 ## 関連資料
 

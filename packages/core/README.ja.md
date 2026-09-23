@@ -84,7 +84,7 @@ fan-out には上限があります — [コレクターの上限](#コレクタ
 
 `Module`、`ModuleContext`、`PathResolver` と 3 つのファクトリー型（`AttributeCollectorFactory`、`RuleCollectorFactory`、`ResourceParserFactory`）は [`src/modules/types.mts`](src/modules/types.mts) に定義されています。モジュールは `name` と非同期の `init(context)` を持ち、コンテキストは `pathResolver`、モジュールの `config`、そして attribute collector・rule collector・resource parser のファクトリーそれぞれの `Registry` を運びます。
 
-モジュールは `init` 内で attribute collector・rule collector・resource parser のファクトリーをレジストリに登録します。設定値は `config` を通じて渡されます。`RuleCollectorFactory` は、起動に I/O が要るコレクターのために `Promise` を返せます (#225)。`createApp` はそれを await します。ホスト側はこれより広いコンテキストでモジュールを初期化できます: デフォルト server の `ServerModuleContext`（`@o3co/auth.policy-verifier.server`、定義は [`jwt/keyResolver.mts`](../server/src/jwt/keyResolver.mts)）はここに 2 つのレジストリを足しています — JWT 鍵リゾルバーの `keyResolverRegistry` と、トークン認証器の `tokenAuthenticatorRegistry`（#219。`createApp` がどのモジュールより先に組み込みの `"jwt"` を登録し、モジュールは独自の名前で代替を追加でき、`oauth.authenticator` がどれを使うかを選びます）。どちらかを必要とするモジュールは `Module<ServerModuleContext>` を宣言します。
+モジュールは `init` 内で attribute collector・rule collector・resource parser のファクトリーをレジストリに登録します。設定値は `config` を通じて渡されます。`RuleCollectorFactory` は、起動に I/O が要るコレクターのために `Promise` を返せます (#225)。`createApp` はそれを await します。ホスト側はこれより広いコンテキストでモジュールを初期化できます: デフォルト server の `ServerModuleContext`（`@o3co/auth.policy-verifier.server`、定義は [`auth/serverModuleContext.mts`](../server/src/auth/serverModuleContext.mts)）はここに 2 つのレジストリを足しています — JWT 鍵リゾルバーの `keyResolverRegistry` と、トークン認証器の `tokenAuthenticatorRegistry`（#219。`createApp` がどのモジュールより先に組み込みの `"jwt"` を登録し、モジュールは独自の名前で代替を追加でき、`oauth.authenticator` がどれを使うかを選びます）。どちらかを必要とするモジュールは `Module<ServerModuleContext>` を宣言します。
 
 ### 型一覧
 

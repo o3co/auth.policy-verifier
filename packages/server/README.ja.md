@@ -56,11 +56,9 @@ npm install @o3co/auth.policy-verifier.server
 
 ### createVerifyRouter
 
-`createVerifyRouter(config: VerifyRouterConfig): express.Router` — `VerifyRouterConfig` はフィールドごとの doc comment 付きで [`src/routes/verify.mts`](src/routes/verify.mts) に定義されており、そちらが正です。`createApp` は `AppConfig` からこれを組み立て、`jwt` ではなく解決済みの `authenticator` を渡します。各 knob の意味:
+`createVerifyRouter(config: VerifyRouterConfig): express.Router` — `VerifyRouterConfig` はフィールドごとの doc comment 付きで [`src/routes/verify.mts`](src/routes/verify.mts) に定義されており、そちらが正です。`createApp` は `AppConfig` からこれを組み立て、`oauth.authenticator` が選ぶ authenticator を渡します。各 knob の意味:
 
-- **subject の認証 — `jwt` と `authenticator` のちょうど一方** (#219)。両方・どちらもなし・どちらかが `null` は構築時に拒否されます。
-  - `jwt` — 組み込みの bearer-JWT 経路で、router 自身が構築します。型は [`src/jwt/tokenAuthenticator.mts`](src/jwt/tokenAuthenticator.mts) の `VerifyRouterJwtConfig` で、`validate` で判別されます: `validate: true` は `key`（`KeyResolverFactory` が返す鍵）、`algorithms`、`issuer`、`audience`、任意の `audienceClaim`（既定 `"aud"`）、`tokenType`（`"*"` は何も pin しない）を持ち、`validate: false` は `allowInsecureDecode: true` を必須とするテスト専用です。どちらの枝も `maxTokenAgeSeconds`（既定 86400）と `clockToleranceSeconds`（0–300、既定 0）を取ります。
-  - `authenticator` — 構築済みの `TokenAuthenticator`。`oauth.authenticator` を解決した後に `createApp` が渡すもので、ライブラリ利用者が別の方法で確立した subject の上で router を動かすときに渡すものでもあります。
+- `authenticator` — **必須**。subject を確立するために router が実行する構築済みの `TokenAuthenticator` です (#219)。router 自身は authenticator を構築しません (#259)。port の定義は [`src/auth/tokenAuthenticator.mts`](src/auth/tokenAuthenticator.mts) にあります。`createApp` は `oauth.authenticator` が選ぶものを渡します。router を自分でマウントする場合は、別の方法で subject を確立する独自の authenticator を渡すか、組み込みの bearer-JWT authenticator を `createTokenAuthenticator(jwt, logger)` で構築して渡します。その際 router と同じ `logger` を渡すと、`jwt_token_rejected` / `jwt_verification_unavailable` の行が同じ出力先に届きます。`jwt` は [`src/jwt/tokenAuthenticator.mts`](src/jwt/tokenAuthenticator.mts) の `VerifyRouterJwtConfig` で、`validate` で判別されます: `validate: true` は `key`（`KeyResolverFactory` が返す鍵）、`algorithms`、`issuer`、`audience`、任意の `audienceClaim`（既定 `"aud"`）、`tokenType`（`"*"` は何も pin しない）を持ち、`validate: false` は `allowInsecureDecode: true` を必須とするテスト専用です。どちらの枝も `maxTokenAgeSeconds`（既定 86400）と `clockToleranceSeconds`（0–300、既定 0）を取ります。authenticator のない config（`null` を含む）と、削除された `jwt` オプションをまだ持つ config は構築時に拒否され、後者のエラーはこの移行方法を示します。
 - `resourceParser`、`attributePipeline`、`rulePipeline` — 必須。collector の上限（`collectorTimeoutMs`、`collectorDeadlineMs`、`collectorConcurrency`）は pipeline 側のもので、この config には含まれません。
 - `evaluateOptions` — 評価セマンティクスの上書き。省略時は空 rule set を deny。`ruleTimeoutMs`・`evaluateDeadlineMs`・`failures` をここに含めると構築時に拒否されます: 期限はこの config 自身のフィールドであり、router は判定ごとに 1 つの failure record を持つので (#200)、渡された `failures` はすべての判定で共有されてしまうためです。`signal` は呼び出し元のものと合成され、置き換えられることはありません。
 - `maxBatchSize`（既定 50）— `POST /verify/batch` が 1 リクエストで判定する件数の上限。
@@ -79,8 +77,8 @@ npm install @o3co/auth.policy-verifier.server
 リクエスト処理フロー:
 
 1. トークンを見る前にボディを検証する (#118): `resource` を `resourceParser` でパースし、`action` と `context` を読み取り、そのすべてをリクエストの上限に照らす。失敗時は `400 invalid_request` を返す — つまり不正なリクエストは、有効なトークンを持っていなくても 400 になる。
-2. `Authorization` ヘッダーを authenticator に渡す。組み込みの authenticator（`jwt`）は `Bearer <token>` を取り出し（スキームは大文字小文字を区別せずに照合）、ヘッダーが存在しないかスキームが Bearer でない場合は 401 を返す。直接渡された `authenticator` は自身の `code` / `message` で応答し、ステップ 3〜5 はその authenticator の責務になる。
-3. `validate` が `true` の場合: 署名に加えて RFC 9068 §4 のクレームを検証する — `iss` を `issuer` と、audience クレーム（`aud`、または `audienceClaim` が指すクレーム）を `audience` と、`typ` ヘッダを `tokenType` と照合する（`application/` プレフィックスは無視。`"*"` は何も pin しない）。失敗時は 401 を返す。3 つのいずれかが欠けている場合、`createVerifyRouter` は例外を投げる。
+2. `Authorization` ヘッダーを authenticator に渡す。組み込みの bearer-JWT authenticator（`createTokenAuthenticator`）は `Bearer <token>` を取り出し（スキームは大文字小文字を区別せずに照合）、ヘッダーが存在しないかスキームが Bearer でない場合は 401 を返す。それ以外の authenticator は自身の `code` / `message` で応答し、ステップ 3〜5 はその authenticator の責務になる。
+3. `validate` が `true` の場合: 署名に加えて RFC 9068 §4 のクレームを検証する — `iss` を `issuer` と、audience クレーム（`aud`、または `audienceClaim` が指すクレーム）を `audience` と、`typ` ヘッダを `tokenType` と照合する（`application/` プレフィックスは無視。`"*"` は何も pin しない）。失敗時は 401 を返す。3 つのいずれかが欠けている場合、`createTokenAuthenticator` は例外を投げる。
 4. `validate` が `false` の場合: JWT を検証なしでデコードする。不正なトークンの場合は 401 を返す。
 5. どちらの経路でもトークン自身の寿命を検証する: `exp` と `iat` は**必須**（有効期限を宣言しないトークンは失効しない）、`nbf` は存在すれば検証、`exp` は未来でなければならず、`now - iat` は `maxTokenAgeSeconds` を超えてはならない — 発行者が何年も先の `exp` を付けたトークンを拒否するのはこれ。`clockToleranceSeconds` はこれら全ての比較に効く。失敗時は 401 を返す。デコード専用経路はこれらの検査を省略せず手書きで再現するので、同一トークンに対して両モードの答えは一致する。
 6. `x-request-id` ヘッダーが存在し、受け入れられる形であれば `CollectorContext.headers` に含める（コレクターが上流呼び出し時に転送可能）。受け入れられるのは `A-Z a-z 0-9 - _ . : + / = #` からなる 1〜128 文字（`acceptRequestId`、#200）で、それ以外の値はここでもログ行でもレスポンスでも無かったものとして扱う。受け入れた ID は、手順 1〜5 の拒否を含め router が書くすべてのレスポンスに `x-request-id` レスポンスヘッダとして返し、呼び出し元が送らなかった場合に採番することはない。
@@ -115,7 +113,7 @@ HOCON の `${?VAR}` 置換が渡す文字列のいずれかで到着し、その
 
 `attribute.collectors` と `rule.collectors` の各エントリには `collector` フィールド（登録済みファクトリ名）が必須です。追加フィールドはファクトリへの設定としてそのまま渡されます。
 
-**HS256 のシークレットは鍵素材として 32 バイト（256 ビット）以上を持つこと。** この下限は `oauth.jwt.secret` と `oauth.jwt.previousSecrets[].secret` の全件に 1 つのルールとして適用されます — 退役したシークレットも重複期間中は検証鍵であり、現行と同じようにトークンを発行できるからです。判定はデコード後の素材に対してもっとも小さく読める解釈で行うため、16 進 64 文字は通り（32 バイト）、16 進 32 文字は通りません（16 バイト）。生成は `openssl rand -hex 32`。`AppConfigSchema` が config パース時に拒否し、HS256 の `KeyResolverFactory` が hand-built config のために同じ検査を繰り返します。独自の HS256 key resolver を登録する利用者向けに `measureSecretEntropyBytes` / `describeWeakSecret` / `MIN_SECRET_ENTROPY_BYTES` を公開しています。`createVerifyRouter` は鍵素材を直接受け取るため下限を適用しません — `KeyObject` を自分で組み立てる呼び出し側がその検査を負います。
+**HS256 のシークレットは鍵素材として 32 バイト（256 ビット）以上を持つこと。** この下限は `oauth.jwt.secret` と `oauth.jwt.previousSecrets[].secret` の全件に 1 つのルールとして適用されます — 退役したシークレットも重複期間中は検証鍵であり、現行と同じようにトークンを発行できるからです。判定はデコード後の素材に対してもっとも小さく読める解釈で行うため、16 進 64 文字は通り（32 バイト）、16 進 32 文字は通りません（16 バイト）。生成は `openssl rand -hex 32`。`AppConfigSchema` が config パース時に拒否し、HS256 の `KeyResolverFactory` が hand-built config のために同じ検査を繰り返します。独自の HS256 key resolver を登録する利用者向けに `measureSecretEntropyBytes` / `describeWeakSecret` / `MIN_SECRET_ENTROPY_BYTES` を公開しています。`createTokenAuthenticator` は鍵素材を直接受け取るため下限を適用しません — `KeyObject` を自分で組み立てる呼び出し側がその検査を負います。
 
 ### 信頼境界
 

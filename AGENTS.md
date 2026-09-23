@@ -139,8 +139,8 @@ The rule then reads `attrs.get(ATTR_SUBSCRIBER_DID)` without ever touching `Coll
 
 **The worked examples**, all under `packages/server/src`:
 
-- `checkJwksUri` ([`jwt/jwks.mts`](packages/server/src/jwt/jwks.mts)) — the JWKS transport policy (#109). Returns a result; the schema renders it as a zod issue, and `parseJwksUri` throws the same message for the `KeyResolverFactory`.
-- `checkHs256Rotation` ([`jwt/hs256Rotation.mts`](packages/server/src/jwt/hs256Rotation.mts)) — the HS256 rotation shape, and the entropy floor over every secret in it (#112, #114). Collects every issue with its path, so both boundaries report a block with two mistakes in one round trip.
+- `checkJwksUri` ([`config/jwks.mts`](packages/server/src/config/jwks.mts)) — the JWKS transport policy (#109). Returns a result; the schema renders it as a zod issue, and `parseJwksUri` throws the same message for the `KeyResolverFactory`.
+- `checkHs256Rotation` ([`config/hs256Rotation.mts`](packages/server/src/config/hs256Rotation.mts)) — the HS256 rotation shape, and the entropy floor over every secret in it (#112, #114). Collects every issue with its path, so both boundaries report a block with two mistakes in one round trip.
 - `checkTokenAuthenticatorSelection` ([`config/tokenAuthenticatorSelection.mts`](packages/server/src/config/tokenAuthenticatorSelection.mts)) — which authenticator `oauth.authenticator` selects, and that `oauth.jwt` is required exactly when it is the built-in one (#219). Returns the key and a path-qualified message; the schema files it as an issue at that key, `createApp` throws it, so both refuse in the same words.
 - `resolveBound` ([`config/bounds.mts`](packages/server/src/config/bounds.mts)) — every numeric knob (#157). One spec table carries each knob's default, range and unit; a boundary supplies only the config path it saw the key at.
 

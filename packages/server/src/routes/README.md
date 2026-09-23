@@ -8,16 +8,20 @@ Last updated: 2026-09-24
   (`POST /verify`, `POST /verify/batch`) and the liveness route. The decision
   endpoints' entry point is `createVerifyRouter` in [`verify.mts`](verify.mts).
 - **Owns.** Everything between the wire and one decision: validating the body
-  and holding it to its limits, the order body before token, authenticating the
-  subject, turning the caller's disconnect into a signal, status codes and
-  headers, the deny envelope on every answer that is not a decision, the
-  batch's lanes, what each failure category is answered with, and the one fault
-  line a request that could not be decided produces.
+  and holding it to its limits, the order body before token, running the
+  authenticator it is handed, turning the caller's disconnect into a signal,
+  status codes and headers, the deny envelope on every answer that is not a
+  decision, the batch's lanes, what each failure category is answered with,
+  and the one fault line a request that could not be decided produces.
 - **Does not own.** The decision itself — that is
   [`../decision/`](../decision/README.md), which both decision endpoints call;
   sorting a failure into a category ([`../observability/`](../observability/));
-  caller authentication ([`../http/`](../http/)); where the routers are mounted
-  and on which liveness paths ([`../app.mts`](../app.mts)).
+  caller authentication ([`../http/`](../http/)); how the subject is
+  authenticated — the contract is [`../auth/`](../auth/), and which
+  authenticator runs, the built-in bearer-JWT one included, is decided and
+  built by [`../app.mts`](../app.mts) or the consumer mounting the router;
+  where the routers are mounted and on which liveness paths
+  ([`../app.mts`](../app.mts)).
 - **Why a separate module.** Apart from `../app.mts` so the endpoints can be
   mounted without the rest of the assembly — `createVerifyRouter` is public for
   a consumer mounting it on their own Express app; apart from `../decision/` so
@@ -37,10 +41,13 @@ Last updated: 2026-09-24
   `{ decision: "deny", code, message }`, the body-parser failures included. The
   handler that ensures it is mounted on the router, so a consumer mounting the
   router on their own app inherits it.
+- The router runs the `TokenAuthenticator` it is handed and builds none: it
+  depends on the contract in `../auth/`, and reaches `../jwt/` through no
+  import at all, type-only included.
 - Both config boundaries agree (#157): every numeric knob goes through
   `resolveBound` with the bound `AppConfigSchema` applies. Config the router
-  would not honour — a deadline or a failure record in `evaluateOptions`, both
-  or neither of `jwt` and `authenticator`, either of them `null` — is refused at
+  would not honour — a deadline or a failure record in `evaluateOptions`, no
+  `authenticator` (`null` included), the removed `jwt` option — is refused at
   construction.
 - `x-request-id` is accepted only in the shape `acceptRequestId` admits, echoed
   on every response the router writes, and never minted.
@@ -60,15 +67,11 @@ shape, by the cross-implementation contract in
 ## Dependencies
 
 - May import `express`, `@o3co/auth.policy-verifier.core`,
-  [`../config/`](../config/), [`../decision/`](../decision/README.md),
-  [`../http/`](../http/), [`../jwt/`](../jwt/) and
+  [`../auth/`](../auth/) (types only), [`../config/`](../config/),
+  [`../decision/`](../decision/README.md), [`../http/`](../http/) and
   [`../observability/`](../observability/).
+- Must not reach [`../jwt/`](../jwt/) or jose, directly or through anything it
+  imports; pinned by
+  [`../decision/__tests__/dependencies.test.mts`](../decision/__tests__/dependencies.test.mts).
 - Reports metrics through the `DecisionMetrics` port, never the Prometheus
   implementation.
-
-## Known issues
-
-- [#259](https://github.com/o3co/auth.policy-verifier/issues/259) — this
-  directory depends on `../jwt/`'s implementation, not only its contract: given
-  `jwt` rather than an `authenticator`, the router builds the built-in
-  authenticator itself.
