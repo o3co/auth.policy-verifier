@@ -37,7 +37,13 @@ export class StaticRoleCollector implements AttributeCollector {
 	private readonly roles: readonly Role[];
 
 	constructor(config: { roles: Role[] }) {
-		this.roles = [...config.roles].map(copyRole);
+		const { roles } = config;
+		if (!Array.isArray(roles)) {
+			throw new TypeError(
+				`StaticRoleCollector: roles must be an array (got ${roles === null ? "null" : typeof roles})`,
+			);
+		}
+		this.roles = [...roles].map(copyRole);
 	}
 
 	async collect(_context: CollectorContext): Promise<Attributes> {

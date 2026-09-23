@@ -31,7 +31,13 @@ export class StaticPermissionCollector implements AttributeCollector {
 	private readonly permissions: readonly string[];
 
 	constructor(config: { permissions: string[] }) {
-		this.permissions = [...config.permissions];
+		const { permissions } = config;
+		if (!Array.isArray(permissions)) {
+			throw new TypeError(
+				`StaticPermissionCollector: permissions must be an array (got ${permissions === null ? "null" : typeof permissions})`,
+			);
+		}
+		this.permissions = [...permissions];
 	}
 
 	async collect(_context: CollectorContext): Promise<Attributes> {
