@@ -23,7 +23,7 @@ import { ATTR_PERMISSIONS } from "@o3co/auth.policy-verifier.core";
  * validated: a missing or non-iterable `permissions` throws a `TypeError` from
  * the constructor.
  *
- * Known issue (not yet tracked in an issue): a string `permissions` is
+ * Known issue (#264): a string `permissions` is
  * iterable, so it is split into single characters rather than refused — and a
  * lone `*` among them is treated by `HasPermission` as grant-all.
  */

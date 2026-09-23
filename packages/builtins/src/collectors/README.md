@@ -89,6 +89,6 @@ or `../resource/`. The one edge into this directory from elsewhere in the packag
 
 ## Known issues
 
-- Not yet tracked in an issue: `StaticPermissionCollector` splits a string `permissions` into
+- #264: `StaticPermissionCollector` splits a string `permissions` into
   single characters (a string is iterable), and a lone `*` among them is treated by
   `HasPermission` as grant-all.
