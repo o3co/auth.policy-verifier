@@ -40,6 +40,9 @@ export class StaticRoleCollector implements AttributeCollector {
  */
 function copyRole(role: Role): Role {
 	if (typeof role !== "object" || role === null) return role;
+	// An array is an object too: spreading it into `{ ...role }` would turn it
+	// into an index-keyed object, so it is copied as an array.
+	if (Array.isArray(role)) return [...role] as unknown as Role;
 	return Array.isArray(role.permissions)
 		? { ...role, permissions: [...role.permissions] }
 		: { ...role };
