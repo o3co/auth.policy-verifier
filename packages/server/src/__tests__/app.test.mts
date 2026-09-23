@@ -492,6 +492,40 @@ describe("createApp", () => {
 	});
 });
 
+describe("createApp — the default bearer-JWT authenticator is built here, not in the router (#259)", () => {
+	it("authenticates verify requests with oauth.jwt when oauth.authenticator is not set", async () => {
+		const app = await createApp({
+			pathResolver: (s: string) => s,
+			config: testConfig,
+			modules: [testModule, builtinKeyResolversModule],
+		});
+		const send = (authorization?: string) => {
+			const req = request(app).post("/verify");
+			if (authorization !== undefined) req.set("Authorization", authorization);
+			return req.send({ resource: "project", action: "read" });
+		};
+
+		const allowed = await send(`Bearer ${await signToken({ sub: "u1", scope: "read:project" })}`);
+		expect(allowed.status).toBe(200);
+		expect(allowed.body).toMatchObject({ decision: "allow", subject: "u1" });
+
+		const foreign = await new SignJWT({ scope: "read:project" })
+			.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
+			.setIssuedAt()
+			.setExpirationTime("1h")
+			.setIssuer(ISSUER)
+			.setAudience(AUDIENCE)
+			.sign(new TextEncoder().encode("22".repeat(32)));
+		const forged = await send(`Bearer ${foreign}`);
+		expect(forged.status).toBe(401);
+		expect(forged.body).toMatchObject({ decision: "deny", code: "invalid_token" });
+
+		const missing = await send();
+		expect(missing.status).toBe(401);
+		expect(missing.body).toMatchObject({ decision: "deny", code: "missing_token" });
+	});
+});
+
 describe("createApp logging (#107)", () => {
 	interface CapturedCall {
 		level: "trace" | "debug" | "info" | "warn" | "error" | "fatal";

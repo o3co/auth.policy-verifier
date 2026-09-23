@@ -17,8 +17,13 @@
  * runtime, but it is still a direction — a port that names a type out of its
  * implementation's module, or a decision that does, depends on that module in
  * every sense but the loader's.
+ *
+ * The same walk holds two server-wide directions the source map
+ * (`src/README.md`) states: the authentication contract in `auth/` reaches no
+ * implementation, and neither `routes/` nor `config/` reaches `jwt/` (#259,
+ * #260). Each is shown to fire on the side that is meant to depend.
  */
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -136,7 +141,7 @@ describe("the decision's dependency boundary (#251)", () => {
 		const router = reach([join(SRC, "routes/verify.mts")]);
 		expect(router.packages).toContain("express");
 		expect(directoriesOf(router.files)).toEqual(
-			new Set(["routes", "decision", "observability", "http", "jwt", "config"]),
+			new Set(["routes", "decision", "observability", "http", "config"]),
 		);
 	});
 });
@@ -168,6 +173,79 @@ describe("the metrics port, apart from its prom-client implementation (#258)", (
 		const metrics = reach([METRICS], allImports);
 		expect(metrics.packages).toContain("express");
 		expect(metrics.packages).toContain("prom-client");
+	});
+});
+
+/** The `.mts` source files directly inside one directory of `src/`, or none if it does not exist. */
+function sourcesIn(directory: string): string[] {
+	const path = join(SRC, directory);
+	if (!existsSync(path)) return [];
+	return readdirSync(path)
+		.filter((name) => name.endsWith(".mts"))
+		.map((name) => join(path, name));
+}
+
+/** The files of `files` that live in one directory of `src/`, relative to `src/`. */
+const within = (files: Set<string>, directory: string): string[] =>
+	[...files].map(relative).filter((file) => file.startsWith(`${directory}/`));
+
+/** The directories of `src/` with a file that exports an interface or type named `name`. */
+function declaringDirectories(name: string): string[] {
+	const declaration = new RegExp(`^export (?:interface|type) ${name}\\b`, "m");
+	return ["auth", "jwt", "config", "routes"].filter((directory) =>
+		sourcesIn(directory).some((file) => declaration.test(readFileSync(file, "utf8"))),
+	);
+}
+
+describe("the authentication contract, apart from the JWT implementation (#259)", () => {
+	it.each([
+		"TokenAuthenticator",
+		"AuthenticationResult",
+		"TokenAuthenticatorFactory",
+		"TokenAuthenticatorDependencies",
+		"ServerModuleContext",
+		"KeyResolver",
+		"KeyResolverFactory",
+	])("%s is declared in auth/, and nowhere else", (name) => {
+		expect(declaringDirectories(name)).toEqual(["auth"]);
+	});
+
+	it("auth/ reaches core and nothing else, not even for a type — no jose, no jwt/", () => {
+		const contract = reach(sourcesIn("auth"), allImports);
+		expect(contract.files.size).toBeGreaterThan(0);
+		expect([...contract.packages]).toEqual([CORE]);
+		expect(directoriesOf(contract.files)).toEqual(new Set(["auth"]));
+	});
+
+	it("routes/ reaches jwt/ through no import at all, type-only included", () => {
+		const router = reach(sourcesIn("routes"), allImports);
+		expect(within(router.files, "jwt")).toEqual([]);
+		expect(router.packages).not.toContain("jose");
+	});
+
+	it("fires: jwt/ implements the contract — the same walk from it reaches auth/ and jose", () => {
+		const jwt = reach(sourcesIn("jwt"), allImports);
+		expect(within(jwt.files, "auth")).not.toEqual([]);
+		expect(jwt.packages).toContain("jose");
+	});
+
+	it("fires: createApp is what reaches jwt/ — it builds the default authenticator", () => {
+		const app = reach([join(SRC, "app.mts")]);
+		expect(within(app.files, "jwt")).not.toEqual([]);
+		expect(app.packages).toContain("jose");
+	});
+});
+
+describe("config/ and jwt/ have one direction: jwt/ → config/ (#260)", () => {
+	it("no file in config/ reaches jwt/ through any import, type-only included", () => {
+		const config = reach(sourcesIn("config"), allImports);
+		expect(within(config.files, "jwt")).toEqual([]);
+		expect(config.packages).not.toContain("jose");
+	});
+
+	it("fires: the same walk from jwt/ reaches config/", () => {
+		const jwt = reach(sourcesIn("jwt"), allImports);
+		expect(within(jwt.files, "config")).not.toEqual([]);
 	});
 });
 

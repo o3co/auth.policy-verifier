@@ -24,10 +24,10 @@ import {
 import express from "express";
 import { exportSPKI, SignJWT } from "jose";
 import request from "supertest";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { AppConfigSchema } from "#/config/application.schema.mjs";
+import { createTokenAuthenticator, type TokenAuthenticator } from "#/index.mjs";
 import { HS256KeyResolverFactory, RS256KeyResolverFactory } from "#/jwt/index.mjs";
-import type { TokenAuthenticator } from "#/jwt/tokenAuthenticator.mjs";
 import { createVerifyRouter, type VerifyRouterConfig } from "#/routes/verify.mjs";
 
 const generateKeyPairAsync = promisify(generateKeyPair);
@@ -1748,32 +1748,62 @@ describe("createVerifyRouter — an already-built authenticator (#219)", () => {
 		});
 	});
 
-	it("refuses a config carrying both jwt and authenticator", () => {
-		expect(() =>
-			createVerifyRouter({ jwt, authenticator: stub, ...pipelines } as VerifyRouterConfig),
-		).toThrow("createVerifyRouter: exactly one of jwt or authenticator must be supplied");
+	it("VerifyRouterConfig requires an authenticator and has no jwt field (#259)", () => {
+		expectTypeOf<VerifyRouterConfig["authenticator"]>().toEqualTypeOf<TokenAuthenticator>();
+		expectTypeOf<VerifyRouterConfig>().not.toHaveProperty("jwt");
 	});
 
-	it("refuses a config carrying neither", () => {
-		expect(() => createVerifyRouter({ ...pipelines } as VerifyRouterConfig)).toThrow(
-			"createVerifyRouter: exactly one of jwt or authenticator must be supplied",
-		);
-	});
-
-	it("refuses null for either, rather than reading it as absent", () => {
-		// The rule the `previousSecrets` `null` contract set (#147): a `null` in a
-		// hand-built config was produced rather than written, and reading it as
-		// "omitted" would let `{ jwt: null, authenticator }` mean something the
-		// caller never said. Refused by name, not as a TypeError off `.validate`.
+	it("refuses a config carrying jwt, with or without an authenticator: the router builds none (#259)", () => {
+		// A JavaScript caller written against the old option. Refused by name,
+		// with the migration, rather than as a missing authenticator or — worse,
+		// with both present — by silently running the authenticator and ignoring
+		// the JWT config the caller thought was in force.
 		for (const config of [
-			{ jwt: null, authenticator: stub, ...pipelines },
-			{ jwt, authenticator: null, ...pipelines },
-			{ jwt: null, ...pipelines },
+			{ jwt, ...pipelines },
+			{ jwt, authenticator: stub, ...pipelines },
 		]) {
 			expect(() => createVerifyRouter(config as unknown as VerifyRouterConfig)).toThrow(
-				"createVerifyRouter: jwt and authenticator are omitted rather than null",
+				"createVerifyRouter: jwt is no longer accepted (#259) — pass an authenticator " +
+					"(createTokenAuthenticator(jwt, logger) builds the bearer-JWT one), or use createApp",
 			);
 		}
+	});
+
+	it("refuses a config carrying no authenticator, null included", () => {
+		// `null` is refused by name rather than read as absent — the rule the
+		// `previousSecrets` `null` contract set (#147) — and in the same words as
+		// an omitted one, since either way the router has nothing to run.
+		for (const config of [
+			{ ...pipelines },
+			{ authenticator: null, ...pipelines },
+			{ authenticator: {}, ...pipelines },
+		]) {
+			expect(() => createVerifyRouter(config as unknown as VerifyRouterConfig)).toThrow(
+				"createVerifyRouter: authenticator is required — a TokenAuthenticator; " +
+					"createTokenAuthenticator builds the bearer-JWT one",
+			);
+		}
+	});
+
+	it("runs the built-in bearer-JWT authenticator when handed one (#259)", async () => {
+		const silent: EventLogger = { info() {}, warn() {}, error() {} };
+		const app = express();
+		app.use(
+			createVerifyRouter({ authenticator: createTokenAuthenticator(jwt, silent), ...pipelines }),
+		);
+		const token = await signHS256Token({ scope: "read:project" });
+		const allowed = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project:1", action: "read" });
+		expect(allowed.status).toBe(200);
+		expect(allowed.body.decision).toBe("allow");
+		const refused = await request(app)
+			.post("/verify")
+			.set("Authorization", "Bearer not-a-jwt")
+			.send({ resource: "project:1", action: "read" });
+		expect(refused.status).toBe(401);
+		expect(refused.body.code).toBe("invalid_token");
 	});
 });
 
