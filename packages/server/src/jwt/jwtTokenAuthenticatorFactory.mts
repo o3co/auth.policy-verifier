@@ -3,8 +3,9 @@
 
 /*
  * The built-in `jwt` token authenticator factory: re-checks the `oauth.jwt`
- * block of a config and builds the bearer-JWT verification the verify router
- * authenticates the subject with.
+ * block of a config and builds the bearer-JWT authentication the verify router
+ * authenticates the subject with (decode-only under
+ * `mode = "insecure-decode"`).
  */
 
 import {

@@ -4,7 +4,7 @@
 /*
  * Runs every attribute collector for a request under the collector bounds and
  * merges their maps into one `Attributes`, failing the collect on a tripped
- * bound or a conflicting scalar write.
+ * bound, a collector's rejection or a conflicting scalar write.
  */
 
 import {

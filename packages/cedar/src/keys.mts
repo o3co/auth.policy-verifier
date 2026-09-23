@@ -3,7 +3,8 @@
 
 /*
  * This package's attribute keys — the parsed request, written by
- * `RequestFactsCollector` and read by default by `CedarPolicyRuleCollector` —
+ * `RequestFactsCollector`; three of them (action, resource type, resource id)
+ * are read by default by `CedarPolicyRuleCollector`, the raw resource is not —
  * and their reservation in core's key registry, made when this module is
  * imported. They exist because a rule is a function of the merged attributes
  * alone, so the request facts a Cedar policy set decides over (action, resource

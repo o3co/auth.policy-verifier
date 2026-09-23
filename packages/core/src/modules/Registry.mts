@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * The name-keyed registry that modules register collector, rule-collector and
- * parser factories into.
+ * A generic name-keyed registry. Modules register collector, rule-collector
+ * and parser factories into it, and the server also uses it for key resolvers
+ * and token authenticators.
  */
 
 /**

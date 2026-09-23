@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * The error classes core raises and a host tells apart: a refused resource
- * string, a collector fan-out that tripped a bound, conflicting attribute
- * writes, and an asynchronous rule that overran its deadline.
+ * The error classes core defines and a host tells apart: a refused resource
+ * string (raised by a `ResourceParser`, e.g. builtins'
+ * `DotNotationResourceParser`), a collector fan-out that tripped a bound,
+ * conflicting attribute writes, and an asynchronous rule that overran its
+ * deadline.
  */
 
 /**

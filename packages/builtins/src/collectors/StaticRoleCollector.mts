@@ -27,6 +27,11 @@ import { ATTR_ROLES } from "@o3co/auth.policy-verifier.core";
  * from the constructor, and a malformed `Role` entry is copied as it is (see
  * `copyRole`). Each collect returns a shallow copy of the list, so its `Role`
  * copies are shared between the outputs of different collects.
+ *
+ * Known issue (not yet tracked in an issue): a string `roles` is iterable, so
+ * it is split into single characters rather than refused, as a string
+ * `permissions` is in `StaticPermissionCollector`. Here the characters are
+ * inert: `HasPermission` ignores those entries, since they are not objects.
  */
 export class StaticRoleCollector implements AttributeCollector {
 	private readonly roles: readonly Role[];

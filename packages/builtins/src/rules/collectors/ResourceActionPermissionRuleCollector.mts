@@ -3,7 +3,7 @@
 
 /*
  * The rule collector that emits one `HasPermission` rule for the request's
- * `{resource}.perm:{action}` permission.
+ * `{resource.raw}.perm:{action}` permission.
  */
 
 import type { CollectorContext, Rule, RuleCollector } from "@o3co/auth.policy-verifier.core";

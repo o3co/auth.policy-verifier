@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * `createApp`: builds the Express application from a validated config and a
- * list of modules — initializes the registries, resolves the collectors,
- * resource parser and token authenticator the config names, and mounts the
- * liveness probe, the caller-auth gate and the verify router.
+ * `createApp`: builds the Express application from an `AppConfig` and a list
+ * of modules, re-checking what `AppConfigSchema` would have caught for a
+ * hand-built config — initializes the registries, resolves the collectors,
+ * resource parser and token authenticator the config names, and mounts, in
+ * order, the metrics middleware, the liveness probe, the `/metrics` router,
+ * the optional caller-auth gate and the verify router.
  */
 
 import {

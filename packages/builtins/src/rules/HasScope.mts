@@ -3,7 +3,8 @@
 
 /*
  * The `HasScope` rule: the token's scopes include a required scope, compared
- * exactly and case-sensitively.
+ * exactly and case-sensitively — unless `allowBareScopeRewrite` is set, in
+ * which case a granted scope with no `:` also matches `read:<scope>`.
  */
 
 import type { ReadonlyAttributes, Rule } from "@o3co/auth.policy-verifier.core";
