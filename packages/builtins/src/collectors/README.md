@@ -1,6 +1,6 @@
 # Collectors
 
-Last updated: 2026-09-23
+Last updated: 2026-09-24
 
 The built-in attribute collectors: the layer that reads the request and writes the
 attributes the rules decide from.
@@ -107,10 +107,21 @@ deployment names these collectors through `builtinCollectorsModule`.
   [`PayloadScopeCollector.test.mts`](../__tests__/collectors/PayloadScopeCollector.test.mts).
 - A collector holds nothing of the request past `collect` — no context, no `signal` — and
   writes nothing into its input (`subject` is read-only by type). Documented, not tested:
-  none of these keeps request-derived state between calls. Configuration they do keep — the
-  mapping collectors a copy of their mappings, built at construction; the static collectors
-  the list they were given (below). The rule-purity suite covers the rule side of this line.
-  Holding the caller's *object* is covered under [Known issues](#known-issues).
+  none of these keeps request-derived state between calls. Configuration they do keep is
+  their own copy, built at construction — the mapping collectors a copy of their mappings, the
+  static collectors a copy of their list (next item). The rule-purity suite covers the rule
+  side of this line.
+- The static collectors copy their configuration at construction (#255):
+  [`StaticPermissionCollector`](StaticPermissionCollector.mts) its `permissions` array,
+  [`StaticRoleCollector`](StaticRoleCollector.mts) its `roles` array, each `Role` in it and
+  each role's `permissions` array. A host that keeps the config and mutates it afterwards —
+  replacing the field, pushing to or splicing the array, renaming a role or editing its
+  permissions — changes nothing a later collect emits. That covers the bundled path as well:
+  the factories in [`../module.mts`](../module.mts) and the server's `createApp` pass the
+  config entry through, and it is copied here. Pinned by the "`<mutation>` after construction
+  changes nothing it collects (#255)" cases of
+  [`StaticPermissionCollector.test.mts`](../__tests__/collectors/StaticPermissionCollector.test.mts)
+  and [`StaticRoleCollector.test.mts`](../__tests__/collectors/StaticRoleCollector.test.mts).
 
 ## Failure and lifecycle
 
@@ -119,36 +130,24 @@ deployment names these collectors through `builtinCollectorsModule`.
   — with an `Error` naming the collector and the field at construction, so a deployment that
   wrote it never serves a decision; their `collect` does not throw on the shape of a claim or
   a field: what does not match is dropped, and a request with no context yields an empty map.
-- The static collectors validate nothing at construction: a `roles` / `permissions` that is
-  missing or not iterable throws a `TypeError` on the first `collect` instead (documented, not
-  tested). Each collect hands out a shallow copy of the configured list — the `Role` objects
-  are shared (documented, not tested). The configured list itself is the caller's array, held
-  by reference — see [Known issues](#known-issues).
+- The static collectors validate nothing at construction, but they copy there: a missing or
+  non-iterable top-level `roles` (`StaticRoleCollector`) or `permissions`
+  (`StaticPermissionCollector`) throws a `TypeError` from the constructor. Inside a role,
+  nothing is checked: a malformed `Role` entry is copied as it is, not coerced —
+  `HasPermission` ignores one that is not an object or whose `permissions` is not an array.
+  Each collect hands out a shallow copy of the collector's own list — its `Role` copies are
+  shared between the collects' outputs (documented, not tested).
 - The pipeline's per-collector timeout and deadline are in force on every collect. These do no
   I/O and complete within any usable bound, but a bound is a bound: an already-aborted caller,
   a sibling's failure or a deadline that expires while one is queued ends it before or during
   `collect`, and a fan-out that has already ended makes any collector throw without running.
 
-## Known issues
-
-- [`StaticRoleCollector`](StaticRoleCollector.mts) and
-  [`StaticPermissionCollector`](StaticPermissionCollector.mts) keep the array in their config
-  by reference (`this.roles = config.roles`, `this.permissions = config.permissions`) and copy
-  it only on each `collect`. A host that constructs one itself and then mutates the array it
-  passed — or a `Role` in it — changes what every later collect emits, and so the decisions,
-  with no validation. The comparison rules keep their config object the same way
-  ([`../rules/README.md`](../rules/README.md#known-issues)); both fall under #255, which is to
-  decide whether construction copies (or freezes) or the caller carries the obligation. The
-  factories in [`../module.mts`](../module.mts) pass the config entry through unchanged, and
-  the server's `createApp` hands them the entry from the config it was given — so the same
-  holds for a host that mutates that config after boot. The mapping collectors and
-  `PayloadScopeCollector` build what they keep at construction and are not affected.
-
 ## Contract tests
 
-[`../__tests__/collectors/`](../__tests__/collectors/) — the four files named above, with
+[`../__tests__/collectors/`](../__tests__/collectors/) — the four files named above, and
 [`StaticRoleCollector.test.mts`](../__tests__/collectors/StaticRoleCollector.test.mts) and
-[`StaticPermissionCollector.test.mts`](../__tests__/collectors/StaticPermissionCollector.test.mts)
-— and [`../__tests__/module.test.mts`](../__tests__/module.test.mts) for the registrations. The
+[`StaticPermissionCollector.test.mts`](../__tests__/collectors/StaticPermissionCollector.test.mts),
+which pin what the static collectors emit and that it is copied at construction — and
+[`../__tests__/module.test.mts`](../__tests__/module.test.mts) for the registrations. The
 merge these collectors feed is pinned in core:
 [`AttributePipeline.test.mts`](../../../core/src/__tests__/AttributePipeline.test.mts).

@@ -34,27 +34,42 @@ export interface AttrPairCompareConfig {
  *   `attr_pair_compare:{a}:{op}:{b}`
  *
  * Pass an explicit `group` string to override the default ruleType entirely.
+ *
+ * ## Configuration is copied at construction
+ *
+ * The constructor reads each field of `config` once, validates it, and keeps
+ * the validated value in a field of its own; the object is not retained (#255).
+ * A caller that mutates the config afterwards changes nothing: the rule answers
+ * from the values it validated, and `ruleType` and `message` keep describing
+ * them.
  */
 export class AttrPairCompare implements Rule {
 	readonly ruleType: string;
 	readonly code = "attr_compare_violated";
 	readonly message: string;
 
-	constructor(private readonly config: AttrPairCompareConfig) {
-		requireAttrName("AttrPairCompare", "a", config.a);
-		requireAttrName("AttrPairCompare", "b", config.b);
-		requireCompareOp("AttrPairCompare", config.op);
+	private readonly a: string;
+	private readonly op: CompareOp;
+	private readonly b: string;
+
+	constructor(config: AttrPairCompareConfig) {
+		const a = requireAttrName("AttrPairCompare", "a", config.a);
+		const b = requireAttrName("AttrPairCompare", "b", config.b);
+		const op = requireCompareOp("AttrPairCompare", config.op);
 		const group = requireOptionalGroup("AttrPairCompare", config.group);
 
-		this.ruleType = group ?? `attr_pair_compare:${config.a}:${config.op}:${config.b}`;
-		this.message = `Attribute constraint not satisfied: ${config.a} must be ${config.op} ${config.b}.`;
+		this.a = a;
+		this.op = op;
+		this.b = b;
+		this.ruleType = group ?? `attr_pair_compare:${a}:${op}:${b}`;
+		this.message = `Attribute constraint not satisfied: ${a} must be ${op} ${b}.`;
 	}
 
 	verify(attrs: ReadonlyAttributes): boolean {
-		const a = attrs.get(this.config.a);
-		const b = attrs.get(this.config.b);
+		const a = attrs.get(this.a);
+		const b = attrs.get(this.b);
 		if (typeof a !== "number") return false;
 		if (typeof b !== "number") return false;
-		return applyCompare(this.config.op, a, b);
+		return applyCompare(this.op, a, b);
 	}
 }

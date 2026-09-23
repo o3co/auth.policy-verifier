@@ -29,24 +29,37 @@ export interface AttrPairEqualConfig {
  *   `attr_pair_equal:{a}:{b}`
  *
  * Pass a shared `group` string to two instances to opt into OR semantics.
+ *
+ * ## Configuration is copied at construction
+ *
+ * The constructor reads each field of `config` once, validates it, and keeps
+ * the validated value in a field of its own; the object is not retained (#255).
+ * A caller that mutates the config afterwards changes nothing: the rule answers
+ * from the values it validated, and `ruleType` and `message` keep describing
+ * them.
  */
 export class AttrPairEqual implements Rule {
 	readonly ruleType: string;
 	readonly code = "attr_mismatch";
 	readonly message: string;
 
-	constructor(private readonly config: AttrPairEqualConfig) {
-		requireAttrName("AttrPairEqual", "a", config.a);
-		requireAttrName("AttrPairEqual", "b", config.b);
+	private readonly a: string;
+	private readonly b: string;
+
+	constructor(config: AttrPairEqualConfig) {
+		const a = requireAttrName("AttrPairEqual", "a", config.a);
+		const b = requireAttrName("AttrPairEqual", "b", config.b);
 		const group = requireOptionalGroup("AttrPairEqual", config.group);
 
-		this.ruleType = group ?? `attr_pair_equal:${config.a}:${config.b}`;
-		this.message = `Attribute constraint not satisfied: ${config.a} must equal ${config.b}.`;
+		this.a = a;
+		this.b = b;
+		this.ruleType = group ?? `attr_pair_equal:${a}:${b}`;
+		this.message = `Attribute constraint not satisfied: ${a} must equal ${b}.`;
 	}
 
 	verify(attrs: ReadonlyAttributes): boolean {
-		const a = attrs.get(this.config.a);
-		const b = attrs.get(this.config.b);
+		const a = attrs.get(this.a);
+		const b = attrs.get(this.b);
 		if (typeof a !== "string" || a.length === 0) return false;
 		if (typeof b !== "string" || b.length === 0) return false;
 		return a === b;

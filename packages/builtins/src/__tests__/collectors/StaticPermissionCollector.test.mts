@@ -21,6 +21,15 @@ const stubContext: CollectorContext = {
 };
 
 describe("StaticPermissionCollector", () => {
+	it.each([
+		["missing", undefined],
+		["null", null],
+		["a number", 42],
+		["a plain object", {}],
+	])("throws a TypeError at construction when `permissions` is %s (#255)", (_label, value) => {
+		expect(() => new StaticPermissionCollector({ permissions: value } as never)).toThrow(TypeError);
+	});
+
 	it("returns configured permissions", async () => {
 		const collector = new StaticPermissionCollector({
 			permissions: ["project:*.perm:read", "document:*.perm:write"],
@@ -33,5 +42,26 @@ describe("StaticPermissionCollector", () => {
 		const collector = new StaticPermissionCollector({ permissions: [] });
 		const attrs = await collector.collect(stubContext);
 		expect(attrs.get(ATTR_PERMISSIONS)).toEqual([]);
+	});
+
+	// #255: the collector answers from what it was given at construction. A
+	// host that keeps the config and changes it afterwards changes nothing.
+	it.each<[string, (config: { permissions: string[] }) => void]>([
+		["pushing to the permissions array", (c) => c.permissions.push("*")],
+		["splicing the permissions array", (c) => c.permissions.splice(0, 1, "*")],
+		[
+			"replacing the permissions field",
+			(c) => {
+				c.permissions = ["*"];
+			},
+		],
+	])("%s after construction changes nothing it collects (#255)", async (_name, mutate) => {
+		const config = { permissions: ["project:*.perm:read", "document:*.perm:write"] };
+		const collector = new StaticPermissionCollector(config);
+
+		mutate(config);
+
+		const attrs = await collector.collect(stubContext);
+		expect(attrs.get(ATTR_PERMISSIONS)).toEqual(["project:*.perm:read", "document:*.perm:write"]);
 	});
 });

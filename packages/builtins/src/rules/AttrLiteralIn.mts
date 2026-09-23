@@ -35,30 +35,40 @@ export interface AttrLiteralInConfig {
  * will share a ruleType and be OR-combined.
  *
  * Pass an explicit `group` string to override the default ruleType entirely.
+ *
+ * ## Configuration is copied at construction
+ *
+ * The constructor reads each field of `config` once, validates it, and keeps
+ * the validated value in a field of its own; the object is not retained (#255).
+ * A caller that mutates the config afterwards changes nothing: the rule answers
+ * from the values it validated, and `ruleType` and `message` keep describing
+ * them.
  */
 export class AttrLiteralIn implements Rule {
 	readonly ruleType: string;
 	readonly code = "attr_not_in_set";
 	readonly message: string;
 
+	private readonly a: string;
 	private readonly elementType: string;
 	private readonly valuesSet: Set<LiteralValue>;
 
-	constructor(private readonly config: AttrLiteralInConfig) {
-		requireAttrName("AttrLiteralIn", "a", config.a);
+	constructor(config: AttrLiteralInConfig) {
+		const a = requireAttrName("AttrLiteralIn", "a", config.a);
 		const values = requireHomogeneousLiteralArray("AttrLiteralIn", config.values);
 		const group = requireOptionalGroup("AttrLiteralIn", config.group);
 
+		this.a = a;
 		this.elementType = typeof values[0];
 		this.valuesSet = new Set(values);
 
 		const valuesKey = computeValuesKey(values);
-		this.ruleType = group ?? `attr_literal_in:${config.a}:${valuesKey}`;
-		this.message = `Attribute constraint not satisfied: ${config.a} must be one of [${values.map(String).join(", ")}].`;
+		this.ruleType = group ?? `attr_literal_in:${a}:${valuesKey}`;
+		this.message = `Attribute constraint not satisfied: ${a} must be one of [${values.map(String).join(", ")}].`;
 	}
 
 	verify(attrs: ReadonlyAttributes): boolean {
-		const x = attrs.get(this.config.a);
+		const x = attrs.get(this.a);
 		if (typeof x !== this.elementType) return false;
 		return this.valuesSet.has(x as LiteralValue);
 	}
