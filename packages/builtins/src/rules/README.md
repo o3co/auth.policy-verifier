@@ -1,23 +1,29 @@
 # Rules
 
+Last updated: 2026-09-23
+
 The built-in rules — predicates over attributes — and, under [`collectors/`](collectors/), the
 two rule collectors that build them from the request.
 
 ## Responsibility
 
+The rule side of `@o3co/auth.policy-verifier.builtins`: core's `RulePipeline` runs the two
+rule collectors here (registered by [`../module.mts`](../module.mts)), core's `evaluate()`
+asks the rules they return, and a host may construct any rule class itself. Nothing here
+depends on anything outside core but one helper from [`../collectors/`](../collectors/)
+(see [Dependencies](#dependencies)). This directory owns
+what each rule compares and how — its matching, its refusals of bad configuration, its
+default `ruleType` and `code` — and, for the two collectors, which rule a request gets. It
+does not own the grouping or the decision (core's `evaluate()`), the attributes (produced by
+`../collectors/`), or any rule that needs I/O (`AsyncRule`s are `packages/cedar`'s or the
+consumer's). It is a directory apart from `../collectors/` because of the split described
+under [`collectors/`](#collectors--the-layer-that-reads-the-request) below: collectors read
+the request, rules read `attrs`.
+
 A rule here answers one question about `attrs` and holds nothing else: what it compares
 against comes from configuration, or for the two collected rules from the request at collect
-time, and the rule never writes to it. The comparison rules keep the caller's
-config object by reference and read `a`, `b`, `op` and `v` off it at verify time, while
-`ruleType` and `message` are computed once in the constructor — so a host that constructs one
-itself and then mutates the object it passed changes the answers, past the construction-time
-guards and out of step with the `ruleType` the evaluator groups by. `HasScope` and
-`HasPermission` take a string and keep nothing of the caller's. Nothing in the bundled
-composition is exposed to this: [`module.mts`](../module.mts) registers the attribute
-collectors, the two rule collectors and the resource parser — no comparison rule is
-constructed there — and the rule collectors build their rules per request from the request
-itself. It applies to a host that constructs one of these classes and keeps the object it
-passed. Whether construction should copy or freeze it is #255.
+time, and the rule never writes to it. How the comparison rules hold their configuration is
+under [Known issues](#known-issues).
 
 - [`HasScope`](HasScope.mts) — `ATTR_SCOPES` contains the required scope; `ruleType` `scope`,
   `code` `invalid_scope`. Exact and case-sensitive; the bare `x` → `read:x` rewrite is opt-in
@@ -137,6 +143,21 @@ deployment that sets `claim` sets it on both. Imported by `../index.mts` and `..
   [`ResourceActionScopeRuleCollector.test.mts`](../__tests__/rules/collectors/ResourceActionScopeRuleCollector.test.mts);
   the permission string is `<resource.raw>.perm:<action>` —
   [`ResourceActionPermissionRuleCollector.test.mts`](../__tests__/rules/collectors/ResourceActionPermissionRuleCollector.test.mts).
+
+## Known issues
+
+- The comparison rules keep the caller's config object by reference and read `a`, `b`, `op`
+  and `v` off it at verify time, while `ruleType` and `message` are computed once in the
+  constructor — so a host that constructs one itself and then mutates the object it passed
+  changes the answers, past the construction-time guards and out of step with the `ruleType`
+  the evaluator groups by. `HasScope` and `HasPermission` take a string and keep nothing of
+  the caller's. Nothing in the bundled composition is exposed to this:
+  [`module.mts`](../module.mts) registers the attribute collectors, the two rule collectors
+  and the resource parser — no comparison rule is constructed there — and the rule collectors
+  build their rules per request from the request itself. It applies to a host that constructs
+  one of these classes and keeps the object it passed. Whether construction should copy or
+  freeze it is #255, which also covers the static attribute collectors' configured arrays —
+  [`../collectors/README.md`](../collectors/README.md#known-issues).
 
 ## Failure and lifecycle
 

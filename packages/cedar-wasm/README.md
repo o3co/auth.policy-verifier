@@ -1,5 +1,7 @@
 # @o3co/auth.policy-verifier.cedar-wasm
 
+Last updated: 2026-09-23
+
 The in-process Cedar engine for
 [`@o3co/auth.policy-verifier.cedar`](../cedar/README.md): the official
 [`@cedar-policy/cedar-wasm`](https://www.npmjs.com/package/@cedar-policy/cedar-wasm)
@@ -24,6 +26,34 @@ the revision was computed over, under an id nothing else holds — so an answer
 cannot have come from any other policies. It is the engine
 `requireConfirmedRevision = true` boots over; see cedar's [Policy
 revision](../cedar/README.md#policy-revision-which-policies-decided).
+
+## Responsibility
+
+**Role.** One engine behind cedar's `CedarEngine` port
+([`engine.mts`](../cedar/src/engine.mts)). It depends on
+`@o3co/auth.policy-verifier.cedar` and on `@cedar-policy/cedar-wasm`. No
+package in this repository depends on it (only the integration tests do); a
+deployment imports it.
+
+**Owns** ([`src/wasmEngine.mts`](src/wasmEngine.mts)):
+
+- Parse-checking each policy file at boot, so a syntax error names its file,
+  and compiling the set once into wasm memory under an id minted per load.
+- Evaluating each request against that compiled set, synchronously, and
+  rendering the bindings' answer as a `CedarDecision`.
+- Naming the revision of the source it compiled on every answer.
+- The exact version of `@cedar-policy/cedar-wasm`.
+- Registering itself as `"wasm"` when imported
+  ([`src/index.mts`](src/index.mts)).
+
+**Does not own.** Policy loading, the policy revision itself, the
+attribute-to-request mapping, what an answer means (the answer table,
+`onNoDeterminingPolicy`, the revision check) and which engine is selected. All
+of that is cedar's, and is identical whichever engine runs.
+
+**Why a separate package.** The cost below: about 12 MB of wasm instantiated
+on import. Kept out of cedar, it is carried only by a deployment that
+evaluates in-process; one that runs cedar's `http` engine never loads it.
 
 ## What it costs, and when to choose it
 

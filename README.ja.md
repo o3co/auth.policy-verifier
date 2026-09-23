@@ -1,5 +1,7 @@
 # auth.policy-verifier
 
+最終更新: 2026-09-23
+
 [![CI](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth.policy-verifier.core)](https://www.npmjs.com/package/@o3co/auth.policy-verifier.core)
 [![codecov](https://codecov.io/gh/o3co/auth.policy-verifier/graph/badge.svg)](https://codecov.io/gh/o3co/auth.policy-verifier)
@@ -12,6 +14,39 @@
 - OPA や Cedar にドロップイン置き換え可能 — [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) は共通の `VerifierEndpoint` インターフェース経由で本サービス、OPA、Cedar Agent のいずれにもルーティング可能
 - HTTP サイドカーとして動作 — エンジンの差し替えはコード変更ではなく設定変更で完了
 - JWT 検証アルゴリズム設定可能 — HS256, RS256, ES256, EdDSA。JWKS または公開鍵直接指定に対応。
+
+## 責務と役割
+
+**役割.** [auth](https://github.com/o3co/auth) スタックにおける認可の *判定* 点です。
+呼び出し側のサービス — 典型的には認可実施層
+（[protobuf.interceptors](https://github.com/o3co/protobuf.interceptors)）— が、
+サブジェクトのトークンと、これから操作しようとしている `resource`・`action`・任意の
+`context` を送り、構造化された `reason` 付きの `allow` / `deny` を受け取ります。
+
+**所有するもの:**
+
+- 設定された token authenticator（`oauth.authenticator`）によるサブジェクトの認証。
+  組み込みのものは bearer JWT を検証し（署名、`iss`、`aud`、`typ`、`exp` / `iat`）、
+  鍵と issuer はデプロイメントの設定に従う。モジュールは別の authenticator
+  （introspection、IdP SDK、ゲートウェイの attestation など）を登録できる
+- 判定に必要な事実の収集（attribute collector）と適用するルールの収集（rule collector）、
+  およびその評価 — ルールグループ内は OR、グループ間は AND、fail-closed
+- `POST /verify` と `POST /verify/batch` のワイヤ契約、および各応答を事後に説明可能に
+  する decision ログとメトリクス
+
+**所有しないもの:**
+
+- トークン発行 — トークンを発行するのは [auth.provider](https://github.com/o3co/auth.provider)
+  （またはデプロイメントの IdP）で、このリポジトリは渡されたものを認証するだけ
+- 認可の実施 — 応答に従って呼び出しを拒否するのは呼び出し側の仕事
+- 操作の意味づけ — ある呼び出しをどの `resource` / `action` に対応づけ、`context` に
+  何を入れるかは呼び出し側が決める
+- ポリシーやパーミッションのストア — 事実は collector から来る。パーミッションを
+  自前のストアに持つデプロイメントは、それを読む collector を書く
+
+**別サービスである理由.** 判定は差し替え可能な部品です。認可実施層は共通の
+`VerifierEndpoint` 経由で到達するため、呼び出し側に手を入れずに OPA や Cedar Agent に
+置き換えられます。
 
 ## 仕組み
 
@@ -135,14 +170,34 @@ curl -X POST http://localhost:3000/verify/batch \
 ## アーキテクチャ
 
 ```text
-standalone → server   → core
-          → builtins  → core
+templates/standalone ─→ server ───→ core
+                     ├─→ builtins ─→ core
+                     └─→ core
+cedar-wasm ─→ cedar ─→ core            (オプション。コンポジションが選んで組み込む)
+create-app  ── templates/standalone をコピーする。どのパッケージも import しない
 ```
 
 - **core** — 型定義、`evaluate()`、`AttributePipeline`、`RulePipeline`、Module 基盤。ランタイム依存なし。エンジン中立な入力: core が受け取るのは `(subject, resource, action, requestContext)` で、`subject` は属性バッグ — core は JWT を一切知らない。デフォルト server が検証済み JWT クレームからバッグを組み立てる。このマッピングが server の境界に置かれていることが、エンジン差し替え可能性の担保。
 - **builtins** — 組み込み Collector (scope, permission, role, subject ID)、ルール (HasScope, HasPermission, 属性比較ルール)、DotNotation リソースパーサー。server に依存しない。カスタム Rule / Collector の書き方は [`docs/extending.ja.md`](docs/extending.ja.md) を参照。
 - **server** — Express HTTP サーバー、`createApp()`、`POST /verify` ルート、JWT 鍵解決、設定スキーマ。builtins に依存しない。
+- **cedar** — オプションの Cedar ポリシー評価（1 ルールグループとして）。`CedarEngine` port の背後で評価し、cedar-agent と通信するプロセス外の `http` engine も同梱する。依存は core のみ。
+- **cedar-wasm** — in-process の Cedar engine（`@cedar-policy/cedar-wasm`）。import すると cedar の port の背後に登録される。
 - **standalone** — コンポジションルート: HOCON 設定読み込み、モジュール選択、サーバー起動。
+- **create-app** — `templates/standalone` を新しいプロジェクトにコピーする `npx` スキャフォルダー。
+
+### パッケージマップ
+
+各パッケージが独立したパッケージである理由 — それぞれが保っている境界:
+
+| パッケージ | 役割 | 分離の理由 |
+| --- | --- | --- |
+| core | 他のすべてのパッケージが土台にする契約と評価器 | ランタイム依存ゼロ。collector・rule・engine が Express や JWT、メトリクスのライブラリを引き込まずに依存できる |
+| builtins | 既製の collector、rule、リソースパーサー | 差し替え可能: 依存は core のみで、server は依存しない（テスト用の devDependency のみ）。デプロイメントは外すことも自前のものに替えることもできる |
+| server | HTTP とトークンの境界: `createApp`、ルート、JWT 検証、設定スキーマ、メトリクス | `express`・`jose`・`prom-client`・`zod` を持ち込む唯一のライブラリパッケージ。ここに閉じ込めることで core をエンジン中立に保つ |
+| cedar | `CedarEngine` port の背後の、オプションのルールグループとしての Cedar | オプトイン: デプロイメントが import しない限り Cedar は何も読み込まれず、その語彙は core に入らない |
+| cedar-wasm | in-process の Cedar 評価器 | どの評価器を使うかは依存関係の選択。約 12 MB の wasm モジュールのコストは import したデプロイメントだけが払う |
+| templates/standalone | コンポジションルートであり、デプロイメントの出発点 | デプロイメントごとの選択（モジュール、設定、ロガー、shutdown、Docker）を持つ。private で、import されるのではなくコピーされる |
+| create-app | スキャフォルダー CLI | `bin` を持つ単独パッケージとして公開され `npx` で実行できる。テンプレートの複製を同梱する |
 
 ## パッケージ構成
 
@@ -155,6 +210,18 @@ standalone → server   → core
 | [`packages/server`](packages/server/) | `@o3co/auth.policy-verifier.server` | Express サーバー、`createApp`、`POST /verify`、JWT 鍵リゾルバ |
 | [`templates/standalone`](templates/standalone/) | — | デプロイ可能なサーバーテンプレート (コンポジションルート) |
 | [`create-app`](create-app/) | `@o3co/create-auth-policy-verifier` | CLI スキャフォルダー |
+
+各パッケージの README がそのパッケージの役割と境界を述べています。パッケージの内部は、
+次のページがディレクトリ単位でソースを案内します — 変更するディレクトリのものを
+読んでください（いずれも英語）:
+
+- [`packages/core/src/README.md`](packages/core/src/README.md) — エンジンのコア
+- [`packages/builtins/src/collectors/README.md`](packages/builtins/src/collectors/README.md) — 組み込み attribute collector
+- [`packages/builtins/src/rules/README.md`](packages/builtins/src/rules/README.md) — 組み込みルールと rule collector
+- [`packages/server/src/README.md`](packages/server/src/README.md) — server のソース構成
+- [`packages/server/src/decision/README.md`](packages/server/src/decision/README.md) — リクエストごとの判定パイプライン
+- [`packages/server/src/routes/README.md`](packages/server/src/routes/README.md) — HTTP ルート
+- [`packages/cedar/src/README.md`](packages/cedar/src/README.md) — Cedar の port、engine、module
 
 ## 評価ロジック
 

@@ -1,8 +1,37 @@
 # @o3co/auth.policy-verifier.builtins
 
+Last updated: 2026-09-23
+
 Built-in attribute collectors, rule collectors, and resource parser for auth.policy-verifier.
 
 **Runtime:** Server- and edge-side JavaScript runtimes that support `BigInt` and `Map.groupBy` — Node.js 22+ (declared via `engines.node` so older Node installs are blocked at install time), Cloudflare Workers, Vercel Edge, Deno, Bun. Browsers are out of scope by design: authorization decisions must be enforced server-side. The `server` companion package remains Node-only.
+
+## Responsibility
+
+A small, ready-made set of implementations of core's interfaces: attribute collectors, rules,
+rule collectors, a resource parser, and `builtinCollectorsModule`, which registers them for
+a host such as the server's `createApp`. It depends on `@o3co/auth.policy-verifier.core` alone;
+`templates/standalone` wires it in, and `server` uses it only in its tests
+(`devDependencies`).
+
+- **Owns** what these implementations read, write and match: the mapping from JWT claims
+  (`sub`, `azp`, `scope`, declared claims) to attribute keys (#170), the matching rules of
+  `HasScope` / `HasPermission` and the comparison rules, and the dot-notation resource
+  grammar.
+- **Does not own** the pipelines, the grouping or the decision (core), authentication or HTTP
+  (`server`), policy engines or `AsyncRule`s (`cedar`), or collectors that do I/O — those are
+  the consumer's to write ([docs/extending.md](../../docs/extending.md)).
+- **Why a separate package from core:** core is the engine-neutral contract and names no
+  field of the subject (#170); the claim vocabulary and the concrete matching live here, on
+  the other side of that line ([AGENTS.md — Core Vocabulary Scope](../../AGENTS.md#core-vocabulary-scope)).
+  It is also optional: builtins is a deliberately basic set, not a catalog
+  ([docs/extending.md — Positioning](../../docs/extending.md#positioning-builtins-is-a-basic-set-not-an-exhaustive-catalog)),
+  so a deployment that writes its own collectors and rules does not have to install it, and
+  core does not grow with it.
+
+Module maps, invariants and contract tests:
+[`src/collectors/README.md`](src/collectors/README.md) (attribute collectors) and
+[`src/rules/README.md`](src/rules/README.md) (rules and rule collectors).
 
 ## Install
 
@@ -23,7 +52,7 @@ All collectors implement `AttributeCollector`.
 | `RequestContextAttributeCollector` | declared fields of `requestContext` | the operator's own keys | `{ attributes: Mapping[] }` |
 | `PayloadClaimAttributeCollector` | declared claims of the verified `subject` | the operator's own keys, or core's five | `{ attributes: Mapping[] }` (#219) |
 
-`StaticPermissionCollector` and `StaticRoleCollector` always emit the values supplied at construction time, regardless of request context.
+`StaticPermissionCollector` and `StaticRoleCollector` always emit the values supplied at construction time, regardless of request context. They keep the array they were given by reference, so mutating it after construction changes what they emit (#255 — see [`src/collectors/README.md`](src/collectors/README.md#known-issues)).
 
 ### PayloadClaimAttributeCollector
 
@@ -301,6 +330,8 @@ that syntax.
 import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
 ```
 
+Registrations as of this writing; the source of truth is [`src/module.mts`](src/module.mts).
+
 | Registry | Name | Factory |
 | --- | --- | --- |
 | `attributeCollector` | `"PayloadScopeCollector"` | `(config) => new PayloadScopeCollector(config)` |
@@ -315,6 +346,7 @@ import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
 
 ## See Also
 
+- [`src/collectors/README.md`](src/collectors/README.md), [`src/rules/README.md`](src/rules/README.md) — module maps, invariants and contract tests of this package
 - [Extension guide (`docs/extending.md`)](../../docs/extending.md) — how to write custom `Rule` and `AttributeCollector` implementations; positioning of `builtins` as a basic set
 - [`@o3co/auth.policy-verifier.core`](../core/README.md) — core interfaces and attribute constants
 - [auth.policy-verifier root README](../../README.md) — full setup and configuration reference
