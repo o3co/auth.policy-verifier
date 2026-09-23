@@ -26,8 +26,8 @@ import {
 	MAX_PREVIOUS_SECRETS,
 	MIN_SECRET_ENTROPY_BYTES,
 } from "#/config/defaults.mjs";
-import { checkHs256Rotation, parseHs256Rotation } from "#/jwt/hs256Rotation.mjs";
-import { type JwksFetchConfig, resolveJwksFetchBounds } from "#/jwt/jwks.mjs";
+import { checkHs256Rotation, parseHs256Rotation } from "#/config/hs256Rotation.mjs";
+import { type JwksFetchConfig, resolveJwksFetchBounds } from "#/config/jwks.mjs";
 import { type JwtTimeClaimConfig, resolveJwtTimeClaimBounds } from "#/jwt/tokenAuthenticator.mjs";
 
 const baseBody = {

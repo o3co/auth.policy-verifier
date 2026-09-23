@@ -17,6 +17,12 @@ export {
 	JWT_MODE_MIGRATION_MESSAGE,
 } from "./config/application.schema.mjs";
 export {
+	type AudienceClaimCheck,
+	checkAudienceClaim,
+	DEFAULT_AUDIENCE_CLAIM,
+	UNPINNED_TOKEN_TYPE,
+} from "./config/audienceClaim.mjs";
+export {
 	CALLER_AUTH_REQUIRED,
 	DEFAULT_BATCH_CONCURRENCY,
 	DEFAULT_CALLER_AUTH_HEADER,
@@ -30,6 +36,23 @@ export {
 	MAX_TCP_PORT,
 	MIN_SECRET_ENTROPY_BYTES,
 } from "./config/defaults.mjs";
+export {
+	checkHs256Rotation,
+	type Hs256PreviousSecret,
+	type Hs256Rotation,
+	type Hs256RotationCheck,
+	type Hs256RotationConfig,
+	type Hs256RotationIssue,
+	parseHs256Rotation,
+} from "./config/hs256Rotation.mjs";
+export {
+	checkJwksUri,
+	type JwksFetchBounds,
+	type JwksFetchConfig,
+	type JwksUriCheck,
+	parseJwksUri,
+	resolveJwksFetchBounds,
+} from "./config/jwks.mjs";
 // The HS256 entropy floor's measurement (#114), exported so a consumer that
 // accepts its own operator secrets — a custom key resolver, a composition root
 // building a JWT config by hand — applies the identical reading rather than a
@@ -53,38 +76,21 @@ export {
 } from "./http/requestId.mjs";
 export {
 	type AssertedJwtConfig,
-	type AudienceClaimCheck,
 	assertVerifyRouterJwtConfig,
 	audienceMatches,
 	builtinKeyResolversModule,
-	checkAudienceClaim,
-	checkHs256Rotation,
-	checkJwksUri,
 	createTokenAuthenticator,
-	DEFAULT_AUDIENCE_CLAIM,
 	type DecodingJwtConfig,
 	EdDSAKeyResolverFactory,
 	ES256KeyResolverFactory,
 	HS256KeyResolverFactory,
-	type Hs256PreviousSecret,
-	type Hs256Rotation,
-	type Hs256RotationCheck,
-	type Hs256RotationConfig,
-	type Hs256RotationIssue,
 	JWT_TOKEN_AUTHENTICATOR,
-	type JwksFetchBounds,
-	type JwksFetchConfig,
-	type JwksUriCheck,
 	type JwtConfigErrorContext,
 	type JwtTimeClaimBounds,
 	type JwtTimeClaimConfig,
 	JwtTokenAuthenticatorFactory,
-	parseHs256Rotation,
-	parseJwksUri,
 	RS256KeyResolverFactory,
-	resolveJwksFetchBounds,
 	resolveJwtTimeClaimBounds,
-	UNPINNED_TOKEN_TYPE,
 	type UncheckedJwtConfig,
 	type VerifyingJwtConfig,
 	type VerifyRouterJwtConfig,

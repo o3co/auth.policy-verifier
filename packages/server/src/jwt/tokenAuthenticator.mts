@@ -27,20 +27,19 @@
 import type { EventLogger } from "@o3co/auth.policy-verifier.core";
 import { decodeJwt, errors, type JWTPayload, jwtVerify } from "jose";
 import type { AuthenticationResult, TokenAuthenticator } from "../auth/tokenAuthenticator.mjs";
-import { NUMERIC_BOUNDS, resolveBound } from "../config/bounds.mjs";
 import {
-	audienceMatches,
 	checkAudienceClaim,
 	DEFAULT_AUDIENCE_CLAIM,
 	UNPINNED_TOKEN_TYPE,
-} from "./audienceClaim.mjs";
+} from "../config/audienceClaim.mjs";
+import { NUMERIC_BOUNDS, resolveBound } from "../config/bounds.mjs";
 
 /**
  * Bounds on a presented token's own lifetime (#110), settable in either mode
  * because both modes enforce them.
  *
  * Each admits the string a HOCON env substitution delivers as well as a number,
- * for the same reason the JWKS fetch bounds in `jwt/jwks.mts` do: `createApp`
+ * for the same reason the JWKS fetch bounds in `config/jwks.mts` do: `createApp`
  * accepts hand-built config objects, and a consumer assembling one from
  * `process.env` supplies strings.
  */
@@ -308,6 +307,25 @@ export function assertVerifyRouterJwtConfig<T extends UncheckedJwtConfig>(
 	if (!audienceClaim.ok) {
 		throw new Error(`${caller}: ${path}.${audienceClaim.message}`);
 	}
+}
+
+/**
+ * Whether a claim value satisfies the configured audience, at least as strict
+ * as jose's rule for `aud` (RFC 7519 §4.1.3): a string equal to an accepted
+ * value, or an array of strings containing one. Anything else — absent, a
+ * number, an array with a non-string in it (which jose would tolerate) — does
+ * not.
+ */
+export function audienceMatches(value: unknown, accepted: string | readonly string[]): boolean {
+	const acceptedList = typeof accepted === "string" ? [accepted] : accepted;
+	if (typeof value === "string") return acceptedList.includes(value);
+	if (Array.isArray(value)) {
+		return (
+			value.every((entry) => typeof entry === "string") &&
+			value.some((entry) => acceptedList.includes(entry))
+		);
+	}
+	return false;
 }
 
 /**

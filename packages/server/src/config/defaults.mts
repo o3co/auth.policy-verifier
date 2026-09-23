@@ -227,7 +227,7 @@ export const MAX_CLOCK_TOLERANCE_SECONDS = 300;
  * The same number auth.provider enforces (its #282), deliberately: the two
  * services share one secret, so a floor that either side applies alone is a
  * floor neither side has. This is the one statement of that reasoning in the
- * code — `config/secretEntropy.mts` and `jwt/hs256Rotation.mts` point here
+ * code — `config/secretEntropy.mts` and `config/hs256Rotation.mts` point here
  * rather than restating it, so a later clarification lands once.
  *
  * It is measured on DECODED material at the smallest plausible reading — see

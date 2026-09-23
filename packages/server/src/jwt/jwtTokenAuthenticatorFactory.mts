@@ -13,8 +13,8 @@ import {
 	JWT_MODE_REMOVED_KEYS,
 } from "../config/application.schema.mjs";
 import { assertConfigObject } from "../config/assertConfigObject.mjs";
+import { checkAudienceClaim } from "../config/audienceClaim.mjs";
 import { JWT_TOKEN_AUTHENTICATOR } from "../config/tokenAuthenticatorSelection.mjs";
-import { checkAudienceClaim } from "./audienceClaim.mjs";
 import {
 	assertVerifyRouterJwtConfig,
 	createTokenAuthenticator,

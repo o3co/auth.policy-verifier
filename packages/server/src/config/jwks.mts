@@ -17,12 +17,14 @@
  * Deliberately dependency-free: `AppConfigSchema` imports it so a rejected URI
  * fails at config-parse time (at boot, where an operator sees it) instead of at
  * the first request, and config-only consumers of the schema must not pull jose
- * or express in behind it. The `KeyResolverFactory` re-checks at construction,
- * through this same function — see AGENTS.md, "Two-Boundary Config Validation".
+ * or express in behind it. The `KeyResolverFactory` in `jwt/` re-checks at
+ * construction, through this same function — see AGENTS.md, "Two-Boundary
+ * Config Validation". It lives in `config/` so that the dependency runs one
+ * way, `jwt/` → `config/` (#260).
  */
 
-import { NUMERIC_BOUNDS, resolveBound } from "../config/bounds.mjs";
 import { isLoopbackHost } from "../net/loopback.mjs";
+import { NUMERIC_BOUNDS, resolveBound } from "./bounds.mjs";
 
 /**
  * Hosts exempt from the https requirement, named in the rejection message.
@@ -120,7 +122,7 @@ export interface JwksFetchBounds {
  * absent bound defaults; a present one that is not a whole number of
  * milliseconds in range throws, naming the config key the operator wrote.
  *
- * The bounds themselves live in `config/bounds.mts` and are the very specs
+ * The bounds themselves live in `bounds.mts` and are the very specs
  * `AppConfigSchema` reads a config file through (#157), so the two boundaries
  * cannot diverge on what a knob admits or on how it says so.
  *

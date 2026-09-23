@@ -2,13 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export {
-	type AudienceClaimCheck,
-	audienceMatches,
-	checkAudienceClaim,
-	DEFAULT_AUDIENCE_CLAIM,
-	UNPINNED_TOKEN_TYPE,
-} from "./audienceClaim.mjs";
-export {
 	builtinKeyResolversModule,
 	EdDSAKeyResolverFactory,
 	ES256KeyResolverFactory,
@@ -16,29 +9,13 @@ export {
 	RS256KeyResolverFactory,
 } from "./builtinKeyResolversModule.mjs";
 export {
-	checkHs256Rotation,
-	type Hs256PreviousSecret,
-	type Hs256Rotation,
-	type Hs256RotationCheck,
-	type Hs256RotationConfig,
-	type Hs256RotationIssue,
-	parseHs256Rotation,
-} from "./hs256Rotation.mjs";
-export {
-	checkJwksUri,
-	type JwksFetchBounds,
-	type JwksFetchConfig,
-	type JwksUriCheck,
-	parseJwksUri,
-	resolveJwksFetchBounds,
-} from "./jwks.mjs";
-export {
 	JWT_TOKEN_AUTHENTICATOR,
 	JwtTokenAuthenticatorFactory,
 } from "./jwtTokenAuthenticatorFactory.mjs";
 export {
 	type AssertedJwtConfig,
 	assertVerifyRouterJwtConfig,
+	audienceMatches,
 	createTokenAuthenticator,
 	type DecodingJwtConfig,
 	type JwtConfigErrorContext,

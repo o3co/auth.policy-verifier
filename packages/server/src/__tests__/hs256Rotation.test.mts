@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { MAX_PREVIOUS_SECRETS, MIN_SECRET_ENTROPY_BYTES } from "#/config/defaults.mjs";
-import { checkHs256Rotation, parseHs256Rotation } from "#/jwt/hs256Rotation.mjs";
+import { checkHs256Rotation, parseHs256Rotation } from "#/config/hs256Rotation.mjs";
 
 /** 64 hex characters — 32 decoded bytes, the floor auth.provider#282 set. */
 const SECRET = "11".repeat(32);
