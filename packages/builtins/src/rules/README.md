@@ -60,11 +60,11 @@ never the reverse.
   collector context" in [`ci.yml`](../../../../.github/workflows/ci.yml) greps `verify`
   bodies as a textual backstop. No builtin collector emits the comparison rules, so beyond
   that grep their purity is documented, not tested.
-- An attribute that is missing, `null` or of another type than the rule's literal never
-  throws and answers `false`; matching is exact and case-sensitive — the per-rule tests in
-  [`../__tests__/rules/`](../__tests__/rules/). The one exception to "answers `false`" is a
-  `NaN` attribute under `AttrLiteralNotEqual` / `AttrLiteralNotIn` (see
-  [Known issues](#known-issues)).
+- An attribute that is missing, `null`, `NaN` or of another type than the rule's literal
+  never throws and answers `false`; matching is exact and case-sensitive — the per-rule tests
+  in [`../__tests__/rules/`](../__tests__/rules/). `NaN` needs saying: it is unequal to every
+  number and in no set, so `AttrLiteralNotEqual` and `AttrLiteralNotIn` refuse it by name
+  rather than let it pass as an unequal value.
 - Configuration is refused at construction: an attribute name may not contain `:` (the
   `ruleType` separator), a literal may not be `NaN`, a value list is non-empty and
   homogeneous, `group` is a non-empty string; the default `ruleType` tells `1` from `"1"` and
@@ -83,8 +83,3 @@ validating class and the field — at boot for a deployment that builds its rule
 configuration at startup, and whenever it constructs one otherwise. Nothing here does I/O: a
 synchronous rule runs under no rule budget, and the rule collectors run under the pipeline's
 per-collector timeout and deadline like any collector; `signal` is never read.
-
-## Known issues
-
-- [#254](https://github.com/o3co/auth.policy-verifier/issues/254) — a `NaN` attribute passes
-  `AttrLiteralNotEqual` and `AttrLiteralNotIn`.

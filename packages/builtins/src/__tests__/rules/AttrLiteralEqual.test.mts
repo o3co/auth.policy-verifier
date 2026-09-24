@@ -61,6 +61,16 @@ describe("AttrLiteralEqual", () => {
 	});
 
 	// ---------------------------------------------------------------------------
+	// Evaluation-time safe-deny: NaN attr (#254)
+	// ---------------------------------------------------------------------------
+
+	it("returns false when the attribute is NaN, against a numeric literal (#254)", () => {
+		const rule = new AttrLiteralEqual({ a: "age", v: 30 });
+		const attrs: Attributes = new Map<string, unknown>([["age", Number.NaN]]);
+		expect(rule.verify(attrs)).toBe(false);
+	});
+
+	// ---------------------------------------------------------------------------
 	// Construction errors: invalid 'a'
 	// ---------------------------------------------------------------------------
 

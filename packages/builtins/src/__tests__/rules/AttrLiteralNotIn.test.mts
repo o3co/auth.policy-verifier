@@ -83,6 +83,19 @@ describe("AttrLiteralNotIn", () => {
 	});
 
 	// ---------------------------------------------------------------------------
+	// Evaluation-time safe-deny: NaN attr (#254)
+	// ---------------------------------------------------------------------------
+
+	it("returns false when the attribute is NaN — it is in no set, and not a number either (#254)", () => {
+		// A NaN attribute is in no numeric set (`Set` finds NaN only when it holds
+		// NaN, and construction refuses that), so NotIn passed it: a restriction
+		// that allowed.
+		const rule = new AttrLiteralNotIn({ a: "level", values: [1, 2, 3] });
+		const attrs: Attributes = new Map<string, unknown>([["level", Number.NaN]]);
+		expect(rule.verify(attrs)).toBe(false);
+	});
+
+	// ---------------------------------------------------------------------------
 	// Construction errors: invalid 'a'
 	// ---------------------------------------------------------------------------
 

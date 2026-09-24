@@ -24,9 +24,11 @@ export interface AttrLiteralNotInConfig {
 /**
  * Rule that passes when a named attribute is present, matches the element type
  * of the configured values array, and is NOT included in that array. No type
- * coercion is performed. If the attribute is missing, null, or of the wrong
- * type the rule returns false (safe-deny). A `NaN` attribute against number
- * values is in none of them and passes; whether it should deny is #254.
+ * coercion is performed. If the attribute is missing, null, of the wrong
+ * type, or `NaN` the rule returns false (safe-deny). `NaN` is in no set of
+ * numbers — construction refuses one that holds it — so the membership test
+ * alone would pass it: a restriction that allows on an attribute that is not
+ * a number at all (#254).
  *
  * ## Grouping and the default ruleType
  *
@@ -71,6 +73,7 @@ export class AttrLiteralNotIn implements Rule {
 	verify(attrs: ReadonlyAttributes): boolean {
 		const x = attrs.get(this.a);
 		if (typeof x !== this.elementType) return false;
+		if (Number.isNaN(x)) return false;
 		return !this.valuesSet.has(x as LiteralValue);
 	}
 }

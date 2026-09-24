@@ -83,6 +83,19 @@ describe("AttrLiteralNotEqual", () => {
 	});
 
 	// ---------------------------------------------------------------------------
+	// Evaluation-time safe-deny: NaN attr (#254)
+	// ---------------------------------------------------------------------------
+
+	it("returns false when the attribute is NaN — not a number is not an unequal number (#254)", () => {
+		// `NaN !== v` holds for every v, so a numeric NotEqual passed a NaN
+		// attribute: a restriction that allowed. JSON carries no NaN; a collector
+		// that computes a number can produce one.
+		const rule = new AttrLiteralNotEqual({ a: "age", v: 30 });
+		const attrs: Attributes = new Map<string, unknown>([["age", Number.NaN]]);
+		expect(rule.verify(attrs)).toBe(false);
+	});
+
+	// ---------------------------------------------------------------------------
 	// Construction errors: invalid 'a'
 	// ---------------------------------------------------------------------------
 

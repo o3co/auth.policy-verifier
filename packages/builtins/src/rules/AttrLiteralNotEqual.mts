@@ -23,9 +23,11 @@ export interface AttrLiteralNotEqualConfig {
 /**
  * Rule that passes when a named attribute is present, matches the type of the
  * configured literal value, and is strictly NOT equal to it. No type coercion
- * is performed. If the attribute is missing, null, or of the wrong type the
- * rule returns false (safe-deny). A `NaN` attribute against a number literal
- * is an unequal number and passes; whether it should deny is #254.
+ * is performed. If the attribute is missing, null, of the wrong type, or
+ * `NaN` the rule returns false (safe-deny). `NaN` is unequal to every number,
+ * so `!==` alone would pass it: a restriction that allows on an attribute
+ * that is not a number at all (#254). Construction refuses a `NaN` literal
+ * for the mirror reason.
  *
  * ## Grouping and the default ruleType
  *
@@ -71,6 +73,7 @@ export class AttrLiteralNotEqual implements Rule {
 	verify(attrs: ReadonlyAttributes): boolean {
 		const x = attrs.get(this.a);
 		if (typeof x !== typeof this.v) return false;
+		if (Number.isNaN(x)) return false;
 		return x !== this.v;
 	}
 }
