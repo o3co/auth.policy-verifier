@@ -31,6 +31,14 @@ import { describe, expect, it } from "vitest";
 
 const SRC = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
+/*
+ * Every pattern below expects a double-quoted specifier. That is a contract,
+ * not an oversight: `biome.json` sets `quoteStyle: "double"`, and
+ * `pnpm run lint` — `biome check packages/ …`, run in CI — fails any file whose
+ * formatting differs, so a single-quoted import cannot reach `develop`. If that
+ * setting or the lint's scope changes, these patterns have to change with it.
+ */
+
 /** One `import … from "…"` statement, however many lines it spans. */
 const IMPORT = /^import\s+(type\s+)?([\s\S]*?)\s+from\s+"([^"]+)";?$/gm;
 
@@ -38,13 +46,14 @@ const IMPORT = /^import\s+(type\s+)?([\s\S]*?)\s+from\s+"([^"]+)";?$/gm;
 const SIDE_EFFECT = /^import\s+"([^"]+)";?$/gm;
 
 /**
- * One `import("…")` with a literal specifier, import attributes or not: it
- * loads the module when it runs. A computed or template-literal specifier
- * cannot be followed and is not seen. An `import("…")` in a type position is
- * counted as a value import too — that errs towards a boundary failing, never
- * towards one passing unseen.
+ * One `import("…")` with a literal specifier, import attributes or not, and a
+ * comment between the specifier and what follows it or not: it loads the
+ * module when it runs. A computed or template-literal specifier cannot be
+ * followed and is not seen. An `import("…")` in a type position is counted as
+ * a value import too — that errs towards a boundary failing, never towards one
+ * passing unseen.
  */
-const DYNAMIC = /\bimport\(\s*"([^"]+)"\s*[,)]/g;
+const DYNAMIC = /\bimport\(\s*"([^"]+)"\s*(?:(?:\/\*[\s\S]*?\*\/|\/\/[^\n]*\n)\s*)*[,)]/g;
 
 /** One `export { … } from "…"` or `export * from "…"` re-export. */
 const RE_EXPORT = /^export\s+(type\s+)?(\{[^}]*\}|\*(?:\s+as\s+\w+)?)\s+from\s+"([^"]+)";?$/gm;
@@ -274,9 +283,10 @@ describe("the import walk itself", () => {
 			file,
 			'export const load = async () => (await import("express")).default;\n' +
 				'const lazy = () => import( "./local.mjs" );\n' +
-				'const data = () => import("./data.json", { with: { type: "json" } });\n',
+				'const data = () => import("./data.json", { with: { type: "json" } });\n' +
+				'const noted = () => import("./noted.mjs" /* why it is lazy */);\n',
 		);
-		expect(valueImports(file)).toEqual(["express", "./local.mjs", "./data.json"]);
-		expect(allImports(file)).toEqual(["express", "./local.mjs", "./data.json"]);
+		expect(valueImports(file)).toEqual(["express", "./local.mjs", "./data.json", "./noted.mjs"]);
+		expect(allImports(file)).toEqual(["express", "./local.mjs", "./data.json", "./noted.mjs"]);
 	});
 });
