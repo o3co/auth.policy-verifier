@@ -1349,7 +1349,7 @@ describe("createVerifyRouter — the credential reaches collectors only by state
 	});
 });
 
-describe("POST /verify/batch — the input the entries share cannot leak between them (#251)", () => {
+describe("POST /verify/batch — each entry gets its own copy of the headers (#251)", () => {
 	it("a collector that writes into context.headers in one entry is not seen by the next", async () => {
 		// The route builds one DecisionInput per request and every lane reads it;
 		// each decision hands its collectors its own copy of the headers, as the

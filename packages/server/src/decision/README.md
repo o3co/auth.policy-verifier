@@ -46,9 +46,12 @@ Last updated: 2026-09-24
 - The subject is trusted input from the authenticator, never from the body;
   the caller's `context` crosses into the collectors marked untrusted. The
   credential is held only when the composition exposes it to collectors.
-- Nothing about a failure is kept process-wide, and nothing one decision hands
-  its collectors reaches another's: each decision has its own `FailureRecord`
-  and its own copy of the shared headers.
+- Nothing about a failure is kept process-wide. Each decision has its own
+  `FailureRecord` and its own copy of the shared headers, so neither reaches
+  another decision. The subject is not copied: it is one object shared by
+  every entry of a batch, `readonly` only at its top level and only by type —
+  a nested array claim can be written even from typed code once narrowed —
+  so a collector must not write to it.
 - The caller's signal cancels the collectors in flight and the asynchronous
   rule; a library consumer's `evaluateOptions.signal` is combined with it,
   never replaced by it. The rule deadlines are this module's own inputs, not
