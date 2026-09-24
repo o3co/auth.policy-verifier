@@ -66,3 +66,9 @@ The source falls into four parts, separated by what changes them:
 - Nothing here evaluates Cedar, so the port and the collector are tested against a stand-in
   engine that evaluates nothing ([`__tests__/scriptedEngine.mts`](__tests__/scriptedEngine.mts));
   the real evaluator is tested end to end in `packages/cedar-wasm`.
+- The `http` engine's wire — what reaches cedar-agent, and how each way a call can fail comes
+  out — is tested through Node's real `fetch` against a local fake agent, with nothing stubbed
+  ([`__tests__/httpEngineFakeAgent.test.mts`](__tests__/httpEngineFakeAgent.test.mts), the
+  agent in [`__tests__/fakeCedarAgent.mts`](__tests__/fakeCedarAgent.mts)); what the engine
+  makes of an answer is tested against a scripted `fetch`
+  ([`__tests__/httpEngine.test.mts`](__tests__/httpEngine.test.mts)).
