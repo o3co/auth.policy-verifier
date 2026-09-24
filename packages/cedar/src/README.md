@@ -76,12 +76,14 @@ The source falls into four parts, separated by what changes them:
   reachable agent —
   [`__tests__/httpEngine.test.mts`](__tests__/httpEngine.test.mts),
   [`__tests__/httpEngineFakeAgent.test.mts`](__tests__/httpEngineFakeAgent.test.mts).
-- The `http` engine bounds an answer by time only: the rule deadline limits how long it may
-  take, and nothing limits its size or checks its `content-type`. The agent is trusted with
-  the decision itself — an agent that could send an unbounded body could as well answer every
-  request however it liked — so a bound would guard against nothing that trust does not
-  already concede. The body is parsed and its shape checked, which is the check a
-  `content-type` test would only approximate.
+- The `http` engine reads at most `CEDAR_ANSWER_MAX_BYTES` (1 MiB) of an answer. A longer
+  one, declared or streamed, is refused — a deny — rather than held in memory for the rule
+  deadline, because a process out of memory takes every route down, not only the ones Cedar
+  gates. It does not check `content-type`: the body is parsed and its shape checked, which is
+  the check a `content-type` test would only approximate.
+- The `http` engine refuses at load a token `fetch` cannot send as a header — a line break or
+  NUL inside it, a character above U+00FF — naming where it came from, never its value:
+  `fetch`'s own refusal quotes the value whole, and would put it in a log line.
 - The `http` engine's wire — what reaches cedar-agent, and how each way a call can fail comes
   out — is tested through Node's real `fetch` against a local fake agent, with nothing stubbed
   ([`__tests__/httpEngineFakeAgent.test.mts`](__tests__/httpEngineFakeAgent.test.mts), the

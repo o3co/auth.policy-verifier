@@ -99,8 +99,8 @@ const NEVER_ABORTS = new AbortController().signal;
 /**
  * Whether Node's `fetch` publishes `undici:request:bodyChunkReceived`, which
  * {@link firstBodyChunk} waits on. The undici bundled with Node 22 (6.x) does
- * not: there the wait never ends, and an `it.fails` would count vitest's
- * timeout as its expected failure — green while testing nothing.
+ * not: there the wait never ends, so a case that waits on it is skipped
+ * rather than left to time out red for a reason that is not the engine's.
  */
 const PUBLISHES_BODY_CHUNKS = Number(process.versions.undici?.split(".")[0]) >= 7;
 
@@ -324,6 +324,15 @@ describe("cedarHttpEngine over the wire — a failed call rejects with CedarEngi
 			/broke off its answer to an authorization call: terminated/,
 		],
 		[
+			// Refused once past the bound, not read to the end and parsed (#271).
+			"a 200 larger than CEDAR_ANSWER_MAX_BYTES",
+			(_request, response) => {
+				response.writeHead(200, { "content-type": "application/json" });
+				response.end(`{"decision":"Allow","padding":"${"x".repeat(1024 * 1024)}"}`);
+			},
+			/answered an authorization call with more than 1 MiB — refused$/,
+		],
+		[
 			"a 200 JSON array",
 			(_request, response) => sendJson(response, 200, [decision("Allow")]),
 			/answered an unknown decision undefined/,
@@ -535,7 +544,9 @@ describe("cedarHttpEngine over the wire — boot", () => {
 		// said "reachable, but the request timed out". It is a race, so this is
 		// the check on the real wire, not the pin: before the fix about one load
 		// in ten lost it, so twenty in a row caught it about nine runs in ten.
-		// `httpEngine.test.mts` pins the same case deterministically.
+		// `httpEngine.test.mts` pins the same case deterministically. A load
+		// whose first attempt times out — a worker stalled past the deadline
+		// before the refusal was read — says no answer came, which is also true.
 		const gone = await FakeCedarAgent.start();
 		await gone.stop();
 		const failures: unknown[] = [];
@@ -554,7 +565,9 @@ describe("cedarHttpEngine over the wire — boot", () => {
 			expect(failure).toBeInstanceOf(CedarEngineError);
 			const { message } = failure as CedarEngineError;
 			expect(message).not.toMatch(/\breachable\b/);
-			expect(message).toMatch(/: fetch failed: connect ECONNREFUSED 127\.0\.0\.1:\d+$/);
+			expect(message).toMatch(
+				/(: fetch failed: connect ECONNREFUSED 127\.0\.0\.1:\d+|the request got no response before the deadline: .*)$/,
+			);
 		}
 	});
 

@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CedarPolicyRuleCollector } from "../CedarPolicyRuleCollector.mjs";
 import { CedarEngineError, type CedarEngineLoadContext } from "../engine.mjs";
 import {
+	CEDAR_ANSWER_MAX_BYTES,
 	CEDAR_AUTHENTICATION_ENV,
 	CEDAR_ENDPOINT_ENV,
 	createCedarHttpEngine,
@@ -132,6 +133,9 @@ function agent(answer: (call: Record<string, unknown>) => Response = () => json(
 }
 
 const NEVER_ABORTS = new AbortController().signal;
+
+/** The answer bound, written out so a test's sizes do not depend on the constant under test. */
+const MIB = 1024 * 1024;
 
 function request(): CedarRequest {
 	const principal = { type: "User", id: "alice" };
@@ -357,7 +361,7 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 		const { doFetch } = agent();
 		const flaky = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
 			attempts++;
-			if (attempts < 3) throw new TypeError("fetch failed: ECONNREFUSED");
+			if (attempts < 3) throw refused();
 			return doFetch(input, init);
 		}) as unknown as typeof fetch;
 		const engine = createCedarHttpEngine({
@@ -526,6 +530,57 @@ describe("cedarHttpEngine — where the agent is", () => {
 			),
 		).rejects.toThrow(/authentication must be a non-empty string/);
 	});
+
+	// `fetch` refuses a header value with a line break or a NUL inside it, or a
+	// character above U+00FF, and quotes the whole value in its error — which
+	// the load then logged on every retry as an unreachable agent (#271).
+	// Refused at load instead, naming where the token came from, never the token.
+	it.each([
+		["a line break inside", "s3cr3t-1\ns3cr3t-2"],
+		["a header smuggled after CRLF", "s3cr3t\r\nX-Other: y"],
+		["a NUL", "s3c\u0000r3t"],
+		["a character above U+00FF", "s3cr€t"],
+	])(
+		"refuses a token fetch cannot send — %s — without repeating it (#271)",
+		async (_label, token) => {
+			const { doFetch, calls } = agent();
+			for (const [config, env, source] of [
+				[{ authentication: token }, AGENT_ENV, "authentication"],
+				[{}, { ...AGENT_ENV, [CEDAR_AUTHENTICATION_ENV]: token }, CEDAR_AUTHENTICATION_ENV],
+			] as const) {
+				let message = "";
+				try {
+					await createCedarHttpEngine({ fetch: doFetch, env }).load(
+						inline(PERMIT_ALL),
+						loadContext(config),
+					);
+				} catch (error) {
+					expect(error).toBeInstanceOf(CedarEngineError);
+					message = (error as CedarEngineError).message;
+				}
+				expect(message).toMatch(
+					new RegExp(
+						`^${source} is not a valid HTTP header value — it holds a line break, a NUL or a character above U\\+00FF`,
+					),
+				);
+				expect(message).not.toContain(token);
+				expect(message).not.toContain(token.slice(0, 4));
+			}
+			expect(calls).toEqual([]);
+		},
+	);
+
+	it("still sends a token whose only whitespace is around it, as fetch trims it", async () => {
+		const { doFetch, calls } = agent();
+		await loadAsync(
+			createCedarHttpEngine({
+				fetch: doFetch,
+				env: { ...AGENT_ENV, [CEDAR_AUTHENTICATION_ENV]: "token\n" },
+			}),
+			inline(PERMIT_ALL),
+		);
+		expect(headersOf(calls[0]).authorization).toBe("token\n");
+	});
 });
 
 describe("cedarHttpEngine — isAuthorized", () => {
@@ -635,14 +690,14 @@ describe("cedarHttpEngine — isAuthorized", () => {
 
 	it("rejects with CedarEngineError when the agent is unreachable, and with the signal's reason when aborted", async () => {
 		const { doFetch } = agent(() => {
-			throw new TypeError("fetch failed: ECONNRESET");
+			throw new TypeError("fetch failed", { cause: failure("read ECONNRESET", "ECONNRESET") });
 		});
 		const loaded = await loadAsync(
 			createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }),
 			inline(PERMIT_ALL),
 		);
 		await expect(loaded.isAuthorized(request(), NEVER_ABORTS)).rejects.toThrow(
-			/cedar engine at .*\/v1\/is_authorized is unreachable: fetch failed/,
+			/cedar engine at .*\/v1\/is_authorized is unreachable: fetch failed: read ECONNRESET$/,
 		);
 
 		const reason = new Error("deadline");
@@ -746,6 +801,155 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		const cause = message.slice(message.indexOf("fetch failed: ") + "fetch failed: ".length);
 		expect(cause).toMatch(/^ELOOP_TEST: x+…$/);
 		expect(cause.length).toBe(200);
+	});
+
+	it("follows a cause chain four links deep, no further", async () => {
+		const chain = ["one", "two", "three", "four", "five", "six"].reduceRight<Error | undefined>(
+			(cause, message) => new Error(message, { cause }),
+			undefined,
+		);
+		const { doFetch } = agent(() => {
+			throw chain;
+		});
+		const loaded = await loadAsync(
+			createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }),
+			inline(PERMIT_ALL),
+		);
+		await expect(loaded.isAuthorized(request(), NEVER_ABORTS)).rejects.toThrow(
+			/is unreachable: one: two: three: four$/,
+		);
+	});
+
+	// Whatever a `fetch` rejects with, describing it must not throw: a throw
+	// there escaped as something other than a CedarEngineError, and at load
+	// it skipped the retry loop.
+	it.each([
+		[
+			"an AggregateError that holds itself",
+			() => {
+				const aggregate = new AggregateError([], "");
+				aggregate.errors.push(aggregate, failure("connect ECONNREFUSED ::1:8180", "ECONNREFUSED"));
+				return new TypeError("fetch failed", { cause: aggregate });
+			},
+			/is unreachable: fetch failed: connect ECONNREFUSED ::1:8180$/,
+		],
+		[
+			"a cause with no prototype, so no toString",
+			() => new TypeError("fetch failed", { cause: Object.create(null) }),
+			/is unreachable: fetch failed: a failure that could not be described$/,
+		],
+		[
+			"a message getter that throws",
+			() => {
+				const hostile = new Error("unused");
+				Object.defineProperty(hostile, "message", {
+					get() {
+						throw new Error("no");
+					},
+				});
+				return new TypeError("fetch failed", { cause: hostile });
+			},
+			/is unreachable: fetch failed: a failure that could not be described$/,
+		],
+	])("describes %s without throwing (#271)", async (_label, make, expected) => {
+		const thrown = make();
+		const { doFetch } = agent(() => {
+			throw thrown;
+		});
+		const loaded = await loadAsync(
+			createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }),
+			inline(PERMIT_ALL),
+		);
+		const rejected = loaded.isAuthorized(request(), NEVER_ABORTS);
+		await expect(rejected).rejects.toThrow(CedarEngineError);
+		await expect(rejected).rejects.toThrow(expected);
+	});
+
+	// The answer is read whole before it is parsed, so without a bound a
+	// faulty agent — or a proxy in front of it — streaming a large body would
+	// hold memory for the whole rule deadline, per concurrent call, and an
+	// exhausted process takes every route down with it, not only the ones
+	// Cedar gates (#271). Over the bound, the call fails closed.
+	it("bounds an answer at 1 MiB (#271)", () => {
+		expect(CEDAR_ANSWER_MAX_BYTES).toBe(MIB);
+	});
+
+	it("refuses an answer that declares more than CEDAR_ANSWER_MAX_BYTES, before reading it (#271)", async () => {
+		let pulled = 0;
+		const body = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				pulled++;
+				if (pulled > 1100) return controller.close();
+				controller.enqueue(new Uint8Array(1024).fill(0x20));
+			},
+		});
+		const response = new Response(body, {
+			status: 200,
+			headers: { "content-length": String(MIB + 1) },
+		});
+		const loaded = await loadAsync(
+			createCedarHttpEngine({ fetch: agent(() => response).doFetch, env: AGENT_ENV }),
+			inline(PERMIT_ALL),
+		);
+		const rejected = loaded.isAuthorized(request(), NEVER_ABORTS);
+		await expect(rejected).rejects.toThrow(CedarEngineError);
+		await expect(rejected).rejects.toThrow(
+			/cedar engine at http:\/\/127\.0\.0\.1:8180 answered an authorization call with more than 1 MiB — refused$/,
+		);
+		// The stream's first pull is the source filling its queue, not a read.
+		expect(pulled).toBeLessThanOrEqual(1);
+	});
+
+	it("refuses an answer that streams past CEDAR_ANSWER_MAX_BYTES without declaring a length (#271)", async () => {
+		// Four times the bound, then the end: finite, so an engine without the
+		// bound reads it all and fails on the parse instead.
+		let sent = 0;
+		const body = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				if (sent >= 4 * MIB) return controller.close();
+				sent += 64 * 1024;
+				controller.enqueue(new Uint8Array(64 * 1024).fill(0x20));
+			},
+		});
+		const loaded = await loadAsync(
+			createCedarHttpEngine({
+				fetch: agent(() => new Response(body, { status: 200 })).doFetch,
+				env: AGENT_ENV,
+			}),
+			inline(PERMIT_ALL),
+		);
+		await expect(loaded.isAuthorized(request(), NEVER_ABORTS)).rejects.toThrow(
+			/answered an authorization call with more than 1 MiB — refused$/,
+		);
+		expect(sent).toBeLessThanOrEqual(MIB + 2 * 64 * 1024);
+	});
+
+	it("reads an answer of exactly CEDAR_ANSWER_MAX_BYTES", async () => {
+		const decision = JSON.stringify(ALLOW);
+		const padded = decision + " ".repeat(MIB - decision.length);
+		const loaded = await loadAsync(
+			createCedarHttpEngine({
+				fetch: agent(() => new Response(padded, { status: 200 })).doFetch,
+				env: AGENT_ENV,
+			}),
+			inline(PERMIT_ALL),
+		);
+		expect((await loaded.isAuthorized(request(), NEVER_ABORTS)).decision).toBe("allow");
+	});
+
+	it("keeps the status as the fact when an error's body is over the bound", async () => {
+		const huge = `{"description":"${"x".repeat(MIB)}"}`;
+		const loaded = await loadAsync(
+			createCedarHttpEngine({
+				fetch: agent(() => new Response(huge, { status: 500, statusText: "Internal Server Error" }))
+					.doFetch,
+				env: AGENT_ENV,
+			}),
+			inline(PERMIT_ALL),
+		);
+		await expect(loaded.isAuthorized(request(), NEVER_ABORTS)).rejects.toThrow(
+			/answered 500 to an authorization call: Internal Server Error$/,
+		);
 	});
 
 	// The status can arrive before the body does, and an abort can land in
@@ -905,7 +1109,7 @@ describe("CedarPolicyRuleCollector on the http engine", () => {
 		// of the set that answered.
 		let up = true;
 		const { doFetch } = agent(() => {
-			if (!up) throw new TypeError("fetch failed: ECONNREFUSED");
+			if (!up) throw refused();
 			return json(200, ALLOW);
 		});
 		vi.stubGlobal("fetch", doFetch);
@@ -955,7 +1159,7 @@ describe("CedarPolicyRuleCollector on the http engine", () => {
 	it("denies and logs when the agent is down after boot", async () => {
 		let up = true;
 		const { doFetch } = agent(() => {
-			if (!up) throw new TypeError("fetch failed: ECONNREFUSED");
+			if (!up) throw refused();
 			return json(200, ALLOW);
 		});
 		vi.stubGlobal("fetch", doFetch);

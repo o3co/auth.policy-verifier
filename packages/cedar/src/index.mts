@@ -27,6 +27,7 @@ export {
 } from "./engine.mjs";
 export type { CedarHttpEngineOptions } from "./httpEngine.mjs";
 export {
+	CEDAR_ANSWER_MAX_BYTES,
 	CEDAR_AUTHENTICATION_ENV,
 	CEDAR_ENDPOINT_ENV,
 	CEDAR_HTTP_ENGINE_NAME,
