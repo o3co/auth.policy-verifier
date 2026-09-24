@@ -207,7 +207,7 @@ new AttrLiteralNotIn({ a: string, values: (string | number | boolean)[], group?:
 
 - `code`: `"attr_in_set"`.
 - Default `ruleType`: `` `attr_literal_not_in:${a}:${type}:${count}:${hashPrefix}` `` — same stable, deduplication-aware hash scheme as `AttrLiteralIn`.
-- `values` must be a non-empty, homogeneous array. Passes when `attrs.get(a)` is the same type as the values and NOT in the set. Missing, wrong-type or `NaN` attributes return `false` (safe-deny) — `NaN` included, though it is in no set (#254). Duplicate elements in `values` are ignored.
+- `values` must be a non-empty, homogeneous array. Passes when `attrs.get(a)` is the same type as the values and NOT in the set. Missing, wrong-type or `NaN` attributes return `false` (safe-deny); `NaN` is in no set, so it would otherwise pass (#254). Duplicate elements in `values` are ignored.
 
 ### AttrLiteralCompare
 
