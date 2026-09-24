@@ -1,6 +1,6 @@
 # auth.policy-verifier
 
-Last updated: 2026-09-23
+Last updated: 2026-09-24
 
 [![CI](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth.policy-verifier.core)](https://www.npmjs.com/package/@o3co/auth.policy-verifier.core)
@@ -712,7 +712,7 @@ anyone who can route to it. See
 
 ## Related Projects
 
-- [auth.provider](https://github.com/o3co/auth.provider) — OAuth 2.0 provider with DID authentication
+- [auth.provider](https://github.com/o3co/auth.provider) — OAuth 2.0 / OIDC provider: authentication and token issuance
 - [auth.proxy](https://github.com/o3co/auth.proxy) — Token validation reverse proxy
 - [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) — protobuf method option authorization interceptors for gRPC / ConnectRPC (calls this service for authorization decisions)
 - [auth](https://github.com/o3co/auth) — Architecture docs and E2E tests
