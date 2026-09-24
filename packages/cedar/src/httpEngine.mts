@@ -33,12 +33,13 @@ export const CEDAR_AUTHENTICATION_ENV = "CEDAR_AUTHENTICATION";
 export const CEDAR_LOAD_TIMEOUT_MS = 10_000;
 
 /**
- * The most of one answer from the agent the engine reads. A longer one —
- * declared by `content-length` or streamed — is refused, a deny, rather than
- * held in memory for the rule's deadline: a faulty agent, or a proxy in front
- * of it, would otherwise hold that per concurrent call, and a process out of
- * memory takes every route down, not only the ones Cedar gates (#271).
- * cedar-agent's answer is a decision and two short lists.
+ * The maximum number of bytes the engine reads from one answer from the
+ * agent. A longer answer — declared by `content-length` or streamed — is
+ * refused, a deny, rather than held in memory for the rule's deadline: a
+ * faulty agent, or a proxy in front of it, would otherwise hold that per
+ * concurrent call, and a process out of memory takes every route down, not
+ * only the ones Cedar gates (#271). cedar-agent's answer is a decision and
+ * two short lists.
  */
 export const CEDAR_ANSWER_MAX_BYTES = 1024 * 1024;
 
@@ -52,8 +53,9 @@ export interface CedarHttpEngineOptions {
 	 * The `fetch` to call. Defaults to the global one, looked up per call. It
 	 * must honour `init.redirect`: both calls ask for `"manual"` so that a 3xx
 	 * fails closed (#270), and a `fetch` that follows redirects anyway undoes that.
-	 * It must also reject once `init.signal` aborts: the load tells its deadline
-	 * apart from other failures by that signal (#271).
+	 * It must also reject once `init.signal` aborts, and fail a body still being
+	 * read, as the platform's does: the load tells its deadline apart from other
+	 * failures by that signal, and a body that stalls ends there (#271).
 	 */
 	fetch?: typeof fetch;
 	/** Where `CEDAR_ENDPOINT` / `CEDAR_AUTHENTICATION` are read. Defaults to `process.env`. */
