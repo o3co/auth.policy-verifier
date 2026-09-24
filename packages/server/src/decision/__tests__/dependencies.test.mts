@@ -37,6 +37,15 @@ const IMPORT = /^import\s+(type\s+)?([\s\S]*?)\s+from\s+"([^"]+)";?$/gm;
 /** One side-effect `import "…";`: it names nothing, but it loads the module. */
 const SIDE_EFFECT = /^import\s+"([^"]+)";?$/gm;
 
+/**
+ * One `import("…")` with a literal specifier, import attributes or not: it
+ * loads the module when it runs. A computed or template-literal specifier
+ * cannot be followed and is not seen. An `import("…")` in a type position is
+ * counted as a value import too — that errs towards a boundary failing, never
+ * towards one passing unseen.
+ */
+const DYNAMIC = /\bimport\(\s*"([^"]+)"\s*[,)]/g;
+
 /** One `export { … } from "…"` or `export * from "…"` re-export. */
 const RE_EXPORT = /^export\s+(type\s+)?(\{[^}]*\}|\*(?:\s+as\s+\w+)?)\s+from\s+"([^"]+)";?$/gm;
 
@@ -66,6 +75,7 @@ const valueImports: Imports = (file) => {
 		found.push(specifier);
 	}
 	for (const [, specifier] of text.matchAll(SIDE_EFFECT)) found.push(specifier);
+	for (const [, specifier] of text.matchAll(DYNAMIC)) found.push(specifier);
 	return found;
 };
 
@@ -77,6 +87,7 @@ const allImports: Imports = (file) => {
 			([, , , specifier]) => specifier,
 		),
 		...[...text.matchAll(SIDE_EFFECT)].map(([, specifier]) => specifier),
+		...[...text.matchAll(DYNAMIC)].map(([, specifier]) => specifier),
 	];
 };
 
@@ -255,5 +266,17 @@ describe("the import walk itself", () => {
 		writeFileSync(file, 'import "express";\nimport "./local.mjs";\n');
 		expect(valueImports(file)).toEqual(["express", "./local.mjs"]);
 		expect(allImports(file)).toEqual(["express", "./local.mjs"]);
+	});
+
+	it("sees a dynamic import() with a literal specifier, which loads a module when it runs", () => {
+		const file = join(mkdtempSync(join(tmpdir(), "deps-")), "dynamic.mts");
+		writeFileSync(
+			file,
+			'export const load = async () => (await import("express")).default;\n' +
+				'const lazy = () => import( "./local.mjs" );\n' +
+				'const data = () => import("./data.json", { with: { type: "json" } });\n',
+		);
+		expect(valueImports(file)).toEqual(["express", "./local.mjs", "./data.json"]);
+		expect(allImports(file)).toEqual(["express", "./local.mjs", "./data.json"]);
 	});
 });
