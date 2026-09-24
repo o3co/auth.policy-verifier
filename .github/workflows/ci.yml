@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [develop, main]
+    branches: [develop]
   pull_request:
-    branches: [develop, main]
+    branches: [develop]
   # Daily audit (see the `audit` job). A `schedule` event runs on the
   # repository's default branch — `develop` here — so this is a daily audit of
   # develop only as long as develop stays the default branch. Nothing else runs

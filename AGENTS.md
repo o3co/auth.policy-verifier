@@ -196,7 +196,7 @@ Releases are triggered by pushing a `v*` tag to GitHub. There is no manual publi
 
 When asked to "release 0.2.1" or similar:
 
-1. Ensure all changes are merged to `main` (releases are cut from `main`, not feature branches)
+1. Ensure all changes are merged to `develop` (releases are cut from `develop`, not feature branches — this repository has no `main`)
 2. Verify the change set warrants the requested version bump (breaking change → major, feature → minor, fix → patch)
 3. Run the release-cut audit in `docs/release-policy.md` R6 and land the CHANGELOG section (`## [X.Y.Z] - YYYY-MM-DD`, written from `git log <lastTag>..HEAD`) first — the workflow refuses a tag whose version has no CHANGELOG section
 4. Propose the tag command to the user; do not push tags without explicit user approval (tag push is irreversible from an npm-publish perspective once the workflow succeeds)
