@@ -187,7 +187,7 @@ new AttrLiteralNotEqual({ a: string, v: string | number | boolean, group?: strin
 
 - `code`: `"attr_equal"`.
 - Default `ruleType`: `` `attr_literal_not_equal:${a}:${typeof v}:${String(v)}` ``. The `typeof v` segment prevents silent collisions between distinct-type literals (same rationale as `AttrLiteralEqual`).
-- Passes when `attrs.get(a)` is the same type as `v` and strictly not equal to it. Missing or wrong-type attributes return `false` (safe-deny); a `NaN` attribute is a number and passes, as any other unequal number does (#254).
+- Passes when `attrs.get(a)` is the same type as `v` and strictly not equal to it. Missing, wrong-type or `NaN` attributes return `false` (safe-deny): `NaN` is unequal to every number, and a restriction must not pass on a value that is not a number at all (#254).
 
 ### AttrLiteralIn
 
@@ -207,7 +207,7 @@ new AttrLiteralNotIn({ a: string, values: (string | number | boolean)[], group?:
 
 - `code`: `"attr_in_set"`.
 - Default `ruleType`: `` `attr_literal_not_in:${a}:${type}:${count}:${hashPrefix}` `` — same stable, deduplication-aware hash scheme as `AttrLiteralIn`.
-- `values` must be a non-empty, homogeneous array. Passes when `attrs.get(a)` is NOT in the set — a `NaN` attribute of a numeric set included, since it is in no set (#254). Duplicate elements in `values` are ignored.
+- `values` must be a non-empty, homogeneous array. Passes when `attrs.get(a)` is NOT in the set. A `NaN` attribute returns `false` (safe-deny), though it is in no set (#254). Duplicate elements in `values` are ignored.
 
 ### AttrLiteralCompare
 

@@ -172,7 +172,7 @@ new AttrLiteralNotEqual({ a: string, v: string | number | boolean, group?: strin
 
 - `code`: `"attr_equal"`。
 - 既定の `ruleType`: `` `attr_literal_not_equal:${a}:${typeof v}:${String(v)}` ``。`typeof v` セグメントは異型リテラル間の衝突を防ぎます（`AttrLiteralEqual` と同じ理由）。
-- `attrs.get(a)` が `v` と同じ型で厳密等価でないときに通過します。欠落または型不一致は `false`（safe-deny）を返します。
+- `attrs.get(a)` が `v` と同じ型で厳密等価でないときに通過します。欠落・型不一致・`NaN` は `false`（safe-deny）を返します。`NaN` はどの数値とも等しくないため、数値でない値で制限が通過しないよう明示的に拒否します（#254）。
 
 ### AttrLiteralIn
 
@@ -192,7 +192,7 @@ new AttrLiteralNotIn({ a: string, values: (string | number | boolean)[], group?:
 
 - `code`: `"attr_in_set"`。
 - 既定の `ruleType`: `` `attr_literal_not_in:${a}:${type}:${count}:${hashPrefix}` `` — `AttrLiteralIn` と同じ、重複除去済みの安定ハッシュ方式。
-- `values` は非空かつ同種の配列。`attrs.get(a)` が集合に含まれないときに通過します。`values` 内の重複要素は Rule の挙動に影響しません。
+- `values` は非空かつ同種の配列。`attrs.get(a)` が集合に含まれないときに通過します。`NaN` の属性はどの集合にも含まれませんが、`false`（safe-deny）を返します（#254）。`values` 内の重複要素は Rule の挙動に影響しません。
 
 ### AttrLiteralCompare
 
