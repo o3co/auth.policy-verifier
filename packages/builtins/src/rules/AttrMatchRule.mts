@@ -11,7 +11,7 @@ import { AttrPairEqual, type AttrPairEqualConfig } from "./AttrPairEqual.mjs";
 export type AttrMatchRuleConfig = AttrPairEqualConfig;
 
 /**
- * @deprecated Use {@link AttrPairEqual}. Scheduled for removal in a future major version.
+ * @deprecated since v0.3 — use {@link AttrPairEqual}.
  *
  * Kept as a thin wrapper that preserves the legacy `ruleType` (`attr_match:{a}:{b}`)
  * and legacy `message` wording. `verify()` semantics are inherited unchanged from

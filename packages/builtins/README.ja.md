@@ -130,7 +130,7 @@ new HasScope(scope: string, options?: { allowBareScopeRewrite?: boolean })
 
 ### AttrMatchRule
 
-**非推奨。** 代わりに [`AttrPairEqual`](#attrpairequal) を使用してください。`AttrMatchRule` は `AttrPairEqual` を継承した薄いラッパークラスとして残されており、後方互換のため旧来の `ruleType`（`attr_match:${a}:${b}`）と旧来の `message` 文言を保持します。型 `AttrMatchRuleConfig` は `AttrPairEqualConfig` の型エイリアスです。将来のメジャーバージョンで削除されます。
+**非推奨。** 代わりに [`AttrPairEqual`](#attrpairequal) を使用してください。`AttrMatchRule` は `AttrPairEqual` を継承した薄いラッパークラスとして残されており、後方互換のため旧来の `ruleType`（`attr_match:${a}:${b}`）と旧来の `message` 文言を保持します。型 `AttrMatchRuleConfig` は `AttrPairEqualConfig` の型エイリアスです。v0.3 から非推奨で、将来のリリースで削除される可能性があります（変更の可能性あり）。
 
 ```ts
 new AttrMatchRule({ a: string, b: string, group?: string })
