@@ -80,10 +80,13 @@ The source falls into four parts, separated by what changes them:
   one, declared or streamed, is refused — a deny — rather than held in memory for the rule
   deadline, because a process out of memory takes every route down, not only the ones Cedar
   gates. It does not check `content-type`: the body is parsed and its shape checked, which is
-  the check a `content-type` test would only approximate.
-- The `http` engine refuses at load a token `fetch` cannot send as a header — a line break or
-  NUL inside it, a character above U+00FF — naming where it came from, never its value:
-  `fetch`'s own refusal quotes the value whole, and would put it in a log line.
+  the check a `content-type` test would only approximate —
+  [`__tests__/httpEngine.test.mts`](__tests__/httpEngine.test.mts),
+  [`__tests__/httpEngineFakeAgent.test.mts`](__tests__/httpEngineFakeAgent.test.mts).
+- The `http` engine refuses at load a token `fetch` cannot send as a header — an ASCII control
+  character other than a tab inside it, a character above U+00FF — naming where it came from,
+  never its value: `fetch`'s own refusal can quote the value whole, and would put it in a log
+  line — [`__tests__/httpEngine.test.mts`](__tests__/httpEngine.test.mts).
 - The `http` engine's wire — what reaches cedar-agent, and how each way a call can fail comes
   out — is tested through Node's real `fetch` against a local fake agent, with nothing stubbed
   ([`__tests__/httpEngineFakeAgent.test.mts`](__tests__/httpEngineFakeAgent.test.mts), the

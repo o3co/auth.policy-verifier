@@ -383,8 +383,9 @@ docker compose --profile cedar up --build
   carries the subject's attributes and the answer is an authorization).
   `authentication` in config, else `CEDAR_AUTHENTICATION`, is sent verbatim as
   the `Authorization` header when the agent was started with one. A token that
-  cannot be sent as a header — a line break or NUL inside it, a character
-  above U+00FF — fails boot, naming where it came from but not its value.
+  cannot be sent as a header — an ASCII control character other than a tab
+  inside it, a character above U+00FF — fails boot, naming where it came from
+  but not its value.
 - **Authenticate the agent.** An agent without `--authentication` is a *write*
   oracle over the policy set: anything that reaches its port can
   `PUT /v1/policies` a `permit(principal, action, resource);` and every later

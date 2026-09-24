@@ -104,9 +104,10 @@ interface AgentAuthorizationCall {
  * carries the request's attributes and the agent's answer is an authorization.
  * `authentication` in config, else `CEDAR_AUTHENTICATION`, is sent verbatim as
  * the `Authorization` header — the value the agent was started with. A value
- * `fetch` cannot send — a line break or a NUL inside it, a character above
- * U+00FF — is refused at load, naming where it came from and not the value,
- * since `fetch`'s own refusal quotes it whole (#271).
+ * `fetch` cannot send — an ASCII control character other than a tab inside
+ * it, a character above U+00FF — is refused at load, naming where it came
+ * from and not the value: `fetch`'s own refusal can quote it whole, and the
+ * load would have called the agent unreachable (#271).
  *
  * ## What it asks of the policy set
  *
@@ -457,7 +458,7 @@ function requestHeaders(configured: unknown, fromEnv: string | undefined): Recor
 	}
 	if (token !== undefined && !isSendableHeaderValue(token)) {
 		throw new CedarEngineError(
-			`${configured !== undefined ? "authentication" : CEDAR_AUTHENTICATION_ENV} is not a valid HTTP header value — it holds a line break, a NUL or a character above U+00FF; set it to the token the agent was started with`,
+			`${configured !== undefined ? "authentication" : CEDAR_AUTHENTICATION_ENV} is not a valid HTTP header value — it holds an ASCII control character other than a tab, or a character above U+00FF; set it to the token the agent was started with`,
 		);
 	}
 	// cedar-agent compares the header to its `--authentication` value verbatim: no scheme.
@@ -466,17 +467,23 @@ function requestHeaders(configured: unknown, fromEnv: string | undefined): Recor
 }
 
 /**
- * Whether `fetch` can send `value` as a header value: nothing above U+00FF,
- * and no line break or NUL once the whitespace around it is trimmed, which
- * `fetch` does itself — so a token read from a file with its trailing newline
- * still goes. `fetch` refuses anything else, quoting the value (#271).
+ * Whether `fetch` can send `value` as a header value — undici's last rule:
+ * once the tabs, spaces and line breaks around it are trimmed, which `fetch`
+ * does itself, a tab, printable ASCII or U+0080–U+00FF and nothing else. So a
+ * token read from a file with its trailing newline still goes. `fetch`
+ * refuses anything else — quoting the value for a line break, a NUL or a
+ * character above U+00FF — and the load would have called the agent
+ * unreachable (#271).
  */
 function isSendableHeaderValue(value: string): boolean {
-	for (const char of value) {
-		if ((char.codePointAt(0) as number) > 0xff) return false;
-	}
 	const trimmed = value.replace(/^[\t\n\r ]+|[\t\n\r ]+$/g, "");
-	return !trimmed.includes("\0") && !trimmed.includes("\r") && !trimmed.includes("\n");
+	for (const char of trimmed) {
+		const code = char.codePointAt(0) as number;
+		const sendable =
+			code === 0x09 || (code >= 0x20 && code <= 0x7e) || (code >= 0x80 && code <= 0xff);
+		if (!sendable) return false;
+	}
+	return true;
 }
 
 // --- the wire ------------------------------------------------------------------
@@ -526,10 +533,11 @@ async function answerText(
 const OVER_BOUND = Symbol("over the answer bound");
 
 /**
- * A body read whole and decoded as `Response.text()` would, up to
- * {@link CEDAR_ANSWER_MAX_BYTES}. Past that — declared by `content-length`,
- * or found while streaming — the read stops, the body is cancelled, and
- * {@link OVER_BOUND} comes back. A failed read rejects as the stream does.
+ * A body read whole and decoded as UTF-8 with one leading BOM dropped, as the
+ * Fetch standard's `text()` does, up to {@link CEDAR_ANSWER_MAX_BYTES}. Past
+ * that — declared by `content-length`, or found while streaming — the read
+ * stops, the body is cancelled, and {@link OVER_BOUND} comes back. A failed
+ * read rejects as the stream does.
  */
 async function boundedText(response: Response): Promise<string | typeof OVER_BOUND> {
 	if (Number(response.headers.get("content-length")) > CEDAR_ANSWER_MAX_BYTES) {
@@ -698,7 +706,10 @@ function describeFailure(failure: unknown): string {
 	const seen = new Set<unknown>();
 	const links: string[] = [];
 	let link: unknown = failure;
-	while (link !== undefined && link !== null && !seen.has(link) && links.length < FAILURE_DEPTH) {
+	// Counted per link visited, not per link that said something: a `cause`
+	// getter can hand over a fresh, empty error every time it is read.
+	for (let visited = 0; visited < FAILURE_DEPTH; visited++) {
+		if (link === undefined || link === null || seen.has(link)) break;
 		seen.add(link);
 		const text = describeLink(link, seen, 1);
 		if (text.length > 0) links.push(text);
@@ -712,9 +723,12 @@ function describeLink(failure: unknown, seen: Set<unknown>, depth: number): stri
 		if (!(failure instanceof Error)) return clip(collapse(String(failure)));
 		let text = collapse(failure.message);
 		if (text.length === 0 && failure instanceof AggregateError && depth < FAILURE_DEPTH) {
+			// By index, and counted per error tried: the array's own iterator
+			// is not the engine's to trust.
+			const errors: unknown[] = Array.isArray(failure.errors) ? failure.errors : [];
 			const parts: string[] = [];
-			for (const error of Array.isArray(failure.errors) ? failure.errors : []) {
-				if (parts.length >= FAILURE_DEPTH) break;
+			for (let index = 0; index < Math.min(errors.length, FAILURE_DEPTH); index++) {
+				const error = errors[index];
 				if (seen.has(error)) continue;
 				seen.add(error);
 				const part = describeLink(error, seen, depth + 1);

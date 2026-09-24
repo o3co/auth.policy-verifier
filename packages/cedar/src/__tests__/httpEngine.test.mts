@@ -531,14 +531,21 @@ describe("cedarHttpEngine — where the agent is", () => {
 		).rejects.toThrow(/authentication must be a non-empty string/);
 	});
 
-	// `fetch` refuses a header value with a line break or a NUL inside it, or a
-	// character above U+00FF, and quotes the whole value in its error — which
-	// the load then logged on every retry as an unreachable agent (#271).
-	// Refused at load instead, naming where the token came from, never the token.
+	// `fetch` refuses a header value that holds an ASCII control character other
+	// than a tab once the whitespace around it is trimmed, or a character
+	// above U+00FF. For a line break, a NUL or a character above U+00FF its
+	// error quotes the whole value, which the load then logged on every retry;
+	// for the others it says only "invalid authorization header". Either way
+	// the load called the agent unreachable and retried for ten seconds
+	// (#271). Refused at load instead, naming where the token came from,
+	// never the token.
 	it.each([
 		["a line break inside", "s3cr3t-1\ns3cr3t-2"],
 		["a header smuggled after CRLF", "s3cr3t\r\nX-Other: y"],
 		["a NUL", "s3c\u0000r3t"],
+		["a DEL", "s3cr\u007ft"],
+		["a form feed after it, which is not trimmed", "s3cr3t\u000c"],
+		["a vertical tab inside", "s3c\u000br3t"],
 		["a character above U+00FF", "s3cr€t"],
 	])(
 		"refuses a token fetch cannot send — %s — without repeating it (#271)",
@@ -560,7 +567,7 @@ describe("cedarHttpEngine — where the agent is", () => {
 				}
 				expect(message).toMatch(
 					new RegExp(
-						`^${source} is not a valid HTTP header value — it holds a line break, a NUL or a character above U\\+00FF`,
+						`^${source} is not a valid HTTP header value — it holds an ASCII control character other than a tab, or a character above U\\+00FF`,
 					),
 				);
 				expect(message).not.toContain(token);
@@ -569,6 +576,18 @@ describe("cedarHttpEngine — where the agent is", () => {
 			expect(calls).toEqual([]);
 		},
 	);
+
+	it("still sends a tab or a Latin-1 character inside a token, as fetch does", async () => {
+		const { doFetch, calls } = agent();
+		await loadAsync(
+			createCedarHttpEngine({
+				fetch: doFetch,
+				env: { ...AGENT_ENV, [CEDAR_AUTHENTICATION_ENV]: "s3c\tr\u00e9t" },
+			}),
+			inline(PERMIT_ALL),
+		);
+		expect(headersOf(calls[0]).authorization).toBe("s3c\tr\u00e9t");
+	});
 
 	it("still sends a token whose only whitespace is around it, as fetch trims it", async () => {
 		const { doFetch, calls } = agent();
@@ -837,6 +856,32 @@ describe("cedarHttpEngine — isAuthorized", () => {
 			"a cause with no prototype, so no toString",
 			() => new TypeError("fetch failed", { cause: Object.create(null) }),
 			/is unreachable: fetch failed: a failure that could not be described$/,
+		],
+		[
+			// Only a custom `fetch` could hand over either of these two.
+			"a cause getter that never runs out",
+			() => {
+				const endless = (): Error => {
+					const link = new Error("");
+					Object.defineProperty(link, "cause", { get: endless });
+					return link;
+				};
+				return new TypeError("fetch failed", { cause: endless() });
+			},
+			/is unreachable: fetch failed$/,
+		],
+		[
+			"an AggregateError whose errors never run out",
+			() => {
+				const aggregate = new AggregateError([], "");
+				Object.defineProperty(aggregate.errors, Symbol.iterator, {
+					*value() {
+						for (;;) yield new Error("");
+					},
+				});
+				return new TypeError("fetch failed", { cause: aggregate });
+			},
+			/is unreachable: fetch failed$/,
 		],
 		[
 			"a message getter that throws",
