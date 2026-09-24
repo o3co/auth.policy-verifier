@@ -6,6 +6,192 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
+## [0.13.0] - 2026-09-24
+
+### Security
+
+- **BREAKING (misconfigured deployments only): a static permission list
+  written as a string no longer grants every permission**
+  (`@o3co/auth.policy-verifier.builtins`,
+  [#264](https://github.com/o3co/auth.policy-verifier/issues/264),
+  [#265](https://github.com/o3co/auth.policy-verifier/pull/265)). From 0.1.0
+  through 0.12.0 `StaticPermissionCollector` copied its list with a spread, and
+  a string is iterable: `permissions = "posts.*"`, written where
+  `permissions = ["posts.*"]` was meant, became
+  `["p","o","s","t","s",".","*"]`, and `HasPermission` reads a lone `"*"` as
+  grant-all. Every subject then passed every `HasPermission` check, the ones
+  `ResourceActionPermissionRuleCollector` builds included. The server's own
+  config reached it: `AppConfigSchema` passes a collector entry's fields
+  through unchecked, so the HOCON entry booted and every decision it granted
+  logged as an ordinary allow. `permissions`, and `StaticRoleCollector`'s
+  `roles`, must now be arrays. Anything else is a
+  `TypeError` at construction that names the collector and the field
+  (`StaticPermissionCollector: permissions must be an array (got string)`),
+  and because `createApp` builds the collectors at boot, the deployment fails
+  to start. What a non-array did in 0.12.0:
+
+  | Configured | 0.12.0 | 0.13.0 |
+  | --- | --- | --- |
+  | `permissions`: a string containing `*` | every `HasPermission` check passes, silently | refused at boot |
+  | `permissions`: a string without `*` | single-character grants — in practice a silent deny | refused at boot |
+  | `permissions` or `roles`: missing, `null`, a number, an object | `collector_threw`: `500` on every decision | refused at boot |
+  | `roles`: a string | ignored by `HasPermission` — a silent deny | refused at boot |
+
+  **What to do:** write the list as a list — `permissions = ["posts.*"]` —
+  and upgrade every `@o3co/auth.policy-verifier.*` package together to 0.13.0,
+  explicitly: a caret range on 0.12.x, which is what
+  `@o3co/create-auth-policy-verifier` writes into a scaffolded project, does
+  not admit 0.13.0, and `.builtins` 0.13.0 requires `.core` 0.13.0 exactly. A deployment whose list was missing or `null`, which used
+  to answer `500` on every decision, now fails at boot instead. Entries are
+  still not checked, because a non-string entry grants nothing. No documented
+  use is affected: the field was always typed `string[]` (`Role[]` for
+  `roles`), and the only shipped example already uses an array.
+
+### Removed
+
+- **BREAKING: `createVerifyRouter` no longer builds an authenticator**
+  (`@o3co/auth.policy-verifier.server`,
+  [#259](https://github.com/o3co/auth.policy-verifier/issues/259),
+  [#260](https://github.com/o3co/auth.policy-verifier/issues/260),
+  [#266](https://github.com/o3co/auth.policy-verifier/pull/266)).
+  `VerifyRouterConfig` loses `jwt?: VerifyRouterJwtConfig`, and
+  `authenticator: TokenAuthenticator` is required, in the type and at
+  construction. Through 0.12.0 the router took exactly one of the two and built
+  the bearer-JWT authenticator from `jwt` itself. A config that has a `jwt` key
+  now throws `createVerifyRouter: jwt is no longer accepted (#259) — pass an
+  authenticator …` whatever the key's value — `jwt: undefined` left by
+  spreading an old config included — and even beside an `authenticator`, so a
+  JWT config is never ignored silently. A missing, `null` or malformed
+  `authenticator` throws `createVerifyRouter: authenticator is required — …`.
+  **What to do:** replace `createVerifyRouter({ jwt, ...rest })` with
+  `createVerifyRouter({ authenticator: createTokenAuthenticator(jwt, logger),
+  ...rest })`, passing the logger you give the router — or `consoleLogger`
+  from `@o3co/auth.policy-verifier.core`, which is what the router used when
+  given none; `createTokenAuthenticator` requires one — so that
+  `jwt_token_rejected` and `jwt_verification_unavailable` reach the same sink,
+  and delete any leftover `jwt` key. `createTokenAuthenticator` and
+  `VerifyRouterJwtConfig` are exported as before, and `createTokenAuthenticator`
+  runs the same validation the router ran on `jwt`. `createApp` already passed
+  `authenticator`, so it — and every deployment configured through HOCON — is
+  unaffected.
+
+### Changed
+
+- **The per-request decision moved out of the HTTP router**
+  (`.server`, [#251](https://github.com/o3co/auth.policy-verifier/issues/251),
+  [#252](https://github.com/o3co/auth.policy-verifier/pull/252)).
+  `POST /verify` and each entry of `POST /verify/batch` now run one internal
+  function in `packages/server/src/decision/`, which takes no Express object.
+  Responses, status codes, failure categories, `verify_caller_gone`, the
+  `decision` line and the counters are unchanged; the router's own suites pass
+  unchanged. It is internal and exported from nowhere. Together with the moves
+  below, this leaves the exported surface of all six packages as 0.12.0 had
+  it — the same names, from the same package roots — apart from
+  `VerifyRouterConfig` (under Removed) and the private fields of the rules and
+  the static collectors (under Fixed). Nothing to do.
+
+- **Under `credentialToCollectors: "expose"`, an authenticator that supplies
+  no credential leaves `credential` off the collector context** (`.server`,
+  [#252](https://github.com/o3co/auth.policy-verifier/pull/252)). In 0.12.0
+  the router set the key whenever the option was on, so it could be present
+  with the value `undefined`; the decision now sets it only when there is a
+  value. Reachable only from a `TokenAuthenticator` written in JavaScript, or
+  through a cast, since `AuthenticationResult` declares `credential: string`.
+  A collector that tested `"credential" in context` now sees `false` there; one
+  that reads `context.credential` sees `undefined` either way.
+
+- **The server's contract types are declared in their own files**
+  (`.server`, [#258](https://github.com/o3co/auth.policy-verifier/issues/258),
+  [#259](https://github.com/o3co/auth.policy-verifier/issues/259),
+  [#260](https://github.com/o3co/auth.policy-verifier/issues/260),
+  [#261](https://github.com/o3co/auth.policy-verifier/pull/261),
+  [#266](https://github.com/o3co/auth.policy-verifier/pull/266)). The
+  authentication contract — `TokenAuthenticator`, `AuthenticationResult`,
+  `TokenAuthenticatorFactory`, `TokenAuthenticatorDependencies`,
+  `KeyResolver`, `KeyResolverFactory` and `ServerModuleContext` — moved from
+  `jwt/` to `auth/`; the `DecisionMetrics` port, with `DecisionObservation`
+  and `CollectorFailureObservation`, moved to `observability/decisionMetrics.mts`,
+  apart from its prom-client implementation; and the config checks the schema
+  shares with the JWT path — the HS256 rotation and JWKS URI checks,
+  `checkAudienceClaim`, `DEFAULT_AUDIENCE_CLAIM`, `UNPINNED_TOKEN_TYPE` —
+  moved from `jwt/` to `config/`. The package root exports every one of them
+  under the same name, and it is the only entry point the package offers, so
+  no import changes. Metric names, labels, types and buckets are unchanged.
+
+- **Two runtime dependencies move, and one is an exact pin**
+  ([#250](https://github.com/o3co/auth.policy-verifier/pull/250)).
+  `@o3co/auth.policy-verifier.cedar-wasm` pins `@cedar-policy/cedar-wasm`
+  exactly, `4.12.0` → `4.13.0`, so every deployment that evaluates Cedar in
+  process runs a different Cedar engine build after this upgrade: the pin
+  moves with the package. A policy's revision is computed from the policy
+  files and does not change, but the evaluator's version is among the things
+  that shape an answer (0.12.0, "The Cedar policy revision"): read Cedar's 4.13.0 release
+  notes before upgrading a deployment that depends on edge-case evaluation
+  behaviour. `@o3co/auth.policy-verifier.server` requires `zod` `^4.6.5`
+  (was `^4.6.2`); an install that already resolves 4.6.5 or later sees no
+  change. A project scaffolded by `@o3co/create-auth-policy-verifier` 0.13.0
+  builds from a refreshed `node:26-alpine` digest
+  ([#248](https://github.com/o3co/auth.policy-verifier/pull/248)).
+
+### Fixed
+
+- **Rules and static collectors copy their config at construction**
+  (`.builtins`, [#255](https://github.com/o3co/auth.policy-verifier/issues/255),
+  [#262](https://github.com/o3co/auth.policy-verifier/pull/262)). The eight
+  comparison rules — `AttrLiteralEqual`, `AttrLiteralNotEqual`,
+  `AttrLiteralIn`, `AttrLiteralNotIn`, `AttrLiteralCompare`, `AttrPairEqual`,
+  `AttrPairNotEqual`, `AttrPairCompare`, and `AttrMatchRule` through
+  `AttrPairEqual` — kept the caller's config object and read it on every
+  `verify`, while `ruleType` and `message` were built once. Mutating the config
+  after construction therefore changed the rule's answers — past the
+  constructor's validation, so a `NaN` could get in — and left `ruleType` and
+  `message` describing values the rule was no longer using.
+  `StaticPermissionCollector` and `StaticRoleCollector` kept the caller's
+  arrays, and roles, the same way. Each now reads, validates and copies its
+  config once, and mutating it afterwards changes nothing. A host that did not
+  mutate a config it had handed over sees no difference. Types only: the
+  rules' `private readonly config` is replaced by private fields named `a`,
+  `b`, `v` and `op`, so a subclass declaring a member of one of those names no
+  longer type-checks, and a JavaScript subclass that read `this.config` finds
+  it gone.
+
+- **The documentation no longer says two collectors writing one scalar
+  attribute merge last-writer-wins** (`.core`,
+  [#253](https://github.com/o3co/auth.policy-verifier/pull/253),
+  [#257](https://github.com/o3co/auth.policy-verifier/pull/257)). Since 0.4.0
+  ([#174](https://github.com/o3co/auth.policy-verifier/issues/174)) two
+  collectors writing *different* values to one non-array key throw
+  `AttributeConflictError`, and the server answers `403` with
+  `code: "attribute_conflict"`. `docs/extending.md` and
+  `docs/extending.ja.md`, `packages/core/README.md` and `AttributePipeline`'s
+  header comment (#253), and `packages/core/README.ja.md` (#257) had gone on
+  describing a last-writer-wins merge. An operator who pointed two collectors
+  at one scalar key on the strength of those pages has been getting denials
+  the documentation called merges. The code does not change. **What to do:**
+  if `attribute_conflict` lines appear in the log, give each scalar key one
+  owning collector; an array-valued key still concatenates, in collector
+  order.
+
+- **`AttrMatchRule` says since when it is deprecated, not until when**
+  (`.builtins`). Its JSDoc and the package README both promised its removal in
+  a major version, and neither said when it was deprecated. It has been
+  deprecated since 0.3.0, and while the major version is 0 a breaking change
+  ships in a minor, so both now say "deprecated since v0.3" and name no
+  removal version. Use `AttrPairEqual`, which it extends.
+
+- **The documentation no longer says a scope claim with no usable list is
+  treated as scopeless** (`.builtins`,
+  [#263](https://github.com/o3co/auth.policy-verifier/pull/263)). The builtins
+  README said `PayloadScopeCollector { claim = "scp" }` and
+  `ResourceActionScopeRuleCollector { claim = "scp" }` "agree about which tokens
+  are scopeless". They do not: the rule collector checks only that the claim is
+  present. Under `scopeless = "skip"`, a token whose claim holds no usable
+  scope list — `""`, a number — counts as scoped, gets the `HasScope` rule, and
+  is denied, where the README implied it would be skipped. The code does not
+  change; the README and the collector's header now say what it does. **What
+  to do:** nothing, unless you counted on such tokens being skipped — 0.12.0
+  denied them too.
+
 ## [0.12.0] - 2026-09-18
 
 ### Security
