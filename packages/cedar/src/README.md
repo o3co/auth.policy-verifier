@@ -69,6 +69,19 @@ The source falls into four parts, separated by what changes them:
 - The `http` engine follows no redirect (#270). A 3xx to an authorization call is a
   `CedarEngineError` — a deny with a `failed` evaluation — and a 3xx to the policy load fails
   boot, so a decision and a policy set only ever come from the configured endpoint.
+- The `http` engine says what failed (#271). A transport failure carries the cause `fetch`
+  keeps on its error, not "fetch failed" alone; an abort — the rule deadline or the caller
+  leaving — rejects with the signal's reason wherever it lands, before the answer or while its
+  body is read; a load whose deadline passes is reported as no answer in time, never as a
+  reachable agent —
+  [`__tests__/httpEngine.test.mts`](__tests__/httpEngine.test.mts),
+  [`__tests__/httpEngineFakeAgent.test.mts`](__tests__/httpEngineFakeAgent.test.mts).
+- The `http` engine bounds an answer by time only: the rule deadline limits how long it may
+  take, and nothing limits its size or checks its `content-type`. The agent is trusted with
+  the decision itself — an agent that could send an unbounded body could as well answer every
+  request however it liked — so a bound would guard against nothing that trust does not
+  already concede. The body is parsed and its shape checked, which is the check a
+  `content-type` test would only approximate.
 - The `http` engine's wire — what reaches cedar-agent, and how each way a call can fail comes
   out — is tested through Node's real `fetch` against a local fake agent, with nothing stubbed
   ([`__tests__/httpEngineFakeAgent.test.mts`](__tests__/httpEngineFakeAgent.test.mts), the

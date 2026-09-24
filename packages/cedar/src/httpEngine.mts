@@ -42,6 +42,8 @@ export interface CedarHttpEngineOptions {
 	 * The `fetch` to call. Defaults to the global one, looked up per call. It
 	 * must honour `init.redirect`: both calls ask for `"manual"` so that a 3xx
 	 * fails closed (#270), and a `fetch` that follows redirects anyway undoes that.
+	 * It must also reject once `init.signal` aborts: the load tells its deadline
+	 * apart from other failures by that signal (#271).
 	 */
 	fetch?: typeof fetch;
 	/** Where `CEDAR_ENDPOINT` / `CEDAR_AUTHENTICATION` are read. Defaults to `process.env`. */
@@ -109,10 +111,19 @@ interface AgentAuthorizationCall {
  * Boot retries a connection refusal for {@link CEDAR_LOAD_TIMEOUT_MS} (a
  * compose sibling may be a few hundred milliseconds behind) and then refuses
  * to start; a load answered with a 3xx fails boot at once. After boot, an
- * agent that is unreachable, answers non-2xx or answers something that is not
- * a decision rejects with {@link CedarEngineError}; the collector logs it and
- * denies, never abstains. No redirect is followed (#270): a 3xx is non-2xx,
- * so `endpoint` must be the URL that answers the calls itself.
+ * agent that is unreachable, answers non-2xx, breaks off its answer or answers
+ * something that is not a decision rejects with {@link CedarEngineError}; the
+ * collector logs it and denies, never abstains. No redirect is followed
+ * (#270): a 3xx is non-2xx, so `endpoint` must be the URL that answers the
+ * calls itself.
+ *
+ * Each failure says what failed (#271). A transport failure names the cause
+ * `fetch` keeps on its error — `connect ECONNREFUSED 127.0.0.1:8180`,
+ * `getaddrinfo ENOTFOUND …`, a TLS code — rather than "fetch failed" for all
+ * of them. An abort rejects with the signal's reason wherever it lands, before
+ * the answer or while its body is read. A load whose deadline passes is
+ * reported as no answer in time, with how the attempt before failed, never as
+ * a reachable agent: a timeout does not show the connection was made.
  */
 export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): CedarEngine {
 	const env = options.env ?? process.env;
@@ -204,10 +215,10 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 					if (!response.ok) {
 						const redirected = response.status >= 300 && response.status < 400;
 						throw new CedarEngineError(
-							`cedar engine at ${endpoint} answered ${response.status} to an authorization call: ${await errorDescription(response)}${redirected ? " — redirects are not followed; set endpoint to the URL that answers it itself" : ""}`,
+							`cedar engine at ${endpoint} answered ${response.status} to an authorization call: ${await errorDescription(response, signal)}${redirected ? " — redirects are not followed; set endpoint to the URL that answers it itself" : ""}`,
 						);
 					}
-					return readDecision(await response.json().catch(() => undefined), endpoint);
+					return readDecision(parseJson(await answerText(response, signal, endpoint)), endpoint);
 				},
 			};
 			return policySet;
@@ -233,37 +244,50 @@ async function pushPolicies(
 	const { loadTimeoutMs, retryMs } = timing;
 	const deadline = Date.now() + loadTimeoutMs;
 	let attempt = 0;
+	/** How the previous attempt failed, when it did — for a timeout to name. */
+	let previousFailure: string | undefined;
 	for (;;) {
 		attempt++;
+		const attemptSignal = AbortSignal.timeout(Math.max(1, deadline - Date.now()));
 		let response: Response;
 		try {
 			response = await doFetch(`${endpoint}${POLICIES_PATH}`, {
 				method: "PUT",
 				headers,
 				body: JSON.stringify(policies),
-				signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+				signal: attemptSignal,
 				// Not followed (#270): the policy set goes to the configured endpoint
 				// or nowhere.
 				redirect: "manual",
 			});
 		} catch (cause) {
-			// The request's own signal is the load deadline, so a timeout means an
-			// agent that is reachable but not answering — said as such, since it
-			// is a different thing to troubleshoot than a connection refused.
-			if (cause instanceof Error && cause.name === "TimeoutError") {
+			// The attempt's own signal is the load deadline, told by the signal
+			// and not by the name of what `fetch` threw. It proves only that no
+			// answer came in time, not that the agent is reachable (#271): a
+			// retry runs on what is left of the deadline — a millisecond, when a
+			// timer overshoots — and can time out before its refusal arrives, and
+			// a host that drops packets never completes the connection at all.
+			// So the message says what is known, and names how the attempt before
+			// failed when one did.
+			if (attemptSignal.aborted) {
 				throw new CedarEngineError(
-					`cedar engine at ${endpoint} did not accept the policy set from ${description} within ${loadTimeoutMs} ms — reachable, but the request timed out (${attempt} attempts)`,
+					`cedar engine at ${endpoint} did not accept the policy set from ${description} within ${loadTimeoutMs} ms (${attempt} attempts) — ${
+						previousFailure === undefined
+							? "the request got no response before the deadline: the agent took it and did not answer, or the connection never completed"
+							: `the last got no response before the deadline, and the one before it failed: ${previousFailure}`
+					}`,
 				);
 			}
 			// Unreachable, not refused: a compose sibling may still be starting.
 			// Retry until the deadline, then fail boot naming the endpoint.
+			previousFailure = describeFailure(cause);
 			if (Date.now() + retryMs >= deadline) {
 				throw new CedarEngineError(
-					`cedar engine at ${endpoint} is unreachable — could not load the policy set from ${description} within ${loadTimeoutMs} ms (${attempt} attempts): ${errorMessage(cause)}`,
+					`cedar engine at ${endpoint} is unreachable — could not load the policy set from ${description} within ${loadTimeoutMs} ms (${attempt} attempts): ${previousFailure}`,
 				);
 			}
 			logger.warn(
-				{ engine: CEDAR_HTTP_ENGINE_NAME, endpoint, attempt, reason: errorMessage(cause) },
+				{ engine: CEDAR_HTTP_ENGINE_NAME, endpoint, attempt, reason: previousFailure },
 				"cedar engine unreachable, retrying",
 			);
 			await new Promise((resolve) => setTimeout(resolve, retryMs));
@@ -431,13 +455,56 @@ async function send(doFetch: typeof fetch, url: string, init: RequestInit): Prom
 		// The rule's signal aborting is the caller's or the deadline's doing; the
 		// evaluator maps that itself. Everything else is the engine not answering.
 		if (init.signal?.aborted) throw init.signal.reason;
-		throw new CedarEngineError(`cedar engine at ${url} is unreachable: ${errorMessage(cause)}`);
+		throw new CedarEngineError(`cedar engine at ${url} is unreachable: ${describeFailure(cause)}`);
 	}
 }
 
-/** cedar-agent's error body is `{ reason, description, code }`; fall back to the status text. */
-async function errorDescription(response: Response): Promise<string> {
-	const body: unknown = await response.json().catch(() => undefined);
+/**
+ * The body of a 2xx answer, read whole. The status arrives before the body,
+ * and the read can fail in between (#271): an abort — the rule deadline, or
+ * the caller leaving — rejects with the signal's reason, as it does before the
+ * status, since that is how the collector and any other caller of the port
+ * tell a timeout from an outage; any other failure is the answer broken off,
+ * not an answer that is not a decision.
+ */
+async function answerText(
+	response: Response,
+	signal: AbortSignal,
+	endpoint: string,
+): Promise<string> {
+	try {
+		return await response.text();
+	} catch (cause) {
+		if (signal.aborted) throw signal.reason;
+		throw new CedarEngineError(
+			`cedar engine at ${endpoint} broke off its answer to an authorization call: ${describeFailure(cause)}`,
+		);
+	}
+}
+
+/** The body as JSON, or `undefined` for anything that is not — which `readDecision` refuses. */
+function parseJson(text: string): unknown {
+	try {
+		return JSON.parse(text);
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * cedar-agent's error body is `{ reason, description, code }`; fall back to
+ * the status text. The status is the fact, so a body that does not arrive
+ * leaves it to the status text — unless the read was cut by `signal`
+ * aborting, which is the signal's to report (#271).
+ */
+async function errorDescription(response: Response, signal?: AbortSignal): Promise<string> {
+	let text: string | undefined;
+	try {
+		text = await response.text();
+	} catch {
+		if (signal?.aborted) throw signal.reason;
+	}
+	const body = text === undefined ? undefined : parseJson(text);
 	if (typeof body === "object" && body !== null) {
 		const description = (body as Record<string, unknown>).description;
 		if (typeof description === "string" && description.length > 0) return description;
@@ -532,6 +599,50 @@ function cedarStringLiteral(value: string): string {
 	return `${out}"`;
 }
 
-function errorMessage(cause: unknown): string {
-	return cause instanceof Error ? cause.message : String(cause);
+/** How many links of a `cause` chain a message follows, and how long one link may run. */
+const FAILURE_DEPTH = 4;
+const FAILURE_LINK_MAX = 200;
+
+/**
+ * A failure as one line, its causes included (#271). The real `fetch` rejects
+ * with "fetch failed" whatever happened, and keeps what did — a refusal, a
+ * name that does not resolve, a TLS error, a reset — on `cause`; the message
+ * alone reads the same for all of them. Each link is its message with
+ * whitespace collapsed (OpenSSL's spans lines), led by its `code` when the
+ * message does not carry it already, and cut at {@link FAILURE_LINK_MAX}
+ * characters; an `AggregateError` without a message — one error per address
+ * tried, as `localhost` gives — is its errors. Only messages and codes are
+ * read, never the request, so the token cannot reach a log line through it.
+ */
+function describeFailure(failure: unknown): string {
+	const links: string[] = [];
+	const seen = new Set<unknown>();
+	let link: unknown = failure;
+	while (link !== undefined && link !== null && !seen.has(link) && links.length < FAILURE_DEPTH) {
+		seen.add(link);
+		const text = describeLink(link);
+		if (text.length > 0) links.push(text);
+		link = link instanceof Error ? link.cause : undefined;
+	}
+	return links.join(": ") || "no description";
+}
+
+function describeLink(failure: unknown): string {
+	if (!(failure instanceof Error)) return clip(String(failure).replace(/\s+/g, " ").trim());
+	let text = failure.message.replace(/\s+/g, " ").trim();
+	if (text.length === 0 && failure instanceof AggregateError) {
+		text = failure.errors
+			.map((error) => describeLink(error))
+			.filter((error) => error.length > 0)
+			.join("; ");
+	}
+	const code = (failure as { code?: unknown }).code;
+	if (typeof code === "string" && code.length > 0 && !text.includes(code)) {
+		text = text.length > 0 ? `${code}: ${text}` : code;
+	}
+	return clip(text);
+}
+
+function clip(text: string): string {
+	return text.length > FAILURE_LINK_MAX ? `${text.slice(0, FAILURE_LINK_MAX - 1)}…` : text;
 }

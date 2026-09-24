@@ -396,8 +396,10 @@ docker compose --profile cedar up --build
   to the agent, one entry per `.cedar` file with the file's name as the policy
   id, so the agent holds exactly `config/policies` and nothing is converted or
   mounted twice. Boot retries an unreachable agent for 10 s (a compose sibling
-  may be a few hundred milliseconds behind) and then refuses to start; a set
-  the agent refuses fails boot at once, with the agent's message.
+  may be a few hundred milliseconds behind) and then refuses to start, naming
+  why the last attempt failed (`connect ECONNREFUSED …`, `getaddrinfo
+  ENOTFOUND …`, a TLS error); a set the agent refuses fails boot at once, with
+  the agent's message.
 - **One policy per file.** cedar-agent stores policies one by one, so each
   `.cedar` file — and an inline `policies` string — must hold exactly one
   policy; a file with two is refused at boot. The wasm engine concatenates and
@@ -417,8 +419,9 @@ docker compose --profile cedar up --build
   should size the agent for that concurrency, or put a connection-limiting
   proxy in front of it.
 - **Failure after boot is a deny.** An agent that is unreachable, answers
-  non-2xx, or answers something that is not a decision makes the rule fail
-  and log (`cedar authorization call failed`). An agent that is up but has
+  non-2xx, breaks off its answer, or answers something that is not a decision
+  makes the rule fail and log (`cedar authorization call failed`), with the
+  cause in the log line's `reason` the same way. An agent that is up but has
   lost the policy set — restarted, or recreated by `docker compose up` — is
   not a failure it can see: it answers "deny, no determining policy" to every
   request, which is why `onNoDeterminingPolicy = "abstain"` is refused with
