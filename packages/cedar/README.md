@@ -375,6 +375,9 @@ docker compose --profile cedar up --build
   is the mistake worth naming. The template's compose file sets
   `CEDAR_ENDPOINT=http://127.0.0.1:8180`, the profile's address. A base URL:
   the agent's `/v1/policies` and `/v1/is_authorized` are appended.
+  Redirects are not followed, so this must be the URL that answers those calls
+  itself: behind an ingress that answers with a 3xx, every decision is a deny
+  and a 3xx to the policy load fails boot.
   Plain `http://` is accepted for loopback hosts only; a routable agent must be
   `https://` (the rule `jwksUri` follows, and for the same reason: the request
   carries the subject's attributes and the answer is an authorization).

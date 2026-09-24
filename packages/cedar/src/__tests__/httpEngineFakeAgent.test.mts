@@ -334,12 +334,14 @@ describe("cedarHttpEngine over the wire — a failed call rejects with CedarEngi
 			/cedar engine at .*\/v1\/is_authorized is unreachable: fetch failed/,
 		],
 		[
-			"a redirect loop — fetch gives up",
+			// Before #270 `fetch` followed this until it gave up ("fetch failed").
+			// Now the first 3xx is answered as the non-2xx it is.
+			"a redirect loop — refused at the first hop",
 			(request, response) => {
 				response.writeHead(307, { location: request.path });
 				response.end();
 			},
-			/cedar engine at .*\/v1\/is_authorized is unreachable: fetch failed/,
+			/cedar engine at .*answered 307 to an authorization call/,
 		],
 	];
 
@@ -407,17 +409,16 @@ describe("cedarHttpEngine over the wire — the deadline", () => {
 });
 
 describe("cedarHttpEngine over the wire — redirects", () => {
-	// FINDING (#269): the engine documents that an agent answering non-2xx
-	// rejects with CedarEngineError (header "Failure is loud and closed";
-	// README "Failure after boot is a deny"), and it is pointed at one base
-	// URL. `fetch` runs with its default `redirect: "follow"`, so a 3xx is
-	// never seen: the engine follows it, re-POSTs the request's attributes to
-	// wherever `Location` names, and takes that server's answer as the
-	// decision. `fetch` drops the Authorization header on a cross-origin hop,
-	// so the agent's token does not leave; the subject's attributes do. Each
-	// case below is written to the documented contract.
+	// The engine documents that an agent answering non-2xx rejects with
+	// CedarEngineError (header "Failure is loud and closed"; README "Failure
+	// after boot is a deny"), and it is pointed at one base URL. Until #270 both
+	// calls ran with `fetch`'s default `redirect: "follow"`, so a 3xx was never
+	// seen: the engine re-POSTed the request's attributes to wherever `Location`
+	// named and took that server's answer as the decision — a forbid could come
+	// back as an allow. These cases, found by #269 and pinned as `it.fails`
+	// until the fix, hold that no redirect is followed.
 
-	it.fails("does not follow a same-origin redirect: a 307 is non-2xx and rejects", async () => {
+	it("does not follow a same-origin redirect: a 307 is non-2xx and rejects", async () => {
 		const loaded = await loadedAgainst(agent.origin);
 		agent.answer((request, response) => {
 			if (request.path === "/v1/is_authorized") {
@@ -436,7 +437,7 @@ describe("cedarHttpEngine over the wire — redirects", () => {
 		]);
 	});
 
-	it.fails("does not follow a cross-origin 307: the other origin receives nothing", async () => {
+	it("does not follow a cross-origin 307: the other origin receives nothing", async () => {
 		// The endpoint rules — https to anything routable, plain http to
 		// loopback only — are checked on the configured endpoint alone, so a
 		// followed redirect also takes the request past them.
@@ -448,11 +449,13 @@ describe("cedarHttpEngine over the wire — redirects", () => {
 				response.end();
 			}),
 		);
-		await expect(loaded.isAuthorized(request(), NEVER_ABORTS)).rejects.toThrow(CedarEngineError);
+		const failure = loaded.isAuthorized(request(), NEVER_ABORTS);
+		await expect(failure).rejects.toThrow(CedarEngineError);
+		await expect(failure).rejects.toThrow(/answered 307 to an authorization call/);
 		expect(stranger.received).toEqual([]);
 	});
 
-	it.fails("does not follow a cross-origin 302 either — the other origin's answer is not the decision", async () => {
+	it("does not follow a cross-origin 302 either — the other origin's answer is not the decision", async () => {
 		const loaded = await loadedAgainst(agent.origin);
 		// A 302 turns the POST into a GET without a body; the stranger answers
 		// whatever the method, and that answer is read as the decision.
@@ -465,20 +468,30 @@ describe("cedarHttpEngine over the wire — redirects", () => {
 				response.end();
 			}),
 		);
-		await expect(loaded.isAuthorized(request(), NEVER_ABORTS)).rejects.toThrow(CedarEngineError);
+		const failure = loaded.isAuthorized(request(), NEVER_ABORTS);
+		await expect(failure).rejects.toThrow(CedarEngineError);
+		await expect(failure).rejects.toThrow(/answered 302 to an authorization call/);
 		expect(stranger.received).toEqual([]);
 	});
 
-	it.fails("does not push the policy set to another origin at boot", async () => {
-		// The load is refused for any non-2xx that is not 401/403 — "the agent
-		// answered and said no" — and a 307 keeps PUT and its body.
+	it("does not push the policy set to another origin at boot", async () => {
+		// Followed, a 307 keeps PUT and its body, so the policy set would land
+		// on the other origin and the load would succeed. A 3xx to the load fails
+		// boot at once, saying why, and is not retried: the endpoint is
+		// configuration, and retrying cannot change where it points.
 		agent.answer((_request, response) => {
 			response.writeHead(307, { location: `${stranger.origin}/v1/policies` });
 			response.end();
 		});
-		await expect(
-			createCedarHttpEngine({ env: {} }).load(policySet(), loadContext({ endpoint: agent.origin })),
-		).rejects.toThrow(CedarEngineError);
+		const booting = createCedarHttpEngine({ env: {} }).load(
+			policySet(),
+			loadContext({ endpoint: agent.origin }),
+		);
+		await expect(booting).rejects.toThrow(CedarEngineError);
+		await expect(booting).rejects.toThrow(
+			/answered 307 to the policy load instead of accepting it — redirects are not followed/,
+		);
+		expect(agent.received).toHaveLength(1);
 		expect(stranger.received).toEqual([]);
 	});
 });
@@ -731,10 +744,10 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 		);
 	});
 
-	// FINDING (#269) — see "redirects" above. Through the rule it is a pass: an
-	// Allow from a server the deployment never configured decides the request,
-	// and is reported as a completed evaluation against the loaded revision.
-	it.fails("denies when the agent redirects the call to another origin", async () => {
+	// See "redirects" above (#269, fixed in #270). Before the fix, through the
+	// rule this was a pass: an Allow from a server the deployment never
+	// configured decided the request, reported as a completed evaluation.
+	it("denies when the agent redirects the call to another origin", async () => {
 		const { rule: redirected } = await rule();
 		stranger.answer(cedarAgent(decision("Allow", ["stranger"])));
 		agent.answer(
