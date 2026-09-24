@@ -96,6 +96,14 @@ function request(): CedarRequest {
 
 const NEVER_ABORTS = new AbortController().signal;
 
+/**
+ * Whether Node's `fetch` publishes `undici:request:bodyChunkReceived`, which
+ * {@link firstBodyChunk} waits on. The undici bundled with Node 22 (6.x) does
+ * not: there the wait never ends, and an `it.fails` would count vitest's
+ * timeout as its expected failure — green while testing nothing.
+ */
+const PUBLISHES_BODY_CHUNKS = Number(process.versions.undici?.split(".")[0]) >= 7;
+
 function parsed(body: string): unknown {
 	return JSON.parse(body);
 }
@@ -387,25 +395,29 @@ describe("cedarHttpEngine over the wire — the deadline", () => {
 	// turns it into "answered something that is not a decision". Still a
 	// rejection, and the collector rethrows `signal.reason` whenever the signal
 	// has aborted, so the rule is not affected; a direct caller of the port is
-	// told the agent answered garbage when it timed out.
-	it.fails("rejects with the signal's reason when the deadline passes mid-body, too", async () => {
-		const loaded = await loadedAgainst(agent.origin);
-		agent.answer(
-			authorizeWith((_request, response) => {
-				response.writeHead(200, { "content-type": "application/json", "content-length": 200 });
-				response.write('{"decision":"Allow",');
-				agent.hold(response);
-			}),
-		);
-		const controller = new AbortController();
-		const reason = new Error("rule deadline");
-		const reading = firstBodyChunk("/v1/is_authorized");
-		const failure = loaded.isAuthorized(request(), controller.signal);
-		failure.catch(() => undefined);
-		await reading;
-		controller.abort(reason);
-		await expect(failure).rejects.toBe(reason);
-	});
+	// told the agent answered garbage when it timed out. Skipped where the
+	// body-chunk channel is silent (see PUBLISHES_BODY_CHUNKS).
+	(PUBLISHES_BODY_CHUNKS ? it.fails : it.skip)(
+		"rejects with the signal's reason when the deadline passes mid-body, too",
+		async () => {
+			const loaded = await loadedAgainst(agent.origin);
+			agent.answer(
+				authorizeWith((_request, response) => {
+					response.writeHead(200, { "content-type": "application/json", "content-length": 200 });
+					response.write('{"decision":"Allow",');
+					agent.hold(response);
+				}),
+			);
+			const controller = new AbortController();
+			const reason = new Error("rule deadline");
+			const reading = firstBodyChunk("/v1/is_authorized");
+			const failure = loaded.isAuthorized(request(), controller.signal);
+			failure.catch(() => undefined);
+			await reading;
+			controller.abort(reason);
+			await expect(failure).rejects.toBe(reason);
+		},
+	);
 });
 
 describe("cedarHttpEngine over the wire — redirects", () => {
