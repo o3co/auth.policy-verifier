@@ -18,8 +18,9 @@ import { AttributeConflictError } from "./errors.mjs";
 import type { AttributeCollector, Attributes, CollectorRequest } from "./types.mjs";
 
 /**
- * Fan-out aggregator that runs every `AttributeCollector` in parallel and merges
- * their results into a single `Attributes` map.
+ * Fan-out aggregator that runs every `AttributeCollector` concurrently — up to
+ * `CollectorLimits.concurrency` at a time, the rest queued behind them — and
+ * merges their results into a single `Attributes` map.
  *
  * Merge semantics: when the same key is produced by multiple collectors,
  * array-valued entries concatenate (in collector order); a non-array value may
