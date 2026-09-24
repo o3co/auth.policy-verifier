@@ -1,6 +1,6 @@
 # auth.policy-verifier
 
-最終更新: 2026-09-23
+最終更新: 2026-09-24
 
 [![CI](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth.policy-verifier.core)](https://www.npmjs.com/package/@o3co/auth.policy-verifier.core)
@@ -702,7 +702,7 @@ loopback に bind し、コンテナの `HEALTHCHECK` はこれが未設定の�
 
 ## 関連プロジェクト
 
-- [auth.provider](https://github.com/o3co/auth.provider) — DID 認証対応 OAuth 2.0 プロバイダー
+- [auth.provider](https://github.com/o3co/auth.provider) — OAuth 2.0 / OIDC プロバイダー（認証とトークン発行）
 - [auth.proxy](https://github.com/o3co/auth.proxy) — トークン検証リバースプロキシ
 - [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) — gRPC / ConnectRPC 向け protobuf method option 認可 interceptor (認可判定にこのサービスを呼び出す)
 - [auth](https://github.com/o3co/auth) — アーキテクチャドキュメントと E2E テスト
