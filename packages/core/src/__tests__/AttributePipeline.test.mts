@@ -119,7 +119,7 @@ describe("AttributePipeline", () => {
 		expect(result.get("scopes")).toEqual(["read:user"]);
 	});
 
-	it("runs collectors in parallel", async () => {
+	it("runs collectors concurrently within the default bound: a fast one finishes before a slow one started first", async () => {
 		const order: number[] = [];
 		const slow: AttributeCollector = {
 			collect: async () => {
