@@ -17,9 +17,10 @@ import {
 import type { AnyRule, CollectorRequest, RuleCollector } from "./types.mjs";
 
 /**
- * Fan-out aggregator that runs every `RuleCollector` in parallel and flattens
- * their results into a single `Rule[]`. Unlike `AttributePipeline`, rules do not
- * merge — each collector's rules are simply concatenated.
+ * Fan-out aggregator that runs every `RuleCollector` concurrently — up to
+ * `CollectorLimits.concurrency` at a time — and flattens their results into a
+ * single `Rule[]`. Unlike `AttributePipeline`, rules do not merge — each
+ * collector's rules are simply concatenated.
  *
  * The fan-out is bounded exactly as the attribute one is (#115), and failing
  * closed matters more here: a short rule list is a *weaker policy*, and an empty
