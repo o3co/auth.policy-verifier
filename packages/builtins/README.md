@@ -145,7 +145,7 @@ new HasScope(scope: string, options?: { allowBareScopeRewrite?: boolean })
 
 ### AttrMatchRule
 
-**Deprecated.** Use [`AttrPairEqual`](#attrpairequal) instead. `AttrMatchRule` is kept as a thin wrapper class that extends `AttrPairEqual` and preserves the legacy `ruleType` (`attr_match:${a}:${b}`) and legacy `message` wording for backward compatibility. The type `AttrMatchRuleConfig` is a type alias of `AttrPairEqualConfig`. It will be removed in a future major version.
+**Deprecated.** Use [`AttrPairEqual`](#attrpairequal) instead. `AttrMatchRule` is kept as a thin wrapper class that extends `AttrPairEqual` and preserves the legacy `ruleType` (`attr_match:${a}:${b}`) and legacy `message` wording for backward compatibility. The type `AttrMatchRuleConfig` is a type alias of `AttrPairEqualConfig`. Deprecated since v0.3; it may be removed in a future release (subject to change).
 
 ```ts
 new AttrMatchRule({ a: string, b: string, group?: string })
