@@ -66,6 +66,9 @@ The source falls into four parts, separated by what changes them:
 - Nothing here evaluates Cedar, so the port and the collector are tested against a stand-in
   engine that evaluates nothing ([`__tests__/scriptedEngine.mts`](__tests__/scriptedEngine.mts));
   the real evaluator is tested end to end in `packages/cedar-wasm`.
+- The `http` engine follows no redirect (#270). A 3xx to an authorization call is a
+  `CedarEngineError` — a deny with a `failed` evaluation — and a 3xx to the policy load fails
+  boot, so a decision and a policy set only ever come from the configured endpoint.
 - The `http` engine's wire — what reaches cedar-agent, and how each way a call can fail comes
   out — is tested through Node's real `fetch` against a local fake agent, with nothing stubbed
   ([`__tests__/httpEngineFakeAgent.test.mts`](__tests__/httpEngineFakeAgent.test.mts), the

@@ -38,7 +38,11 @@ const IS_AUTHORIZED_PATH = "/v1/is_authorized";
 
 /** Constructor options, for composition and tests; the registered engine uses the defaults. */
 export interface CedarHttpEngineOptions {
-	/** The `fetch` to call. Defaults to the global one, looked up per call. */
+	/**
+	 * The `fetch` to call. Defaults to the global one, looked up per call. It
+	 * must honour `init.redirect`: both calls ask for `"manual"` so that a 3xx
+	 * fails closed (#270), and a `fetch` that follows redirects anyway undoes that.
+	 */
 	fetch?: typeof fetch;
 	/** Where `CEDAR_ENDPOINT` / `CEDAR_AUTHENTICATION` are read. Defaults to `process.env`. */
 	env?: Readonly<Record<string, string | undefined>>;
@@ -104,9 +108,11 @@ interface AgentAuthorizationCall {
  *
  * Boot retries a connection refusal for {@link CEDAR_LOAD_TIMEOUT_MS} (a
  * compose sibling may be a few hundred milliseconds behind) and then refuses
- * to start. After boot, an agent that is unreachable, answers non-2xx or
- * answers something that is not a decision rejects with
- * {@link CedarEngineError}; the collector logs it and denies, never abstains.
+ * to start; a load answered with a 3xx fails boot at once. After boot, an
+ * agent that is unreachable, answers non-2xx or answers something that is not
+ * a decision rejects with {@link CedarEngineError}; the collector logs it and
+ * denies, never abstains. No redirect is followed (#270): a 3xx is non-2xx,
+ * so `endpoint` must be the URL that answers the calls itself.
  */
 export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): CedarEngine {
 	const env = options.env ?? process.env;
@@ -189,10 +195,16 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 						headers,
 						body: JSON.stringify(call),
 						signal,
+						// Not followed (#270): a 3xx is the non-2xx it is, and fails closed
+						// below. Followed, it re-sent the call — the subject's attributes —
+						// wherever `Location` pointed and took that server's answer as the
+						// decision, so a redirect could turn a forbid into an allow.
+						redirect: "manual",
 					});
 					if (!response.ok) {
+						const redirected = response.status >= 300 && response.status < 400;
 						throw new CedarEngineError(
-							`cedar engine at ${endpoint} answered ${response.status} to an authorization call: ${await errorDescription(response)}`,
+							`cedar engine at ${endpoint} answered ${response.status} to an authorization call: ${await errorDescription(response)}${redirected ? " — redirects are not followed; set endpoint to the URL that answers it itself" : ""}`,
 						);
 					}
 					return readDecision(await response.json().catch(() => undefined), endpoint);
@@ -230,6 +242,9 @@ async function pushPolicies(
 				headers,
 				body: JSON.stringify(policies),
 				signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+				// Not followed (#270): the policy set goes to the configured endpoint
+				// or nowhere.
+				redirect: "manual",
 			});
 		} catch (cause) {
 			// The request's own signal is the load deadline, so a timeout means an
@@ -255,6 +270,14 @@ async function pushPolicies(
 			continue;
 		}
 		if (response.ok) return;
+		if (response.status >= 300 && response.status < 400) {
+			// Not retried: the endpoint is configuration, and it did not answer
+			// the load itself.
+			await response.body?.cancel().catch(() => undefined);
+			throw new CedarEngineError(
+				`cedar engine at ${endpoint} answered ${response.status} to the policy load instead of accepting it — redirects are not followed; set endpoint to the URL that answers it itself`,
+			);
+		}
 		if (response.status === 401 || response.status === 403) {
 			// The agent's own body says only "requires user authentication"; the
 			// fix is on this side, so name it (v0.10.0 audit — the template starts
