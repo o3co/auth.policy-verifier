@@ -69,6 +69,24 @@ The source falls into four parts, separated by what changes them:
 - The `http` engine follows no redirect (#270). A 3xx to an authorization call is a
   `CedarEngineError` — a deny with a `failed` evaluation — and a 3xx to the policy load fails
   boot, so a decision and a policy set only ever come from the configured endpoint.
+- The `http` engine says what failed (#271). A transport failure carries the cause `fetch`
+  keeps on its error, not "fetch failed" alone; an abort — the rule deadline or the caller
+  leaving — rejects with the signal's reason wherever it lands, before the answer or while its
+  body is read; a load whose deadline passes is reported as no answer in time, never as a
+  reachable agent —
+  [`__tests__/httpEngine.test.mts`](__tests__/httpEngine.test.mts),
+  [`__tests__/httpEngineFakeAgent.test.mts`](__tests__/httpEngineFakeAgent.test.mts).
+- The `http` engine reads at most `CEDAR_ANSWER_MAX_BYTES` (1 MiB) of an answer. A longer
+  one, declared or streamed, is refused — a deny — rather than held in memory for the rule
+  deadline, because a process out of memory takes every route down, not only the ones Cedar
+  gates. It does not check `content-type`: the body is parsed and its shape checked, which is
+  the check a `content-type` test would only approximate —
+  [`__tests__/httpEngine.test.mts`](__tests__/httpEngine.test.mts),
+  [`__tests__/httpEngineFakeAgent.test.mts`](__tests__/httpEngineFakeAgent.test.mts).
+- The `http` engine refuses at load a token `fetch` cannot send as a header — an ASCII control
+  character other than a tab inside it, a character above U+00FF — naming where it came from,
+  never its value: `fetch`'s own refusal can quote the value whole, and would put it in a log
+  line — [`__tests__/httpEngine.test.mts`](__tests__/httpEngine.test.mts).
 - The `http` engine's wire — what reaches cedar-agent, and how each way a call can fail comes
   out — is tested through Node's real `fetch` against a local fake agent, with nothing stubbed
   ([`__tests__/httpEngineFakeAgent.test.mts`](__tests__/httpEngineFakeAgent.test.mts), the

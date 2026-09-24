@@ -382,7 +382,10 @@ docker compose --profile cedar up --build
   `https://` (the rule `jwksUri` follows, and for the same reason: the request
   carries the subject's attributes and the answer is an authorization).
   `authentication` in config, else `CEDAR_AUTHENTICATION`, is sent verbatim as
-  the `Authorization` header when the agent was started with one.
+  the `Authorization` header when the agent was started with one. A token that
+  cannot be sent as a header — an ASCII control character other than a tab
+  inside it, a character above U+00FF — fails boot, naming where it came from
+  but not its value.
 - **Authenticate the agent.** An agent without `--authentication` is a *write*
   oracle over the policy set: anything that reaches its port can
   `PUT /v1/policies` a `permit(principal, action, resource);` and every later
@@ -396,8 +399,12 @@ docker compose --profile cedar up --build
   to the agent, one entry per `.cedar` file with the file's name as the policy
   id, so the agent holds exactly `config/policies` and nothing is converted or
   mounted twice. Boot retries an unreachable agent for 10 s (a compose sibling
-  may be a few hundred milliseconds behind) and then refuses to start; a set
-  the agent refuses fails boot at once, with the agent's message.
+  may be a few hundred milliseconds behind) and then refuses to start. The
+  error names the cause — `connect ECONNREFUSED …`, `getaddrinfo ENOTFOUND …`,
+  a TLS error — or, when the deadline passes while an attempt is still
+  waiting, says no answer came in time, with how the attempt before failed if
+  one did. A set the agent refuses fails boot at once, with the agent's
+  message.
 - **One policy per file.** cedar-agent stores policies one by one, so each
   `.cedar` file — and an inline `policies` string — must hold exactly one
   policy; a file with two is refused at boot. The wasm engine concatenates and
@@ -417,8 +424,10 @@ docker compose --profile cedar up --build
   should size the agent for that concurrency, or put a connection-limiting
   proxy in front of it.
 - **Failure after boot is a deny.** An agent that is unreachable, answers
-  non-2xx, or answers something that is not a decision makes the rule fail
-  and log (`cedar authorization call failed`). An agent that is up but has
+  non-2xx, breaks off its answer, answers more than 1 MiB
+  (`CEDAR_ANSWER_MAX_BYTES`), or answers something that is not a decision
+  makes the rule fail and log (`cedar authorization call failed`); the log
+  line's `reason` names the cause, as the boot error does. An agent that is up but has
   lost the policy set — restarted, or recreated by `docker compose up` — is
   not a failure it can see: it answers "deny, no determining policy" to every
   request, which is why `onNoDeterminingPolicy = "abstain"` is refused with

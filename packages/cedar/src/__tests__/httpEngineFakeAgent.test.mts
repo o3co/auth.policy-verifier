@@ -99,8 +99,8 @@ const NEVER_ABORTS = new AbortController().signal;
 /**
  * Whether Node's `fetch` publishes `undici:request:bodyChunkReceived`, which
  * {@link firstBodyChunk} waits on. The undici bundled with Node 22 (6.x) does
- * not: there the wait never ends, and an `it.fails` would count vitest's
- * timeout as its expected failure — green while testing nothing.
+ * not: there the wait never ends, so a case that waits on it is skipped
+ * rather than left to time out red for a reason that is not the engine's.
  */
 const PUBLISHES_BODY_CHUNKS = Number(process.versions.undici?.split(".")[0]) >= 7;
 
@@ -319,7 +319,18 @@ describe("cedarHttpEngine over the wire — a failed call rejects with CedarEngi
 				response.write('{"decision":"Allow","diagnostics":{"reason":[');
 				setImmediate(() => response.socket?.destroy());
 			},
-			/answered something that is not a decision/,
+			// Not "answered something that is not a decision" (#271): the agent
+			// never finished answering.
+			/broke off its answer to an authorization call: terminated/,
+		],
+		[
+			// Refused once past the bound, not read to the end and parsed (#271).
+			"a 200 larger than CEDAR_ANSWER_MAX_BYTES",
+			(_request, response) => {
+				response.writeHead(200, { "content-type": "application/json" });
+				response.end(`{"decision":"Allow","padding":"${"x".repeat(1024 * 1024)}"}`);
+			},
+			/answered an authorization call with more than 1 MiB — refused$/,
 		],
 		[
 			"a 200 JSON array",
@@ -339,7 +350,8 @@ describe("cedarHttpEngine over the wire — a failed call rejects with CedarEngi
 		[
 			"a connection dropped before any answer",
 			(_request, response) => response.socket?.destroy(),
-			/cedar engine at .*\/v1\/is_authorized is unreachable: fetch failed/,
+			// The cause undici keeps on the error is named (#271).
+			/cedar engine at .*\/v1\/is_authorized is unreachable: fetch failed: .+$/,
 		],
 		[
 			// Before #270 `fetch` followed this until it gave up ("fetch failed").
@@ -368,7 +380,9 @@ describe("cedarHttpEngine over the wire — a failed call rejects with CedarEngi
 		const failure = loaded.isAuthorized(request(), NEVER_ABORTS);
 		await expect(failure).rejects.toThrow(CedarEngineError);
 		await expect(failure).rejects.toThrow(
-			new RegExp(`cedar engine at ${gone.origin}/v1/is_authorized is unreachable: fetch failed`),
+			new RegExp(
+				`cedar engine at ${gone.origin}/v1/is_authorized is unreachable: fetch failed: connect ECONNREFUSED 127\\.0\\.0\\.1:\\d+$`,
+			),
 		);
 	});
 });
@@ -387,17 +401,14 @@ describe("cedarHttpEngine over the wire — the deadline", () => {
 		await expect(failure).rejects.toBe(reason);
 	});
 
-	// FINDING (#269): an abort that lands while the body is being read is not
-	// the signal's reason. `send` rethrows `signal.reason` when `fetch` itself
-	// rejects on the abort — the case the stubbed tests covered — but with the
-	// real `fetch` the headers can arrive first, and the abort then rejects
-	// `response.json()`, whose `.catch(() => undefined)` in `isAuthorized`
-	// turns it into "answered something that is not a decision". Still a
-	// rejection, and the collector rethrows `signal.reason` whenever the signal
-	// has aborted, so the rule is not affected; a direct caller of the port is
-	// told the agent answered garbage when it timed out. Skipped where the
-	// body-chunk channel is silent (see PUBLISHES_BODY_CHUNKS).
-	(PUBLISHES_BODY_CHUNKS ? it.fails : it.skip)(
+	// Found by #269, fixed in #271: with the real `fetch` the headers can
+	// arrive first, and an abort then fails the body read rather than `fetch`
+	// itself. The engine used to read that as "answered something that is not
+	// a decision", telling a direct caller of the port the agent answered
+	// garbage when it timed out. Skipped where the body-chunk channel is silent
+	// (see PUBLISHES_BODY_CHUNKS); `httpEngine.test.mts` pins the same contract
+	// against a scripted body on every Node.
+	(PUBLISHES_BODY_CHUNKS ? it : it.skip)(
 		"rejects with the signal's reason when the deadline passes mid-body, too",
 		async () => {
 			const loaded = await loadedAgainst(agent.origin);
@@ -509,14 +520,9 @@ describe("cedarHttpEngine over the wire — redirects", () => {
 });
 
 describe("cedarHttpEngine over the wire — boot", () => {
-	it("refuses to start naming the endpoint when the connection is refused", async () => {
+	it("refuses to start naming the endpoint and the refusal when the connection is refused", async () => {
 		// One attempt: `retryMs` is not shorter than the deadline, so the first
-		// refusal is the last. With room for a retry, the last attempt runs under
-		// whatever is left of the deadline — a millisecond, when a timer
-		// overshoots — and can time out before the refusal arrives; the engine
-		// then reports the refused agent as "reachable, but the request timed
-		// out". That is a finding of #269, not pinned here because it is a race.
-		// The retry loop itself is pinned against a scripted fetch.
+		// refusal is the last. The retry loop is pinned against a scripted fetch.
 		const gone = await FakeCedarAgent.start();
 		await gone.stop();
 		const load = createCedarHttpEngine({ env: {}, loadTimeoutMs: 1000, retryMs: 1000 }).load(
@@ -526,23 +532,56 @@ describe("cedarHttpEngine over the wire — boot", () => {
 		await expect(load).rejects.toThrow(CedarEngineError);
 		await expect(load).rejects.toThrow(
 			new RegExp(
-				`cedar engine at ${gone.origin} is unreachable — could not load the policy set from /policies within 1000 ms \\(1 attempts\\): fetch failed`,
+				`cedar engine at ${gone.origin} is unreachable — could not load the policy set from /policies within 1000 ms \\(1 attempts\\): fetch failed: connect ECONNREFUSED 127\\.0\\.0\\.1:\\d+$`,
 			),
 		);
 	});
 
-	it("says the agent is reachable but not answering when the load deadline passes on an open connection", async () => {
-		// The real `fetch` rejects with the timeout signal's own reason, a
-		// DOMException named TimeoutError — the name the engine tells this
-		// case apart by. The agent never answers, so the outcome does not
-		// depend on how long the deadline is.
+	it("never calls a refused agent reachable, wherever the deadline falls on its last attempt (#271)", async () => {
+		// With room for retries, the last attempt runs under whatever is left of
+		// the deadline — a millisecond, when a timer overshoots — and can time
+		// out before its refusal arrives. Found by #269: 48 of 200 such loads
+		// said "reachable, but the request timed out". It is a race, so this is
+		// the check on the real wire, not the pin: before the fix about one load
+		// in ten lost it, so twenty in a row caught it about nine runs in ten.
+		// `httpEngine.test.mts` pins the same case deterministically. A load
+		// whose first attempt times out — a worker stalled past the deadline
+		// before the refusal was read — says no answer came, which is also true.
+		const gone = await FakeCedarAgent.start();
+		await gone.stop();
+		const failures: unknown[] = [];
+		for (let load = 0; load < 20; load++) {
+			try {
+				await createCedarHttpEngine({ env: {}, loadTimeoutMs: 50, retryMs: 1 }).load(
+					policySet(),
+					loadContext({ endpoint: gone.origin }),
+				);
+				failures.push(new Error("loaded against a closed port"));
+			} catch (error) {
+				failures.push(error);
+			}
+		}
+		for (const failure of failures) {
+			expect(failure).toBeInstanceOf(CedarEngineError);
+			const { message } = failure as CedarEngineError;
+			expect(message).not.toMatch(/\breachable\b/);
+			expect(message).toMatch(
+				/(: fetch failed: connect ECONNREFUSED 127\.0\.0\.1:\d+|the request got no response before the deadline: .*)$/,
+			);
+		}
+	});
+
+	it("says no answer came before the deadline when the agent holds the load open", async () => {
+		// The agent never answers, so the outcome does not depend on how long
+		// the deadline is. A timeout is not evidence the agent is reachable, so
+		// the message does not say it is (#271).
 		agent.answer((_request, response) => agent.hold(response));
 		const load = createCedarHttpEngine({ env: {}, loadTimeoutMs: 100, retryMs: 20 }).load(
 			policySet(),
 			loadContext({ endpoint: agent.origin }),
 		);
 		await expect(load).rejects.toThrow(
-			/did not accept the policy set from \/policies within 100 ms — reachable, but the request timed out \(1 attempts\)/,
+			/did not accept the policy set from \/policies within 100 ms \(1 attempts\) — the request got no response before the deadline/,
 		);
 		expect(agent.received).toHaveLength(1);
 	});
