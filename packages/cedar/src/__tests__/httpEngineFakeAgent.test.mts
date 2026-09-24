@@ -10,8 +10,13 @@
  * the wire, and how each way the wire can fail comes out — as a
  * `CedarEngineError` from the engine, and as a logged deny with a `failed`
  * evaluation from the rule.
+ *
+ * A case marked `it.fails` is the documented contract, which the engine does
+ * not meet over the real `fetch`: a finding, named in the comment above it.
+ * It turns red when the engine is fixed, and is then made an ordinary `it`.
  */
 
+import { subscribe, unsubscribe } from "node:diagnostics_channel";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -105,18 +110,40 @@ async function loadedAgainst(endpoint: string, config: Record<string, unknown> =
 	return loaded;
 }
 
+/**
+ * Resolves once the client side has read the first chunk of a response body
+ * from `path`, and the promise jobs that follow have run — so the engine has its
+ * `Response` and is reading the body. Observed on undici's diagnostics
+ * channel, which is what Node's `fetch` publishes; nothing is stubbed.
+ */
+function firstBodyChunk(path: string): Promise<void> {
+	const channel = "undici:request:bodyChunkReceived";
+	return new Promise((resolve) => {
+		const onChunk = (message: unknown) => {
+			const received = message as { request?: { path?: string } };
+			if (received.request?.path !== path) return;
+			unsubscribe(channel, onChunk);
+			setTimeout(resolve, 0);
+		};
+		subscribe(channel, onChunk);
+	});
+}
+
 let agent: FakeCedarAgent;
+/** A second server: whatever it receives went somewhere the engine was not pointed at. */
+let stranger: FakeCedarAgent;
 
 beforeAll(async () => {
-	agent = await FakeCedarAgent.start();
+	[agent, stranger] = await Promise.all([FakeCedarAgent.start(), FakeCedarAgent.start()]);
 });
 
 afterEach(() => {
 	agent.reset();
+	stranger.reset();
 });
 
 afterAll(async () => {
-	await agent.stop();
+	await Promise.all([agent.stop(), stranger.stop()]);
 });
 
 describe("cedarHttpEngine over the wire — what reaches the agent", () => {
@@ -348,6 +375,111 @@ describe("cedarHttpEngine over the wire — the deadline", () => {
 		await arrived;
 		controller.abort(reason);
 		await expect(failure).rejects.toBe(reason);
+	});
+
+	// FINDING (#269): an abort that lands while the body is being read is not
+	// the signal's reason. `send` rethrows `signal.reason` when `fetch` itself
+	// rejects on the abort — the case the stubbed tests covered — but with the
+	// real `fetch` the headers can arrive first, and the abort then rejects
+	// `response.json()`, whose `.catch(() => undefined)` in `isAuthorized`
+	// turns it into "answered something that is not a decision". Still a
+	// rejection, and the collector rethrows `signal.reason` whenever the signal
+	// has aborted, so the rule is not affected; a direct caller of the port is
+	// told the agent answered garbage when it timed out.
+	it.fails("rejects with the signal's reason when the deadline passes mid-body, too", async () => {
+		const loaded = await loadedAgainst(agent.origin);
+		agent.answer(
+			authorizeWith((_request, response) => {
+				response.writeHead(200, { "content-type": "application/json", "content-length": 200 });
+				response.write('{"decision":"Allow",');
+				agent.hold(response);
+			}),
+		);
+		const controller = new AbortController();
+		const reason = new Error("rule deadline");
+		const reading = firstBodyChunk("/v1/is_authorized");
+		const failure = loaded.isAuthorized(request(), controller.signal);
+		failure.catch(() => undefined);
+		await reading;
+		controller.abort(reason);
+		await expect(failure).rejects.toBe(reason);
+	});
+});
+
+describe("cedarHttpEngine over the wire — redirects", () => {
+	// FINDING (#269): the engine documents that an agent answering non-2xx
+	// rejects with CedarEngineError (header "Failure is loud and closed";
+	// README "Failure after boot is a deny"), and it is pointed at one base
+	// URL. `fetch` runs with its default `redirect: "follow"`, so a 3xx is
+	// never seen: the engine follows it, re-POSTs the request's attributes to
+	// wherever `Location` names, and takes that server's answer as the
+	// decision. `fetch` drops the Authorization header on a cross-origin hop,
+	// so the agent's token does not leave; the subject's attributes do. Each
+	// case below is written to the documented contract.
+
+	it.fails("does not follow a same-origin redirect: a 307 is non-2xx and rejects", async () => {
+		const loaded = await loadedAgainst(agent.origin);
+		agent.answer((request, response) => {
+			if (request.path === "/v1/is_authorized") {
+				response.writeHead(307, { location: "/elsewhere/v1/is_authorized" });
+				response.end();
+			} else {
+				cedarAgent(decision("Allow", ["not-the-agent"]))(request, response);
+			}
+		});
+		const failure = loaded.isAuthorized(request(), NEVER_ABORTS);
+		await expect(failure).rejects.toThrow(CedarEngineError);
+		await expect(failure).rejects.toThrow(/answered 307 to an authorization call/);
+		expect(agent.received.map((received) => received.path)).toEqual([
+			"/v1/policies",
+			"/v1/is_authorized",
+		]);
+	});
+
+	it.fails("does not follow a cross-origin 307: the other origin receives nothing", async () => {
+		// The endpoint rules — https to anything routable, plain http to
+		// loopback only — are checked on the configured endpoint alone, so a
+		// followed redirect also takes the request past them.
+		const loaded = await loadedAgainst(agent.origin, { authentication: "agent-token" });
+		stranger.answer(cedarAgent(decision("Allow", ["stranger"])));
+		agent.answer(
+			authorizeWith((_request, response) => {
+				response.writeHead(307, { location: `${stranger.origin}/v1/is_authorized` });
+				response.end();
+			}),
+		);
+		await expect(loaded.isAuthorized(request(), NEVER_ABORTS)).rejects.toThrow(CedarEngineError);
+		expect(stranger.received).toEqual([]);
+	});
+
+	it.fails("does not follow a cross-origin 302 either — the other origin's answer is not the decision", async () => {
+		const loaded = await loadedAgainst(agent.origin);
+		// A 302 turns the POST into a GET without a body; the stranger answers
+		// whatever the method, and that answer is read as the decision.
+		stranger.answer((_request, response) =>
+			sendJson(response, 200, decision("Allow", ["stranger"])),
+		);
+		agent.answer(
+			authorizeWith((_request, response) => {
+				response.writeHead(302, { location: `${stranger.origin}/v1/is_authorized` });
+				response.end();
+			}),
+		);
+		await expect(loaded.isAuthorized(request(), NEVER_ABORTS)).rejects.toThrow(CedarEngineError);
+		expect(stranger.received).toEqual([]);
+	});
+
+	it.fails("does not push the policy set to another origin at boot", async () => {
+		// The load is refused for any non-2xx that is not 401/403 — "the agent
+		// answered and said no" — and a 307 keeps PUT and its body.
+		agent.answer((_request, response) => {
+			response.writeHead(307, { location: `${stranger.origin}/v1/policies` });
+			response.end();
+		});
+		await expect(
+			createCedarHttpEngine({ env: {} }).load(policySet(), loadContext({ endpoint: agent.origin })),
+		).rejects.toThrow(CedarEngineError);
+		expect(stranger.received).toEqual([]);
 	});
 });
 
@@ -597,5 +729,22 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 		await expect(evaluate(attrs(), [slow], { ruleTimeoutMs: 50 })).rejects.toBeInstanceOf(
 			RuleTimeoutError,
 		);
+	});
+
+	// FINDING (#269) — see "redirects" above. Through the rule it is a pass: an
+	// Allow from a server the deployment never configured decides the request,
+	// and is reported as a completed evaluation against the loaded revision.
+	it.fails("denies when the agent redirects the call to another origin", async () => {
+		const { rule: redirected } = await rule();
+		stranger.answer(cedarAgent(decision("Allow", ["stranger"])));
+		agent.answer(
+			authorizeWith((_request, response) => {
+				response.writeHead(307, { location: `${stranger.origin}/v1/is_authorized` });
+				response.end();
+			}),
+		);
+		const decided = await evaluate(attrs(), [redirected]);
+		expect(decided.decision).toBe("deny");
+		expect(outcomeOf(decided)).toMatchObject({ passed: false, evaluation: unconfirmed("failed") });
 	});
 });
