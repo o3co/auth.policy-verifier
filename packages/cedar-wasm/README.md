@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.cedar-wasm
 
-Last updated: 2026-09-23
+Last updated: 2026-09-25
 
 The in-process Cedar engine for
 [`@o3co/auth.policy-verifier.cedar`](../cedar/README.md): the official
@@ -37,8 +37,13 @@ deployment imports it.
 
 **Owns** ([`src/wasmEngine.mts`](src/wasmEngine.mts)):
 
-- Parse-checking each policy file at boot, so a syntax error names its file,
-  and compiling the set once into wasm memory under an id minted per load.
+- Parsing each policy file at boot, so a syntax error names its file;
+  naming each policy for its file (cedar's `namePolicies`, #199), so Cedar's
+  `diagnostics.reason` — and a decision's `determiningPolicies` — say
+  `30-forbid-contractors` or `20-rules#2` rather than a positional `policy7`;
+  refusing a set where two policies would share an id, a policy in a file
+  named only `.cedar`, or a template, which nothing here would link; and
+  compiling the set once into wasm memory under an id minted per load.
 - Evaluating each request against that compiled set, synchronously, and
   rendering the bindings' answer as a `CedarDecision`.
 - Naming the revision of the source it compiled on every answer.

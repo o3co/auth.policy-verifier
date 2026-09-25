@@ -14,11 +14,12 @@ import type {
 	Attributes,
 	CollectorContext,
 	Logger,
+	ReportRuleEvaluation,
 	Rule,
 	RuleEvaluation,
 } from "@o3co/auth.policy-verifier.core";
-import { evaluate, isAsyncRule } from "@o3co/auth.policy-verifier.core";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { DETERMINING_POLICIES_MAX, evaluate, isAsyncRule } from "@o3co/auth.policy-verifier.core";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	CedarPolicyRuleCollector,
 	type NoDeterminingPolicy,
@@ -634,6 +635,225 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 		});
 	});
 
+	/*
+	 * #199: a completed evaluation also names the policies that determined it —
+	 * Cedar's `diagnostics.reason` — made to fit core's contract: each id once,
+	 * sorted (Cedar keeps them in a set, whose order is not the attributes'),
+	 * at most DETERMINING_POLICIES_MAX, and what does not fit counted.
+	 */
+	describe("which policies determined a completed answer (#199)", () => {
+		/**
+		 * A reporter that records, and bounds determining policies the way this
+		 * release's core does — its own `boundDeterminingPolicies`, taken from a
+		 * reporter `evaluate()` handed out.
+		 */
+		let coreBound: NonNullable<ReportRuleEvaluation["boundDeterminingPolicies"]>;
+		beforeAll(async () => {
+			let handed: ReportRuleEvaluation | undefined;
+			await evaluate(new Map(), [
+				{
+					ruleType: "probe",
+					code: "probe_deny",
+					message: "probe",
+					verify: (_attrs, report) => {
+						handed = report;
+						return true;
+					},
+				},
+			]);
+			if (handed?.boundDeterminingPolicies === undefined) {
+				throw new Error("core's reporter bounds determining policies");
+			}
+			coreBound = handed.boundDeterminingPolicies;
+		});
+		const recording = (keep: (evaluation: RuleEvaluation) => void): ReportRuleEvaluation =>
+			Object.assign((reported: RuleEvaluation) => keep(reported), {
+				boundDeterminingPolicies: coreBound,
+			});
+		const askReading = (rule: Rule, attrs: Attributes): Asked => {
+			let evaluation: RuleEvaluation | undefined;
+			const report = recording((reported) => {
+				evaluation = reported;
+			});
+			return asked(rule.verify(attrs, report), evaluation);
+		};
+
+		it("names the determining permit of an allow and the forbid of a deny", async () => {
+			const rule = await collectSync({ policies: PERMIT_ALL });
+			sync.answer = () => ({
+				decision: "allow",
+				reason: ["20-permit-ops", "10-permit-eng"],
+				errors: [],
+			});
+			expect(askReading(rule, attrsWith()).evaluation).toEqual({
+				status: "completed",
+				revision: REVISION,
+				determiningPolicies: ["10-permit-eng", "20-permit-ops"],
+			});
+			sync.answer = () => ({ decision: "deny", reason: ["30-forbid-contractors"], errors: [] });
+			expect(askReading(rule, attrsWith()).evaluation).toEqual({
+				status: "completed",
+				revision: REVISION,
+				determiningPolicies: ["30-forbid-contractors"],
+			});
+		});
+
+		it("names none when no policy determined the request — an empty list, not an absent one", async () => {
+			sync.answer = () => UNDETERMINED;
+			const rule = await collectSync({ policies: PERMIT_ALL, onNoDeterminingPolicy: "abstain" });
+			expect(askReading(rule, attrsWith())).toEqual({
+				passed: true,
+				evaluation: { status: "completed", revision: REVISION, determiningPolicies: [] },
+			});
+		});
+
+		it("reports the same ids whatever order the engine gave them in — equal attributes, equal report", async () => {
+			const rule = await collectSync({ policies: PERMIT_ALL });
+			sync.answer = () => ({ decision: "allow", reason: ["b", "a", "c", "a"], errors: [] });
+			const first = askReading(rule, attrsWith());
+			sync.answer = () => ({ decision: "allow", reason: ["c", "b", "a"], errors: [] });
+			expect(askReading(rule, attrsWith())).toEqual(first);
+			expect(first.evaluation).toMatchObject({ determiningPolicies: ["a", "b", "c"] });
+		});
+
+		it("lists at most DETERMINING_POLICIES_MAX, the first in sorted order, and counts the rest", async () => {
+			const ids = Array.from(
+				{ length: DETERMINING_POLICIES_MAX + 8 },
+				(_, i) => `p${String(i).padStart(3, "0")}`,
+			);
+			sync.answer = () => ({ decision: "allow", reason: [...ids].reverse(), errors: [] });
+			const rule = await collectSync({ policies: PERMIT_ALL });
+			expect(askReading(rule, attrsWith()).evaluation).toEqual({
+				status: "completed",
+				revision: REVISION,
+				determiningPolicies: ids.slice(0, DETERMINING_POLICIES_MAX),
+				determiningPoliciesOmitted: 8,
+			});
+		});
+
+		it("counts an id it cannot carry rather than failing the decision", async () => {
+			// An engine can name anything; a line break in an id would forge a log line.
+			sync.answer = () => ({ decision: "deny", reason: ["20-forbid", "bad\nid"], errors: [] });
+			const rule = await collectSync({ policies: PERMIT_ALL });
+			expect(askReading(rule, attrsWith())).toEqual({
+				passed: false,
+				evaluation: {
+					status: "completed",
+					revision: REVISION,
+					determiningPolicies: ["20-forbid"],
+					determiningPoliciesOmitted: 1,
+				},
+			});
+		});
+
+		it("names none on a failed evaluation — Cedar's errors mean no policy decided", async () => {
+			sync.answer = () => ({
+				decision: "deny",
+				reason: ["20-forbid"],
+				errors: ["policy 10: boom"],
+			});
+			const rule = await collectSync({ policies: PERMIT_ALL }, fakeLogger().logger);
+			expect(askReading(rule, attrsWith()).evaluation).toEqual({
+				status: "failed",
+				revision: REVISION,
+			});
+		});
+
+		it("names none to a reporter that does not bound them — a core older than #199 would refuse the keys", async () => {
+			sync.answer = () => ({ decision: "deny", reason: ["30-forbid-contractors"], errors: [] });
+			const rule = await collectSync({ policies: PERMIT_ALL });
+			expect(ask(rule, attrsWith())).toEqual({
+				passed: false,
+				evaluation: { status: "completed", revision: REVISION },
+			});
+		});
+
+		it("names them on an asynchronous engine's answer too, beside the unconfirmed revision", async () => {
+			async.answer = () => ({ decision: "deny", reason: ["30-forbid-contractors"], errors: [] });
+			const rule = await collectAsync({ policies: PERMIT_ALL });
+			let evaluation: RuleEvaluation | undefined;
+			const report = recording((reported) => {
+				evaluation = reported;
+			});
+			expect(await rule.decide(attrsWith(), NEVER_ABORTS, report)).toBe(false);
+			expect(evaluation).toEqual({
+				status: "completed",
+				revision: null,
+				loadedRevision: REVISION,
+				determiningPolicies: ["30-forbid-contractors"],
+			});
+		});
+
+		it.each([
+			["a reason that is a string", { decision: "allow", reason: "p1", errors: [] }],
+			["errors that are a string", { decision: "allow", reason: ["p1"], errors: "boom" }],
+		])("fails an answer with %s — its letters are no policy ids", async (_label, answer) => {
+			sync.answer = () => answer as unknown as CedarDecision;
+			const { logger, error } = fakeLogger();
+			const rule = await collectSync({ policies: PERMIT_ALL }, logger);
+			expect(askReading(rule, attrsWith())).toEqual({
+				passed: false,
+				evaluation: { status: "failed", revision: null, loadedRevision: REVISION },
+			});
+			expect(error).toHaveBeenCalledWith(
+				expect.objectContaining({
+					reason: expect.stringMatching(/reason or errors is not a list/),
+				}),
+				"cedar authorization call failed — denying",
+			);
+		});
+
+		it.each([
+			["null", null],
+			["a string", "allow"],
+		])("fails an answer that is %s — no decision at all", async (_label, answer) => {
+			// The engine that does not vouch hands its answer through untouched.
+			async.answer = () => answer as unknown as CedarDecision;
+			const { logger, error } = fakeLogger();
+			const rule = await collectAsync({ policies: PERMIT_ALL }, logger);
+			let evaluation: RuleEvaluation | undefined;
+			const report = recording((reported) => {
+				evaluation = reported;
+			});
+			expect(await rule.decide(attrsWith(), NEVER_ABORTS, report)).toBe(false);
+			expect(evaluation).toEqual({ status: "failed", revision: null, loadedRevision: REVISION });
+			expect(error).toHaveBeenCalledWith(
+				expect.objectContaining({ reason: expect.stringMatching(/not a decision/) }),
+				"cedar authorization call failed — denying",
+			);
+		});
+
+		it("reports a malformed answer from a foreign set as the foreign set it is", async () => {
+			sync.answer = () =>
+				({
+					decision: "allow",
+					reason: "p1",
+					errors: [],
+					revision: "sha256:other",
+				}) as unknown as CedarDecision;
+			const { logger, error } = fakeLogger();
+			const rule = await collectSync({ policies: PERMIT_ALL }, logger);
+			expect(askReading(rule, attrsWith()).passed).toBe(false);
+			expect(error).toHaveBeenCalledWith(
+				expect.anything(),
+				"cedar engine answered from a policy revision other than the one loaded — denying",
+			);
+			expect(error).not.toHaveBeenCalledWith(
+				expect.anything(),
+				"cedar authorization call failed — denying",
+			);
+		});
+
+		it("passes core's own check — the ids reach the decision through evaluate()", async () => {
+			sync.answer = () => ({ decision: "deny", reason: ["30-forbid-contractors"], errors: [] });
+			const rule = await collectSync({ policies: PERMIT_ALL });
+			const decided = await evaluate(attrsWith(), [rule]);
+			expect(decided.reason.groups[0].evaluated[0].evaluation).toMatchObject({
+				determiningPolicies: ["30-forbid-contractors"],
+			});
+		});
+	});
+
 	describe("asked without a reporter — an evaluator that predates it", () => {
 		/*
 		 * The reason the evaluation is reported rather than returned. A mixed
@@ -903,14 +1123,17 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 			);
 			for (const decision of decisions) {
 				const byType = new Map(decision.reason.groups.map((group) => [group.ruleType, group]));
+				// Core's reporter reads determining policies (#199), so they ride along.
 				expect(byType.get("cedar-a")?.evaluated[0].evaluation).toEqual({
 					status: "completed",
 					revision: REVISION,
+					determiningPolicies: ALLOW.reason,
 				});
 				expect(byType.get("cedar-b")?.evaluated[0].evaluation).toEqual({
 					status: "completed",
 					revision: null,
 					loadedRevision: OTHER_REVISION,
+					determiningPolicies: ALLOW.reason,
 				});
 			}
 		});
@@ -929,6 +1152,7 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 			expect(denied.reason.groups[0].evaluated[0].evaluation).toEqual({
 				status: "completed",
 				revision: REVISION,
+				determiningPolicies: FORBIDDEN.reason,
 			});
 			expect(notInvoked.reason.groups[0].evaluated[0].evaluation).toEqual({
 				status: "not_invoked",

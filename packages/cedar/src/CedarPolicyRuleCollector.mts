@@ -13,6 +13,7 @@ import type {
 	AnyRule,
 	AsyncRule,
 	CollectorContext,
+	EvaluatedRevision,
 	Logger,
 	ReadonlyAttributes,
 	ReportRuleEvaluation,
@@ -24,6 +25,7 @@ import { createConsoleLogger } from "@o3co/auth.policy-verifier.core";
 import {
 	type CedarDecision,
 	type CedarEngine,
+	CedarEngineError,
 	type LoadedCedarPolicySet,
 	registeredCedarEngines,
 	resolveCedarEngine,
@@ -43,7 +45,7 @@ const NO_DETERMINING_POLICIES: readonly NoDeterminingPolicy[] = ["abstain", "den
 
 /** Config entry accepted by `CedarPolicyRuleCollector`. */
 export interface CedarPolicyRuleCollectorConfig {
-	/** Directory of `*.cedar` files (sorted, concatenated). XOR `policies`. */
+	/** Directory of `*.cedar` files, read in name order. XOR `policies`. */
 	policyDir?: string;
 	/** Inline Cedar policy text. XOR `policyDir`. */
 	policies?: string;
@@ -194,7 +196,7 @@ export interface CedarPolicyRuleCollectorOptions {
  * | `deny` | determining `forbid` | fail | `completed` |
  * | `deny` | no determining policy | `onNoDeterminingPolicy` (default `"deny"`) | `completed` |
  * | anything | evaluation errors | **fail, and log** | `failed` |
- * | — | the call itself failed | **fail, and log** | `failed` |
+ * | — | the call itself failed, or answered something that is not a decision | **fail, and log** | `failed` |
  * | — | the request could not be built, so Cedar was not asked | **fail, and log** | `not_invoked` |
  * | anything | a revision other than the one loaded | **fail, and log** | `failed` |
  *
@@ -218,6 +220,11 @@ export interface CedarPolicyRuleCollectorOptions {
  * core hands `verify` / `decide` for that one call (`ReportRuleEvaluation`) —
  * built from this call's own values, with nothing kept on the rule, which
  * answers concurrent decisions.
+ *
+ * A completed answer also names the policies Cedar says determined it (#199),
+ * sorted, through the reporter's own `boundDeterminingPolicies` — the bounds
+ * of the core that checks the report. A reporter without it, from a core that
+ * predates the keys, is told the evaluation without them.
  *
  * The rule still **answers a boolean**, and that is deliberate. An evaluator
  * that passes no reporter — a copy of core one release older, in a mixed
@@ -390,10 +397,21 @@ interface BoundRule {
 	faultLogger: Logger;
 }
 
+/** How a reporter bounds determining policies — the checking core's own (#199). */
+type DeterminingPolicyBounder = NonNullable<ReportRuleEvaluation["boundDeterminingPolicies"]>;
+
 /** One answer of the rule, before it is split into the boolean and the report. */
 interface Answered {
-	passed: boolean;
-	evaluation: RuleEvaluation;
+	readonly passed: boolean;
+	/** What an evaluator is told. */
+	readonly evaluation: RuleEvaluation;
+	/**
+	 * What a reporter that bounds determining policies is told instead
+	 * (#199): the same completed evaluation, naming the policies that
+	 * determined it under that reporter's bounds. Present only when Cedar ran
+	 * to an answer.
+	 */
+	readonly naming?: (bound: DeterminingPolicyBounder) => RuleEvaluation;
 }
 
 function buildRule(bound: BoundRule): AnyRule {
@@ -447,8 +465,19 @@ function buildRule(bound: BoundRule): AnyRule {
 	 * class doc comment for why that, and not a richer return value.
 	 */
 	const deliver = (answered: Answered, report: ReportRuleEvaluation | undefined): boolean => {
-		if (report === undefined) warnUnreported();
-		report?.(answered.evaluation);
+		if (report === undefined) {
+			warnUnreported();
+			return answered.passed;
+		}
+		// #199: determining policies are named only through the reporter's own
+		// bounding. A core that predates them has none — it would refuse the keys
+		// and fail the decision — and is told the evaluation without them.
+		const bound = report.boundDeterminingPolicies;
+		report(
+			bound !== undefined && answered.naming !== undefined
+				? answered.naming(bound)
+				: answered.evaluation,
+		);
 		return answered.passed;
 	};
 	// `requireConfirmedRevision` is set so that every decision's record names
@@ -475,6 +504,14 @@ function buildRule(bound: BoundRule): AnyRule {
 		return { passed: false, evaluation: unconfirmed("failed") };
 	};
 	const interpret = (answer: CedarDecision): Answered => {
+		// The port's type is the contract; an engine written outside the type
+		// may not keep to it, and what it answered is then no decision at all —
+		// the call failed, whatever else it said.
+		if (typeof answer !== "object" || answer === null) {
+			return callFailed(
+				new CedarEngineError("cedar engine answered something that is not a decision"),
+			);
+		}
 		if (answer.revision !== undefined && answer.revision !== loadedRevision) {
 			// The engine holds a policy set this collector did not load — replaced
 			// under it, or never its own. A permit from there is a permit from
@@ -487,6 +524,16 @@ function buildRule(bound: BoundRule): AnyRule {
 			);
 			return { passed: false, evaluation: unconfirmed("failed") };
 		}
+		if (!Array.isArray(answer.reason) || !Array.isArray(answer.errors)) {
+			// After the revision check, so an answer from a foreign set is logged
+			// as that. A string here would be read by character — its letters
+			// recorded as policy ids, or its length taken for errors.
+			return callFailed(
+				new CedarEngineError(
+					"cedar engine answered a decision whose reason or errors is not a list",
+				),
+			);
+		}
 		const confirmed = answer.revision !== undefined;
 		if (requireConfirmedRevision && !confirmed) {
 			// The engine declared `confirmsRevision` — boot checked — and this
@@ -497,8 +544,9 @@ function buildRule(bound: BoundRule): AnyRule {
 			);
 			return { passed: false, evaluation: unconfirmed("failed") };
 		}
-		const evaluated = (status: "completed" | "failed"): RuleEvaluation =>
-			confirmed ? { status, revision: loadedRevision } : unconfirmed(status);
+		const evaluatedRevision: EvaluatedRevision = confirmed
+			? { revision: loadedRevision }
+			: { revision: null, loadedRevision };
 
 		if (answer.errors.length > 0) {
 			// Checked before the decision on purpose: an erroring `forbid` stops
@@ -508,16 +556,24 @@ function buildRule(bound: BoundRule): AnyRule {
 				{ ...identity, decision: answer.decision, errors: [...answer.errors] },
 				"cedar policy evaluation raised errors — denying",
 			);
-			return { passed: false, evaluation: evaluated("failed") };
+			return { passed: false, evaluation: { status: "failed", ...evaluatedRevision } };
 		}
 		// From here Cedar ran to an answer, and the answer is the policies' own —
 		// "no policy determined the request" included, under either setting.
-		const evaluation = evaluated("completed");
-		if (answer.decision === "allow") return { passed: true, evaluation };
-		if (answer.reason.length === 0) {
-			return { passed: onNoDeterminingPolicy === "abstain", evaluation };
-		}
-		return { passed: false, evaluation };
+		const evaluation: RuleEvaluation = { status: "completed", ...evaluatedRevision };
+		// Named for their files by the engine (`namePolicies`). Cedar keeps
+		// `reason` in a set, whose order is not the attributes', so it is sorted:
+		// equal attributes, equal report. Only when a reporter asks — an older
+		// core's never does — and each id once before the sort.
+		const naming = (bound: DeterminingPolicyBounder): RuleEvaluation => ({
+			status: "completed",
+			...evaluatedRevision,
+			...bound([...new Set(answer.reason)].sort()),
+		});
+		const answered = (passed: boolean): Answered => ({ passed, evaluation, naming });
+		if (answer.decision === "allow") return answered(true);
+		if (answer.reason.length === 0) return answered(onNoDeterminingPolicy === "abstain");
+		return answered(false);
 	};
 
 	if (!policySet.async) {

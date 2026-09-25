@@ -3,14 +3,16 @@
 
 /*
  * Reads the Cedar policy files a `CedarPolicyRuleCollector` evaluates, from
- * `policyDir` or inline `policies`, and computes the revision a decision's
- * provenance names for them. Reading only: parsing and compiling are the
- * engine's job.
+ * `policyDir` or inline `policies`, computes the revision a decision's
+ * provenance names for them, and names the policies in them (#199) — the one
+ * place a policy id is made, for every engine. Reading and naming only:
+ * parsing and compiling are the engine's job.
  */
 
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { CedarEngineError } from "./engine.mjs";
 
 /** One policy file as read, with where it came from for error messages. */
 export interface PolicyFile {
@@ -59,9 +61,9 @@ const REVISION_PREIMAGE_HEADER = "auth.policy-verifier.cedar/policy-set/v1\n";
  * holds a revision to.
  *
  * **What it covers, and why that.** Each file's name and text, in the order
- * they are loaded, and nothing else. The name is in because it is the policy
- * id the http engine gives the agent, so a rename changes what a decision's
- * determining policies are called. The framing is there because the
+ * they are loaded, and nothing else. The name is in because the policy ids
+ * are made from it ({@link policyIdsOf}), so a rename changes what a
+ * decision's determining policies are called. The framing is there because the
  * concatenation is not injective — `"X\n" + "Y"` and `"X" + "\nY"` are one
  * `text` and two policy sets. The directory is deliberately out: two replicas
  * mounting the same files at different paths hold the same revision, and a
@@ -85,6 +87,77 @@ export function computePolicyRevision(files: readonly Pick<PolicyFile, "name" | 
 
 function netstring(value: string): string {
 	return `${Buffer.byteLength(value, "utf8")}:${value},`;
+}
+
+/**
+ * The ids the `count` policies of `file` are known by — what Cedar names in
+ * `diagnostics.reason`, and a decision in `determiningPolicies` (#199): the
+ * file's name without `.cedar` for a file that holds one policy, and that
+ * name numbered `#1`, `#2`… in the file's order for a file that holds several.
+ * The inline set's name is `policies` already.
+ *
+ * Made from `PolicyFile.name`, the very string the revision hashes, so a
+ * rename renames the policies and changes the revision together. Not exported
+ * from the package: engines name their policies through {@link namePolicies},
+ * the one entry point, which also refuses two policies sharing an id.
+ *
+ * @throws {CedarEngineError} for a file named only `.cedar` that holds a
+ *   policy: there is no name to call it by.
+ * @throws {RangeError} for a `count` that is not a non-negative integer.
+ */
+export function policyIdsOf(file: Pick<PolicyFile, "name" | "source">, count: number): string[] {
+	if (!Number.isSafeInteger(count) || count < 0) {
+		throw new RangeError(`policyIdsOf: count must be a non-negative integer, got ${count}`);
+	}
+	const stem = file.name.replace(/\.cedar$/, "");
+	if (stem.length === 0 && count > 0) {
+		throw new CedarEngineError(
+			`"${file.source}" yields an empty policy id — the file needs a name before .cedar`,
+		);
+	}
+	if (count === 1) return [stem];
+	return Array.from({ length: count }, (_, index) => `${stem}#${index + 1}`);
+}
+
+/** One policy of a set, named for its file (#199). */
+export interface NamedPolicy {
+	/** Its id, from {@link policyIdsOf}. */
+	readonly id: string;
+	/** Its Cedar text. */
+	readonly text: string;
+	/** The file it came from, for error messages. */
+	readonly file: PolicyFile;
+}
+
+/**
+ * Names every policy of `files` for its file ({@link policyIdsOf}), splitting
+ * each into its policies' texts, in the file's order, with `split` — for an
+ * engine that accepts a file holding several policies. The ids are all a
+ * decision records of which policy decided, so a layout that would give two
+ * policies one id (`a.cedar` holding two, beside `a#1.cedar`) is refused,
+ * naming both files, rather than one policy answering under the other's name.
+ *
+ * @throws {CedarEngineError} for such a collision, and for a policy in a file
+ *   named only `.cedar`; whatever `split` throws, unchanged.
+ */
+export function namePolicies(
+	files: readonly PolicyFile[],
+	split: (file: PolicyFile) => readonly string[],
+): NamedPolicy[] {
+	const named = new Map<string, NamedPolicy>();
+	for (const file of files) {
+		const texts = split(file);
+		for (const [index, id] of policyIdsOf(file, texts.length).entries()) {
+			const holder = named.get(id);
+			if (holder !== undefined) {
+				throw new CedarEngineError(
+					`policy id "${id}" names a policy in ${holder.file.source} and one in ${file.source} — rename one of the files`,
+				);
+			}
+			named.set(id, { id, text: texts[index], file });
+		}
+	}
+	return [...named.values()];
 }
 
 /**

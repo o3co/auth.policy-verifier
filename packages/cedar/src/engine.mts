@@ -15,17 +15,24 @@ import type { PolicySource } from "./policySource.mjs";
 /**
  * What one authorization call answered — Cedar's own `Response`, engine-neutral.
  *
- * `reason` and `errors` are rendered text rather than an evaluator's objects,
- * because the rule only ever logs them; what the rule *decides* on is whether
- * each list is empty. A non-empty `errors` is a deny whatever `decision` reads
- * — see the collector's answer table.
+ * `reason` is the determining policies' ids, and a decision records them as
+ * `determiningPolicies` (#199), so an engine names its policies with
+ * `namePolicies` and reads its evaluator's items as ids.
+ * `errors` is rendered text rather than an evaluator's objects, because the
+ * rule only logs it. What the rule *decides* on is whether each list is empty:
+ * a non-empty `errors` is a deny whatever `decision` reads — see the
+ * collector's answer table. Both must be lists; the rule fails an answer
+ * whose either is not one.
  */
 export interface CedarDecision {
 	decision: "allow" | "deny";
 	/**
-	 * The determining policies, as text: normally their ids (`10-permit-eng`),
-	 * or the JSON of an item an engine reported in a structured form. Empty: no
-	 * policy determined the request.
+	 * The ids of the determining policies (`10-permit-eng`) — what a
+	 * decision's `determiningPolicies` names (#199). Empty: no policy
+	 * determined the request. An entry the engine cannot read as an id stays
+	 * in the list — its emptiness decides an answer — as a string no id can be
+	 * (one holding a control character), so the decision counts it in
+	 * `determiningPoliciesOmitted` rather than naming it.
 	 */
 	reason: readonly string[];
 	/**
