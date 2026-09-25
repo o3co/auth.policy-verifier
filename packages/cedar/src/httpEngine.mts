@@ -448,11 +448,14 @@ function resolveEndpoint(configured: unknown, fromEnv: string | undefined): stri
 }
 
 /**
- * The range `maxAnswerBytes` may be set in. Below 1 KiB even the smallest
- * decision is refused, so every request would be denied — a unit slip (`4`
- * meant as MiB) is caught at boot rather than in production. Above 256 MiB
- * the text would approach the longest string V8 can hold, about 512 Mi
- * characters, and a failure there would be reported as a broken-off answer.
+ * The range `maxAnswerBytes` may be set in. Below 1 KiB a bound saves no
+ * memory worth having and is almost certainly a unit slip — `4` meant as MiB,
+ * `512` meant as KiB. The smallest decision is about 60 bytes and grows with
+ * each determining policy and error, so such a bound denies some answers or
+ * all of them, and only once requests arrive; refused at boot instead. Above
+ * 256 MiB the text would approach the longest string V8 can hold, about
+ * 512 Mi characters, and a failure there would be reported as a broken-off
+ * answer.
  */
 const MIN_ANSWER_BYTES = 1024;
 const MAX_ANSWER_BYTES = 256 * 1024 * 1024;
