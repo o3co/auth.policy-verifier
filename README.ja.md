@@ -1,6 +1,6 @@
 # auth.policy-verifier
 
-最終更新: 2026-09-24
+最終更新: 2026-09-25
 
 [![CI](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth.policy-verifier.core)](https://www.npmjs.com/package/@o3co/auth.policy-verifier.core)
@@ -644,9 +644,18 @@ policy の更新後や rolling deployment の最中は、決定の結果と rule
 | `"revision": null` と `"loadedRevision": "sha256:…"` | evaluator は走ったが、何を評価したかを確定できない。out-of-process の `http` engine の answer はすべてこれ（cedar-agent は自分が何を保持しているかを言わない）。`loadedRevision` はこの verifier が boot 時に load したもの。記録する価値はあるが、**何が走ったかの証明ではない** |
 | 無い | Rule は何も報告していない。TypeScript の Rule には名指すべき policy source が無く、決めたのはデプロイされた版とその config。古い verifier や opt-in していない verifier の答えもこれ。**無い = 不明** |
 
+**どの policy が決めたか（#199）。** `completed` の evaluation は、答えを決めた policy も名指せます — allow なら該当した permit、deny なら該当した forbid です:
+
+```json
+"evaluation": { "status": "completed", "revision": "sha256:9f2c…",
+                "determiningPolicies": ["20-forbid-contractors"] }
+```
+
+`determiningPolicies` は Rule の提供者が名付ける policy id の集合で、どの policy も該当しなかったときは空のリストです。最大 32 個、各 id は制御文字を含まない 1〜256 文字で、それを超えて evaluator が名指したものは `determiningPoliciesOmitted` に件数として入ります（0 でないときだけ現れます）。`failed` と `not_invoked` の evaluation はどちらも持ちません。その答えはどの policy も決めていないからです。知らない Rule も持ちません — **無い = Rule が言わなかった**。deny の `code` は変わりません。id はその横に並ぶもので、置き換えるものではありません。
+
 参照は報告した Rule の outcome に載るので、2 つの policy source の下で下された決定は 2 つの revision を持ち、1 つが両方を代表することはありません。batch では entry ごとに自分のものを持ちます。batch は snapshot を固定しませんし、policy set が boot 時に 1 回だけ load される間は固定する必要もありません。各 replica は *自分が* 評価した snapshot を報告するので、rolling deployment 中に同じ request への 2 つの答えを見分けられます。policy の評価なしに作られた deny — router の `collector_timeout`、`rule_timeout`、`attribute_conflict` と、evaluator の `no_applicable_rule` — は group を持たないので evaluation も無く、評価前に拒否された request（`400`、`401`）はそもそも決定ではありません。どちらも「policy が決めた」と記録されることはありません。
 
-**どこに出るか。** `decision` イベントには常に `evaluations` として載ります。response に載るのは `verify.evaluationInResponse = "include"` のときだけです（既定は `"omit"` で、その場合 response はキー単位でこれまでと同一）。XACML の `ReturnPolicyIdList` や OPA の `?provenance=true` と違って opt-in が呼び出し側ではなくデプロイ側にあるのは、これが「policy set がいつ変わったか」「deny が policy によるものか engine の失敗か」を、受理される token の保持者全員に伝えるからです。それが問題になる環境では [`http.callerAuth`](#設定) と併用してください。
+**どこに出るか。** `decision` イベントには常に `evaluations` として載ります（決めた policy も含みます）。response に載るのは `verify.evaluationInResponse = "include"` のときだけです（既定は `"omit"` で、その場合 response はキー単位でこれまでと同一）。XACML の `ReturnPolicyIdList` や OPA の `?provenance=true` と違って opt-in が呼び出し側ではなくデプロイ側にあるのは、これが「policy set がいつ変わったか」「deny が policy によるものか engine の失敗か」「どんな policy があるか」を、受理される token の保持者全員に伝えるからです。それが問題になる環境では [`http.callerAuth`](#設定) と併用してください。
 
 **アプリケーションが保存するもの。** 許可または拒否した操作ごとに、`decision`、deny の `code`、`reason`（各 `evaluation` を含む）、そして自分が送った `x-request-id`。PDP の `decision` イベントは同じ `requestId` と同じ `evaluations` を持つので、2 つの記録は id で結合できます。batch では id に加えて entry の `resource` と `action` で結合します。revision を *必須* とする client は、satisfy した outcome に文字列の `revision` が無い allow を「未確定」として扱い、どうするかを自分で決めます。PDP 側では、Cedar collector の `requireConfirmedRevision = true` がそのような answer を出ていく前に deny に変えます（決して満たせない engine は boot で拒否します）。
 

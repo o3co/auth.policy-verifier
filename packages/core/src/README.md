@@ -1,6 +1,6 @@
 # Core
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 The engine's contract and the two things that run it — the collector pipelines and
 `evaluate()`. Nothing here is a transport or a policy engine.
@@ -78,7 +78,9 @@ documented, not tested.
   [`rulePurity.mts`](../../../tests/integration/src/conformance/rulePurity.mts).
 - One reporter per invocation: at most one report, checked and frozen onto that outcome
   alone; a non-boolean answer, a report that does not read or a pass reporting `failed` /
-  `not_invoked` is a `TypeError` attributed to the rule even when the rule swallowed it —
+  `not_invoked` is a `TypeError` attributed to the rule even when the rule swallowed it.
+  Determining policies are carried only by a `completed` evaluation, as a bounded set of ids
+  with a count of what did not fit —
   [`__tests__/ruleEvaluationReport.test.mts`](__tests__/ruleEvaluationReport.test.mts).
 - Failure attribution is opt-in and partial: only when the caller hands a `FailureRecord` in,
   and only for what the runner and evaluator raise or observe themselves, is the source

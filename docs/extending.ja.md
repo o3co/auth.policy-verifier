@@ -229,6 +229,9 @@ type RuleEvaluation =
   | { status: "not_invoked" }                                   // evaluator は一度も呼ばれていない
   | { status: "completed" | "failed"; revision: string }        // 走った。何を評価したかを evaluator が保証する
   | { status: "completed" | "failed"; revision: null; loadedRevision?: string }; // 走った。何を評価したかは確定できない
+// completed のものは revision の横に次を追加できる（#199）:
+//   determiningPolicies?: string[]          — 答えを決めた policy
+//   determiningPoliciesOmitted?: number     — 上限を超えて名指した件数
 
 const rule: Rule = {
   ruleType: "policy", code: "policy_deny", message: "Denied by policy",
@@ -248,6 +251,7 @@ const rule: Rule = {
 - **他の Rule を包む Rule は、`report` を多くても 1 つの子にだけ渡します — その答えが自分の答えになる子です。** 報告する子 2 つに渡すと、2 度目の報告が上の `TypeError` になります。拒否した子に渡したうえで別の子の判断で pass すると、拒否した側の revision があなたの pass の背後に立つことになり、core からはそれが見えません。包んだ Rule が互いの代替なら、包まないでください。同じ `ruleType` を与えて `evaluate()` に OR を実行させれば、それぞれが自分の outcome と evaluation を保ちます。
 - **`completed` は evaluator が答えに到達したこと**を意味します。答えが permit でも forbid でも、どの policy も該当しなかった場合でも同じです。**`failed`** は呼び出したがきれいな答えが得られなかったこと。**`not_invoked`** は問い合わせる前に Rule が失敗したことで、revision 系のキーはどちらも持ちません。一度も問われていない evaluator は何も評価していないからです。`failed` と `not_invoked` は Rule が fail-closed で失敗したことを意味するので、どちらかを報告した **pass** は拒否されます — pass の背後に立てるのは completed の evaluation だけです。
 - **`revision` は「何が評価されたか」についての主張**なので、evaluator が保証するときだけ文字列になります。保証できない場合（何を走らせたかを言わない remote engine）は `revision: null` とし、分かっていれば自分が *load した* ものを `loadedRevision` に入れます。2 つは決して同じ名前を共有しないので、`revision` を読む consumer が「誰も確認していない snapshot」を「評価された snapshot」と取り違えることはありません。URL・デプロイのラベル・更新時刻から revision をでっち上げないでください。
+- **`determiningPolicies` は completed の答えを決めた policy を名指します**（#199）— allow なら該当した permit、deny なら該当した forbid、どの policy も該当しなければ空のリストです。報告するのは `completed` の evaluation からだけです。`failed` の答えは Rule が fail-closed で失敗したもので、決めた policy はありません。集合なので同じ id を 2 度入れず、順序は attributes だけで決まるようにします（engine の順序が安定しないならソートしてください。そうしないと純粋性のスイートが差分を検出します）。最大 `DETERMINING_POLICIES_MAX`（32）個、各 id は制御文字を含まない 1〜`POLICY_ID_MAX_LENGTH`（256）文字です。engine がそれを超えて名指したもの — 上限を超えた分や、形に収まらない id — は `determiningPoliciesOmitted` に件数として入れ、黙って捨てないでください。policy は作者が知っている名前で名指します（`packages/cedar` ではファイル名）。engine が付けた通し番号ではありません。
 - **参照は `scheme:encoded`** — OCI の digest 文法で、最大 256 文字です。content digest なら `sha256:<小文字 hex 64 桁>`、版が digest でない engine は独自の scheme を名乗ります（`POLICY_REVISION_PATTERN`）。Rule の報告は wire と監査ログに載るので、core がこれを強制します。読めない報告（パス、policy 本文、未知の status、余分なキー）は Rule に帰属する `TypeError` となり、Rule がそのエラーを握りつぶしても request は `500` で答えます。落とさずに拒否するのは、完全に見える誤った監査記録のほうが、騒がしい障害より悪いからです。
 
 `packages/cedar` が実例です。`CedarPolicyRuleCollector` は answer table の各行を報告し、revision は load した policy ファイルの digest で、`CedarEngine` port は engine がその answer を保証するかどうかを answer ごとに伝えます。

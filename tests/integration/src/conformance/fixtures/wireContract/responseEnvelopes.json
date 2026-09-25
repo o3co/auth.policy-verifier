@@ -38,8 +38,15 @@
 		"`no_applicable_rule`) has no groups and therefore no evaluation: no policy decided it.",
 		"The key sets under `evaluation` below are what THIS version sends, and the suite holds",
 		"a DEPLOYMENT to them exactly. A CLIENT reads the other way: it MUST IGNORE any key inside",
-		"`evaluation` that it does not know. More will be added there (the determining policy ids",
-		"of #199), and a client that rejects an unknown key breaks on the verifier's next minor."
+		"`evaluation` that it does not know, and a client that rejects an unknown key breaks on",
+		"the verifier's next minor.",
+		"`determiningPolicies` (#199) names the policies that determined a COMPLETED answer — for",
+		"an allow the permits that applied, for a deny the forbids that did — and is an empty list",
+		"when no policy applied. It is a set of policy ids (for packages/cedar, policy file names),",
+		"at most `determiningPolicies.maxItems` of them; whatever the evaluator named beyond that,",
+		"or in a shape it could not carry, is counted in `determiningPoliciesOmitted`, present only",
+		"beside the list and only when it is not zero. A `failed` or `not_invoked` evaluation",
+		"carries neither: no policy decided that answer. ABSENT means the rule did not say."
 	],
 	"error": {
 		"keys": ["decision", "code", "message"],
@@ -71,7 +78,13 @@
 		"evaluated": {
 			"statuses": ["completed", "failed"],
 			"required": ["status", "revision"],
-			"onlyWhenRevisionIsNull": ["loadedRevision"]
+			"onlyWhenRevisionIsNull": ["loadedRevision"],
+			"onlyWhenCompleted": ["determiningPolicies", "determiningPoliciesOmitted"]
+		},
+		"determiningPolicies": {
+			"maxItems": 32,
+			"idMaxLength": 256,
+			"about": "A set of policy ids, each 1 to idMaxLength characters with no control character. `determiningPoliciesOmitted`, a positive integer, only beside it."
 		},
 		"revision": {
 			"pattern": "^[a-z0-9]+(?:[+._-][a-z0-9]+)*:[A-Za-z0-9=_-]+$",

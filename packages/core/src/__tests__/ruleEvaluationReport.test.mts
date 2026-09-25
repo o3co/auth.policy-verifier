@@ -29,6 +29,8 @@ import {
 	type AnyRule,
 	type AsyncRule,
 	type Attributes,
+	DETERMINING_POLICIES_MAX,
+	POLICY_ID_MAX_LENGTH,
 	POLICY_REVISION_MAX_LENGTH,
 	type ReportRuleEvaluation,
 	type Rule,
@@ -37,6 +39,10 @@ import {
 
 const REVISION_A = `sha256:${"a".repeat(64)}`;
 const REVISION_B = `sha256:${"b".repeat(64)}`;
+
+/** `count` distinct policy ids. */
+const ids = (count: number): string[] =>
+	Array.from({ length: count }, (_, i) => `policy-${String(i).padStart(3, "0")}`);
 
 const attrs: Attributes = new Map();
 
@@ -199,6 +205,31 @@ describe("evaluate — what a rule reports about one invocation", () => {
 		expect(Object.isFrozen(outcome.evaluation)).toBe(true);
 	});
 
+	it("keeps a frozen copy of the determining policies too, so the rule cannot rewrite them afterwards (#199)", async () => {
+		const determining = ["10-permit-eng", "20-permit-ops"];
+		const { outcome } = await outcomeOf(
+			sync(
+				"cedar",
+				"cedar_deny",
+				reporting(true, {
+					status: "completed",
+					revision: REVISION_A,
+					determiningPolicies: determining,
+				}),
+			),
+		);
+		determining.push("99-injected");
+		determining[0] = "rewritten";
+		expect(outcome.evaluation).toEqual({
+			status: "completed",
+			revision: REVISION_A,
+			determiningPolicies: ["10-permit-eng", "20-permit-ops"],
+		});
+		const kept = (outcome.evaluation as { determiningPolicies: readonly string[] })
+			.determiningPolicies;
+		expect(Object.isFrozen(kept)).toBe(true);
+	});
+
 	it("ignores a report that arrives after the answer — the decision is already made", async () => {
 		let late: (() => void) | undefined;
 		const rule = async("cedar", "cedar_deny", (report) => {
@@ -231,6 +262,54 @@ describe("evaluate — what a rule may report", () => {
 		[
 			"failed, revision not established, naming what was loaded",
 			{ status: "failed", revision: null, loadedRevision: REVISION_A },
+		],
+		// #199: which policies determined a completed answer.
+		[
+			"completed, no policy determining the request",
+			{ status: "completed", revision: REVISION_A, determiningPolicies: [] },
+		],
+		[
+			"completed, naming the policies that determined it",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: ["10-permit-eng", "20-forbid"],
+			},
+		],
+		[
+			"completed, revision not established, naming what was loaded and what determined it",
+			{
+				status: "completed",
+				revision: null,
+				loadedRevision: REVISION_A,
+				determiningPolicies: ["20-forbid"],
+			},
+		],
+		[
+			"completed, as many policies as the bound and a count of the rest",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: ids(DETERMINING_POLICIES_MAX),
+				determiningPoliciesOmitted: 5,
+			},
+		],
+		[
+			"completed, a count of policies whose ids could not be listed, and none listed",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: [],
+				determiningPoliciesOmitted: 1,
+			},
+		],
+		[
+			"completed, ids with spaces and non-ASCII letters, and one at the length bound",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: ["team policies #2", "ポリシー", "x".repeat(POLICY_ID_MAX_LENGTH)],
+			},
 		],
 	];
 	it.each(accepted)("accepts: %s", async (_name, evaluation) => {
@@ -271,6 +350,94 @@ describe("evaluate — what a rule may report", () => {
 		[
 			"a key the contract does not name",
 			{ status: "completed", revision: REVISION_A, policyText: "permit(…);" },
+		],
+		// #199: determining policies belong to a completed answer, bounded.
+		[
+			"determining policies on a failed evaluation — its answer is not the policies'",
+			{ status: "failed", revision: REVISION_A, determiningPolicies: ["20-forbid"] },
+		],
+		[
+			"determining policies on an evaluator that was never invoked",
+			{ status: "not_invoked", determiningPolicies: [] },
+		],
+		[
+			"determining policies that are not a list",
+			{ status: "completed", revision: REVISION_A, determiningPolicies: "20-forbid" },
+		],
+		[
+			"more determining policies than the bound",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: ids(DETERMINING_POLICIES_MAX + 1),
+			},
+		],
+		[
+			"a determining policy id that is not a string",
+			{ status: "completed", revision: REVISION_A, determiningPolicies: [7] },
+		],
+		[
+			"an empty determining policy id",
+			{ status: "completed", revision: REVISION_A, determiningPolicies: [""] },
+		],
+		[
+			"a determining policy id over the length bound",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: ["x".repeat(POLICY_ID_MAX_LENGTH + 1)],
+			},
+		],
+		[
+			"a determining policy id with a line break — it would forge a log line",
+			{ status: "completed", revision: REVISION_A, determiningPolicies: ["20-forbid\nlevel=info"] },
+		],
+		[
+			"a determining policy id with a C1 control character",
+			{ status: "completed", revision: REVISION_A, determiningPolicies: ["20-forbid\u0085"] },
+		],
+		[
+			"the same determining policy twice — it is a set",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: ["20-forbid", "20-forbid"],
+			},
+		],
+		[
+			"an omitted count without the list it counts beside",
+			{ status: "completed", revision: REVISION_A, determiningPoliciesOmitted: 3 },
+		],
+		[
+			"an omitted count of zero — absence says that",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: [],
+				determiningPoliciesOmitted: 0,
+			},
+		],
+		[
+			"an omitted count that is not a whole number",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: [],
+				determiningPoliciesOmitted: 1.5,
+			},
+		],
+		[
+			"an omitted count written as a string",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: [],
+				determiningPoliciesOmitted: "3",
+			},
+		],
+		[
+			"an omitted count on a failed evaluation",
+			{ status: "failed", revision: REVISION_A, determiningPoliciesOmitted: 3 },
 		],
 	];
 	it.each(refused)("refuses: %s", async (_name, evaluation) => {
@@ -373,6 +540,22 @@ describe("evaluate — what a rule may report", () => {
 		const error = await evaluate(attrs, [rule]).catch((cause: unknown) => cause);
 		expect(error).toBeInstanceOf(TypeError);
 		expect(String((error as Error).message)).not.toContain(secret);
+	});
+
+	it("does not repeat a refused determining policy id in the error either (#199)", async () => {
+		const secret = "tenant-acme-internal\nlevel=info msg=forged";
+		const rule = sync(
+			"cedar",
+			"cedar_deny",
+			reporting(false, {
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: [secret],
+			}),
+		);
+		const error = await evaluate(attrs, [rule]).catch((cause: unknown) => cause);
+		expect(error).toBeInstanceOf(TypeError);
+		expect(String((error as Error).message)).not.toContain("tenant-acme-internal");
 	});
 
 	it("refuses the same from an asynchronous rule", async () => {

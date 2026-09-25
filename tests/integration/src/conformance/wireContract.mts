@@ -174,6 +174,8 @@ export interface WireFixtures {
 		unconfirmed?: WireDecisionRequest;
 		/** A request the rule denied before its evaluator was asked. */
 		notInvoked?: WireDecisionRequest;
+		/** A request whose evaluator completed and named the policies that determined it (#199). */
+		determining?: WireDecisionRequest;
 	};
 }
 
@@ -201,7 +203,13 @@ interface ResponseEnvelopes {
 	evaluation: {
 		statuses: string[];
 		notInvoked: { keys: string[] };
-		evaluated: { statuses: string[]; required: string[]; onlyWhenRevisionIsNull: string[] };
+		evaluated: {
+			statuses: string[];
+			required: string[];
+			onlyWhenRevisionIsNull: string[];
+			onlyWhenCompleted: string[];
+		};
+		determiningPolicies: { maxItems: number; idMaxLength: number; about: string };
 		revision: { pattern: string; maxLength: number; about: string };
 	};
 	status: Record<string, number>;
@@ -308,13 +316,48 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 		const permitted = new Set([
 			...evaluationEnvelope.evaluated.required,
 			...(evaluation.revision === null ? evaluationEnvelope.evaluated.onlyWhenRevisionIsNull : []),
+			...(evaluation.status === "completed" ? evaluationEnvelope.evaluated.onlyWhenCompleted : []),
 		]);
 		expect(Object.keys(evaluation).filter((key) => !permitted.has(key))).toEqual([]);
 		if (evaluation.revision !== null) expectRevision(evaluation.revision);
 		for (const key of evaluationEnvelope.evaluated.onlyWhenRevisionIsNull) {
 			if (key in evaluation) expectRevision(evaluation[key]);
 		}
+		if ("determiningPolicies" in evaluation) {
+			expectDeterminingPolicies(evaluation.determiningPolicies);
+		}
+		if ("determiningPoliciesOmitted" in evaluation) {
+			// A count of what the list could not carry, so never without the list.
+			expect(evaluation).toHaveProperty("determiningPolicies");
+			expect(Number.isSafeInteger(evaluation.determiningPoliciesOmitted)).toBe(true);
+			expect(evaluation.determiningPoliciesOmitted as number).toBeGreaterThan(0);
+		}
 		return evaluation;
+	};
+
+	/**
+	 * Asserts a completed evaluation's determining policies (#199) are the
+	 * bounded set the contract carries: a list, no longer than `maxItems`, of
+	 * distinct ids, each 1 to `idMaxLength` characters with no control
+	 * character — which is what keeps an id from forging a log line.
+	 */
+	const expectDeterminingPolicies = (value: unknown): void => {
+		expect(Array.isArray(value)).toBe(true);
+		const ids = value as unknown[];
+		expect(ids.length).toBeLessThanOrEqual(evaluationEnvelope.determiningPolicies.maxItems);
+		expect(new Set(ids).size).toBe(ids.length);
+		for (const id of ids) {
+			expect(typeof id).toBe("string");
+			expect((id as string).length).toBeGreaterThan(0);
+			expect((id as string).length).toBeLessThanOrEqual(
+				evaluationEnvelope.determiningPolicies.idMaxLength,
+			);
+			const controls = [...(id as string)].filter((char) => {
+				const code = char.codePointAt(0) as number;
+				return code <= 0x1f || (code >= 0x7f && code <= 0x9f);
+			});
+			expect(controls).toEqual([]);
+		}
 	};
 
 	/** Every `evaluation` a decision body carries, in evaluation order, each checked. */
@@ -719,6 +762,19 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 					expect(unconfirmed.length).toBeGreaterThan(0);
 					// The envelope check above already held `loadedRevision`, where
 					// present, to the revision shape — and refused it anywhere else.
+				},
+			);
+
+			it.runIf(reporting?.determining)(
+				"names the policies that determined a completed answer, and only on a completed one (#199)",
+				async () => {
+					const res = await post("/verify", reporting?.determining);
+					const evaluations = evaluationsOf(expectDecisionEnvelope(res.body));
+					const naming = evaluations.filter((evaluation) => "determiningPolicies" in evaluation);
+					expect(naming.length).toBeGreaterThan(0);
+					for (const evaluation of naming) {
+						expect(evaluation.status).toBe("completed");
+					}
 				},
 			);
 

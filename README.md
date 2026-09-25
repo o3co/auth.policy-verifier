@@ -1,6 +1,6 @@
 # auth.policy-verifier
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 [![CI](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth.policy-verifier.core)](https://www.npmjs.com/package/@o3co/auth.policy-verifier.core)
@@ -653,9 +653,18 @@ After a policy update or during a rolling deployment, a decision's result and ru
 | `"revision": null`, with `"loadedRevision": "sha256:…"` | the evaluator ran, and what it evaluated cannot be established — every answer of the out-of-process `http` engine, since cedar-agent does not say what it holds. `loadedRevision` is what this verifier loaded at boot: worth recording, **not proof of what ran** |
 | absent | the rule reported nothing — a TypeScript rule has no policy source to name; the deployed version and its config are what decided. Also what an older verifier, or one that has not opted in, answers: **absence means unknown** |
 
+**Which policies decided (#199).** A `completed` evaluation may also name the policies that determined the answer — for an allow, the permits that applied; for a deny, the forbids that did:
+
+```json
+"evaluation": { "status": "completed", "revision": "sha256:9f2c…",
+                "determiningPolicies": ["20-forbid-contractors"] }
+```
+
+`determiningPolicies` is a set of policy ids as the rule's producer names them, and an empty list when no policy applied. It holds at most 32 ids, each 1–256 characters with no control character; what the evaluator named beyond that is counted in `determiningPoliciesOmitted`, present only when it is not zero. A `failed` or `not_invoked` evaluation carries neither, because no policy decided that answer, and a rule that does not know carries neither either — **absence means the rule did not say**. The deny `code` is unchanged: the ids sit beside it, not instead of it.
+
 The reference sits on the outcome of the rule that reported it, so a decision made under two policy sources carries two revisions, never one standing for both. In a batch every entry carries its own; a batch does not pin a snapshot, and needs none while the policy set is loaded once at boot — each replica reports the snapshot *it* evaluated, which during a rolling deployment is how two answers to the same request are told apart. A deny made without a policy evaluation — the router's `collector_timeout`, `rule_timeout` and `attribute_conflict`, and the evaluator's `no_applicable_rule` — has no groups and so no evaluation, and a request refused before evaluation (`400`, `401`) is not a decision at all: neither is ever recorded as decided by a policy.
 
-**Where it goes.** The `decision` event always carries it, as `evaluations`. The response carries it only under `verify.evaluationInResponse = "include"` (default `"omit"`, under which the response is key-for-key what it was). The opt-in is the deployment's rather than the caller's — unlike XACML's `ReturnPolicyIdList` or OPA's `?provenance=true` — because it tells any holder of an accepted token when the policy set changed and whether a denial was a policy's or the engine failing. Pair it with [`http.callerAuth`](#configuration) where that matters.
+**Where it goes.** The `decision` event always carries it, as `evaluations` — the determining policies included. The response carries it only under `verify.evaluationInResponse = "include"` (default `"omit"`, under which the response is key-for-key what it was). The opt-in is the deployment's rather than the caller's — unlike XACML's `ReturnPolicyIdList` or OPA's `?provenance=true` — because it tells any holder of an accepted token when the policy set changed, whether a denial was a policy's or the engine failing, and which policies are there. Pair it with [`http.callerAuth`](#configuration) where that matters.
 
 **What an application stores.** For each operation it authorizes or refuses: the `decision`, the deny `code`, the `reason` (which carries each `evaluation`), and the `x-request-id` it sent. The PDP's `decision` event carries the same `requestId` and the same `evaluations`, so the two records join on the id — and, for a batch, on the id plus the entry's `resource` and `action`. A client that *requires* a revision treats an allow whose satisfying outcomes carry no string `revision` as not established, and decides for itself what to do with it; on the PDP side, `requireConfirmedRevision = true` on the Cedar collector turns such an answer into a deny before it leaves (and refuses at boot an engine that could never satisfy it).
 

@@ -51,8 +51,8 @@ export interface DenyingGroup {
  * `ruleType` and `code`, so it is also what tells their entries apart.
  *
  * `evaluation` is nested, the way the response nests it on an outcome, and not
- * spread beside the name: a key added to it later (#199's determining policy
- * ids) cannot then collide with `ruleType`, `code` or `passed`.
+ * spread beside the name: a key it carries — the determining policy ids
+ * (#199) among them — cannot then collide with `ruleType`, `code` or `passed`.
  */
 export interface ReportedEvaluation extends NamedRule {
 	passed: boolean;

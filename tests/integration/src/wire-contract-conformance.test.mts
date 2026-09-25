@@ -176,7 +176,14 @@ const policyBackedRuleCollector: RuleCollector = {
 			case UNCONFIRMED_ACTION:
 				return [reports(true, { status: "completed", revision: null, loadedRevision: REVISION })];
 			default:
-				return [unbuilt, reports(true, { status: "completed", revision: REVISION })];
+				return [
+					unbuilt,
+					reports(true, {
+						status: "completed",
+						revision: REVISION,
+						determiningPolicies: ["10-permit-read"],
+					}),
+				];
 		}
 	},
 };
@@ -357,6 +364,7 @@ describeWireContractConformance(
 		{
 			reportingEvaluation: {
 				confirmed: allowed,
+				determining: allowed,
 				unconfirmed: {
 					resource: "project:1",
 					action: UNCONFIRMED_ACTION,

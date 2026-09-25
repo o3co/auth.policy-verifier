@@ -68,6 +68,8 @@ export type {
 	CollectorRequest,
 	Decision,
 	DecisionReason,
+	DeterminingPolicies,
+	EvaluatedRevision,
 	ReadonlyAttributes,
 	ReportRuleEvaluation,
 	Resource,
@@ -81,6 +83,12 @@ export type {
 	RuleOutcome,
 	SubjectAttributes,
 } from "./types.mjs";
-export { isAsyncRule, POLICY_REVISION_MAX_LENGTH, POLICY_REVISION_PATTERN } from "./types.mjs";
+export {
+	DETERMINING_POLICIES_MAX,
+	isAsyncRule,
+	POLICY_ID_MAX_LENGTH,
+	POLICY_REVISION_MAX_LENGTH,
+	POLICY_REVISION_PATTERN,
+} from "./types.mjs";
 export type { UntrustedRequestContext } from "./untrusted.mjs";
 export { markUntrustedRequestContext, readUntrustedRequestContext } from "./untrusted.mjs";

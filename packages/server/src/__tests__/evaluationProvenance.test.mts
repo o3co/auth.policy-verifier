@@ -296,6 +296,62 @@ describe("the response — carries it only when the deployment says so", () => {
 		}
 	});
 
+	// #199: the policies that determined an answer ride the same evaluation, so
+	// the same switch governs them — on the audit line always, on the response
+	// only when the deployment opts in. A policy id is internal structure.
+	it("carries the determining policies the same way — on the line always, in the response only under include (#199)", async () => {
+		const determining = reporting("cedar", (action) =>
+			action === "read"
+				? {
+						passed: true,
+						evaluation: {
+							status: "completed",
+							revision: REVISION_A,
+							determiningPolicies: ["10-permit-read"],
+						},
+					}
+				: {
+						passed: false,
+						evaluation: {
+							status: "completed",
+							revision: REVISION_A,
+							determiningPolicies: ["20-forbid-delete"],
+						},
+					},
+		);
+
+		const omitting = appWith([determining]);
+		const hidden = await verify(omitting.app, { resource: "project:1", action: "delete" }).expect(
+			403,
+		);
+		expect(hidden.text).not.toContain("20-forbid-delete");
+		expect(decisionLines(omitting.events)[0].evaluations).toEqual([
+			expect.objectContaining({
+				evaluation: {
+					status: "completed",
+					revision: REVISION_A,
+					determiningPolicies: ["20-forbid-delete"],
+				},
+			}),
+		]);
+
+		const including = appWith([determining], { evaluationInResponse: "include" });
+		const allow = await verify(including.app, { resource: "project:1", action: "read" }).expect(
+			200,
+		);
+		const deny = await verify(including.app, { resource: "project:1", action: "delete" }).expect(
+			403,
+		);
+		expect(allow.body.reason.groups[0].evaluated[0].evaluation.determiningPolicies).toEqual([
+			"10-permit-read",
+		]);
+		expect(deny.body.reason.groups[0].evaluated[0].evaluation.determiningPolicies).toEqual([
+			"20-forbid-delete",
+		]);
+		// The coarse code is what it was: the detail is beside it, not instead of it.
+		expect(deny.body).toMatchObject({ decision: "deny", code: "cedar_deny" });
+	});
+
 	it("attributes each batch entry to its own evaluation, in order, sharing one request id", async () => {
 		// The revision a rule reports is per invocation; a batch is N of them.
 		// Entries alternate between two sources here so that stamping the batch

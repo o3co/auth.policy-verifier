@@ -25,6 +25,9 @@
  */
 
 import {
+	DETERMINING_POLICIES_MAX,
+	type DeterminingPolicies,
+	POLICY_ID_MAX_LENGTH,
 	POLICY_REVISION_MAX_LENGTH,
 	POLICY_REVISION_PATTERN,
 	type ReportRuleEvaluation,
@@ -57,7 +60,21 @@ export interface RuleInvocation {
 
 const STATUSES: ReadonlySet<string> = new Set(["completed", "failed", "not_invoked"]);
 const NOT_INVOKED_KEYS: ReadonlySet<string> = new Set(["status"]);
-const EVALUATED_KEYS: ReadonlySet<string> = new Set(["status", "revision", "loadedRevision"]);
+const FAILED_KEYS: ReadonlySet<string> = new Set(["status", "revision", "loadedRevision"]);
+const COMPLETED_KEYS: ReadonlySet<string> = new Set([
+	...FAILED_KEYS,
+	"determiningPolicies",
+	"determiningPoliciesOmitted",
+]);
+
+/** Whether `value` holds a control character — C0, DEL or C1 — which would let an id forge a log line. */
+function hasControlCharacter(value: string): boolean {
+	for (let index = 0; index < value.length; index++) {
+		const code = value.charCodeAt(index);
+		if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true;
+	}
+	return false;
+}
 
 /**
  * Begins one invocation. Made per call by `evaluate()`, never shared: what a
@@ -129,7 +146,8 @@ function readEvaluation(value: unknown): RuleEvaluation {
 		throw new TypeError("a rule's evaluation must be an object");
 	}
 	const keys = Object.keys(value);
-	const { status, revision, loadedRevision } = value as Record<string, unknown>;
+	const { status, revision, loadedRevision, determiningPolicies, determiningPoliciesOmitted } =
+		value as Record<string, unknown>;
 	if (typeof status !== "string" || !STATUSES.has(status)) {
 		throw new TypeError(`a rule's evaluation.status must be one of ${[...STATUSES].join(", ")}`);
 	}
@@ -141,15 +159,25 @@ function readEvaluation(value: unknown): RuleEvaluation {
 		return Object.freeze({ status });
 	}
 
-	refuseUnknownKeys(keys, EVALUATED_KEYS, "a rule's evaluation");
+	// A failed evaluation's answer is the rule failing closed, not the
+	// policies', so only a completed one may say which policies determined it.
+	refuseUnknownKeys(
+		keys,
+		status === "completed" ? COMPLETED_KEYS : FAILED_KEYS,
+		status === "completed" ? "a rule's evaluation" : 'a "failed" evaluation',
+	);
 	const evaluated = status as "completed" | "failed";
+	const determining = readDeterminingPolicies(determiningPolicies, determiningPoliciesOmitted);
 	if (revision === null) {
-		if (loadedRevision === undefined) return Object.freeze({ status: evaluated, revision });
+		if (loadedRevision === undefined) {
+			return Object.freeze({ status: evaluated, revision, ...determining }) as RuleEvaluation;
+		}
 		return Object.freeze({
 			status: evaluated,
 			revision,
 			loadedRevision: readRevision(loadedRevision, "loadedRevision"),
-		});
+			...determining,
+		}) as RuleEvaluation;
 	}
 	if (revision === undefined) {
 		// Present-and-null is the explicit unknown; absent is a rule that forgot.
@@ -160,7 +188,71 @@ function readEvaluation(value: unknown): RuleEvaluation {
 	if (loadedRevision !== undefined) {
 		throw new TypeError("a rule's evaluation carries loadedRevision only when revision is null");
 	}
-	return Object.freeze({ status: evaluated, revision: readRevision(revision, "revision") });
+	return Object.freeze({
+		status: evaluated,
+		revision: readRevision(revision, "revision"),
+		...determining,
+	}) as RuleEvaluation;
+}
+
+/**
+ * The determining policies of a completed evaluation (#199), copied and
+ * frozen, or nothing when the rule named none. The list is read once, by
+ * index, so a list whose length or entries answer differently the second time
+ * is judged on the one reading.
+ */
+function readDeterminingPolicies(list: unknown, omitted: unknown): DeterminingPolicies {
+	if (list === undefined) {
+		if (omitted !== undefined) {
+			throw new TypeError(
+				"a rule's evaluation carries determiningPoliciesOmitted only beside determiningPolicies",
+			);
+		}
+		return {};
+	}
+	if (!Array.isArray(list)) {
+		throw new TypeError("a rule's evaluation.determiningPolicies must be a list of policy ids");
+	}
+	const length = list.length;
+	if (length > DETERMINING_POLICIES_MAX) {
+		throw new TypeError(
+			`a rule's evaluation.determiningPolicies lists at most ${DETERMINING_POLICIES_MAX} ids — count the rest in determiningPoliciesOmitted`,
+		);
+	}
+	const ids: string[] = [];
+	const seen = new Set<string>();
+	for (let index = 0; index < length; index++) {
+		const id: unknown = list[index];
+		if (
+			typeof id !== "string" ||
+			id.length === 0 ||
+			id.length > POLICY_ID_MAX_LENGTH ||
+			hasControlCharacter(id)
+		) {
+			throw new TypeError(
+				`a rule's evaluation.determiningPolicies holds an id that is not 1 to ${POLICY_ID_MAX_LENGTH} characters without a control character`,
+			);
+		}
+		if (seen.has(id)) {
+			throw new TypeError(
+				"a rule's evaluation.determiningPolicies names a policy twice — it is a set",
+			);
+		}
+		seen.add(id);
+		ids.push(id);
+	}
+	const kept: { determiningPolicies: readonly string[]; determiningPoliciesOmitted?: number } = {
+		determiningPolicies: Object.freeze(ids),
+	};
+	if (omitted !== undefined) {
+		if (typeof omitted !== "number" || !Number.isSafeInteger(omitted) || omitted < 1) {
+			throw new TypeError(
+				"a rule's evaluation.determiningPoliciesOmitted must be a positive whole number — absent when nothing was omitted",
+			);
+		}
+		kept.determiningPoliciesOmitted = omitted;
+	}
+	return kept;
 }
 
 function readRevision(value: unknown, key: string): string {

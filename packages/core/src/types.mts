@@ -165,7 +165,8 @@ export type RuleEvaluationStatus = "completed" | "failed" | "not_invoked";
 
 /**
  * What a rule reports about the evaluation behind one answer: its
- * {@link RuleEvaluationStatus}, and which policy snapshot it concerned.
+ * {@link RuleEvaluationStatus}, which policy snapshot it concerned, and —
+ * for a completed one — which policies determined the answer.
  *
  * `revision` is a claim about what was **evaluated**, so it is a string only
  * when the evaluator vouches for it. `null` is the explicit unknown — the
@@ -184,15 +185,35 @@ export type RuleEvaluationStatus = "completed" | "failed" | "not_invoked";
  * covers is its producer's to document: for `packages/cedar`, the policy files
  * and nothing else. It is never a promise of replay — attributes, mapping and
  * evaluator version decide an answer too.
+ *
+ * `determiningPolicies` (#199) names the policies that determined a
+ * **completed** answer — for an allow, the permits that applied; for a deny,
+ * the forbids that did; an empty list when no policy applied to the request.
+ * It is a set, in the order the rule reports it, and absent when the rule does
+ * not know (a rule that fronts no evaluator reports nothing at all). A
+ * `failed` evaluation carries none: its answer is the rule failing closed, not
+ * the policies'. At most {@link DETERMINING_POLICIES_MAX} ids, each 1 to
+ * {@link POLICY_ID_MAX_LENGTH} characters with no control character; what the
+ * evaluator named beyond that — past the bound, or an id outside that shape —
+ * is counted in `determiningPoliciesOmitted`, present only when it is not
+ * zero. An id is the policy's name as its producer documents it: for
+ * `packages/cedar`, the policy file's name.
  */
 export type RuleEvaluation =
 	| { readonly status: "not_invoked" }
-	| { readonly status: "completed" | "failed"; readonly revision: string }
-	| {
-			readonly status: "completed" | "failed";
-			readonly revision: null;
-			readonly loadedRevision?: string;
-	  };
+	| ({ readonly status: "completed" } & EvaluatedRevision & DeterminingPolicies)
+	| ({ readonly status: "failed" } & EvaluatedRevision);
+
+/** Which policy snapshot an evaluated {@link RuleEvaluation} concerned. */
+export type EvaluatedRevision =
+	| { readonly revision: string }
+	| { readonly revision: null; readonly loadedRevision?: string };
+
+/** The determining policies a completed {@link RuleEvaluation} may name (#199). */
+export interface DeterminingPolicies {
+	readonly determiningPolicies?: readonly string[];
+	readonly determiningPoliciesOmitted?: number;
+}
 
 /**
  * The shape a policy revision reference is held to: `scheme:encoded`, the OCI
@@ -204,6 +225,16 @@ export const POLICY_REVISION_PATTERN = /^[a-z0-9]+(?:[+._-][a-z0-9]+)*:[A-Za-z0-
 
 /** Longest reference carried. `sha512:` and its 128 hex characters is 135. */
 export const POLICY_REVISION_MAX_LENGTH = 256;
+
+/**
+ * Most determining policies one evaluation lists (#199). Every decision's
+ * audit line carries them, and so may its response: a handful answers "which
+ * policy decided", and the rest are counted, not dropped.
+ */
+export const DETERMINING_POLICIES_MAX = 32;
+
+/** Longest determining policy id carried — a file name, not a policy's text. */
+export const POLICY_ID_MAX_LENGTH = 256;
 
 /**
  * How a rule reports the {@link RuleEvaluation} behind one answer (#244).
