@@ -59,6 +59,7 @@ export type {
 } from "./modules/index.mjs";
 export { Registry } from "./modules/index.mjs";
 export { RulePipeline } from "./RulePipeline.mjs";
+export { boundDeterminingPolicies, isReportablePolicyId } from "./ruleEvaluation.mjs";
 export type {
 	AnyRule,
 	AsyncRule,
@@ -86,6 +87,7 @@ export type {
 export {
 	DETERMINING_POLICIES_MAX,
 	isAsyncRule,
+	POLICY_ID_FORBIDDEN_RANGES,
 	POLICY_ID_MAX_LENGTH,
 	POLICY_REVISION_MAX_LENGTH,
 	POLICY_REVISION_PATTERN,

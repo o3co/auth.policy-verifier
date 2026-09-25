@@ -29,7 +29,10 @@ import type {
 import {
 	AttributePipeline,
 	consoleLogger,
+	DETERMINING_POLICIES_MAX,
 	evaluate,
+	POLICY_ID_FORBIDDEN_RANGES,
+	POLICY_ID_MAX_LENGTH,
 	POLICY_REVISION_MAX_LENGTH,
 	POLICY_REVISION_PATTERN,
 	RulePipeline,
@@ -393,6 +396,48 @@ describe("the fixture's evaluation table is core's own", () => {
 	it("states the revision grammar and bound core enforces", () => {
 		expect(evaluation.revision.pattern).toBe(POLICY_REVISION_PATTERN.source);
 		expect(evaluation.revision.maxLength).toBe(POLICY_REVISION_MAX_LENGTH);
+	});
+
+	it("states the determining-policy bounds and id shape core enforces (#199)", () => {
+		expect(evaluation.determiningPolicies.maxItems).toBe(DETERMINING_POLICIES_MAX);
+		expect(evaluation.determiningPolicies.idMaxLength).toBe(POLICY_ID_MAX_LENGTH);
+		expect(
+			evaluation.determiningPolicies.idForbiddenRanges.map(([low, high]) => [
+				Number.parseInt(low, 16),
+				Number.parseInt(high, 16),
+			]),
+		).toEqual(POLICY_ID_FORBIDDEN_RANGES.map(([low, high]) => [low, high]));
+	});
+
+	it("names as completed-only exactly the keys core takes on a completed report and refuses on a failed one (#199)", async () => {
+		const accepts = async (report: Record<string, unknown>): Promise<boolean> =>
+			evaluate(new Map(), [
+				{
+					ruleType: "policy",
+					code: "policy_deny",
+					message: "Denied by policy",
+					verify: (_attrs, tell) => {
+						tell?.(report as RuleEvaluation);
+						return false;
+					},
+				},
+			]).then(
+				() => true,
+				() => false,
+			);
+		const keys: Record<string, unknown> = {
+			determiningPolicies: ["10-permit"],
+			determiningPoliciesOmitted: 2,
+		};
+		for (const key of evaluation.evaluated.onlyWhenCompleted) {
+			const pair =
+				key === "determiningPoliciesOmitted"
+					? { determiningPolicies: [], determiningPoliciesOmitted: keys[key] }
+					: { [key]: keys[key] };
+			expect(await accepts({ status: "completed", revision: null, ...pair })).toBe(true);
+			expect(await accepts({ status: "failed", revision: null, ...pair })).toBe(false);
+		}
+		expect([...evaluation.evaluated.onlyWhenCompleted].sort()).toEqual(Object.keys(keys).sort());
 	});
 
 	it("lists exactly the statuses core accepts", async () => {

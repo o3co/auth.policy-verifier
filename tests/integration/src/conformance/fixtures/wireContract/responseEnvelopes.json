@@ -42,11 +42,12 @@
 		"the verifier's next minor.",
 		"`determiningPolicies` (#199) names the policies that determined a COMPLETED answer — for",
 		"an allow the permits that applied, for a deny the forbids that did — and is an empty list",
-		"when no policy applied. It is a set of policy ids (for packages/cedar, policy file names),",
-		"at most `determiningPolicies.maxItems` of them; whatever the evaluator named beyond that,",
-		"or in a shape it could not carry, is counted in `determiningPoliciesOmitted`, present only",
-		"beside the list and only when it is not zero. A `failed` or `not_invoked` evaluation",
-		"carries neither: no policy decided that answer. ABSENT means the rule did not say."
+		"when no policy applied. It is a set of policy ids, named as the rule's producer documents",
+		"them, at most `determiningPolicies.maxItems` of them; whatever the evaluator named beyond",
+		"that, or in a shape it could not carry, is counted in `determiningPoliciesOmitted`, present",
+		"only beside the list and only when it is not zero. Beside `revision: null` the ids are as",
+		"unconfirmed as the revision. A `failed` or `not_invoked` evaluation carries neither key:",
+		"no policy decided that answer. ABSENT means the rule did not say."
 	],
 	"error": {
 		"keys": ["decision", "code", "message"],
@@ -83,8 +84,19 @@
 		},
 		"determiningPolicies": {
 			"maxItems": 32,
-			"idMaxLength": 256,
-			"about": "A set of policy ids, each 1 to idMaxLength characters with no control character. `determiningPoliciesOmitted`, a positive integer, only beside it."
+			"idMaxLength": 128,
+			"idLengthUnit": "UTF-16 code units",
+			"idWellFormed": true,
+			"idForbiddenRanges": [
+				["0000", "001F"],
+				["007F", "009F"],
+				["061C", "061C"],
+				["200E", "200F"],
+				["2028", "202E"],
+				["2066", "2069"]
+			],
+			"omitted": { "minimum": 1, "onlyBeside": "determiningPolicies" },
+			"about": "A set of distinct policy ids. Each is well-formed UTF-16 (no lone surrogate), 1 to idMaxLength UTF-16 code units long, and holds no code point in idForbiddenRanges (inclusive, hex): the controls and the characters that break or reorder a displayed line. `determiningPoliciesOmitted` is an integer of at least `omitted.minimum`, present only beside the list."
 		},
 		"revision": {
 			"pattern": "^[a-z0-9]+(?:[+._-][a-z0-9]+)*:[A-Za-z0-9=_-]+$",

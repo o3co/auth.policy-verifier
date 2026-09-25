@@ -209,7 +209,15 @@ interface ResponseEnvelopes {
 			onlyWhenRevisionIsNull: string[];
 			onlyWhenCompleted: string[];
 		};
-		determiningPolicies: { maxItems: number; idMaxLength: number; about: string };
+		determiningPolicies: {
+			maxItems: number;
+			idMaxLength: number;
+			idLengthUnit: string;
+			idWellFormed: boolean;
+			idForbiddenRanges: [string, string][];
+			omitted: { minimum: number; onlyBeside: string };
+			about: string;
+		};
 		revision: { pattern: string; maxLength: number; about: string };
 	};
 	status: Record<string, number>;
@@ -328,9 +336,12 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 		}
 		if ("determiningPoliciesOmitted" in evaluation) {
 			// A count of what the list could not carry, so never without the list.
-			expect(evaluation).toHaveProperty("determiningPolicies");
+			const { omitted } = evaluationEnvelope.determiningPolicies;
+			expect(evaluation).toHaveProperty(omitted.onlyBeside);
 			expect(Number.isSafeInteger(evaluation.determiningPoliciesOmitted)).toBe(true);
-			expect(evaluation.determiningPoliciesOmitted as number).toBeGreaterThan(0);
+			expect(evaluation.determiningPoliciesOmitted as number).toBeGreaterThanOrEqual(
+				omitted.minimum,
+			);
 		}
 		return evaluation;
 	};
@@ -338,25 +349,30 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 	/**
 	 * Asserts a completed evaluation's determining policies (#199) are the
 	 * bounded set the contract carries: a list, no longer than `maxItems`, of
-	 * distinct ids, each 1 to `idMaxLength` characters with no control
-	 * character — which is what keeps an id from forging a log line.
+	 * distinct ids, each well-formed, 1 to `idMaxLength` UTF-16 units long, and
+	 * free of every code point in `idForbiddenRanges` — which is what keeps an
+	 * id from breaking a log line or displaying as another id.
 	 */
 	const expectDeterminingPolicies = (value: unknown): void => {
+		const shape = evaluationEnvelope.determiningPolicies;
+		const forbidden = shape.idForbiddenRanges.map(
+			([low, high]) => [Number.parseInt(low, 16), Number.parseInt(high, 16)] as const,
+		);
 		expect(Array.isArray(value)).toBe(true);
 		const ids = value as unknown[];
-		expect(ids.length).toBeLessThanOrEqual(evaluationEnvelope.determiningPolicies.maxItems);
+		expect(ids.length).toBeLessThanOrEqual(shape.maxItems);
 		expect(new Set(ids).size).toBe(ids.length);
 		for (const id of ids) {
 			expect(typeof id).toBe("string");
-			expect((id as string).length).toBeGreaterThan(0);
-			expect((id as string).length).toBeLessThanOrEqual(
-				evaluationEnvelope.determiningPolicies.idMaxLength,
-			);
-			const controls = [...(id as string)].filter((char) => {
+			const text = id as string;
+			expect(text.length).toBeGreaterThan(0);
+			expect(text.length).toBeLessThanOrEqual(shape.idMaxLength);
+			if (shape.idWellFormed) expect(text.isWellFormed()).toBe(true);
+			const outside = [...text].filter((char) => {
 				const code = char.codePointAt(0) as number;
-				return code <= 0x1f || (code >= 0x7f && code <= 0x9f);
+				return forbidden.some(([low, high]) => code >= low && code <= high);
 			});
-			expect(controls).toEqual([]);
+			expect(outside).toEqual([]);
 		}
 	};
 

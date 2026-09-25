@@ -192,12 +192,14 @@ export type RuleEvaluationStatus = "completed" | "failed" | "not_invoked";
  * It is a set, in the order the rule reports it, and absent when the rule does
  * not know (a rule that fronts no evaluator reports nothing at all). A
  * `failed` evaluation carries none: its answer is the rule failing closed, not
- * the policies'. At most {@link DETERMINING_POLICIES_MAX} ids, each 1 to
- * {@link POLICY_ID_MAX_LENGTH} characters with no control character; what the
- * evaluator named beyond that — past the bound, or an id outside that shape —
- * is counted in `determiningPoliciesOmitted`, present only when it is not
- * zero. An id is the policy's name as its producer documents it: for
- * `packages/cedar`, the policy file's name.
+ * the policies'. Beside `revision: null` the ids are as unconfirmed as the
+ * revision — they name policies in whatever set the evaluator held. An id is
+ * the policy's name as its producer documents it, never an index the engine
+ * made up. The shape is {@link isReportablePolicyId}'s and the bound
+ * {@link DETERMINING_POLICIES_MAX}; a rule builds the two keys with
+ * {@link boundDeterminingPolicies}, which counts whatever does not fit in
+ * `determiningPoliciesOmitted` — present only when it is not zero — so a rule
+ * that uses it cannot trip the check.
  */
 export type RuleEvaluation =
 	| { readonly status: "not_invoked" }
@@ -209,7 +211,15 @@ export type EvaluatedRevision =
 	| { readonly revision: string }
 	| { readonly revision: null; readonly loadedRevision?: string };
 
-/** The determining policies a completed {@link RuleEvaluation} may name (#199). */
+/**
+ * The determining policies a completed {@link RuleEvaluation} may name (#199).
+ * `determiningPoliciesOmitted` only ever stands beside `determiningPolicies`;
+ * `evaluate()` refuses it alone. The type leaves both optional rather than
+ * saying so, because the stricter union stops `{ status, revision }` with a
+ * `"completed" | "failed"` status from type-checking — code that compiled
+ * against the #244 type. {@link boundDeterminingPolicies} returns the pair in
+ * the shape the check wants.
+ */
 export interface DeterminingPolicies {
 	readonly determiningPolicies?: readonly string[];
 	readonly determiningPoliciesOmitted?: number;
@@ -229,12 +239,36 @@ export const POLICY_REVISION_MAX_LENGTH = 256;
 /**
  * Most determining policies one evaluation lists (#199). Every decision's
  * audit line carries them, and so may its response: a handful answers "which
- * policy decided", and the rest are counted, not dropped.
+ * policy decided", and the rest are counted, not dropped. With
+ * {@link POLICY_ID_MAX_LENGTH} this bounds one evaluation's ids at 4,096
+ * UTF-16 units — about 4 KiB of ASCII, at most 12 KiB of UTF-8 — so the
+ * decision line stays under the 16 KiB a line-splitting log driver cuts at.
  */
 export const DETERMINING_POLICIES_MAX = 32;
 
-/** Longest determining policy id carried — a file name, not a policy's text. */
-export const POLICY_ID_MAX_LENGTH = 256;
+/**
+ * Longest determining policy id carried, in UTF-16 code units (`String.length`,
+ * so an astral character counts two) — a name, not a policy's text.
+ */
+export const POLICY_ID_MAX_LENGTH = 128;
+
+/**
+ * The code points a determining policy id may not hold, as inclusive ranges:
+ * the C0 controls, DEL and the C1 controls; the Arabic letter mark; the
+ * left-to-right and right-to-left marks; the line and paragraph separators
+ * and the bidi embeddings and overrides beside them; and the bidi isolates.
+ * Each can break a log line or make an id display as another. An id must
+ * also be well-formed UTF-16 — no lone surrogate, which does not survive a
+ * JSON round trip. Published so the wire contract can be checked against it.
+ */
+export const POLICY_ID_FORBIDDEN_RANGES: ReadonlyArray<readonly [number, number]> = Object.freeze([
+	Object.freeze([0x0000, 0x001f] as const),
+	Object.freeze([0x007f, 0x009f] as const),
+	Object.freeze([0x061c, 0x061c] as const),
+	Object.freeze([0x200e, 0x200f] as const),
+	Object.freeze([0x2028, 0x202e] as const),
+	Object.freeze([0x2066, 0x2069] as const),
+]);
 
 /**
  * How a rule reports the {@link RuleEvaluation} behind one answer (#244).

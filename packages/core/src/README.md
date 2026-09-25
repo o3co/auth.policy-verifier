@@ -79,8 +79,9 @@ documented, not tested.
 - One reporter per invocation: at most one report, checked and frozen onto that outcome
   alone; a non-boolean answer, a report that does not read or a pass reporting `failed` /
   `not_invoked` is a `TypeError` attributed to the rule even when the rule swallowed it.
-  Determining policies are carried only by a `completed` evaluation, as a bounded set of ids
-  with a count of what did not fit —
+  Determining policies are carried only by a `completed` evaluation — refused on a `failed`
+  one however the value is reached — as a bounded set of ids with a count of what did not fit,
+  and the one id check (`isReportablePolicyId`) is what `boundDeterminingPolicies` filters with —
   [`__tests__/ruleEvaluationReport.test.mts`](__tests__/ruleEvaluationReport.test.mts).
 - Failure attribution is opt-in and partial: only when the caller hands a `FailureRecord` in,
   and only for what the runner and evaluator raise or observe themselves, is the source

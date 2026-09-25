@@ -27,6 +27,8 @@
 import {
 	DETERMINING_POLICIES_MAX,
 	type DeterminingPolicies,
+	type EvaluatedRevision,
+	POLICY_ID_FORBIDDEN_RANGES,
 	POLICY_ID_MAX_LENGTH,
 	POLICY_REVISION_MAX_LENGTH,
 	POLICY_REVISION_PATTERN,
@@ -67,13 +69,52 @@ const COMPLETED_KEYS: ReadonlySet<string> = new Set([
 	"determiningPoliciesOmitted",
 ]);
 
-/** Whether `value` holds a control character — C0, DEL or C1 — which would let an id forge a log line. */
-function hasControlCharacter(value: string): boolean {
-	for (let index = 0; index < value.length; index++) {
-		const code = value.charCodeAt(index);
-		if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true;
+/**
+ * Whether `value` can be carried as a determining policy id (#199): a
+ * well-formed string of 1 to {@link POLICY_ID_MAX_LENGTH} UTF-16 units that
+ * holds no code point of {@link POLICY_ID_FORBIDDEN_RANGES}. The one check —
+ * {@link boundDeterminingPolicies} filters with it, and `evaluate()` refuses
+ * with it — so a rule that bounds its report cannot be refused for it.
+ */
+export function isReportablePolicyId(value: unknown): value is string {
+	if (typeof value !== "string" || value.length === 0 || value.length > POLICY_ID_MAX_LENGTH) {
+		return false;
 	}
-	return false;
+	if (!value.isWellFormed()) return false;
+	for (const char of value) {
+		const code = char.codePointAt(0) as number;
+		for (const [low, high] of POLICY_ID_FORBIDDEN_RANGES) {
+			if (code >= low && code <= high) return false;
+		}
+	}
+	return true;
+}
+
+/**
+ * The determining policies an evaluator named, made to fit the contract
+ * (#199): each name once, in the order given, those {@link isReportablePolicyId}
+ * accepts, at most {@link DETERMINING_POLICIES_MAX} of them — and every
+ * other distinct name counted in `determiningPoliciesOmitted`, which is left
+ * out when nothing was. Spread the result into a completed report; what it
+ * returns is never refused. The order is the caller's: sort names whose order
+ * the engine does not keep stable, or two replicas record one decision two
+ * ways. `names` is iterated once.
+ */
+export function boundDeterminingPolicies(names: Iterable<unknown>): {
+	readonly determiningPolicies: readonly string[];
+	readonly determiningPoliciesOmitted?: number;
+} {
+	const distinct = new Set<unknown>(names);
+	const listed: string[] = [];
+	for (const name of distinct) {
+		if (listed.length === DETERMINING_POLICIES_MAX) break;
+		if (isReportablePolicyId(name)) listed.push(name);
+	}
+	const omitted = distinct.size - listed.length;
+	const determiningPolicies = Object.freeze(listed);
+	return omitted > 0
+		? { determiningPolicies, determiningPoliciesOmitted: omitted }
+		: { determiningPolicies };
 }
 
 /**
@@ -161,38 +202,49 @@ function readEvaluation(value: unknown): RuleEvaluation {
 
 	// A failed evaluation's answer is the rule failing closed, not the
 	// policies', so only a completed one may say which policies determined it.
-	refuseUnknownKeys(
-		keys,
-		status === "completed" ? COMPLETED_KEYS : FAILED_KEYS,
-		status === "completed" ? "a rule's evaluation" : 'a "failed" evaluation',
-	);
-	const evaluated = status as "completed" | "failed";
-	const determining = readDeterminingPolicies(determiningPolicies, determiningPoliciesOmitted);
-	if (revision === null) {
-		if (loadedRevision === undefined) {
-			return Object.freeze({ status: evaluated, revision, ...determining }) as RuleEvaluation;
-		}
+	// The key check sees own enumerable keys only, and a value is read however
+	// it is reached, so a failed report is checked on the values themselves too.
+	if (status === "completed") {
+		refuseUnknownKeys(keys, COMPLETED_KEYS, "a rule's evaluation");
+		const determining = readDeterminingPolicies(determiningPolicies, determiningPoliciesOmitted);
 		return Object.freeze({
-			status: evaluated,
-			revision,
-			loadedRevision: readRevision(loadedRevision, "loadedRevision"),
+			status,
+			...readEvaluatedRevision(status, revision, loadedRevision),
 			...determining,
-		}) as RuleEvaluation;
+		});
+	}
+	refuseUnknownKeys(keys, FAILED_KEYS, 'a "failed" evaluation');
+	if (determiningPolicies !== undefined || determiningPoliciesOmitted !== undefined) {
+		throw new TypeError(
+			'a "failed" evaluation names no determining policies — its answer is not the policies\'',
+		);
+	}
+	return Object.freeze({
+		status: "failed",
+		...readEvaluatedRevision("failed", revision, loadedRevision),
+	});
+}
+
+/** The revision part of an evaluated report: a vouched revision, or `null` and what was loaded. */
+function readEvaluatedRevision(
+	status: "completed" | "failed",
+	revision: unknown,
+	loadedRevision: unknown,
+): EvaluatedRevision {
+	if (revision === null) {
+		if (loadedRevision === undefined) return { revision };
+		return { revision, loadedRevision: readRevision(loadedRevision, "loadedRevision") };
 	}
 	if (revision === undefined) {
 		// Present-and-null is the explicit unknown; absent is a rule that forgot.
 		throw new TypeError(
-			`a "${evaluated}" evaluation must name its revision, or null when it cannot be established`,
+			`a "${status}" evaluation must name its revision, or null when it cannot be established`,
 		);
 	}
 	if (loadedRevision !== undefined) {
 		throw new TypeError("a rule's evaluation carries loadedRevision only when revision is null");
 	}
-	return Object.freeze({
-		status: evaluated,
-		revision: readRevision(revision, "revision"),
-		...determining,
-	}) as RuleEvaluation;
+	return { revision: readRevision(revision, "revision") };
 }
 
 /**
@@ -213,7 +265,10 @@ function readDeterminingPolicies(list: unknown, omitted: unknown): DeterminingPo
 	if (!Array.isArray(list)) {
 		throw new TypeError("a rule's evaluation.determiningPolicies must be a list of policy ids");
 	}
-	const length = list.length;
+	const length: unknown = list.length;
+	if (typeof length !== "number" || !Number.isSafeInteger(length) || length < 0) {
+		throw new TypeError("a rule's evaluation.determiningPolicies must be a list of policy ids");
+	}
 	if (length > DETERMINING_POLICIES_MAX) {
 		throw new TypeError(
 			`a rule's evaluation.determiningPolicies lists at most ${DETERMINING_POLICIES_MAX} ids — count the rest in determiningPoliciesOmitted`,
@@ -223,14 +278,9 @@ function readDeterminingPolicies(list: unknown, omitted: unknown): DeterminingPo
 	const seen = new Set<string>();
 	for (let index = 0; index < length; index++) {
 		const id: unknown = list[index];
-		if (
-			typeof id !== "string" ||
-			id.length === 0 ||
-			id.length > POLICY_ID_MAX_LENGTH ||
-			hasControlCharacter(id)
-		) {
+		if (!isReportablePolicyId(id)) {
 			throw new TypeError(
-				`a rule's evaluation.determiningPolicies holds an id that is not 1 to ${POLICY_ID_MAX_LENGTH} characters without a control character`,
+				`a rule's evaluation.determiningPolicies holds an id that is not 1 to ${POLICY_ID_MAX_LENGTH} UTF-16 units of well-formed text free of control and bidi characters — build the report with boundDeterminingPolicies, which counts such an id in determiningPoliciesOmitted`,
 			);
 		}
 		if (seen.has(id)) {
