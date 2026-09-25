@@ -459,10 +459,10 @@ const MAX_ANSWER_BYTES = 256 * 1024 * 1024;
 
 /**
  * The collector entry's `maxAnswerBytes`, else {@link CEDAR_ANSWER_MAX_BYTES}.
- * Written as a number, or as the string a HOCON env substitution
- * (`${?CEDAR_MAX_ANSWER_BYTES}`) delivers — the rule the server's numeric
- * knobs follow (`resolveBound` in the server package, which this package
- * cannot import) — and a whole number of bytes in range. Checked here, where
+ * Written as a number, or as the string a HOCON env substitution of the
+ * operator's own variable (`${?MY_ANSWER_BYTES}`) delivers — the rule the
+ * server's numeric knobs follow (`resolveBound` in the server package, which
+ * this package cannot import) — and a whole number of bytes in range. Checked here, where
  * `endpoint` is: the config schema passes a collector entry through, so the
  * engine is where its keys are checked (`CedarEngineLoadContext.config`).
  * `null` is a value, and refused like anything else that is not a byte count.
@@ -488,7 +488,12 @@ function shown(value: unknown): string {
 	if (typeof value === "number") return String(value);
 	if (typeof value === "bigint") return `${value}n`;
 	if (typeof value === "symbol") return value.toString();
-	return JSON.stringify(value) ?? String(value);
+	try {
+		return JSON.stringify(value) ?? String(value);
+	} catch {
+		// A circular object, or one with no toString: say what it is.
+		return Object.prototype.toString.call(value);
+	}
 }
 
 /** A byte count as an operator would write it: MiB or KiB when it divides evenly, else bytes. */
@@ -637,9 +642,9 @@ function parseJson(text: string): unknown {
 /**
  * cedar-agent's error body is `{ reason, description, code }`; fall back to
  * the status text. The status is the fact, so a body that does not arrive, or
- * is over the bound — `maxAnswerBytes`, and never more than
- * {@link CEDAR_ANSWER_MAX_BYTES} — leaves it to the status text — unless the read was cut
- * by `signal` aborting, which is the signal's to report (#271).
+ * is over the bound, leaves it to the status text, unless the read was cut by
+ * `signal` aborting, which is the signal's to report (#271). The bound is
+ * `maxAnswerBytes`, and never more than {@link CEDAR_ANSWER_MAX_BYTES}.
  */
 async function errorDescription(
 	response: Response,

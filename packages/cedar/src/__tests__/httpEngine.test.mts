@@ -1045,7 +1045,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 
 	it.each([
 		["a number", 2 * MIB],
-		// `maxAnswerBytes = ${?CEDAR_MAX_ANSWER_BYTES}` in HOCON delivers a string,
+		// `maxAnswerBytes = ${?MY_ANSWER_BYTES}` in HOCON delivers a string,
 		// as it does for the server's numeric knobs, and is read the same way.
 		["the string a HOCON env substitution delivers", String(2 * MIB)],
 	])("reads that decision when maxAnswerBytes allows it, written as %s", async (_label, bound) => {
