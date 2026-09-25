@@ -62,8 +62,7 @@ pins the ones it depends on exactly (`.builtins`, `.cedar` and `.server` on
 
 - **BREAKING (agents whose answers exceed 1 MiB): the Cedar `http` engine
   reads at most `maxAnswerBytes` of an answer, 1 MiB unless the collector's
-  entry sets it** (`.cedar`,
-  [#271](https://github.com/o3co/auth.policy-verifier/issues/271),
+  entry sets it** (`.cedar`, [#271](https://github.com/o3co/auth.policy-verifier/issues/271),
   [#274](https://github.com/o3co/auth.policy-verifier/pull/274),
   [#276](https://github.com/o3co/auth.policy-verifier/pull/276)). From 0.10.0
   through 0.13.0 an answer was read whole, bounded only by the rule deadline,
@@ -74,17 +73,19 @@ pins the ones it depends on exactly (`.builtins`, `.cedar` and `.server` on
   now cancelled and refused: a deny with a `failed` evaluation, logged as
   `cedar authorization call failed — denying` with the `reason` `cedar engine
   at … answered an authorization call with more than 1 MiB — refused; set
-  maxAnswerBytes higher if its answers are this large`. An error's body is
+  maxAnswerBytes higher if its answers are this large` at the default; the
+  message names the bound as set (`4 MiB`, `1536 bytes`). An error's body is
   read up to the smaller of `maxAnswerBytes` and 1 MiB, and past it the status
   text is its description. `content-type` is still not checked; the body is
   parsed and its shape checked. **What to do:** an answer's
   determining-policy and error lists grow with the policy set — an `Allow`
   naming 11,000 policies by ids of about a hundred characters is past 1 MiB,
-  and 0.13.0 read it — so if your
-  agent's answers can be that large, set `maxAnswerBytes` in the
-  `CedarPolicyRuleCollector` entry before upgrading: a whole number of bytes
-  from 1 KiB to 256 MiB, written as a number or read through a HOCON env
-  substitution. Otherwise nothing.
+  and 0.10.0 through 0.13.0 read it — so if your agent's answers can be that
+  large, set `maxAnswerBytes` in the `CedarPolicyRuleCollector` entry before
+  upgrading: a whole number of bytes from 1 KiB to 256 MiB, written as a
+  number (`maxAnswerBytes = 4194304`) or a numeric string, which is what a
+  HOCON env substitution delivers. `4 MiB` unquoted is a string, and refused.
+  Otherwise nothing.
 
 - **A Cedar agent token no longer reaches the log** (`.cedar`,
   [#271](https://github.com/o3co/auth.policy-verifier/issues/271),
@@ -113,8 +114,8 @@ pins the ones it depends on exactly (`.builtins`, `.cedar` and `.server` on
 - **`maxAnswerBytes` in the `CedarPolicyRuleCollector` entry** (`.cedar`,
   [#276](https://github.com/o3co/auth.policy-verifier/pull/276)): the most
   bytes the `http` engine reads of one answer from the agent, a whole number
-  from 1 KiB to 256 MiB, as a number or the string a HOCON env substitution
-  delivers; anything else refuses to start, naming the key. Absent, it is
+  from 1 KiB to 256 MiB, as a number or a numeric string (what a HOCON env
+  substitution delivers); anything else refuses to start, naming the key. Absent, it is
   `CEDAR_ANSWER_MAX_BYTES` (1 MiB), which is exported
   ([#274](https://github.com/o3co/auth.policy-verifier/pull/274)). The wasm
   engine ignores it, as it ignores `endpoint`. See Security.
