@@ -1,6 +1,6 @@
 # cedar/src
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 The source of [`@o3co/auth.policy-verifier.cedar`](../README.md). The package README says
 what the package does and how to configure it; this page says how the source is divided and
@@ -57,6 +57,11 @@ The source falls into four parts, separated by what changes them:
   [`__tests__/engine.test.mts`](__tests__/engine.test.mts).
 - `index.mts` is the only file that registers an engine, and `keys.mts` the only one that
   reserves attribute keys; both do it at import.
+- A request carries one entity per uid: roles — principal, action, resource, in authority order —
+  contribute to one entity set in `mapping.mts` and never emit their own entries. A later role
+  that contradicts an earlier one, or (under the default `sharedEntity = "strict"`) adds to it,
+  refuses the request (#282) —
+  [`__tests__/CedarPolicyRuleCollector.test.mts`](__tests__/CedarPolicyRuleCollector.test.mts).
 - Policy ids are made in one place — `namePolicies` (over `policyIdsOf`) in `policySource.mts` —
   and both engines use it, so a policy is called the same whichever engine answers, and a
   decision records that name (#199) —

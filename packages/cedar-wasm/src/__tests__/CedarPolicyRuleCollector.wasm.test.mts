@@ -387,6 +387,51 @@ describe("CedarPolicyRuleCollector on the wasm engine — the evaluation behind 
 		expect(rule.verify(attrsWith())).toBe(true);
 	});
 
+	describe("a user acting on their own record — the principal and the resource are one entity (#282)", () => {
+		const OWN = attrsWith([
+			["requestResourceType", "User"],
+			["requestResourceId", "alice"],
+			["department", "eng"],
+			["resourceOwner", "alice"],
+		]);
+		const config = {
+			policies: `permit(principal, action, resource)
+				when { resource == principal && principal.dept == "eng" && resource.owner == principal };`,
+			principal: { attributes: { dept: "department" } },
+			resource: { attributes: { owner: { attribute: "resourceOwner", entityType: "User" } } },
+		};
+
+		it("is refused by default — the two mappings describe the entity differently", async () => {
+			const rule = await collectRule(config, fakeLogger().logger);
+			expect(rule.verify(OWN)).toBe(false);
+		});
+
+		it('is allowed under sharedEntity = "merge", as one entity holding both mappings\' facts', async () => {
+			const rule = await collectRule({ ...config, sharedEntity: "merge" });
+			expect(rule.verify(OWN)).toBe(true);
+		});
+
+		it("gives a caller no principal fact through the resource, even merged", async () => {
+			// The principal's own mapping leaves clearance out; the resource's would
+			// fill it from what the caller sent. Merged, that would answer the read.
+			const rule = await collectRule(
+				{
+					policies: `permit(principal, action, resource) when { principal.clearance == "top" };`,
+					principal: { attributes: { clearance: "userClearance" } },
+					resource: { attributes: { clearance: "ctxClearance" } },
+					sharedEntity: "merge",
+				},
+				fakeLogger().logger,
+			);
+			const own = attrsWith([
+				["requestResourceType", "User"],
+				["requestResourceId", "alice"],
+				["ctxClearance", "top"],
+			]);
+			expect(rule.verify(own)).toBe(false);
+		});
+	});
+
 	it("answers a plain boolean to an evaluator that passes no reporter — a deny stays a deny", async () => {
 		// The mixed-install case, against real Cedar: an older `evaluate()` calls
 		// `verify(attrs)` and reads the answer by truthiness.
