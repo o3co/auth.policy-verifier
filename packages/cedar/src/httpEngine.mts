@@ -459,13 +459,14 @@ const MAX_ANSWER_BYTES = 256 * 1024 * 1024;
 
 /**
  * The collector entry's `maxAnswerBytes`, else {@link CEDAR_ANSWER_MAX_BYTES}.
- * Written as a number, or as the string a HOCON env substitution of the
- * operator's own variable (`${?MY_ANSWER_BYTES}`) delivers — the rule the
+ * Written as a number or a numeric string — what a HOCON env substitution of
+ * the operator's own variable (`${?MY_ANSWER_BYTES}`) delivers — the rule the
  * server's numeric knobs follow (`resolveBound` in the server package, which
- * this package cannot import) — and a whole number of bytes in range. Checked here, where
- * `endpoint` is: the config schema passes a collector entry through, so the
- * engine is where its keys are checked (`CedarEngineLoadContext.config`).
- * `null` is a value, and refused like anything else that is not a byte count.
+ * this package cannot import), and a whole number of bytes in range. Checked
+ * here, where `endpoint` is: the config schema passes a collector entry
+ * through, so the engine is where its keys are checked
+ * (`CedarEngineLoadContext.config`). `null` is a value, and refused like
+ * anything else that is not a byte count.
  */
 function resolveMaxAnswerBytes(configured: unknown): number {
 	if (configured === undefined) return CEDAR_ANSWER_MAX_BYTES;

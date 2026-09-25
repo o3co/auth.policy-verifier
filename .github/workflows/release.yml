@@ -126,11 +126,12 @@ jobs:
       #
       # The gate this replaces asked npm about one package
       # (@o3co/auth.policy-verifier.core) and skipped the whole step when it
-      # answered. Publishing this workspace is four independent registry writes
-      # — .core, .builtins, .server and create-auth-policy-verifier — so if core
-      # landed and any of the other three failed (npm outage, per-package
-      # trusted-publisher drift), the gate turned every retag into a no-op and
-      # the missing packages could never be published at that version at all.
+      # answered. Publishing this workspace is one registry write per package —
+      # six today: .core, .builtins, .server, .cedar, .cedar-wasm and
+      # create-auth-policy-verifier — so if core landed and any other failed
+      # (npm outage, per-package trusted-publisher drift), the gate turned every
+      # retag into a no-op and the missing packages could never be published at
+      # that version at all.
       # auth.provider hit exactly this on its v0.5.0 cut (5 of 9 packages
       # published, retag skipped the rest) and removed the gate for the same
       # reason: o3co/auth.provider#111.

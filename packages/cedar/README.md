@@ -431,10 +431,12 @@ docker compose --profile cedar up --build
   determining-policy and error lists grow with the policy set, so a large set
   can answer honestly past 1 MiB: the refusal says so, and the fix is a higher
   `maxAnswerBytes` in the collector's entry — a whole number of bytes from
-  1 KiB to 256 MiB, written as a number or read from a variable of your own
-  naming through a HOCON env substitution
-  (`maxAnswerBytes = ${?MY_ANSWER_BYTES}`); anything else refuses to start. An error's body is read up to the smaller of `maxAnswerBytes` and
-  1 MiB, since it becomes the log line.
+  1 KiB to 256 MiB, written as a number (`maxAnswerBytes = 4194304`) or a
+  numeric string, which is what a HOCON env substitution of a variable of your
+  own naming delivers (`maxAnswerBytes = ${?MY_ANSWER_BYTES}`). Anything else
+  — `4 MiB` unquoted is a string — refuses to start. An error's body is read
+  up to the smaller of `maxAnswerBytes` and 1 MiB, since it becomes the log
+  line.
 - **Failure after boot is a deny.** An agent that is unreachable, answers
   non-2xx, breaks off its answer, answers more than `maxAnswerBytes`, or
   answers something that is not a decision
