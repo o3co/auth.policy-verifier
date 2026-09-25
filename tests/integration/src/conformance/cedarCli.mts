@@ -98,7 +98,12 @@ export function cedarAuthorize(cli: string, files: AuthorizeFiles): CliAnswer {
 
 const DETERMINED_BY = "note: this decision was due to the following policies:";
 const NONE_APPLIED = "note: no policies applied to this request";
-const EVALUATION_ERROR = /^error while evaluating policy `([^`]+)`: (.*)$/;
+/**
+ * An evaluation error: `error while evaluating policy` in cedar-policy-cli 4.x,
+ * `error occurred while evaluating policy` in 2.5 — and in cedar-agent 0.2.2's
+ * own error strings, which carry its Cedar's wording (#284).
+ */
+export const EVALUATION_ERROR = /^error (?:occurred )?while evaluating policy `([^`]+)`: (.*)$/;
 
 /** Reads `cedar authorize --verbose` output — see the header for why strictly. */
 export function parseAuthorizeOutput(output: string): CliAnswer {

@@ -70,6 +70,26 @@ describe("parseAuthorizeOutput — cedar authorize --verbose, read back", () => 
 		});
 	});
 
+	it("reads cedar-policy-cli 2.5's evaluation errors too — the Cedar cedar-agent 0.2.2 runs (#284)", () => {
+		const out = [
+			"",
+			"ALLOW",
+			"",
+			'error occurred while evaluating policy `10-permit-eng`: `User::"alice"` does not have the attribute: dept',
+			"",
+			"note: this decision was due to the following policies:",
+			"  20-permit-read",
+			"",
+		].join("\n");
+		expect(parseAuthorizeOutput(out)).toEqual({
+			decision: "allow",
+			reason: ["20-permit-read"],
+			errors: [
+				{ policyId: "10-permit-eng", message: '`User::"alice"` does not have the attribute: dept' },
+			],
+		});
+	});
+
 	it("refuses output it cannot read, rather than reading it as a deny", () => {
 		expect(() => parseAuthorizeOutput("")).toThrow(/no decision/);
 		expect(() => parseAuthorizeOutput("\nMAYBE\n")).toThrow(/no decision/);
