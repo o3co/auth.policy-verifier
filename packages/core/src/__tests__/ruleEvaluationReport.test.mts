@@ -25,7 +25,7 @@ import { describe, expect, it } from "vitest";
 import { RuleTimeoutError } from "../errors.mjs";
 import { evaluate } from "../evaluate.mjs";
 import { FailureRecord } from "../failureSource.mjs";
-import { boundDeterminingPolicies, isReportablePolicyId } from "../ruleEvaluation.mjs";
+import { beginRuleInvocation, isReportablePolicyId } from "../ruleEvaluation.mjs";
 import {
 	type AnyRule,
 	type AsyncRule,
@@ -827,7 +827,105 @@ describe("a rule asked by an evaluator that passes no reporter", () => {
 	});
 });
 
-describe("boundDeterminingPolicies — what a rule reports, made to fit (#199)", () => {
+/*
+ * #199: a core older than determining policies refuses the keys as unknown, and
+ * the bounds on them are the checking core's, not those of the copy a rule's
+ * package imports. So the reporter carries the bounding itself: present, a
+ * rule names the policies through it; absent, it names none.
+ */
+describe("a reporter bounds determining policies to its own core's contract (#199)", () => {
+	/** The reporter `evaluate()` hands a rule, kept for the test to inspect. */
+	async function handed(kind: "sync" | "async"): Promise<ReportRuleEvaluation> {
+		let kept: ReportRuleEvaluation | undefined;
+		const keep = (report: ReportRuleEvaluation | undefined) => {
+			kept = report;
+			return true;
+		};
+		await evaluate(attrs, [
+			kind === "sync" ? sync("a", "a_deny", keep) : async("a", "a_deny", keep),
+		]);
+		if (kept === undefined) throw new Error("no reporter was handed");
+		return kept;
+	}
+
+	it.each(["sync", "async"] as const)(
+		"hands a %s rule a reporter that bounds them",
+		async (kind) => {
+			const report = await handed(kind);
+			expect(report.boundDeterminingPolicies?.(ids(DETERMINING_POLICIES_MAX + 1))).toEqual({
+				determiningPolicies: ids(DETERMINING_POLICIES_MAX),
+				determiningPoliciesOmitted: 1,
+			});
+		},
+	);
+
+	it("cannot be swapped by the rule — its bounds stay the core's", async () => {
+		const report = await handed("sync");
+		const own = report.boundDeterminingPolicies;
+		expect(() => {
+			(report as { boundDeterminingPolicies?: unknown }).boundDeterminingPolicies = () => ({
+				determiningPolicies: ["x".repeat(POLICY_ID_MAX_LENGTH + 1)],
+			});
+		}).toThrow(TypeError);
+		expect(
+			() => delete (report as { boundDeterminingPolicies?: unknown }).boundDeterminingPolicies,
+		).toThrow(TypeError);
+		expect(report.boundDeterminingPolicies).toBe(own);
+	});
+
+	it("carries nothing from one invocation to the next — what a rule writes on it does not stick", async () => {
+		const first = await handed("sync");
+		expect(() => {
+			(first.boundDeterminingPolicies as unknown as Record<string, unknown>).stash =
+				"from one decision";
+		}).toThrow(TypeError);
+		const second = await handed("sync");
+		expect(
+			(second.boundDeterminingPolicies as unknown as Record<string, unknown>).stash,
+		).toBeUndefined();
+	});
+
+	it("takes a report built through it, the determining policies included", async () => {
+		const rule = sync("cedar", "cedar_deny", (report) => {
+			report?.({
+				status: "completed",
+				revision: REVISION_A,
+				...report?.boundDeterminingPolicies?.(["20-forbid"]),
+			});
+			return false;
+		});
+		expect((await outcomeOf(rule)).outcome.evaluation).toEqual({
+			status: "completed",
+			revision: REVISION_A,
+			determiningPolicies: ["20-forbid"],
+		});
+	});
+
+	it("never produces what evaluate() refuses — a rule that reports its output cannot trip the bound", async () => {
+		const names = [...ids(DETERMINING_POLICIES_MAX + 3), "bad\nid", 7, "😀".repeat(200)];
+		const rule = sync("cedar", "cedar_deny", (report) => {
+			report?.({
+				status: "completed",
+				revision: REVISION_A,
+				...report?.boundDeterminingPolicies?.(names),
+			});
+			return true;
+		});
+		expect((await outcomeOf(rule)).outcome.evaluation).toMatchObject({
+			determiningPolicies: ids(DETERMINING_POLICIES_MAX),
+			determiningPoliciesOmitted: 6,
+		});
+	});
+});
+
+describe("a reporter's boundDeterminingPolicies — what a rule reports, made to fit (#199)", () => {
+	/** The one a fresh reporter carries: the bounds that apply are the checking core's. */
+	const boundDeterminingPolicies = (names: Iterable<unknown> & object) => {
+		const bound = beginRuleInvocation().report.boundDeterminingPolicies;
+		if (bound === undefined) throw new Error("this core's reporter bounds determining policies");
+		return bound(names);
+	};
+
 	it("keeps the names in the order given, and says nothing more when all of them fit", () => {
 		expect(boundDeterminingPolicies(["20-forbid", "10-permit-eng"])).toEqual({
 			determiningPolicies: ["20-forbid", "10-permit-eng"],
@@ -876,25 +974,6 @@ describe("boundDeterminingPolicies — what a rule reports, made to fit (#199)",
 		const bounded = boundDeterminingPolicies(once);
 		expect(reads).toBe(1);
 		expect(Object.isFrozen(bounded.determiningPolicies)).toBe(true);
-	});
-
-	it("never produces what evaluate() refuses — a rule that reports its output cannot trip the bound", async () => {
-		const names = [...ids(DETERMINING_POLICIES_MAX + 3), "bad\nid", 7, "😀".repeat(200)];
-		const { outcome } = await outcomeOf(
-			sync(
-				"cedar",
-				"cedar_deny",
-				reporting(true, {
-					status: "completed",
-					revision: REVISION_A,
-					...boundDeterminingPolicies(names),
-				}),
-			),
-		);
-		expect(outcome.evaluation).toMatchObject({
-			determiningPolicies: ids(DETERMINING_POLICIES_MAX),
-			determiningPoliciesOmitted: 6,
-		});
 	});
 });
 

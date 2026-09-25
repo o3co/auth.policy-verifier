@@ -25,6 +25,7 @@
  */
 
 import {
+	type BoundDeterminingPolicies,
 	DETERMINING_POLICIES_MAX,
 	type DeterminingPolicies,
 	type EvaluatedRevision,
@@ -73,8 +74,12 @@ const COMPLETED_KEYS: ReadonlySet<string> = new Set([
  * Whether `value` can be carried as a determining policy id (#199): a
  * well-formed string of 1 to {@link POLICY_ID_MAX_LENGTH} UTF-16 units that
  * holds no code point of {@link POLICY_ID_FORBIDDEN_RANGES}. The one check —
- * {@link boundDeterminingPolicies} filters with it, and `evaluate()` refuses
- * with it — so a rule that bounds its report cannot be refused for it.
+ * a reporter's `boundDeterminingPolicies` filters with it, and `evaluate()`
+ * refuses with it — so a rule that bounds its report cannot be refused for it.
+ *
+ * Published to be read, like the bounds it applies: a rule does not filter its
+ * ids with it. The copy a rule's package imports need not be the core that
+ * checks the report, so a rule bounds its ids through its reporter.
  */
 export function isReportablePolicyId(value: unknown): value is string {
 	if (typeof value !== "string" || value.length === 0 || value.length > POLICY_ID_MAX_LENGTH) {
@@ -91,19 +96,14 @@ export function isReportablePolicyId(value: unknown): value is string {
 }
 
 /**
- * The determining policies an evaluator named, made to fit the contract
- * (#199): each name once, in the order given, those {@link isReportablePolicyId}
- * accepts, at most {@link DETERMINING_POLICIES_MAX} of them — and every
- * other distinct name counted in `determiningPoliciesOmitted`, which is left
- * out when nothing was. Spread the result into a completed report; what it
- * returns is never refused. The order is the caller's: sort names whose order
- * the engine does not keep stable, or two replicas record one decision two
- * ways. `names` is iterated once.
+ * What every reporter of this core carries as `boundDeterminingPolicies`
+ * (#199) — see `ReportRuleEvaluation` for the contract. Not exported from the
+ * package: a rule reaches it through its reporter, so the bounds it applies
+ * are those of the core that checks the report.
  */
-export function boundDeterminingPolicies(names: Iterable<unknown> & object): {
-	readonly determiningPolicies: readonly string[];
-	readonly determiningPoliciesOmitted?: number;
-} {
+export function boundDeterminingPolicies(
+	names: Iterable<unknown> & object,
+): BoundDeterminingPolicies {
 	// A string is iterable too, by character: one id passed bare would come
 	// back as a list of letters — a wrong record that looks complete.
 	if (typeof names === "string") {
@@ -121,6 +121,9 @@ export function boundDeterminingPolicies(names: Iterable<unknown> & object): {
 		? { determiningPolicies, determiningPoliciesOmitted: omitted }
 		: { determiningPolicies };
 }
+// One function object, shared by every reporter: frozen, so nothing a rule
+// writes on it reaches another invocation.
+Object.freeze(boundDeterminingPolicies);
 
 /**
  * Begins one invocation. Made per call by `evaluate()`, never shared: what a
@@ -141,22 +144,32 @@ export function beginRuleInvocation(): RuleInvocation {
 		throw refusal.error;
 	};
 
+	const report = (evaluation: RuleEvaluation): void => {
+		// After the answer the decision is made. Not a throw: it would land in
+		// the rule's own detached code, as an unhandled rejection.
+		if (closed) return;
+		if (reported !== undefined || refusal !== undefined) {
+			refuse(new TypeError("a rule reported its evaluation more than once for one invocation"));
+		}
+		try {
+			reported = readEvaluation(evaluation);
+		} catch (cause) {
+			// Either this module's own TypeError, or whatever an accessor on the
+			// report threw. Both are kept as they are — see the header comment.
+			refuse(cause);
+		}
+	};
+
+	// #199: the bounds a rule names determining policies to are this core's —
+	// see ReportRuleEvaluation. Neither writable nor configurable, so a rule
+	// cannot swap them; the function itself is left as it was.
+	Object.defineProperty(report, "boundDeterminingPolicies", {
+		value: boundDeterminingPolicies,
+		enumerable: true,
+	});
+
 	return {
-		report(evaluation) {
-			// After the answer the decision is made. Not a throw: it would land in
-			// the rule's own detached code, as an unhandled rejection.
-			if (closed) return;
-			if (reported !== undefined || refusal !== undefined) {
-				refuse(new TypeError("a rule reported its evaluation more than once for one invocation"));
-			}
-			try {
-				reported = readEvaluation(evaluation);
-			} catch (cause) {
-				// Either this module's own TypeError, or whatever an accessor on the
-				// report threw. Both are kept as they are — see the header comment.
-				refuse(cause);
-			}
-		},
+		report,
 
 		conclude(answer) {
 			closed = true;
@@ -296,7 +309,7 @@ function readDeterminingPolicies(list: unknown, omitted: unknown): DeterminingPo
 		const id: unknown = list[index];
 		if (!isReportablePolicyId(id)) {
 			throw new TypeError(
-				`a rule's evaluation.determiningPolicies holds an id that is not 1 to ${POLICY_ID_MAX_LENGTH} UTF-16 units of well-formed text outside POLICY_ID_FORBIDDEN_RANGES — build the report with boundDeterminingPolicies, which counts such an id in determiningPoliciesOmitted`,
+				`a rule's evaluation.determiningPolicies holds an id that is not 1 to ${POLICY_ID_MAX_LENGTH} UTF-16 units of well-formed text outside POLICY_ID_FORBIDDEN_RANGES — build the report with report.boundDeterminingPolicies, which counts such an id in determiningPoliciesOmitted`,
 			);
 		}
 		if (seen.has(id)) {

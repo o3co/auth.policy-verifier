@@ -257,6 +257,41 @@ describe("the decision event — always carries what the rules reported", () => 
 		});
 		expect(event).not.toHaveProperty("evaluations");
 	});
+
+	it("hands a rule the core's own reporter — one that bounds determining policies (#199)", async () => {
+		// A rule that follows the contract names them only through its reporter;
+		// under the server it always can, because nothing stands between the rule
+		// and core's evaluate().
+		const asking: RuleCollector = {
+			async collect() {
+				const rule: AnyRule = {
+					ruleType: "cedar",
+					code: "cedar_deny",
+					message: "Denied by cedar",
+					verify: (_attrs, report) => {
+						report?.({
+							status: "completed",
+							revision: REVISION_A,
+							...report?.boundDeterminingPolicies?.(["20-forbid-delete"]),
+						});
+						return false;
+					},
+				};
+				return [rule];
+			},
+		};
+		const { app, events } = appWith([asking]);
+		await verify(app, { resource: "project:1", action: "delete" }).expect(403);
+		expect(decisionLines(events)[0].evaluations).toEqual([
+			expect.objectContaining({
+				evaluation: {
+					status: "completed",
+					revision: REVISION_A,
+					determiningPolicies: ["20-forbid-delete"],
+				},
+			}),
+		]);
+	});
 });
 
 describe("the response — carries it only when the deployment says so", () => {

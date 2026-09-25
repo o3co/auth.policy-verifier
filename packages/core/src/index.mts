@@ -59,12 +59,13 @@ export type {
 } from "./modules/index.mjs";
 export { Registry } from "./modules/index.mjs";
 export { RulePipeline } from "./RulePipeline.mjs";
-export { boundDeterminingPolicies, isReportablePolicyId } from "./ruleEvaluation.mjs";
+export { isReportablePolicyId } from "./ruleEvaluation.mjs";
 export type {
 	AnyRule,
 	AsyncRule,
 	AttributeCollector,
 	Attributes,
+	BoundDeterminingPolicies,
 	CollectorContext,
 	CollectorRequest,
 	Decision,

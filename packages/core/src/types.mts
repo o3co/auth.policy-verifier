@@ -198,10 +198,10 @@ export type RuleEvaluationStatus = "completed" | "failed" | "not_invoked";
  * revision — they name policies in whatever set the evaluator held. An id is
  * the policy's name as its producer documents it, never an index the engine
  * made up. The shape is {@link isReportablePolicyId}'s and the bound
- * {@link DETERMINING_POLICIES_MAX}; a rule builds the two keys with
- * {@link boundDeterminingPolicies}, which counts whatever does not fit in
- * `determiningPoliciesOmitted` — present only when it is not zero — so a rule
- * that uses it cannot trip the check.
+ * {@link DETERMINING_POLICIES_MAX}; a rule builds the two keys with its
+ * reporter's {@link ReportRuleEvaluation.boundDeterminingPolicies}, which
+ * counts whatever does not fit in `determiningPoliciesOmitted` — present only
+ * when it is not zero — so a rule that uses it cannot trip the check.
  */
 export type RuleEvaluation =
 	| { readonly status: "not_invoked" }
@@ -219,11 +219,23 @@ export type EvaluatedRevision =
  * `evaluate()` refuses it alone. The type leaves both optional rather than
  * saying so, because the stricter union stops `{ status, revision }` with a
  * `"completed" | "failed"` status from type-checking — code that compiled
- * against the #244 type. {@link boundDeterminingPolicies} returns the pair in
- * the shape the check wants.
+ * against the #244 type. A reporter's
+ * {@link ReportRuleEvaluation.boundDeterminingPolicies} returns the pair in
+ * the shape the check wants ({@link BoundDeterminingPolicies}).
  */
 export interface DeterminingPolicies {
 	readonly determiningPolicies?: readonly string[];
+	readonly determiningPoliciesOmitted?: number;
+}
+
+/**
+ * Determining policies made to fit the contract of the core that checks them
+ * (#199) — what {@link ReportRuleEvaluation.boundDeterminingPolicies} returns,
+ * ready to spread into a completed report.
+ */
+export interface BoundDeterminingPolicies {
+	readonly determiningPolicies: readonly string[];
+	/** Every distinct name that was not listed; absent when there was none. */
 	readonly determiningPoliciesOmitted?: number;
 }
 
@@ -246,6 +258,14 @@ export const POLICY_REVISION_MAX_LENGTH = 256;
  * UTF-16 units — about 4 KiB of ASCII, at most 12 KiB of UTF-8 — under the
  * 16 KiB a line-splitting log driver cuts at. That is one evaluation's; a
  * decision line carries one per reporting rule.
+ *
+ * The bounds on determining policies — this, {@link POLICY_ID_MAX_LENGTH},
+ * {@link POLICY_ID_FORBIDDEN_RANGES} — are the checking core's. A rule does
+ * not apply them from the copy of core its package imports, which in a mixed
+ * install is not the one that checks: it applies them through its reporter's
+ * {@link ReportRuleEvaluation.boundDeterminingPolicies}, which carries the
+ * checking core's own. They are published to be read, not to be enforced by
+ * a rule.
  */
 export const DETERMINING_POLICIES_MAX = 32;
 
@@ -316,7 +336,46 @@ export const POLICY_ID_FORBIDDEN_RANGES: ReadonlyArray<readonly [number, number]
  * Optional in the signatures because a rule may be asked without one; a rule
  * that reports calls `report?.(…)`.
  */
-export type ReportRuleEvaluation = (evaluation: RuleEvaluation) => void;
+export interface ReportRuleEvaluation {
+	(evaluation: RuleEvaluation): void;
+	/**
+	 * Makes the policies an evaluator named fit the contract of the core that
+	 * checks this report (#199): each name once, in the order given, those
+	 * {@link isReportablePolicyId} accepts, at most
+	 * {@link DETERMINING_POLICIES_MAX} of them — and every other distinct name
+	 * counted in `determiningPoliciesOmitted`, left out when there was none.
+	 * That core never refuses what it returns. `names` is iterated once; its
+	 * order is the caller's, so sort names whose order the engine does not
+	 * keep stable, or two replicas record one decision two ways.
+	 *
+	 * On the reporter, and not imported, for two reasons. The bounds that
+	 * count are the checking core's — the server's — and not those of the
+	 * copy of core a rule's package depends on; in a mixed install they can
+	 * differ. And it is absent on a reporter from a core older than #199, which
+	 * refuses the keys as unknown and would fail every completed answer as the
+	 * rule's fault — and on one made of a plain function, a test's or a
+	 * composite rule's own, which cannot say what the core behind it reads. So a rule
+	 * names determining policies only through it, and reports the rest of the
+	 * evaluation either way (`...undefined` spreads nothing):
+	 *
+	 * ```ts
+	 * report?.({
+	 *   status: "completed",
+	 *   revision,
+	 *   ...report?.boundDeterminingPolicies?.(names),
+	 * });
+	 * ```
+	 *
+	 * That is what lets a package that reports them be upgraded ahead of the
+	 * server it runs under, or behind it.
+	 *
+	 * @throws {TypeError} for one name passed bare — a string iterates by
+	 *   character, and would come back as a list of letters.
+	 */
+	readonly boundDeterminingPolicies?: (
+		names: Iterable<unknown> & object,
+	) => BoundDeterminingPolicies;
+}
 
 /**
  * A rule whose answer comes from I/O — an out-of-process policy engine such as
