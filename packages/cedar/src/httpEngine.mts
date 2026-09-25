@@ -302,7 +302,9 @@ function ownDecision(decision: CedarDecision, ownIds: ReadonlyMap<string, string
 	const seen = new Set<string>();
 	for (const item of decision.reason) {
 		const id = ownIds.get(item);
-		if (id === undefined) return { ...decision, reason: [], foreign: foreignAnswer(item) };
+		if (id === undefined) {
+			return { ...decision, reason: [], foreign: foreignAnswer(item, ownIds) };
+		}
 		if (seen.has(id)) continue;
 		seen.add(id);
 		reason.push(id);
@@ -310,11 +312,19 @@ function ownDecision(decision: CedarDecision, ownIds: ReadonlyMap<string, string
 	return { ...decision, reason };
 }
 
-/** Why `item` is not this load's — a fixed label, and a mark only when it is 16 hex. */
-function foreignAnswer(item: string): ForeignAnswer {
+/**
+ * Why `item` is not this load's: a fixed label, and — only when `item` is one
+ * of this load's own file ids under another 16-hex mark — that mark. A file
+ * may be named `x@<16 hex>.cedar`, so a suffix alone says nothing; one of this
+ * load's names under a different mark is another load of the same corpus.
+ */
+function foreignAnswer(item: string, ownIds: ReadonlyMap<string, string>): ForeignAnswer {
 	if (item.startsWith(UNREADABLE_POLICY_ID)) return { why: "unreadable policy" };
-	const mark = /@([0-9a-f]{16})$/.exec(item)?.[1];
-	return mark === undefined ? { why: "unknown policy" } : { why: "unknown policy", mark };
+	const marked = /^(.*)@([0-9a-f]{16})$/.exec(item);
+	if (marked !== null && [...ownIds.values()].includes(marked[1])) {
+		return { why: "unknown policy", mark: marked[2] };
+	}
+	return { why: "unknown policy" };
 }
 
 /** The engine a deployment gets by naming `engine = "http"`, or by default when the wasm package is not imported. */

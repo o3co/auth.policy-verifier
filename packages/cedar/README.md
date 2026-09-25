@@ -348,8 +348,11 @@ set this verifier did not load. Three ways that happens:
 
 Such an answer is failed and logged like a foreign revision, never read. The
 log line carries the reason, `foreign: "unknown policy"` or `"unreadable
-policy"`. When the id it could not place carried a mark, the line also carries
-that other load's mark, which tells an operator which revision took the agent.
+policy"`. When the id is one of this load's own policies under another mark,
+the line also carries that mark. That is the same corpus loaded from other
+files, such as a rolling deploy sharing the agent, and the mark tells an operator
+which revision took it. It is what the other side spelled, unverified. An id
+that merely ends in `@` and 16 hex, as a file may be named, gives no mark.
 
 **The mark is neither a secret nor an authenticator.** Anyone can learn the
 ids:

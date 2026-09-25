@@ -86,7 +86,13 @@ export interface ForeignAnswer {
 	 * reporting in a shape this engine does not read, which it cannot attribute.
 	 */
 	readonly why: "unknown policy" | "unreadable policy";
-	/** The other load's mark, 16 hex, when the id carried one. */
+	/**
+	 * Another load's mark, 16 hex — given only when the id is one of this
+	 * load's own policy ids under a different mark: the same corpus, loaded
+	 * from other files (a rolling deploy sharing the agent). It is what the
+	 * other side spelled, unverified; an id that merely ends in `@` and 16 hex
+	 * (a file may be named so) gives none.
+	 */
 	readonly mark?: string;
 }
 

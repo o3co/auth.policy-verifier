@@ -668,11 +668,14 @@ describe("cedarHttpEngine — whose policies an answer names (#283)", () => {
 	it.each([
 		["an id without a mark", ["policies"], { why: "unknown policy" }],
 		["another load's", [`policies@${otherMark}`], { why: "unknown policy", mark: otherMark }],
+		// A suffix alone is no mark: a file may be named so. Only this load's own
+		// name under another mark says another load of the same corpus.
 		[
 			"an id this load never pushed, under its own mark",
 			[`extra@${ownMark}`],
-			{ why: "unknown policy", mark: ownMark },
+			{ why: "unknown policy" },
 		],
+		["an id merely ending in @ and 16 hex", [`legacy@${otherMark}`], { why: "unknown policy" }],
 		["this load's beside another's", [ours, "policies"], { why: "unknown policy" }],
 		["an item it cannot read as an id", [{ id: "x" }], { why: "unreadable policy" }],
 		["an id with an @ but no mark", ["a@b"], { why: "unknown policy" }],
