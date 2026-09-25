@@ -1,0 +1,128 @@
+{
+	"about": "A user acting on their own record is the principal and the resource at once (#282). Under sharedEntity = \"merge\" the request carries one entity holding what both mappings know of it — the principal's `dept`, the resource's `owner`.",
+	"config": {
+		"principal": {
+			"attributes": {
+				"dept": "department"
+			}
+		},
+		"resource": {
+			"attributes": {
+				"owner": {
+					"attribute": "resourceOwner",
+					"entityType": "User"
+				}
+			}
+		},
+		"sharedEntity": "merge"
+	},
+	"requests": [
+		{
+			"about": "their own record: one entity",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "read",
+				"requestResourceType": "User",
+				"requestResourceId": "alice",
+				"department": "eng",
+				"resourceOwner": "alice"
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "read"
+					},
+					"resource": {
+						"type": "User",
+						"id": "alice"
+					},
+					"context": {},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {
+								"dept": "eng",
+								"owner": {
+									"__entity": {
+										"type": "User",
+										"id": "alice"
+									}
+								}
+							},
+							"parents": []
+						}
+					]
+				},
+				"decision": "allow",
+				"determiningPolicies": ["10-permit-own-record"],
+				"errorsIn": []
+			}
+		},
+		{
+			"about": "someone else's record: two entities, and the policy does not apply",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "read",
+				"requestResourceType": "User",
+				"requestResourceId": "bob",
+				"department": "eng",
+				"resourceOwner": "bob"
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "read"
+					},
+					"resource": {
+						"type": "User",
+						"id": "bob"
+					},
+					"context": {},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {
+								"dept": "eng"
+							},
+							"parents": []
+						},
+						{
+							"uid": {
+								"type": "User",
+								"id": "bob"
+							},
+							"attrs": {
+								"owner": {
+									"__entity": {
+										"type": "User",
+										"id": "bob"
+									}
+								}
+							},
+							"parents": []
+						}
+					]
+				},
+				"decision": "deny",
+				"determiningPolicies": [],
+				"errorsIn": []
+			}
+		}
+	]
+}

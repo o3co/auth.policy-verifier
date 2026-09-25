@@ -35,6 +35,7 @@ import {
 	type CedarRequest,
 	type ResolvedMapping,
 	resolveMapping,
+	type SharedEntity,
 } from "./mapping.mjs";
 import { loadPolicySource } from "./policySource.mjs";
 
@@ -135,6 +136,15 @@ export interface CedarPolicyRuleCollectorConfig {
 	 * leave it off and record `loadedRevision` for what it is.
 	 */
 	requireConfirmedRevision?: boolean;
+	/**
+	 * How the principal and the resource are described when they are one
+	 * entity — a user acting on their own record (#282). `"strict"` (default):
+	 * the principal's mapping describes it and the resource's may repeat but
+	 * not add; else the request is refused. `"merge"`: the resource mapping is
+	 * trusted as the principal's, and what only one declares is added — see
+	 * `SharedEntity`.
+	 */
+	sharedEntity?: SharedEntity;
 	/** Entity/context mapping — see `resolveMapping` for the shape. */
 	principal?: unknown;
 	action?: unknown;

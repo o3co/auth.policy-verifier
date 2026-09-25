@@ -44,7 +44,12 @@ export {
 	CEDAR_ATTRIBUTE_KEY_OWNER,
 	CEDAR_ATTRIBUTE_KEYS,
 } from "./keys.mjs";
-export type { AttributeMapping, CedarRequest, EntityMappingConfig } from "./mapping.mjs";
+export type {
+	AttributeMapping,
+	CedarRequest,
+	EntityMappingConfig,
+	SharedEntity,
+} from "./mapping.mjs";
 export { CedarInputError } from "./mapping.mjs";
 export { cedarPolicyModule } from "./module.mjs";
 export type { NamedPolicy, PolicyFile, PolicySource } from "./policySource.mjs";

@@ -1,0 +1,112 @@
+{
+	"about": "By default (sharedEntity = \"strict\") the principal's mapping describes a shared entity and the resource's may add nothing. The resource mapping here declares `owner`, which a user's own record does not carry, so the request is one entity: the principal's.",
+	"config": {
+		"principal": {
+			"attributes": {
+				"dept": "department"
+			}
+		},
+		"resource": {
+			"attributes": {
+				"owner": {
+					"attribute": "resourceOwner",
+					"entityType": "User"
+				}
+			}
+		}
+	},
+	"requests": [
+		{
+			"about": "their own record: the resource mapping adds nothing",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "read",
+				"requestResourceType": "User",
+				"requestResourceId": "alice",
+				"department": "eng"
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "read"
+					},
+					"resource": {
+						"type": "User",
+						"id": "alice"
+					},
+					"context": {},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {
+								"dept": "eng"
+							},
+							"parents": []
+						}
+					]
+				},
+				"decision": "allow",
+				"determiningPolicies": ["10-permit-own-record"],
+				"errorsIn": []
+			}
+		},
+		{
+			"about": "someone else's record: two entities",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "read",
+				"requestResourceType": "User",
+				"requestResourceId": "bob",
+				"department": "eng"
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "read"
+					},
+					"resource": {
+						"type": "User",
+						"id": "bob"
+					},
+					"context": {},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {
+								"dept": "eng"
+							},
+							"parents": []
+						},
+						{
+							"uid": {
+								"type": "User",
+								"id": "bob"
+							},
+							"attrs": {},
+							"parents": []
+						}
+					]
+				},
+				"decision": "deny",
+				"determiningPolicies": [],
+				"errorsIn": []
+			}
+		}
+	]
+}

@@ -117,6 +117,11 @@ rule {
         }
       }
       context { mfa = "mfaVerified" }        # context.mfa
+
+      # When the principal and the resource are one entity — a user acting
+      # on their own record — how the two mappings are reconciled. "strict"
+      # is the default; see "One entity per uid" below.
+      # sharedEntity = "strict"
     }
   ]
 }
@@ -126,6 +131,26 @@ Request-context fields reach Cedar the same way everything else does — as
 attributes. Promote them with the builtins' `RequestContextAttributeCollector`
 (the declared-allowlist trust boundary, #123) and map them here; nothing
 undeclared can reach a policy.
+
+**Map parents only from attributes the caller cannot choose.** `parents` are
+memberships Cedar trusts: `principal in Group::"admins"` is true because the
+mapping says so. A caller-supplied request-context field mapped to
+`principal.parents` hands the caller their own group memberships. Feed them
+from verified sources — token claims, a directory lookup — not from the request.
+
+**A resource fact is a principal fact wherever the principal reaches the
+resource.** The caller chooses the resource, and a policy can reach it from the
+principal in two ways:
+- **Through `in`.** Membership is transitive through the entities a request
+  carries. Say the principal is in `Group::"team"` and the request's resource is
+  that team: the team's mapped parents then extend the principal's ancestry.
+- **Through an entity reference.** Say a principal attribute references the
+  resource's entity: `principal.team.budget` then reads the resource
+  mapping's `budget`.
+
+So any fact the resource mapping gives — parents and attributes alike — is as
+trusted as its source. Map it from the request context only where the caller
+may decide it.
 
 ## Reserved attribute keys
 
@@ -197,6 +222,44 @@ same way — see [docs/extending.md](../../docs/extending.md#the-trust-boundary-
   membership, entity references. Multi-hop dereference and hierarchy walks
   need an entity store; needing them is the signal to move to a full Cedar
   deployment, which the same `.cedar` files already fit.
+- **One entity per uid (#282).** A role names an entity; it is not one. A user
+  acting on their own record is the principal and the resource at once. Cedar
+  holds one description per entity, refuses two different entries for one uid,
+  and lets `principal` and `resource` both read whatever that description says.
+  So the request carries the entity once, and `sharedEntity` decides how the two
+  mappings' descriptions are reconciled:
+  - **`"strict"` (default).** The principal's mapping describes the entity. The
+    resource's may repeat what it says but add nothing: no attribute or parent
+    the principal's mapping does not give. So nothing the resource mapping says
+    of that entity can reach `principal`.
+    - **What both declare must agree, an omission included**, since an omitted
+      attribute is what makes a policy reading it deny. So a config that maps
+      `dept` on both sides (for `principal.dept == resource.dept`), or `Group`
+      parents on both sides, passes self-access only when the resource side
+      supplies the same values.
+    - **What passes as one entity** is a request whose resource-mapping names
+      and parent types are absent on it, such as a document's `owner` on a
+      user's own record.
+  - **`"merge"`.** The deployment states that its resource mapping's sources
+    are as trusted as its principal mapping's. What both declare must agree,
+    and what only one declares is added. On self-access, a policy then sees
+    through `principal` what only the resource mapping gives: `principal.x`
+    reads an `x` only it declares, and `principal in Group::"g"` holds for a
+    membership only it declares. Choose it only where no caller-supplied
+    attribute feeds the resource mapping.
+
+  The action is a role too, one no mapping describes. A caller who names the
+  request's own action as the resource may add nothing to it, under either
+  setting: there is no mapping of the action to trust the resource's as. A
+  config whose `principal.type` is its `action.type` is refused at boot.
+
+  What cannot be reconciled is refused like any request the attributes cannot
+  supply (`not_invoked`, logged, naming the attribute or parent type), never
+  settled by picking a side.
+  - The log says whether the resource would *add* a fact, which `"merge"` would
+    admit, or whether the two mappings *disagree*, which nothing would.
+  - A request whose entities would be their own ancestors is refused too. Cedar
+    would refuse it whole.
 
 ## Policy revision: which policies decided
 

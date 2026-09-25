@@ -295,6 +295,374 @@ describe("CedarPolicyRuleCollector — engine selection and what the engine rece
 	});
 });
 
+/*
+ * #282: an entity is what a uid names, not the role that reached it. A user
+ * acting on their own record is the principal and the resource at once, and
+ * Cedar holds one description per entity — so the request carries one entity
+ * per uid, and the roles' descriptions of it are reconciled under the
+ * deployment's `sharedEntity`: by default the principal's describes it and the
+ * resource's may repeat but not add; under `"merge"` what only one declares is
+ * added. What cannot be reconciled is refused, never settled by picking a side.
+ */
+describe("CedarPolicyRuleCollector — one entity per uid (#282)", () => {
+	const SELF: ReadonlyArray<[string, unknown]> = [
+		["requestResourceType", "User"],
+		["requestResourceId", "alice"],
+	];
+	/** The rule, the entities the engine was handed (none: refused), and what was logged. */
+	async function ask(config: Record<string, unknown>, entries: ReadonlyArray<[string, unknown]>) {
+		const { logger, error } = fakeLogger();
+		const rule = await collectSync({ policies: PERMIT_ALL, ...config }, logger);
+		const before = sync.requests.length;
+		let evaluation: RuleEvaluation | undefined;
+		const passed = rule.verify(attrsWith(entries), (reported) => {
+			evaluation = reported;
+		});
+		const handed = sync.requests.length > before ? sync.requests.at(-1)?.entities : undefined;
+		return { passed, evaluation, entities: handed, logged: JSON.stringify(error.mock.calls) };
+	}
+	const ROLES = {
+		principal: { attributes: { dept: "department" } },
+		resource: { attributes: { owner: { attribute: "resourceOwner", entityType: "User" } } },
+	};
+
+	describe('by default ("strict") — the resource mapping may repeat the principal\'s, not add to it', () => {
+		it("carries one entity, the principal's description, when the resource mapping adds nothing", async () => {
+			// ROLES' resource mapping declares `owner`; on a user's own record it is absent.
+			const { passed, entities } = await ask(ROLES, [...SELF, ["department", "eng"]]);
+			expect(passed).toBe(true);
+			expect(entities).toEqual([
+				{ uid: { type: "User", id: "alice" }, attrs: { dept: "eng" }, parents: [] },
+			]);
+		});
+
+		it("carries one entity when both mappings say the same", async () => {
+			const { passed, entities } = await ask(
+				{
+					principal: { attributes: { dept: "department" } },
+					resource: { attributes: { dept: "resourceDept" } },
+				},
+				[...SELF, ["department", "eng"], ["resourceDept", "eng"]],
+			);
+			expect(passed).toBe(true);
+			expect(entities).toHaveLength(1);
+		});
+
+		it("refuses what the resource mapping would add — nothing it says reaches principal", async () => {
+			const { passed, evaluation, entities, logged } = await ask(ROLES, [
+				...SELF,
+				["department", "eng"],
+				["resourceOwner", "alice"],
+			]);
+			expect(passed).toBe(false);
+			expect(evaluation).toEqual({ status: "not_invoked" });
+			expect(entities).toBeUndefined();
+			expect(logged).toContain(
+				'the principal and the resource are one User entity, and the resource mapping would say of it what the principal mapping does not (attribute \\"owner\\")',
+			);
+			expect(logged).toContain('set sharedEntity = \\"merge\\"');
+			// Named by roles, type and attribute — never by a value or the id.
+			expect(logged).not.toMatch(/\beng\b|\balice\b/);
+		});
+
+		it("refuses an attribute both declare that the principal's leaves out — the omission is what makes a read deny", async () => {
+			const { passed, logged } = await ask(
+				{
+					principal: { attributes: { clearance: "userClearance" } },
+					resource: { attributes: { clearance: "ctxClearance" } },
+				},
+				[...SELF, ["ctxClearance", "top"]],
+			);
+			expect(passed).toBe(false);
+			expect(logged).toContain('their mappings disagree on it (attribute \\"clearance\\")');
+			// A disagreement is no addition: "merge" would refuse it too, so it is not suggested.
+			expect(logged).not.toContain("sharedEntity");
+			expect(logged).not.toMatch(/\btop\b/);
+		});
+
+		it("refuses a parent type both declare that the resource side leaves empty — and suggests nothing", async () => {
+			const both = {
+				principal: { parents: { Group: "groups" } },
+				resource: { parents: { Group: "resourceGroups" } },
+			};
+			const strict = await ask(both, [...SELF, ["groups", ["team"]]]);
+			expect(strict.passed).toBe(false);
+			expect(strict.logged).toContain(
+				'their mappings disagree on it (parents of type \\"Group\\")',
+			);
+			expect(strict.logged).not.toContain("sharedEntity");
+			const merged = await ask({ ...both, sharedEntity: "merge" }, [...SELF, ["groups", ["team"]]]);
+			expect(merged.passed).toBe(false);
+		});
+
+		it("refuses an attribute both declare that the resource's leaves out — the other way round too", async () => {
+			const { passed, logged } = await ask(
+				{
+					principal: { attributes: { dept: "department" } },
+					resource: { attributes: { dept: "resourceDept" } },
+				},
+				[...SELF, ["department", "eng"]],
+			);
+			expect(passed).toBe(false);
+			expect(logged).toContain('their mappings disagree on it (attribute \\"dept\\")');
+		});
+
+		it("refuses parents the resource mapping would add", async () => {
+			const own = await ask(
+				{
+					principal: { parents: { Group: "groups" } },
+					resource: { parents: { Group: "resourceGroups" } },
+				},
+				[...SELF, ["groups", ["staff"]], ["resourceGroups", ["admins"]]],
+			);
+			expect(own.passed).toBe(false);
+			expect(own.logged).toContain('(parents of type \\"Group\\")');
+			expect(own.logged).not.toMatch(/\bstaff\b|\badmins\b/);
+			// …a type only the resource mapping declares included, as soon as it has members.
+			const added = await ask({ resource: { parents: { Group: "resourceGroups" } } }, [
+				...SELF,
+				["resourceGroups", ["admins"]],
+			]);
+			expect(added.passed).toBe(false);
+			const none = await ask({ resource: { parents: { Group: "resourceGroups" } } }, SELF);
+			expect(none.passed).toBe(true);
+		});
+
+		it("compares as Cedar does — a set is its members, whatever their order or repetition", async () => {
+			const { passed, entities } = await ask(
+				{
+					principal: { attributes: { teams: "teams" } },
+					resource: { attributes: { teams: "resourceTeams" } },
+				},
+				[...SELF, ["teams", ["eng", "staff"]], ["resourceTeams", ["staff", "eng", "eng"]]],
+			);
+			expect(passed).toBe(true);
+			expect(entities).toHaveLength(1);
+		});
+
+		it("never takes a string for the integer it spells", async () => {
+			const { passed } = await ask(
+				{
+					principal: { attributes: { level: "level" } },
+					resource: { attributes: { level: "resourceLevel" } },
+				},
+				[...SELF, ["level", 3], ["resourceLevel", "3"]],
+			);
+			expect(passed).toBe(false);
+		});
+
+		it("compares entity references by the entity they name", async () => {
+			const refer = (type: string) => ({
+				attributes: { manager: { attribute: "m", entityType: type } },
+			});
+			const same = await ask({ principal: refer("User"), resource: refer("User") }, [
+				...SELF,
+				["m", "carol"],
+			]);
+			expect(same.passed).toBe(true);
+			const other = await ask({ principal: refer("User"), resource: refer("Group") }, [
+				...SELF,
+				["m", "carol"],
+			]);
+			expect(other.passed).toBe(false);
+		});
+	});
+
+	describe('under sharedEntity = "merge" — the resource mapping is trusted as the principal\'s', () => {
+		const merge = (config: Record<string, unknown>) => ({ ...config, sharedEntity: "merge" });
+
+		it("adds what only one mapping declares — a user reading their own record", async () => {
+			const { passed, entities } = await ask(merge(ROLES), [
+				...SELF,
+				["department", "eng"],
+				["resourceOwner", "alice"],
+			]);
+			expect(passed).toBe(true);
+			expect(entities).toEqual([
+				{
+					uid: { type: "User", id: "alice" },
+					attrs: { dept: "eng", owner: { __entity: { type: "User", id: "alice" } } },
+					parents: [],
+				},
+			]);
+		});
+
+		it("refuses an attribute both declare that one leaves out — the omission is what makes a read deny", async () => {
+			// Without this, a resource-side value would answer a principal-side read
+			// that the principal's own mapping left to fail.
+			const { passed, logged } = await ask(
+				merge({
+					principal: { attributes: { clearance: "userClearance" } },
+					resource: { attributes: { clearance: "ctxClearance" } },
+				}),
+				[...SELF, ["ctxClearance", "top"]],
+			);
+			expect(passed).toBe(false);
+			expect(logged).toMatch(/their mappings disagree on it \(attribute \\"clearance\\"\)/);
+			expect(logged).not.toMatch(/\btop\b/);
+		});
+
+		it("refuses a parent type both declare with different members", async () => {
+			const { passed, logged } = await ask(
+				merge({
+					principal: { parents: { Group: "groups" } },
+					resource: { parents: { Group: "resourceGroups" } },
+				}),
+				[...SELF, ["groups", ["staff"]], ["resourceGroups", ["admins"]]],
+			);
+			expect(passed).toBe(false);
+			expect(logged).toMatch(/disagree on it \(parents of type \\"Group\\"\)/);
+		});
+
+		it("takes a parent type both declare with the same members, as a set", async () => {
+			const { passed, entities } = await ask(
+				merge({
+					principal: { parents: { Group: "groups" } },
+					resource: { parents: { Group: "resourceGroups" } },
+				}),
+				[...SELF, ["groups", ["admins", "staff"]], ["resourceGroups", ["staff", "admins"]]],
+			);
+			expect(passed).toBe(true);
+			expect(entities?.[0].parents).toEqual([
+				{ type: "Group", id: "admins" },
+				{ type: "Group", id: "staff" },
+			]);
+		});
+
+		it("refuses a value both declare and give differently", async () => {
+			const { passed } = await ask(
+				merge({
+					principal: { attributes: { dept: "department" } },
+					resource: { attributes: { dept: "resourceDept" } },
+				}),
+				[...SELF, ["department", "eng"], ["resourceDept", "ops"]],
+			);
+			expect(passed).toBe(false);
+		});
+
+		it("refuses a principal type that is the action type, at boot", async () => {
+			await expect(
+				collectSync({ policies: PERMIT_ALL, principal: { type: "Action" } }),
+			).rejects.toThrow(/principal\.type and action\.type must differ, both are "Action"/);
+		});
+
+		it("is refused at boot as anything but strict or merge", async () => {
+			await expect(collectSync({ policies: PERMIT_ALL, sharedEntity: "union" })).rejects.toThrow(
+				/sharedEntity must be one of strict, merge, got "union"/,
+			);
+			await expect(collectSync({ policies: PERMIT_ALL, sharedEntity: 1 })).rejects.toThrow(
+				/sharedEntity must be one of strict, merge, got number/,
+			);
+		});
+	});
+
+	describe("whichever the setting", () => {
+		it("keeps two entities whose uids differ only in type", async () => {
+			const { entities } = await ask(ROLES, [
+				["requestResourceId", "alice"],
+				["department", "eng"],
+			]);
+			expect(entities?.map((entity) => entity.uid)).toEqual([
+				{ type: "User", id: "alice" },
+				{ type: "Document", id: "alice" },
+			]);
+		});
+
+		it("holds an entity's parents as a set — a group named twice is one parent", async () => {
+			const { entities } = await ask({ principal: { parents: { Group: "groups" } } }, [
+				["groups", ["admins", "admins"]],
+			]);
+			expect(entities?.[0].parents).toEqual([{ type: "Group", id: "admins" }]);
+		});
+
+		it("builds a request with thousands of memberships in linear time", async () => {
+			const groups = Array.from({ length: 20_000 }, (_, i) => `g${i}`);
+			const started = performance.now();
+			const { entities } = await ask({ principal: { parents: { Group: "groups" } } }, [
+				["groups", groups],
+			]);
+			// Quadratic, this is seconds; linear, it is milliseconds.
+			expect(performance.now() - started).toBeLessThan(5_000);
+			expect(entities?.[0].parents).toHaveLength(20_000);
+		});
+
+		it("refuses entities that would be their own ancestors", async () => {
+			const own = await ask({ principal: { parents: { User: "managers" } } }, [
+				["managers", ["alice"]],
+			]);
+			expect(own.passed).toBe(false);
+			expect(own.logged).toMatch(/form a membership cycle/);
+			const mutual = await ask(
+				{ principal: { parents: { Group: "groups" } }, resource: { parents: { User: "members" } } },
+				[
+					["requestResourceType", "Group"],
+					["requestResourceId", "team"],
+					["groups", ["team"]],
+					["members", ["alice"]],
+				],
+			);
+			expect(mutual.passed).toBe(false);
+			expect(mutual.logged).toMatch(/form a membership cycle/);
+		});
+
+		it("treats the action as a role no mapping describes — a resource naming it may add nothing", async () => {
+			const asAction: ReadonlyArray<[string, unknown]> = [
+				["requestResourceType", "Action"],
+				["requestResourceId", "read"],
+			];
+			const flagged = { resource: { attributes: { flag: "flag" } } };
+			const added = await ask(flagged, [...asAction, ["flag", true]]);
+			expect(added.passed).toBe(false);
+			expect(added.logged).toContain(
+				'the resource is the request\'s action entity, which no mapping describes, and the resource mapping would describe it (attribute \\"flag\\")',
+			);
+			// No trust between mappings to judge, so no setting admits it.
+			expect(added.logged).not.toContain("sharedEntity");
+			const merged = await ask({ ...flagged, sharedEntity: "merge" }, [
+				...asAction,
+				["flag", true],
+			]);
+			expect(merged.passed).toBe(false);
+			const parented = await ask(
+				{ resource: { parents: { Action: "ctxActs" } }, sharedEntity: "merge" },
+				[...asAction, ["ctxActs", ["all"]]],
+			);
+			expect(parented.passed).toBe(false);
+			// Nothing to add: the resource is one entry, as it always was.
+			const plain = await ask(flagged, asAction);
+			expect(plain.passed).toBe(true);
+			expect(plain.entities?.map((entity) => entity.uid)).toEqual([
+				{ type: "User", id: "alice" },
+				{ type: "Action", id: "read" },
+			]);
+		});
+
+		it("takes an ancestry for what it is — the principal in its resource is no cycle", async () => {
+			const { passed, entities } = await ask(
+				{
+					principal: { parents: { Group: "groups" } },
+					resource: { parents: { Group: "resourceGroups" } },
+				},
+				[
+					["requestResourceType", "Group"],
+					["requestResourceId", "team"],
+					["groups", ["team"]],
+					["resourceGroups", ["org"]],
+				],
+			);
+			expect(passed).toBe(true);
+			expect(entities).toHaveLength(2);
+		});
+
+		it("carries an attribute called __proto__ as one", async () => {
+			// As a config parser builds it: an own key, which a literal `__proto__:` is not.
+			const attributes = JSON.parse('{"__proto__": "department"}');
+			const { entities } = await ask({ principal: { attributes } }, [["department", "eng"]]);
+			expect(Object.hasOwn(entities?.[0].attrs ?? {}, "__proto__")).toBe(true);
+		});
+	});
+});
+
 describe("CedarPolicyRuleCollector — rule metadata", () => {
 	it("returns one rule in the configured group with the fixed code, for either kind", async () => {
 		for (const rule of [
