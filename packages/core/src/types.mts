@@ -165,7 +165,8 @@ export type RuleEvaluationStatus = "completed" | "failed" | "not_invoked";
 
 /**
  * What a rule reports about the evaluation behind one answer: its
- * {@link RuleEvaluationStatus}, and which policy snapshot it concerned.
+ * {@link RuleEvaluationStatus}, which policy snapshot it concerned, and —
+ * for a completed one — which policies determined the answer.
  *
  * `revision` is a claim about what was **evaluated**, so it is a string only
  * when the evaluator vouches for it. `null` is the explicit unknown — the
@@ -175,8 +176,10 @@ export type RuleEvaluationStatus = "completed" | "failed" | "not_invoked";
  * of what ran. The two never share a name, so a consumer reading `revision`
  * cannot take a snapshot nobody confirmed for one that was evaluated.
  *
- * `not_invoked` has no revision key of either kind, by type and by the check
- * in `evaluate()`: an evaluator that was never asked evaluated nothing.
+ * `not_invoked` has no revision key of either kind, and no determining
+ * policies, by type and by the check in `evaluate()` — which refuses them
+ * however the value is reached, inherited or through a getter included: an
+ * evaluator that was never asked evaluated nothing.
  *
  * A reference is `scheme:encoded` — {@link POLICY_REVISION_PATTERN}, the OCI
  * digest grammar — so `sha256:<64 hex>` for a content digest, and an engine
@@ -184,15 +187,57 @@ export type RuleEvaluationStatus = "completed" | "failed" | "not_invoked";
  * covers is its producer's to document: for `packages/cedar`, the policy files
  * and nothing else. It is never a promise of replay — attributes, mapping and
  * evaluator version decide an answer too.
+ *
+ * `determiningPolicies` (#199) names the policies that determined a
+ * **completed** answer — for an allow, the permits that applied; for a deny,
+ * the forbids that did; an empty list when no policy applied to the request.
+ * It is a set, in the order the rule reports it, and absent when the rule does
+ * not know (a rule that fronts no evaluator reports nothing at all). A
+ * `failed` evaluation carries none, checked the same way: its answer is the
+ * rule failing closed, not the policies'. Beside `revision: null` the ids are as unconfirmed as the
+ * revision — they name policies in whatever set the evaluator held. An id is
+ * the policy's name as its producer documents it, never an index the engine
+ * made up. The shape is {@link isReportablePolicyId}'s and the bound
+ * {@link DETERMINING_POLICIES_MAX}; a rule builds the two keys with its
+ * reporter's {@link ReportRuleEvaluation.boundDeterminingPolicies}, which
+ * counts whatever does not fit in `determiningPoliciesOmitted` — present only
+ * when it is not zero — so a rule that uses it cannot trip the check.
  */
 export type RuleEvaluation =
 	| { readonly status: "not_invoked" }
-	| { readonly status: "completed" | "failed"; readonly revision: string }
-	| {
-			readonly status: "completed" | "failed";
-			readonly revision: null;
-			readonly loadedRevision?: string;
-	  };
+	| ({ readonly status: "completed" } & EvaluatedRevision & DeterminingPolicies)
+	| ({ readonly status: "failed" } & EvaluatedRevision);
+
+/** Which policy snapshot an evaluated {@link RuleEvaluation} concerned. */
+export type EvaluatedRevision =
+	| { readonly revision: string }
+	| { readonly revision: null; readonly loadedRevision?: string };
+
+/**
+ * The determining policies a completed {@link RuleEvaluation} may name (#199).
+ * `determiningPoliciesOmitted` only ever stands beside `determiningPolicies`;
+ * `evaluate()` refuses it alone. The type leaves both optional rather than
+ * saying so, because the stricter union stops `{ status, revision }` with a
+ * `"completed" | "failed"` status from type-checking — code that compiled
+ * against the #244 type. A reporter's
+ * {@link ReportRuleEvaluation.boundDeterminingPolicies} returns the pair in
+ * the shape the check wants ({@link BoundDeterminingPolicies}).
+ */
+export interface DeterminingPolicies {
+	readonly determiningPolicies?: readonly string[];
+	readonly determiningPoliciesOmitted?: number;
+}
+
+/**
+ * Determining policies made to fit the contract of the core that checks them
+ * (#199) — what {@link ReportRuleEvaluation.boundDeterminingPolicies} returns,
+ * ready to spread into a completed report.
+ */
+export interface BoundDeterminingPolicies {
+	readonly determiningPolicies: readonly string[];
+	/** Every distinct name that was not listed; absent when there was none. */
+	readonly determiningPoliciesOmitted?: number;
+}
 
 /**
  * The shape a policy revision reference is held to: `scheme:encoded`, the OCI
@@ -204,6 +249,58 @@ export const POLICY_REVISION_PATTERN = /^[a-z0-9]+(?:[+._-][a-z0-9]+)*:[A-Za-z0-
 
 /** Longest reference carried. `sha512:` and its 128 hex characters is 135. */
 export const POLICY_REVISION_MAX_LENGTH = 256;
+
+/**
+ * Most determining policies one evaluation lists (#199). Every decision's
+ * audit line carries them, and so may its response: a handful answers "which
+ * policy decided", and the rest are counted, not dropped. With
+ * {@link POLICY_ID_MAX_LENGTH} this bounds one evaluation's ids at 4,096
+ * UTF-16 units — about 4 KiB of ASCII, at most 12 KiB of UTF-8 — under the
+ * 16 KiB a line-splitting log driver cuts at. That is one evaluation's; a
+ * decision line carries one per reporting rule.
+ *
+ * The bounds on determining policies — this, {@link POLICY_ID_MAX_LENGTH},
+ * {@link POLICY_ID_FORBIDDEN_RANGES} — are the checking core's. A rule does
+ * not apply them from the copy of core its package imports, which in a mixed
+ * install is not the one that checks: it applies them through its reporter's
+ * {@link ReportRuleEvaluation.boundDeterminingPolicies}, which carries the
+ * checking core's own. They are published to be read, not to be enforced by
+ * a rule.
+ */
+export const DETERMINING_POLICIES_MAX = 32;
+
+/**
+ * Longest determining policy id carried, in UTF-16 code units (`String.length`,
+ * so an astral character counts two) — a name, not a policy's text.
+ */
+export const POLICY_ID_MAX_LENGTH = 128;
+
+/**
+ * The code points a determining policy id may not hold, as inclusive ranges.
+ * They break a log line (the C0 controls, DEL, the C1 controls, the line and
+ * paragraph separators), reorder it (the bidi controls: the Arabic letter
+ * mark, LRM and RLM, the embeddings and overrides, the isolates), or hide in
+ * it so that an id displays as another (the soft hyphen, the Mongolian vowel
+ * separator, the zero-width space, the word joiner and the invisible
+ * operators, the byte order mark, the tag characters). The zero-width joiner
+ * and non-joiner are allowed: Persian and Indic text and emoji need them.
+ * Look-alike letters are not in scope — no range can rule them out. An id
+ * must also be well-formed UTF-16 (no lone surrogate, which does not survive
+ * a JSON round trip). Published so the wire contract can be checked against it.
+ */
+export const POLICY_ID_FORBIDDEN_RANGES: ReadonlyArray<readonly [number, number]> = Object.freeze([
+	Object.freeze([0x0000, 0x001f] as const),
+	Object.freeze([0x007f, 0x009f] as const),
+	Object.freeze([0x00ad, 0x00ad] as const),
+	Object.freeze([0x061c, 0x061c] as const),
+	Object.freeze([0x180e, 0x180e] as const),
+	Object.freeze([0x200b, 0x200b] as const),
+	Object.freeze([0x200e, 0x200f] as const),
+	Object.freeze([0x2028, 0x202e] as const),
+	Object.freeze([0x2060, 0x2069] as const),
+	Object.freeze([0xfeff, 0xfeff] as const),
+	Object.freeze([0xe0000, 0xe007f] as const),
+]);
 
 /**
  * How a rule reports the {@link RuleEvaluation} behind one answer (#244).
@@ -239,7 +336,46 @@ export const POLICY_REVISION_MAX_LENGTH = 256;
  * Optional in the signatures because a rule may be asked without one; a rule
  * that reports calls `report?.(…)`.
  */
-export type ReportRuleEvaluation = (evaluation: RuleEvaluation) => void;
+export interface ReportRuleEvaluation {
+	(evaluation: RuleEvaluation): void;
+	/**
+	 * Makes the policies an evaluator named fit the contract of the core that
+	 * checks this report (#199): each name once, in the order given, those
+	 * {@link isReportablePolicyId} accepts, at most
+	 * {@link DETERMINING_POLICIES_MAX} of them — and every other distinct name
+	 * counted in `determiningPoliciesOmitted`, left out when there was none.
+	 * That core never refuses what it returns. `names` is iterated once; its
+	 * order is the caller's, so sort names whose order the engine does not
+	 * keep stable, or two replicas record one decision two ways.
+	 *
+	 * On the reporter, and not imported, for two reasons. The bounds that
+	 * count are the checking core's — the server's — and not those of the
+	 * copy of core a rule's package depends on; in a mixed install they can
+	 * differ. And it is absent on a reporter from a core older than #199, which
+	 * refuses the keys as unknown and would fail every completed answer as the
+	 * rule's fault — and on one made of a plain function, a test's or a
+	 * composite rule's own, which cannot say what the core behind it reads. So a rule
+	 * names determining policies only through it, and reports the rest of the
+	 * evaluation either way (`...undefined` spreads nothing):
+	 *
+	 * ```ts
+	 * report?.({
+	 *   status: "completed",
+	 *   revision,
+	 *   ...report?.boundDeterminingPolicies?.(names),
+	 * });
+	 * ```
+	 *
+	 * That is what lets a package that reports them be upgraded ahead of the
+	 * server it runs under, or behind it.
+	 *
+	 * @throws {TypeError} for one name passed bare — a string iterates by
+	 *   character, and would come back as a list of letters.
+	 */
+	readonly boundDeterminingPolicies?: (
+		names: Iterable<unknown> & object,
+	) => BoundDeterminingPolicies;
+}
 
 /**
  * A rule whose answer comes from I/O — an out-of-process policy engine such as

@@ -59,15 +59,19 @@ export type {
 } from "./modules/index.mjs";
 export { Registry } from "./modules/index.mjs";
 export { RulePipeline } from "./RulePipeline.mjs";
+export { isReportablePolicyId } from "./ruleEvaluation.mjs";
 export type {
 	AnyRule,
 	AsyncRule,
 	AttributeCollector,
 	Attributes,
+	BoundDeterminingPolicies,
 	CollectorContext,
 	CollectorRequest,
 	Decision,
 	DecisionReason,
+	DeterminingPolicies,
+	EvaluatedRevision,
 	ReadonlyAttributes,
 	ReportRuleEvaluation,
 	Resource,
@@ -81,6 +85,13 @@ export type {
 	RuleOutcome,
 	SubjectAttributes,
 } from "./types.mjs";
-export { isAsyncRule, POLICY_REVISION_MAX_LENGTH, POLICY_REVISION_PATTERN } from "./types.mjs";
+export {
+	DETERMINING_POLICIES_MAX,
+	isAsyncRule,
+	POLICY_ID_FORBIDDEN_RANGES,
+	POLICY_ID_MAX_LENGTH,
+	POLICY_REVISION_MAX_LENGTH,
+	POLICY_REVISION_PATTERN,
+} from "./types.mjs";
 export type { UntrustedRequestContext } from "./untrusted.mjs";
 export { markUntrustedRequestContext, readUntrustedRequestContext } from "./untrusted.mjs";

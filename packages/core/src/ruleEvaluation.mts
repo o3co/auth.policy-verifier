@@ -25,6 +25,12 @@
  */
 
 import {
+	type BoundDeterminingPolicies,
+	DETERMINING_POLICIES_MAX,
+	type DeterminingPolicies,
+	type EvaluatedRevision,
+	POLICY_ID_FORBIDDEN_RANGES,
+	POLICY_ID_MAX_LENGTH,
 	POLICY_REVISION_MAX_LENGTH,
 	POLICY_REVISION_PATTERN,
 	type ReportRuleEvaluation,
@@ -57,7 +63,67 @@ export interface RuleInvocation {
 
 const STATUSES: ReadonlySet<string> = new Set(["completed", "failed", "not_invoked"]);
 const NOT_INVOKED_KEYS: ReadonlySet<string> = new Set(["status"]);
-const EVALUATED_KEYS: ReadonlySet<string> = new Set(["status", "revision", "loadedRevision"]);
+const FAILED_KEYS: ReadonlySet<string> = new Set(["status", "revision", "loadedRevision"]);
+const COMPLETED_KEYS: ReadonlySet<string> = new Set([
+	...FAILED_KEYS,
+	"determiningPolicies",
+	"determiningPoliciesOmitted",
+]);
+
+/**
+ * Whether `value` can be carried as a determining policy id (#199): a
+ * well-formed string of 1 to {@link POLICY_ID_MAX_LENGTH} UTF-16 units that
+ * holds no code point of {@link POLICY_ID_FORBIDDEN_RANGES}. The one check —
+ * a reporter's `boundDeterminingPolicies` filters with it, and `evaluate()`
+ * refuses with it — so a rule that bounds its report cannot be refused for it.
+ *
+ * Published to be read, like the bounds it applies: a rule does not filter its
+ * ids with it. The copy a rule's package imports need not be the core that
+ * checks the report, so a rule bounds its ids through its reporter.
+ */
+export function isReportablePolicyId(value: unknown): value is string {
+	if (typeof value !== "string" || value.length === 0 || value.length > POLICY_ID_MAX_LENGTH) {
+		return false;
+	}
+	if (!value.isWellFormed()) return false;
+	for (const char of value) {
+		const code = char.codePointAt(0) as number;
+		for (const [low, high] of POLICY_ID_FORBIDDEN_RANGES) {
+			if (code >= low && code <= high) return false;
+		}
+	}
+	return true;
+}
+
+/**
+ * What every reporter of this core carries as `boundDeterminingPolicies`
+ * (#199) — see `ReportRuleEvaluation` for the contract. Not exported from the
+ * package: a rule reaches it through its reporter, so the bounds it applies
+ * are those of the core that checks the report.
+ */
+export function boundDeterminingPolicies(
+	names: Iterable<unknown> & object,
+): BoundDeterminingPolicies {
+	// A string is iterable too, by character: one id passed bare would come
+	// back as a list of letters — a wrong record that looks complete.
+	if (typeof names === "string") {
+		throw new TypeError("boundDeterminingPolicies takes a list of names, not one name");
+	}
+	const distinct = new Set<unknown>(names);
+	const listed: string[] = [];
+	for (const name of distinct) {
+		if (listed.length === DETERMINING_POLICIES_MAX) break;
+		if (isReportablePolicyId(name)) listed.push(name);
+	}
+	const omitted = distinct.size - listed.length;
+	const determiningPolicies = Object.freeze(listed);
+	return omitted > 0
+		? { determiningPolicies, determiningPoliciesOmitted: omitted }
+		: { determiningPolicies };
+}
+// One function object, shared by every reporter: frozen, so nothing a rule
+// writes on it reaches another invocation.
+Object.freeze(boundDeterminingPolicies);
 
 /**
  * Begins one invocation. Made per call by `evaluate()`, never shared: what a
@@ -78,22 +144,32 @@ export function beginRuleInvocation(): RuleInvocation {
 		throw refusal.error;
 	};
 
+	const report = (evaluation: RuleEvaluation): void => {
+		// After the answer the decision is made. Not a throw: it would land in
+		// the rule's own detached code, as an unhandled rejection.
+		if (closed) return;
+		if (reported !== undefined || refusal !== undefined) {
+			refuse(new TypeError("a rule reported its evaluation more than once for one invocation"));
+		}
+		try {
+			reported = readEvaluation(evaluation);
+		} catch (cause) {
+			// Either this module's own TypeError, or whatever an accessor on the
+			// report threw. Both are kept as they are — see the header comment.
+			refuse(cause);
+		}
+	};
+
+	// #199: the bounds a rule names determining policies to are this core's —
+	// see ReportRuleEvaluation. Neither writable nor configurable, so a rule
+	// cannot swap them; the function itself is left as it was.
+	Object.defineProperty(report, "boundDeterminingPolicies", {
+		value: boundDeterminingPolicies,
+		enumerable: true,
+	});
+
 	return {
-		report(evaluation) {
-			// After the answer the decision is made. Not a throw: it would land in
-			// the rule's own detached code, as an unhandled rejection.
-			if (closed) return;
-			if (reported !== undefined || refusal !== undefined) {
-				refuse(new TypeError("a rule reported its evaluation more than once for one invocation"));
-			}
-			try {
-				reported = readEvaluation(evaluation);
-			} catch (cause) {
-				// Either this module's own TypeError, or whatever an accessor on the
-				// report threw. Both are kept as they are — see the header comment.
-				refuse(cause);
-			}
-		},
+		report,
 
 		conclude(answer) {
 			closed = true;
@@ -129,38 +205,133 @@ function readEvaluation(value: unknown): RuleEvaluation {
 		throw new TypeError("a rule's evaluation must be an object");
 	}
 	const keys = Object.keys(value);
-	const { status, revision, loadedRevision } = value as Record<string, unknown>;
+	const { status, revision, loadedRevision, determiningPolicies, determiningPoliciesOmitted } =
+		value as Record<string, unknown>;
 	if (typeof status !== "string" || !STATUSES.has(status)) {
 		throw new TypeError(`a rule's evaluation.status must be one of ${[...STATUSES].join(", ")}`);
 	}
 
+	// The key checks below see own enumerable keys only, and a value is read
+	// however it is reached — so what a status may not carry is also checked on
+	// the values themselves, or a report could slip it past as a getter.
 	if (status === "not_invoked") {
 		// An evaluator that was never asked evaluated nothing, so there is no
-		// revision to claim — not an evaluated one, and not a loaded one either.
+		// revision to claim — not an evaluated one, and not a loaded one either —
+		// and no policy determined anything.
 		refuseUnknownKeys(keys, NOT_INVOKED_KEYS, 'a "not_invoked" evaluation');
+		if (
+			[revision, loadedRevision, determiningPolicies, determiningPoliciesOmitted].some(
+				(carried) => carried !== undefined,
+			)
+		) {
+			throw new TypeError(
+				'a "not_invoked" evaluation may not carry a revision, a loadedRevision or determining policies — not even inherited or through a getter; nothing was evaluated',
+			);
+		}
 		return Object.freeze({ status });
 	}
 
-	refuseUnknownKeys(keys, EVALUATED_KEYS, "a rule's evaluation");
-	const evaluated = status as "completed" | "failed";
-	if (revision === null) {
-		if (loadedRevision === undefined) return Object.freeze({ status: evaluated, revision });
+	// A failed evaluation's answer is the rule failing closed, not the
+	// policies', so only a completed one may say which policies determined it.
+	if (status === "completed") {
+		refuseUnknownKeys(keys, COMPLETED_KEYS, "a rule's evaluation");
+		const determining = readDeterminingPolicies(determiningPolicies, determiningPoliciesOmitted);
 		return Object.freeze({
-			status: evaluated,
-			revision,
-			loadedRevision: readRevision(loadedRevision, "loadedRevision"),
+			status,
+			...readEvaluatedRevision(status, revision, loadedRevision),
+			...determining,
 		});
+	}
+	refuseUnknownKeys(keys, FAILED_KEYS, 'a "failed" evaluation');
+	if (determiningPolicies !== undefined || determiningPoliciesOmitted !== undefined) {
+		throw new TypeError(
+			'a "failed" evaluation may not name determining policies — not even inherited or through a getter; its answer is the rule failing closed, not a decision of the policies, and only a "completed" one carries them',
+		);
+	}
+	return Object.freeze({
+		status: "failed",
+		...readEvaluatedRevision("failed", revision, loadedRevision),
+	});
+}
+
+/** The revision part of an evaluated report: a vouched revision, or `null` and what was loaded. */
+function readEvaluatedRevision(
+	status: "completed" | "failed",
+	revision: unknown,
+	loadedRevision: unknown,
+): EvaluatedRevision {
+	if (revision === null) {
+		if (loadedRevision === undefined) return { revision };
+		return { revision, loadedRevision: readRevision(loadedRevision, "loadedRevision") };
 	}
 	if (revision === undefined) {
 		// Present-and-null is the explicit unknown; absent is a rule that forgot.
 		throw new TypeError(
-			`a "${evaluated}" evaluation must name its revision, or null when it cannot be established`,
+			`a "${status}" evaluation must name its revision, or null when it cannot be established`,
 		);
 	}
 	if (loadedRevision !== undefined) {
 		throw new TypeError("a rule's evaluation carries loadedRevision only when revision is null");
 	}
-	return Object.freeze({ status: evaluated, revision: readRevision(revision, "revision") });
+	return { revision: readRevision(revision, "revision") };
+}
+
+/**
+ * The determining policies of a completed evaluation (#199), copied and
+ * frozen, or nothing when the rule named none. The list is read once, by
+ * index, so a list whose length or entries answer differently the second time
+ * is judged on the one reading.
+ */
+function readDeterminingPolicies(list: unknown, omitted: unknown): DeterminingPolicies {
+	if (list === undefined) {
+		if (omitted !== undefined) {
+			throw new TypeError(
+				"a rule's evaluation carries determiningPoliciesOmitted only beside determiningPolicies",
+			);
+		}
+		return {};
+	}
+	if (!Array.isArray(list)) {
+		throw new TypeError("a rule's evaluation.determiningPolicies must be a list of policy ids");
+	}
+	const length: unknown = list.length;
+	if (typeof length !== "number" || !Number.isSafeInteger(length) || length < 0) {
+		throw new TypeError("a rule's evaluation.determiningPolicies must be a list of policy ids");
+	}
+	if (length > DETERMINING_POLICIES_MAX) {
+		throw new TypeError(
+			`a rule's evaluation.determiningPolicies lists at most ${DETERMINING_POLICIES_MAX} ids — count the rest in determiningPoliciesOmitted`,
+		);
+	}
+	const ids: string[] = [];
+	const seen = new Set<string>();
+	for (let index = 0; index < length; index++) {
+		const id: unknown = list[index];
+		if (!isReportablePolicyId(id)) {
+			throw new TypeError(
+				`a rule's evaluation.determiningPolicies holds an id that is not 1 to ${POLICY_ID_MAX_LENGTH} UTF-16 units of well-formed text outside POLICY_ID_FORBIDDEN_RANGES — build the report with report.boundDeterminingPolicies, which counts such an id in determiningPoliciesOmitted`,
+			);
+		}
+		if (seen.has(id)) {
+			throw new TypeError(
+				"a rule's evaluation.determiningPolicies names a policy twice — it is a set",
+			);
+		}
+		seen.add(id);
+		ids.push(id);
+	}
+	const kept: { determiningPolicies: readonly string[]; determiningPoliciesOmitted?: number } = {
+		determiningPolicies: Object.freeze(ids),
+	};
+	if (omitted !== undefined) {
+		if (typeof omitted !== "number" || !Number.isSafeInteger(omitted) || omitted < 1) {
+			throw new TypeError(
+				"a rule's evaluation.determiningPoliciesOmitted must be a positive whole number — absent when nothing was omitted",
+			);
+		}
+		kept.determiningPoliciesOmitted = omitted;
+	}
+	return kept;
 }
 
 function readRevision(value: unknown, key: string): string {

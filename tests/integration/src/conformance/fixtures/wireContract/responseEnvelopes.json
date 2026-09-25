@@ -38,8 +38,16 @@
 		"`no_applicable_rule`) has no groups and therefore no evaluation: no policy decided it.",
 		"The key sets under `evaluation` below are what THIS version sends, and the suite holds",
 		"a DEPLOYMENT to them exactly. A CLIENT reads the other way: it MUST IGNORE any key inside",
-		"`evaluation` that it does not know. More will be added there (the determining policy ids",
-		"of #199), and a client that rejects an unknown key breaks on the verifier's next minor."
+		"`evaluation` that it does not know, and a client that rejects an unknown key breaks on",
+		"the verifier's next minor.",
+		"`determiningPolicies` (#199) names the policies that determined a COMPLETED answer — for",
+		"an allow the permits that applied, for a deny the forbids that did — and is an empty list",
+		"when no policy applied. It is a set of policy ids, named as the rule's producer documents",
+		"them, at most `determiningPolicies.maxItems` of them; whatever the evaluator named beyond",
+		"that, or in a shape it could not carry, is counted in `determiningPoliciesOmitted`, present",
+		"only beside the list and only when it is not zero. Beside `revision: null` the ids are as",
+		"unconfirmed as the revision. A `failed` or `not_invoked` evaluation carries neither key:",
+		"no policy decided that answer. ABSENT means the rule did not say."
 	],
 	"error": {
 		"keys": ["decision", "code", "message"],
@@ -71,7 +79,29 @@
 		"evaluated": {
 			"statuses": ["completed", "failed"],
 			"required": ["status", "revision"],
-			"onlyWhenRevisionIsNull": ["loadedRevision"]
+			"onlyWhenRevisionIsNull": ["loadedRevision"],
+			"onlyWhenCompleted": ["determiningPolicies", "determiningPoliciesOmitted"]
+		},
+		"determiningPolicies": {
+			"maxItems": 32,
+			"idMaxLength": 128,
+			"idLengthUnit": "UTF-16 code units",
+			"idWellFormed": true,
+			"idForbiddenRanges": [
+				["0000", "001F"],
+				["007F", "009F"],
+				["00AD", "00AD"],
+				["061C", "061C"],
+				["180E", "180E"],
+				["200B", "200B"],
+				["200E", "200F"],
+				["2028", "202E"],
+				["2060", "2069"],
+				["FEFF", "FEFF"],
+				["E0000", "E007F"]
+			],
+			"omitted": { "minimum": 1, "onlyBeside": "determiningPolicies" },
+			"about": "A set of distinct policy ids. Each is well-formed UTF-16 (no lone surrogate), 1 to idMaxLength UTF-16 code units long, and holds no code point in idForbiddenRanges (inclusive, hex): the controls, and the characters that break or reorder a displayed line or hide in it. `determiningPoliciesOmitted` is an integer of at least `omitted.minimum`, present only beside the list."
 		},
 		"revision": {
 			"pattern": "^[a-z0-9]+(?:[+._-][a-z0-9]+)*:[A-Za-z0-9=_-]+$",

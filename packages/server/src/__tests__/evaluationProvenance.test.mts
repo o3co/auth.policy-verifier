@@ -257,6 +257,41 @@ describe("the decision event — always carries what the rules reported", () => 
 		});
 		expect(event).not.toHaveProperty("evaluations");
 	});
+
+	it("hands a rule the core's own reporter — one that bounds determining policies (#199)", async () => {
+		// A rule that follows the contract names them only through its reporter;
+		// under the server it always can, because nothing stands between the rule
+		// and core's evaluate().
+		const asking: RuleCollector = {
+			async collect() {
+				const rule: AnyRule = {
+					ruleType: "cedar",
+					code: "cedar_deny",
+					message: "Denied by cedar",
+					verify: (_attrs, report) => {
+						report?.({
+							status: "completed",
+							revision: REVISION_A,
+							...report?.boundDeterminingPolicies?.(["20-forbid-delete"]),
+						});
+						return false;
+					},
+				};
+				return [rule];
+			},
+		};
+		const { app, events } = appWith([asking]);
+		await verify(app, { resource: "project:1", action: "delete" }).expect(403);
+		expect(decisionLines(events)[0].evaluations).toEqual([
+			expect.objectContaining({
+				evaluation: {
+					status: "completed",
+					revision: REVISION_A,
+					determiningPolicies: ["20-forbid-delete"],
+				},
+			}),
+		]);
+	});
 });
 
 describe("the response — carries it only when the deployment says so", () => {
@@ -294,6 +329,62 @@ describe("the response — carries it only when the deployment says so", () => {
 			);
 			expect(onTheLine).toEqual(evaluationsIn(res.body));
 		}
+	});
+
+	// #199: the policies that determined an answer ride the same evaluation, so
+	// the same switch governs them — on the audit line always, on the response
+	// only when the deployment opts in. A policy id is internal structure.
+	it("carries the determining policies the same way — on the line always, in the response only under include (#199)", async () => {
+		const determining = reporting("cedar", (action) =>
+			action === "read"
+				? {
+						passed: true,
+						evaluation: {
+							status: "completed",
+							revision: REVISION_A,
+							determiningPolicies: ["10-permit-read"],
+						},
+					}
+				: {
+						passed: false,
+						evaluation: {
+							status: "completed",
+							revision: REVISION_A,
+							determiningPolicies: ["20-forbid-delete"],
+						},
+					},
+		);
+
+		const omitting = appWith([determining]);
+		const hidden = await verify(omitting.app, { resource: "project:1", action: "delete" }).expect(
+			403,
+		);
+		expect(hidden.text).not.toContain("20-forbid-delete");
+		expect(decisionLines(omitting.events)[0].evaluations).toEqual([
+			expect.objectContaining({
+				evaluation: {
+					status: "completed",
+					revision: REVISION_A,
+					determiningPolicies: ["20-forbid-delete"],
+				},
+			}),
+		]);
+
+		const including = appWith([determining], { evaluationInResponse: "include" });
+		const allow = await verify(including.app, { resource: "project:1", action: "read" }).expect(
+			200,
+		);
+		const deny = await verify(including.app, { resource: "project:1", action: "delete" }).expect(
+			403,
+		);
+		expect(allow.body.reason.groups[0].evaluated[0].evaluation.determiningPolicies).toEqual([
+			"10-permit-read",
+		]);
+		expect(deny.body.reason.groups[0].evaluated[0].evaluation.determiningPolicies).toEqual([
+			"20-forbid-delete",
+		]);
+		// The coarse code is what it was: the detail is beside it, not instead of it.
+		expect(deny.body).toMatchObject({ decision: "deny", code: "cedar_deny" });
 	});
 
 	it("attributes each batch entry to its own evaluation, in order, sharing one request id", async () => {

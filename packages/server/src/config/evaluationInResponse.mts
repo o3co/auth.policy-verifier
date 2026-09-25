@@ -15,8 +15,8 @@
  * information opt-in, by the requester; here the opt-in is the deployment's,
  * because what a token holder may learn about the policy layer is not the
  * token holder's to decide. `"omit"` is the default, and with it the response
- * is key-for-key what it was before this existed. #199's determining policy
- * ids will ride the same object and so the same switch.
+ * is key-for-key what it was before this existed. The determining policy
+ * ids (#199) ride the same object and so the same switch.
  *
  * One check, imported by both boundaries (AGENTS.md, "Two-Boundary Config
  * Validation"): `AppConfigSchema` files the refusal as an issue at the key,

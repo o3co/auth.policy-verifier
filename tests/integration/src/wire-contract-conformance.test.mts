@@ -29,7 +29,11 @@ import type {
 import {
 	AttributePipeline,
 	consoleLogger,
+	DETERMINING_POLICIES_MAX,
 	evaluate,
+	isReportablePolicyId,
+	POLICY_ID_FORBIDDEN_RANGES,
+	POLICY_ID_MAX_LENGTH,
 	POLICY_REVISION_MAX_LENGTH,
 	POLICY_REVISION_PATTERN,
 	RulePipeline,
@@ -176,7 +180,14 @@ const policyBackedRuleCollector: RuleCollector = {
 			case UNCONFIRMED_ACTION:
 				return [reports(true, { status: "completed", revision: null, loadedRevision: REVISION })];
 			default:
-				return [unbuilt, reports(true, { status: "completed", revision: REVISION })];
+				return [
+					unbuilt,
+					reports(true, {
+						status: "completed",
+						revision: REVISION,
+						determiningPolicies: ["10-permit-read"],
+					}),
+				];
 		}
 	},
 };
@@ -357,6 +368,7 @@ describeWireContractConformance(
 		{
 			reportingEvaluation: {
 				confirmed: allowed,
+				determining: allowed,
 				unconfirmed: {
 					resource: "project:1",
 					action: UNCONFIRMED_ACTION,
@@ -385,6 +397,87 @@ describe("the fixture's evaluation table is core's own", () => {
 	it("states the revision grammar and bound core enforces", () => {
 		expect(evaluation.revision.pattern).toBe(POLICY_REVISION_PATTERN.source);
 		expect(evaluation.revision.maxLength).toBe(POLICY_REVISION_MAX_LENGTH);
+	});
+
+	it("states the determining-policy bounds and id shape core enforces (#199)", () => {
+		expect(evaluation.determiningPolicies.maxItems).toBe(DETERMINING_POLICIES_MAX);
+		expect(evaluation.determiningPolicies.idMaxLength).toBe(POLICY_ID_MAX_LENGTH);
+		// The unit is what core counts in: an id of astral characters at the bound
+		// holds half as many code points, and one unit more is refused.
+		expect(evaluation.determiningPolicies.idLengthUnit).toBe("UTF-16 code units");
+		const astral = "\u{1f600}".repeat(POLICY_ID_MAX_LENGTH / 2);
+		expect(isReportablePolicyId(astral)).toBe(true);
+		expect(isReportablePolicyId(`${astral}x`)).toBe(false);
+		expect(
+			evaluation.determiningPolicies.idForbiddenRanges.map(([low, high]) => [
+				Number.parseInt(low, 16),
+				Number.parseInt(high, 16),
+			]),
+		).toEqual(POLICY_ID_FORBIDDEN_RANGES.map(([low, high]) => [low, high]));
+	});
+
+	it("names as completed-only exactly the keys core takes on a completed report and refuses on a failed one (#199)", async () => {
+		const accepts = async (report: Record<string, unknown>): Promise<boolean> =>
+			evaluate(new Map(), [
+				{
+					ruleType: "policy",
+					code: "policy_deny",
+					message: "Denied by policy",
+					verify: (_attrs, tell) => {
+						tell?.(report as RuleEvaluation);
+						return false;
+					},
+				},
+			]).then(
+				() => true,
+				() => false,
+			);
+		const keys: Record<string, unknown> = {
+			determiningPolicies: ["10-permit"],
+			determiningPoliciesOmitted: 2,
+		};
+		for (const key of evaluation.evaluated.onlyWhenCompleted) {
+			const pair =
+				key === "determiningPoliciesOmitted"
+					? { determiningPolicies: [], determiningPoliciesOmitted: keys[key] }
+					: { [key]: keys[key] };
+			expect(await accepts({ status: "completed", revision: null, ...pair })).toBe(true);
+			expect(await accepts({ status: "failed", revision: null, ...pair })).toBe(false);
+		}
+		expect([...evaluation.evaluated.onlyWhenCompleted].sort()).toEqual(Object.keys(keys).sort());
+	});
+
+	it("states the omitted count's rules and id well-formedness as core holds them (#199)", async () => {
+		const accepts = async (report: Record<string, unknown>): Promise<boolean> =>
+			evaluate(new Map(), [
+				{
+					ruleType: "policy",
+					code: "policy_deny",
+					message: "Denied by policy",
+					verify: (_attrs, tell) => {
+						tell?.(report as RuleEvaluation);
+						return false;
+					},
+				},
+			]).then(
+				() => true,
+				() => false,
+			);
+		const { omitted, idWellFormed } = evaluation.determiningPolicies;
+		const completed = { status: "completed", revision: null };
+		const list = { [omitted.onlyBeside]: [] };
+		expect(
+			await accepts({ ...completed, ...list, determiningPoliciesOmitted: omitted.minimum }),
+		).toBe(true);
+		expect(
+			await accepts({ ...completed, ...list, determiningPoliciesOmitted: omitted.minimum - 1 }),
+		).toBe(false);
+		expect(await accepts({ ...completed, determiningPoliciesOmitted: omitted.minimum })).toBe(
+			false,
+		);
+		// Core refuses a lone surrogate, so the fixture must say ids are well-formed.
+		expect(idWellFormed).toBe(true);
+		expect(await accepts({ ...completed, determiningPolicies: ["a\ud800"] })).toBe(false);
 	});
 
 	it("lists exactly the statuses core accepts", async () => {

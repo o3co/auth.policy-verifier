@@ -223,18 +223,35 @@ A rule that fronts a policy evaluator — a Cedar policy set, an OPA bundle, an 
 So the evaluator hands `verify` / `decide` a reporter, made for that one invocation, and the rule says there how the evaluation went. It still **answers a boolean**:
 
 ```ts
-type ReportRuleEvaluation = (evaluation: RuleEvaluation) => void;
+interface ReportRuleEvaluation {
+  (evaluation: RuleEvaluation): void;
+  readonly boundDeterminingPolicies?: (names: Iterable<unknown> & object) => // #199 — the checking core's bounds;
+    { determiningPolicies: readonly string[]; determiningPoliciesOmitted?: number }; // absent on a core older than that
+}
 
 type RuleEvaluation =
-  | { status: "not_invoked" }                                   // the evaluator was never asked
-  | { status: "completed" | "failed"; revision: string }        // it ran, and vouches for what it evaluated
-  | { status: "completed" | "failed"; revision: null; loadedRevision?: string }; // it ran; what it evaluated is not established
+  | { status: "not_invoked" }                                        // the evaluator was never asked
+  | ({ status: "completed" } & EvaluatedRevision & DeterminingPolicies) // it ran to an answer
+  | ({ status: "failed" } & EvaluatedRevision);                      // it ran, and failed closed
+
+type EvaluatedRevision =
+  | { revision: string }                                             // it vouches for what it evaluated
+  | { revision: null; loadedRevision?: string };                     // what it evaluated is not established
+
+interface DeterminingPolicies {                                      // #199 — build with report.boundDeterminingPolicies
+  determiningPolicies?: readonly string[];                           // which policies determined the answer
+  determiningPoliciesOmitted?: number;                               // how many more it named than it could carry
+}
 
 const rule: Rule = {
   ruleType: "policy", code: "policy_deny", message: "Denied by policy",
   verify(attrs, report) {
     const answer = policies.isAuthorized(requestFrom(attrs));
-    report?.({ status: "completed", revision: policies.revision });
+    report?.({
+      status: "completed",
+      revision: policies.revision,
+      ...report?.boundDeterminingPolicies?.([...answer.determiningPolicies].sort()),
+    });
     return answer.allowed;
   },
 };
@@ -245,9 +262,11 @@ const rule: Rule = {
 - **A reporter, and not a richer return value — because of what happens when the evaluator does not know about it.** Returning `{ passed, evaluation }` looks tidier, and fails open: an object is truthy, so an older copy of core in a mixed install, or a composite rule that calls `verify` itself, reads every deny as a pass. With a reporter, an evaluator that passes none gets the boolean it always got and merely records no evaluation — which is what an absent `evaluation` already means. So always call it as `report?.(…)`, and never make your answer depend on whether one was passed.
 - **It is per invocation, which is the point.** One rule object answers concurrent decisions. Anything kept on the rule between them — a "last evaluation" field, a callback into shared state — is one decision's evaluation on another's record. The reporter is made for one call and ignores what arrives after the answer. What you report is part of the answer and is under the purity contract with the rest of it: equal attributes, equal report. `describeRulePurityConformance` compares it, copying each report as it is made, so a rule that reports whichever revision it saw last — or rewrites one object and reports it again — fails.
 - **Report at most once, before you answer.** A second report in one invocation is a `TypeError`.
-- **A rule that wraps other rules forwards `report` to at most one of them — the one whose answer becomes its own.** Forward it to two reporting children and the second report is that `TypeError`. Forward it to a child that refused and then pass on another child's say-so, and the refuser's revision stands behind your pass; core cannot see that. If the wrapped rules are alternatives, do not wrap them: give them one `ruleType` and let `evaluate()` run the OR, where each keeps its own outcome and its own evaluation.
+- **A rule that wraps other rules forwards `report` to at most one of them — the one whose answer becomes its own.** Forward it to two reporting children and the second report is that `TypeError`. Forward it to a child that refused and then pass on another child's say-so, and the refuser's revision stands behind your pass; core cannot see that. If the wrapped rules are alternatives, do not wrap them: give them one `ruleType` and let `evaluate()` run the OR, where each keeps its own outcome and its own evaluation. Forward `report` itself, not a function of your own around it: a wrapper — or a `report.bind(…)` — has no `boundDeterminingPolicies`, so the child names no determining policies through it. The same goes for your own tests: a reporter you make of a plain function bounds nothing, so test the path that names policies through `evaluate()`, which hands your rule core's reporter, or give your stub a `boundDeterminingPolicies` of its own.
 - **`completed` means the evaluator ran to an answer**, whatever the answer was — a permit, a forbid, or no policy applying. **`failed`** means it was invoked and did not produce a clean answer. **`not_invoked`** means the rule failed before asking, and takes no revision key of either kind: an evaluator that was never asked evaluated nothing. `failed` and `not_invoked` mean the rule failed closed, so a **pass** that reports either is refused — only a completed evaluation can stand behind a pass.
 - **`revision` is a claim about what was evaluated**, so it is a string only when the evaluator vouches for it. When it cannot — a remote engine that does not say what it ran — report `revision: null` and, if you know it, what you *loaded* as `loadedRevision`. The two never share a name, so a consumer reading `revision` cannot take a snapshot nobody confirmed for one that was evaluated. Do not manufacture a revision from a URL, a deployment label or a modification time.
+- **`determiningPolicies` names the policies that determined a completed answer** (#199) — for an allow the permits that applied, for a deny the forbids that did, an empty list when no policy applied. Report it only from a `completed` evaluation; a `failed` one has none, because its answer is your rule failing closed, and a `not_invoked` one evaluated nothing — `evaluate()` refuses the keys on either, however the value reaches it. Build the two keys with `report.boundDeterminingPolicies(names)` and spread the result into the report: it keeps each name once, in the order you give, drops what `isReportablePolicyId` refuses and anything past `DETERMINING_POLICIES_MAX` (32), and counts all of that in `determiningPoliciesOmitted` — so the core that checks the report never refuses what it returns. Give the names in an order that depends on the attributes alone: sort them if your engine's order is not stable, or two replicas record one decision two ways (the purity suite compares answers within one process, so it may not catch that). Beside `revision: null` your ids are as unconfirmed as the revision. Name a policy the way its author knows it — a file name, a policy's declared id — not by an index the engine made up.
+- **Name them only through the reporter.** `determiningPolicies` is checked by the `evaluate()` of the core your rule runs under — the server's, not your package's own copy. A core older than this contract refuses the keys as unknown, and every completed decision of your rule would answer `500 internal_error`, logged as `rule_threw`; a newer or older one may bound them differently from the copy you import. `report.boundDeterminingPolicies` is the checking core's own, and is absent on a reporter from a core that predates the keys — so spread `report?.boundDeterminingPolicies?.(names)`, as the example does, and report the rest of the evaluation either way. Your package can then be upgraded ahead of the server or behind it; under an older server the ids simply do not appear.
 - **A reference is `scheme:encoded`** — the OCI digest grammar, at most 256 characters: `sha256:<64 lowercase hex>` for a content digest, your own scheme for an engine whose versions are not digests (`POLICY_REVISION_PATTERN`). Core enforces it, because what a rule reports ends up on the wire and in the audit log. A report that does not read — a path, policy text, an unknown status, an extra key — is a `TypeError` attributed to the rule, and the request answers `500`, even if the rule caught the error: it is refused rather than dropped, because a wrong audit record that looks complete is worse than a loud fault.
 
 `packages/cedar` is the worked example: `CedarPolicyRuleCollector` reports each row of its answer table, the revision is a digest of the loaded policy files, and the `CedarEngine` port says per answer whether the engine vouches for it.

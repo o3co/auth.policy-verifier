@@ -223,18 +223,35 @@ policy evaluator（Cedar の policy set、OPA の bundle、OpenFGA の model）�
 そこで evaluator は、その 1 回の呼び出しのために作った reporter を `verify` / `decide` に渡し、Rule は evaluation の結果をそこへ報告します。Rule が**返すのは boolean のまま**です:
 
 ```ts
-type ReportRuleEvaluation = (evaluation: RuleEvaluation) => void;
+interface ReportRuleEvaluation {
+  (evaluation: RuleEvaluation): void;
+  readonly boundDeterminingPolicies?: (names: Iterable<unknown> & object) => // #199 — 検査する core の上限;
+    { determiningPolicies: readonly string[]; determiningPoliciesOmitted?: number }; // それより古い core では無い
+}
 
 type RuleEvaluation =
-  | { status: "not_invoked" }                                   // evaluator は一度も呼ばれていない
-  | { status: "completed" | "failed"; revision: string }        // 走った。何を評価したかを evaluator が保証する
-  | { status: "completed" | "failed"; revision: null; loadedRevision?: string }; // 走った。何を評価したかは確定できない
+  | { status: "not_invoked" }                                        // evaluator は一度も呼ばれていない
+  | ({ status: "completed" } & EvaluatedRevision & DeterminingPolicies) // 走って答えが出た
+  | ({ status: "failed" } & EvaluatedRevision);                      // 走ったが fail-closed で失敗した
+
+type EvaluatedRevision =
+  | { revision: string }                                             // 何を評価したかを evaluator が保証する
+  | { revision: null; loadedRevision?: string };                     // 何を評価したかは確定できない
+
+interface DeterminingPolicies {                                      // #199 — report.boundDeterminingPolicies で組み立てる
+  determiningPolicies?: readonly string[];                           // 答えを決めた policy
+  determiningPoliciesOmitted?: number;                               // 載せきれなかった件数
+}
 
 const rule: Rule = {
   ruleType: "policy", code: "policy_deny", message: "Denied by policy",
   verify(attrs, report) {
     const answer = policies.isAuthorized(requestFrom(attrs));
-    report?.({ status: "completed", revision: policies.revision });
+    report?.({
+      status: "completed",
+      revision: policies.revision,
+      ...report?.boundDeterminingPolicies?.([...answer.determiningPolicies].sort()),
+    });
     return answer.allowed;
   },
 };
@@ -245,9 +262,11 @@ const rule: Rule = {
 - **戻り値を豊かにするのではなく reporter にしたのは、evaluator がそれを知らないときに何が起きるかで決まります。** `{ passed, evaluation }` を返す形は見た目は素直ですが、fail-open です。オブジェクトは truthy なので、mixed install の中の古い core や、自分で `verify` を呼ぶ複合 Rule は、すべての deny を pass と読みます。reporter なら、reporter を渡さない evaluator はこれまでどおり boolean を受け取り、evaluation を記録しないだけです — それは `evaluation` が無いことの既存の意味（不明）と一致します。ですから必ず `report?.(…)` と呼び、reporter が渡されたかどうかで answer を変えないでください。
 - **呼び出しごとであることが要点です。** 1 つの Rule オブジェクトは並行する決定に答えます。呼び出しの間に Rule 上へ何かを残す（「最後の evaluation」フィールド、共有状態への callback）と、ある決定の evaluation が別の決定の記録に載ります。reporter は 1 回の呼び出しのために作られ、answer の後に届いた報告は無視します。報告する内容は answer の一部なので、純粋性の契約もそのまま及びます — 等しい attributes には等しい報告。`describeRulePurityConformance` は報告を受けた瞬間にコピーして比較するので、「最後に見た revision」を報告する Rule も、1 つのオブジェクトを書き換えて再度報告する Rule も落ちます。
 - **報告は answer の前に、多くても 1 回。** 1 回の呼び出しで 2 度報告すると `TypeError` です。
-- **他の Rule を包む Rule は、`report` を多くても 1 つの子にだけ渡します — その答えが自分の答えになる子です。** 報告する子 2 つに渡すと、2 度目の報告が上の `TypeError` になります。拒否した子に渡したうえで別の子の判断で pass すると、拒否した側の revision があなたの pass の背後に立つことになり、core からはそれが見えません。包んだ Rule が互いの代替なら、包まないでください。同じ `ruleType` を与えて `evaluate()` に OR を実行させれば、それぞれが自分の outcome と evaluation を保ちます。
+- **他の Rule を包む Rule は、`report` を多くても 1 つの子にだけ渡します — その答えが自分の答えになる子です。** 報告する子 2 つに渡すと、2 度目の報告が上の `TypeError` になります。拒否した子に渡したうえで別の子の判断で pass すると、拒否した側の revision があなたの pass の背後に立つことになり、core からはそれが見えません。包んだ Rule が互いの代替なら、包まないでください。同じ `ruleType` を与えて `evaluate()` に OR を実行させれば、それぞれが自分の outcome と evaluation を保ちます。`report` は自前の関数で包まず、そのまま渡してください。包んだ関数や `report.bind(…)` には `boundDeterminingPolicies` が無いので、子はそれを通じて決めた policy を名指せません。自分のテストでも同じです。素の関数で作った reporter は何も切り詰めないので、policy を名指す経路は `evaluate()` を通して（Rule に core の reporter が渡ります）テストするか、stub に自前の `boundDeterminingPolicies` を持たせてください。
 - **`completed` は evaluator が答えに到達したこと**を意味します。答えが permit でも forbid でも、どの policy も該当しなかった場合でも同じです。**`failed`** は呼び出したがきれいな答えが得られなかったこと。**`not_invoked`** は問い合わせる前に Rule が失敗したことで、revision 系のキーはどちらも持ちません。一度も問われていない evaluator は何も評価していないからです。`failed` と `not_invoked` は Rule が fail-closed で失敗したことを意味するので、どちらかを報告した **pass** は拒否されます — pass の背後に立てるのは completed の evaluation だけです。
 - **`revision` は「何が評価されたか」についての主張**なので、evaluator が保証するときだけ文字列になります。保証できない場合（何を走らせたかを言わない remote engine）は `revision: null` とし、分かっていれば自分が *load した* ものを `loadedRevision` に入れます。2 つは決して同じ名前を共有しないので、`revision` を読む consumer が「誰も確認していない snapshot」を「評価された snapshot」と取り違えることはありません。URL・デプロイのラベル・更新時刻から revision をでっち上げないでください。
+- **`determiningPolicies` は completed の答えを決めた policy を名指します**（#199）— allow なら該当した permit、deny なら該当した forbid、どの policy も該当しなければ空のリストです。報告するのは `completed` の evaluation からだけです。`failed` の答えは Rule が fail-closed で失敗したもので、決めた policy はありません。`not_invoked` は何も評価していません — `evaluate()` はどちらの上のキーも、値がどう届いても拒否します。2 つのキーは `report.boundDeterminingPolicies(names)` で組み立て、結果を報告に展開してください。各名前を 1 度だけ、渡した順に残し、`isReportablePolicyId` が拒否するものと `DETERMINING_POLICIES_MAX`（32）を超えた分を落とし、それらをすべて `determiningPoliciesOmitted` に数えます — そのため報告を検査する core が戻り値を拒否することはありません。名前は attributes だけで決まる順序で渡してください。engine の順序が安定しないならソートします。そうしないと 2 つの replica が同じ決定を別々に記録します（純粋性のスイートは 1 プロセス内の答えを比べるので、それを検出できないことがあります）。`revision: null` の横の id は revision と同じく未確認です。policy は作者が知っている名前で名指します — ファイル名や、policy が宣言した id です。engine が付けた通し番号ではありません。
+- **名指すのは reporter を通じてだけにしてください。** `determiningPolicies` を検査するのは、あなたの Rule が動く core の `evaluate()` — あなたのパッケージが持つ core ではなく server の core — です。この契約より古い core はキーを未知として拒否し、Rule の completed な決定はすべて `500 internal_error`（ログ上の分類は `rule_threw`）になります。新しい core や古い core は、あなたが import する core と上限が違うこともあります。`report.boundDeterminingPolicies` は検査する core 自身のもので、キーより古い core の reporter には付いていません。ですから例のとおり `report?.boundDeterminingPolicies?.(names)` を展開し、evaluation の残りはどちらでも報告してください。そうすればパッケージを server より先にも後にも更新でき、古い server の下では id が現れないだけです。
 - **参照は `scheme:encoded`** — OCI の digest 文法で、最大 256 文字です。content digest なら `sha256:<小文字 hex 64 桁>`、版が digest でない engine は独自の scheme を名乗ります（`POLICY_REVISION_PATTERN`）。Rule の報告は wire と監査ログに載るので、core がこれを強制します。読めない報告（パス、policy 本文、未知の status、余分なキー）は Rule に帰属する `TypeError` となり、Rule がそのエラーを握りつぶしても request は `500` で答えます。落とさずに拒否するのは、完全に見える誤った監査記録のほうが、騒がしい障害より悪いからです。
 
 `packages/cedar` が実例です。`CedarPolicyRuleCollector` は answer table の各行を報告し、revision は load した policy ファイルの digest で、`CedarEngine` port は engine がその answer を保証するかどうかを answer ごとに伝えます。

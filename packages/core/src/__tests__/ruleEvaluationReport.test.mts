@@ -25,10 +25,13 @@ import { describe, expect, it } from "vitest";
 import { RuleTimeoutError } from "../errors.mjs";
 import { evaluate } from "../evaluate.mjs";
 import { FailureRecord } from "../failureSource.mjs";
+import { beginRuleInvocation, isReportablePolicyId } from "../ruleEvaluation.mjs";
 import {
 	type AnyRule,
 	type AsyncRule,
 	type Attributes,
+	DETERMINING_POLICIES_MAX,
+	POLICY_ID_MAX_LENGTH,
 	POLICY_REVISION_MAX_LENGTH,
 	type ReportRuleEvaluation,
 	type Rule,
@@ -37,6 +40,10 @@ import {
 
 const REVISION_A = `sha256:${"a".repeat(64)}`;
 const REVISION_B = `sha256:${"b".repeat(64)}`;
+
+/** `count` distinct policy ids. */
+const ids = (count: number): string[] =>
+	Array.from({ length: count }, (_, i) => `policy-${String(i).padStart(3, "0")}`);
 
 const attrs: Attributes = new Map();
 
@@ -199,6 +206,31 @@ describe("evaluate — what a rule reports about one invocation", () => {
 		expect(Object.isFrozen(outcome.evaluation)).toBe(true);
 	});
 
+	it("keeps a frozen copy of the determining policies too, so the rule cannot rewrite them afterwards (#199)", async () => {
+		const determining = ["10-permit-eng", "20-permit-ops"];
+		const { outcome } = await outcomeOf(
+			sync(
+				"cedar",
+				"cedar_deny",
+				reporting(true, {
+					status: "completed",
+					revision: REVISION_A,
+					determiningPolicies: determining,
+				}),
+			),
+		);
+		determining.push("99-injected");
+		determining[0] = "rewritten";
+		expect(outcome.evaluation).toEqual({
+			status: "completed",
+			revision: REVISION_A,
+			determiningPolicies: ["10-permit-eng", "20-permit-ops"],
+		});
+		const kept = (outcome.evaluation as { determiningPolicies: readonly string[] })
+			.determiningPolicies;
+		expect(Object.isFrozen(kept)).toBe(true);
+	});
+
 	it("ignores a report that arrives after the answer — the decision is already made", async () => {
 		let late: (() => void) | undefined;
 		const rule = async("cedar", "cedar_deny", (report) => {
@@ -231,6 +263,66 @@ describe("evaluate — what a rule may report", () => {
 		[
 			"failed, revision not established, naming what was loaded",
 			{ status: "failed", revision: null, loadedRevision: REVISION_A },
+		],
+		// #199: which policies determined a completed answer.
+		[
+			"completed, no policy determining the request",
+			{ status: "completed", revision: REVISION_A, determiningPolicies: [] },
+		],
+		[
+			"completed, naming the policies that determined it",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: ["10-permit-eng", "20-forbid"],
+			},
+		],
+		[
+			"completed, revision not established, naming what was loaded and what determined it",
+			{
+				status: "completed",
+				revision: null,
+				loadedRevision: REVISION_A,
+				determiningPolicies: ["20-forbid"],
+			},
+		],
+		[
+			"completed, as many policies as the bound and a count of the rest",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: ids(DETERMINING_POLICIES_MAX),
+				determiningPoliciesOmitted: 5,
+			},
+		],
+		[
+			"completed, a count of policies whose ids could not be listed, and none listed",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: [],
+				determiningPoliciesOmitted: 1,
+			},
+		],
+		[
+			"completed, ids with spaces and non-ASCII letters, and one at the length bound",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: ["team policies #2", "ポリシー", "x".repeat(POLICY_ID_MAX_LENGTH)],
+			},
+		],
+		[
+			"completed, an id of astral characters exactly at the bound, counted in UTF-16 units",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: ["😀".repeat(POLICY_ID_MAX_LENGTH / 2)],
+			},
+		],
+		[
+			"completed, an id with a no-break space — not a control character",
+			{ status: "completed", revision: REVISION_A, determiningPolicies: ["team\u00a0policies"] },
 		],
 	];
 	it.each(accepted)("accepts: %s", async (_name, evaluation) => {
@@ -271,6 +363,131 @@ describe("evaluate — what a rule may report", () => {
 		[
 			"a key the contract does not name",
 			{ status: "completed", revision: REVISION_A, policyText: "permit(…);" },
+		],
+		// #199: determining policies belong to a completed answer, bounded.
+		[
+			"determining policies on a failed evaluation — its answer is not the policies'",
+			{ status: "failed", revision: REVISION_A, determiningPolicies: ["20-forbid"] },
+		],
+		[
+			"determining policies on an evaluator that was never invoked",
+			{ status: "not_invoked", determiningPolicies: [] },
+		],
+		[
+			"determining policies that are not a list",
+			{ status: "completed", revision: REVISION_A, determiningPolicies: "20-forbid" },
+		],
+		[
+			"more determining policies than the bound",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: ids(DETERMINING_POLICIES_MAX + 1),
+			},
+		],
+		[
+			"a determining policy id that is not a string",
+			{ status: "completed", revision: REVISION_A, determiningPolicies: [7] },
+		],
+		[
+			"an empty determining policy id",
+			{ status: "completed", revision: REVISION_A, determiningPolicies: [""] },
+		],
+		[
+			"a determining policy id over the length bound",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: ["x".repeat(POLICY_ID_MAX_LENGTH + 1)],
+			},
+		],
+		[
+			"a determining policy id with a line break — it would forge a log line",
+			{ status: "completed", revision: REVISION_A, determiningPolicies: ["20-forbid\nlevel=info"] },
+		],
+		[
+			"a determining policy id with a C1 control character",
+			{ status: "completed", revision: REVISION_A, determiningPolicies: ["20-forbid\u0085"] },
+		],
+		[
+			"the same determining policy twice — it is a set",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: ["20-forbid", "20-forbid"],
+			},
+		],
+		[
+			"an omitted count without the list it counts beside",
+			{ status: "completed", revision: REVISION_A, determiningPoliciesOmitted: 3 },
+		],
+		[
+			"an omitted count of zero — absence says that",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: [],
+				determiningPoliciesOmitted: 0,
+			},
+		],
+		[
+			"an omitted count that is not a whole number",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: [],
+				determiningPoliciesOmitted: 1.5,
+			},
+		],
+		[
+			"an omitted count written as a string",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: [],
+				determiningPoliciesOmitted: "3",
+			},
+		],
+		[
+			"an omitted count on a failed evaluation, beside a list",
+			{
+				status: "failed",
+				revision: REVISION_A,
+				determiningPolicies: [],
+				determiningPoliciesOmitted: 3,
+			},
+		],
+		[
+			"a determining policy id with DEL",
+			{ status: "completed", revision: REVISION_A, determiningPolicies: ["20-forbid\u007f"] },
+		],
+		[
+			"a determining policy id with a line separator — some viewers break the line on it",
+			{ status: "completed", revision: REVISION_A, determiningPolicies: ["20-forbid\u2028x"] },
+		],
+		[
+			"a determining policy id with a paragraph separator",
+			{ status: "completed", revision: REVISION_A, determiningPolicies: ["20-forbid\u2029x"] },
+		],
+		[
+			"a determining policy id with a bidi override — it would display as a different id",
+			{ status: "completed", revision: REVISION_A, determiningPolicies: ["\u202edibrof-02"] },
+		],
+		[
+			"a determining policy id with a bidi isolate",
+			{ status: "completed", revision: REVISION_A, determiningPolicies: ["a\u2066b"] },
+		],
+		[
+			"a determining policy id with a lone surrogate — it does not survive a JSON round trip",
+			{ status: "completed", revision: REVISION_A, determiningPolicies: ["policy\ud800"] },
+		],
+		[
+			"a determining policy id one UTF-16 unit over the bound, in astral characters",
+			{
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: [`${"😀".repeat(POLICY_ID_MAX_LENGTH / 2)}x`],
+			},
 		],
 	];
 	it.each(refused)("refuses: %s", async (_name, evaluation) => {
@@ -375,6 +592,163 @@ describe("evaluate — what a rule may report", () => {
 		expect(String((error as Error).message)).not.toContain(secret);
 	});
 
+	// A report's own enumerable keys decide which keys it may carry, but a
+	// value is read however it is reached — so an evaluation carrying, by any
+	// route, what its status may not carry is refused rather than recorded as
+	// if it had said nothing: determining policies on a failed or not_invoked
+	// one (#199), a revision of either kind on a not_invoked one (#244).
+	const routes: ReadonlyArray<[string, (visible: object, key: string, value: unknown) => object]> =
+		[
+			[
+				"inherited from its prototype",
+				(visible, key, value) => Object.assign(Object.create({ [key]: value }), visible),
+			],
+			[
+				"as a non-enumerable own property",
+				(visible, key, value) =>
+					Object.defineProperty({ ...visible }, key, { value, enumerable: false }),
+			],
+			[
+				"through a getter on its prototype",
+				(visible, key, value) =>
+					Object.assign(
+						Object.create(Object.defineProperty({}, key, { get: () => value })),
+						visible,
+					),
+			],
+		];
+	const FAILED = { status: "failed", revision: REVISION_A };
+	const NOT_INVOKED = { status: "not_invoked" };
+	const hidden: ReadonlyArray<[string, object, string, string, unknown]> = [
+		["failed", FAILED, "determining policies", "determiningPolicies", ["20-forbid"]],
+		["failed", FAILED, "an omitted count", "determiningPoliciesOmitted", 4],
+		["not_invoked", NOT_INVOKED, "determining policies", "determiningPolicies", ["20-forbid"]],
+		["not_invoked", NOT_INVOKED, "an omitted count", "determiningPoliciesOmitted", 4],
+		["not_invoked", NOT_INVOKED, "a revision", "revision", REVISION_A],
+		["not_invoked", NOT_INVOKED, "a null revision", "revision", null],
+		["not_invoked", NOT_INVOKED, "a loaded revision", "loadedRevision", REVISION_A],
+	];
+	it.each(
+		hidden.flatMap(([status, visible, label, key, value]) =>
+			routes.map(([how, hide]) => [status, label, how, () => hide(visible, key, value)] as const),
+		),
+	)("refuses a %s evaluation that carries %s %s", async (status, _label, _how, make) => {
+		const rule = sync("cedar", "cedar_deny", reporting(false, make() as unknown as RuleEvaluation));
+		const error = await evaluate(attrs, [rule]).catch((cause: unknown) => cause);
+		expect(error).toBeInstanceOf(TypeError);
+		const { message } = error as TypeError;
+		expect(message).toContain(`a "${status}" evaluation may not`);
+		// Refused by name, never by what the rule put there.
+		expect(message).not.toContain("20-forbid");
+		expect(message).not.toContain(REVISION_A);
+	});
+
+	it("still takes a report built with its status widened to completed | failed", () => {
+		// The union splits on `status`, so a helper typed with the wider status —
+		// as rules written before #199 are — still builds a RuleEvaluation. The
+		// typecheck is the test; the assertion only keeps the helpers used.
+		const vouched = (status: "completed" | "failed"): RuleEvaluation => ({
+			status,
+			revision: REVISION_A,
+		});
+		const unvouched = (status: "completed" | "failed"): RuleEvaluation => ({
+			status,
+			revision: null,
+			loadedRevision: REVISION_A,
+		});
+		expect([vouched("failed"), unvouched("completed")]).toEqual([
+			{ status: "failed", revision: REVISION_A },
+			{ status: "completed", revision: null, loadedRevision: REVISION_A },
+		]);
+	});
+
+	it.each([
+		["NaN", Number.NaN],
+		["a fraction", 1.5],
+		["a negative length", -1],
+	])(
+		"refuses a list whose length is %s, however it came to say so (#199)",
+		async (_label, length) => {
+			const lying = new Proxy(["10-permit-eng"], {
+				get: (target, key, receiver) =>
+					key === "length" ? length : Reflect.get(target, key, receiver),
+			});
+			const rule = sync(
+				"cedar",
+				"cedar_deny",
+				reporting(false, { status: "completed", revision: REVISION_A, determiningPolicies: lying }),
+			);
+			await expect(evaluate(attrs, [rule])).rejects.toThrow(TypeError);
+		},
+	);
+
+	it("reads the list's length and each entry once, and keeps what that reading said (#199)", async () => {
+		const reads = new Map<PropertyKey, number>();
+		let turn = 0;
+		const drifting = new Proxy(["10-permit-eng", "20-permit-ops"], {
+			get: (target, key, receiver) => {
+				reads.set(key, (reads.get(key) ?? 0) + 1);
+				// A second reading of an entry would see a different id.
+				if (key === "0" && turn++ > 0) return "99-injected";
+				return Reflect.get(target, key, receiver);
+			},
+		});
+		const { outcome } = await outcomeOf(
+			sync(
+				"cedar",
+				"cedar_deny",
+				reporting(true, {
+					status: "completed",
+					revision: REVISION_A,
+					determiningPolicies: drifting,
+				}),
+			),
+		);
+		expect(outcome.evaluation).toEqual({
+			status: "completed",
+			revision: REVISION_A,
+			determiningPolicies: ["10-permit-eng", "20-permit-ops"],
+		});
+		expect(reads.get("length")).toBe(1);
+		expect(reads.get("0")).toBe(1);
+		expect(reads.get("1")).toBe(1);
+	});
+
+	it("carries the determining policies an asynchronous rule reports (#199)", async () => {
+		const { outcome } = await outcomeOf(
+			async(
+				"cedar",
+				"cedar_deny",
+				reporting(false, {
+					status: "completed",
+					revision: REVISION_A,
+					determiningPolicies: ["20-forbid"],
+				}),
+			),
+		);
+		expect(outcome.evaluation).toEqual({
+			status: "completed",
+			revision: REVISION_A,
+			determiningPolicies: ["20-forbid"],
+		});
+	});
+
+	it("does not repeat a refused determining policy id in the error either (#199)", async () => {
+		const secret = "tenant-acme-internal\nlevel=info msg=forged";
+		const rule = sync(
+			"cedar",
+			"cedar_deny",
+			reporting(false, {
+				status: "completed",
+				revision: REVISION_A,
+				determiningPolicies: [secret],
+			}),
+		);
+		const error = await evaluate(attrs, [rule]).catch((cause: unknown) => cause);
+		expect(error).toBeInstanceOf(TypeError);
+		expect(String((error as Error).message)).not.toContain("tenant-acme-internal");
+	});
+
 	it("refuses the same from an asynchronous rule", async () => {
 		const rule = async(
 			"cedar",
@@ -450,5 +824,188 @@ describe("a rule asked by an evaluator that passes no reporter", () => {
 		);
 		expect(denying.verify(attrs)).toBe(false);
 		expect(legacyEvaluate([denying])).toBe(false);
+	});
+});
+
+/*
+ * #199: a core older than determining policies refuses the keys as unknown, and
+ * the bounds on them are the checking core's, not those of the copy a rule's
+ * package imports. So the reporter carries the bounding itself: present, a
+ * rule names the policies through it; absent, it names none.
+ */
+describe("a reporter bounds determining policies to its own core's contract (#199)", () => {
+	/** The reporter `evaluate()` hands a rule, kept for the test to inspect. */
+	async function handed(kind: "sync" | "async"): Promise<ReportRuleEvaluation> {
+		let kept: ReportRuleEvaluation | undefined;
+		const keep = (report: ReportRuleEvaluation | undefined) => {
+			kept = report;
+			return true;
+		};
+		await evaluate(attrs, [
+			kind === "sync" ? sync("a", "a_deny", keep) : async("a", "a_deny", keep),
+		]);
+		if (kept === undefined) throw new Error("no reporter was handed");
+		return kept;
+	}
+
+	it.each(["sync", "async"] as const)(
+		"hands a %s rule a reporter that bounds them",
+		async (kind) => {
+			const report = await handed(kind);
+			expect(report.boundDeterminingPolicies?.(ids(DETERMINING_POLICIES_MAX + 1))).toEqual({
+				determiningPolicies: ids(DETERMINING_POLICIES_MAX),
+				determiningPoliciesOmitted: 1,
+			});
+		},
+	);
+
+	it("cannot be swapped by the rule — its bounds stay the core's", async () => {
+		const report = await handed("sync");
+		const own = report.boundDeterminingPolicies;
+		expect(() => {
+			(report as { boundDeterminingPolicies?: unknown }).boundDeterminingPolicies = () => ({
+				determiningPolicies: ["x".repeat(POLICY_ID_MAX_LENGTH + 1)],
+			});
+		}).toThrow(TypeError);
+		expect(
+			() => delete (report as { boundDeterminingPolicies?: unknown }).boundDeterminingPolicies,
+		).toThrow(TypeError);
+		expect(report.boundDeterminingPolicies).toBe(own);
+	});
+
+	it("carries nothing from one invocation to the next — what a rule writes on it does not stick", async () => {
+		const first = await handed("sync");
+		expect(() => {
+			(first.boundDeterminingPolicies as unknown as Record<string, unknown>).stash =
+				"from one decision";
+		}).toThrow(TypeError);
+		const second = await handed("sync");
+		expect(
+			(second.boundDeterminingPolicies as unknown as Record<string, unknown>).stash,
+		).toBeUndefined();
+	});
+
+	it("takes a report built through it, the determining policies included", async () => {
+		const rule = sync("cedar", "cedar_deny", (report) => {
+			report?.({
+				status: "completed",
+				revision: REVISION_A,
+				...report?.boundDeterminingPolicies?.(["20-forbid"]),
+			});
+			return false;
+		});
+		expect((await outcomeOf(rule)).outcome.evaluation).toEqual({
+			status: "completed",
+			revision: REVISION_A,
+			determiningPolicies: ["20-forbid"],
+		});
+	});
+
+	it("never produces what evaluate() refuses — a rule that reports its output cannot trip the bound", async () => {
+		const names = [...ids(DETERMINING_POLICIES_MAX + 3), "bad\nid", 7, "😀".repeat(200)];
+		const rule = sync("cedar", "cedar_deny", (report) => {
+			report?.({
+				status: "completed",
+				revision: REVISION_A,
+				...report?.boundDeterminingPolicies?.(names),
+			});
+			return true;
+		});
+		expect((await outcomeOf(rule)).outcome.evaluation).toMatchObject({
+			determiningPolicies: ids(DETERMINING_POLICIES_MAX),
+			determiningPoliciesOmitted: 6,
+		});
+	});
+});
+
+describe("a reporter's boundDeterminingPolicies — what a rule reports, made to fit (#199)", () => {
+	/** The one a fresh reporter carries: the bounds that apply are the checking core's. */
+	const boundDeterminingPolicies = (names: Iterable<unknown> & object) => {
+		const bound = beginRuleInvocation().report.boundDeterminingPolicies;
+		if (bound === undefined) throw new Error("this core's reporter bounds determining policies");
+		return bound(names);
+	};
+
+	it("keeps the names in the order given, and says nothing more when all of them fit", () => {
+		expect(boundDeterminingPolicies(["20-forbid", "10-permit-eng"])).toEqual({
+			determiningPolicies: ["20-forbid", "10-permit-eng"],
+		});
+	});
+
+	it("keeps each name once — the list is a set", () => {
+		expect(boundDeterminingPolicies(["a", "b", "a"])).toEqual({ determiningPolicies: ["a", "b"] });
+	});
+
+	it("keeps the first DETERMINING_POLICIES_MAX and counts the rest", () => {
+		const bounded = boundDeterminingPolicies(ids(DETERMINING_POLICIES_MAX + 7));
+		expect(bounded.determiningPolicies).toEqual(ids(DETERMINING_POLICIES_MAX));
+		expect(bounded.determiningPoliciesOmitted).toBe(7);
+	});
+
+	it("counts a name it cannot carry rather than dropping it — not a string, empty, too long, or a line breaker", () => {
+		expect(
+			boundDeterminingPolicies([
+				"20-forbid",
+				7,
+				"",
+				"x".repeat(POLICY_ID_MAX_LENGTH + 1),
+				"a\nb",
+				"\u202eevil",
+			]),
+		).toEqual({ determiningPolicies: ["20-forbid"], determiningPoliciesOmitted: 5 });
+	});
+
+	it("refuses one name passed bare — a string is iterable, by character", () => {
+		expect(() => boundDeterminingPolicies("20-forbid" as unknown as string[])).toThrow(TypeError);
+	});
+
+	it("answers an empty list for no names — no policy determined the answer", () => {
+		expect(boundDeterminingPolicies([])).toEqual({ determiningPolicies: [] });
+	});
+
+	it("reads any iterable once, and freezes what it keeps", () => {
+		let reads = 0;
+		const once = {
+			*[Symbol.iterator]() {
+				reads++;
+				yield "10-permit-eng";
+			},
+		};
+		const bounded = boundDeterminingPolicies(once);
+		expect(reads).toBe(1);
+		expect(Object.isFrozen(bounded.determiningPolicies)).toBe(true);
+	});
+});
+
+describe("isReportablePolicyId (#199)", () => {
+	it.each([
+		["a file name", true, "10-permit-eng"],
+		["spaces and non-ASCII letters", true, "team policies ポリシー"],
+		["exactly the bound", true, "x".repeat(POLICY_ID_MAX_LENGTH)],
+		["one over the bound", false, "x".repeat(POLICY_ID_MAX_LENGTH + 1)],
+		["empty", false, ""],
+		["a number", false, 7],
+		["a C0 control", false, "a\u0001b"],
+		["DEL", false, "a\u007fb"],
+		["a C1 control", false, "a\u0085b"],
+		["the last C1 control", false, "a\u009fb"],
+		["the first character after C1", true, "a\u00a0b"],
+		["a soft hyphen", false, "a\u00adb"],
+		["a zero-width space", false, "20-forbid\u200b"],
+		["a zero-width joiner — emoji and Indic text need it", true, "a\u200db"],
+		["a word joiner", false, "a\u2060b"],
+		["a byte order mark", false, "\ufeff20-forbid"],
+		["a tag character", false, "a\u{e0041}b"],
+		["an Arabic letter mark", false, "a\u061cb"],
+		["a left-to-right mark", false, "a\u200eb"],
+		["a line separator", false, "a\u2028b"],
+		["a right-to-left override", false, "a\u202eb"],
+		["the character after the embedding controls", true, "a\u202fb"],
+		["a first strong isolate", false, "a\u2068b"],
+		["a pop directional isolate", false, "a\u2069b"],
+		["a lone surrogate", false, "a\ud800b"],
+		["a surrogate pair", true, "a😀b"],
+	])("%s → %s", (_label, expected, value) => {
+		expect(isReportablePolicyId(value)).toBe(expected);
 	});
 });
