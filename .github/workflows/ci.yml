@@ -178,6 +178,79 @@ jobs:
           disable_search: true
           fail_ci_if_error: false
 
+  # The CLI-equivalence suite (#198): `CedarPolicyRuleCollector` over the wasm
+  # engine and the official `cedar` CLI must agree on a fixture corpus —
+  # decision, determining policies, erroring policies. The CLI is a Rust
+  # binary, installed at the version `@cedar-policy/cedar-wasm` is pinned to,
+  # read from that pin, so the two cannot be bumped apart; the suite checks the
+  # version too. Cached by that version. `build-and-test` runs the same file
+  # without a CLI and skips it with a notice; here CEDAR_CLI_REQUIRED turns a
+  # missing CLI into a failure.
+  cedar-cli-equivalence:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    # A cold `cargo install` takes minutes; a hung one should not take hours.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Read the Cedar version the wasm engine is pinned to
+        id: cedar
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p 'require("./packages/cedar-wasm/package.json").dependencies["@cedar-policy/cedar-wasm"]')
+          # An exact pin is what makes one CLI version the right one.
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::@cedar-policy/cedar-wasm is pinned to '$version', not an exact version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the cedar CLI
+        id: cedar-cli-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cedar-cli
+          key: cedar-policy-cli-${{ steps.cedar.outputs.version }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install the cedar CLI
+        if: steps.cedar-cli-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          CEDAR_VERSION: ${{ steps.cedar.outputs.version }}
+        run: |
+          set -euo pipefail
+          # The crate's MSRV moves with Cedar; the current stable meets it.
+          rustup toolchain install stable --profile minimal
+          cargo +stable install cedar-policy-cli --version "$CEDAR_VERSION" --locked --root ~/.cedar-cli
+
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+
+      - name: Run the CLI-equivalence suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CEDAR_CLI="$HOME/.cedar-cli/bin/cedar"
+          export CEDAR_CLI_REQUIRED=1
+          pnpm --filter @o3co/auth.policy-verifier.integration-tests exec vitest run cedar-cli-
+
   # Simulates the post-publish state: tarball every package `pnpm -r publish`
   # would offer to the registry, then build the scaffold a consumer actually
   # receives against those tarballs instead of the `workspace:*` links a local

@@ -1,0 +1,172 @@
+{
+	"about": "`resource.owner == principal` compares an entity reference the mapping builds with `{ attribute, entityType }`.",
+	"config": {
+		"resource": {
+			"attributes": {
+				"owner": {
+					"attribute": "resourceOwner",
+					"entityType": "User"
+				}
+			}
+		}
+	},
+	"requests": [
+		{
+			"about": "the owner",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "read",
+				"requestResourceType": "Document",
+				"requestResourceId": "42",
+				"resourceOwner": "alice"
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "read"
+					},
+					"resource": {
+						"type": "Document",
+						"id": "42"
+					},
+					"context": {},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {},
+							"parents": []
+						},
+						{
+							"uid": {
+								"type": "Document",
+								"id": "42"
+							},
+							"attrs": {
+								"owner": {
+									"__entity": {
+										"type": "User",
+										"id": "alice"
+									}
+								}
+							},
+							"parents": []
+						}
+					]
+				},
+				"decision": "allow",
+				"determiningPolicies": ["10-permit-owner"],
+				"errorsIn": []
+			}
+		},
+		{
+			"about": "someone else",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "read",
+				"requestResourceType": "Document",
+				"requestResourceId": "42",
+				"resourceOwner": "bob"
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "read"
+					},
+					"resource": {
+						"type": "Document",
+						"id": "42"
+					},
+					"context": {},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {},
+							"parents": []
+						},
+						{
+							"uid": {
+								"type": "Document",
+								"id": "42"
+							},
+							"attrs": {
+								"owner": {
+									"__entity": {
+										"type": "User",
+										"id": "bob"
+									}
+								}
+							},
+							"parents": []
+						}
+					]
+				},
+				"decision": "deny",
+				"determiningPolicies": [],
+				"errorsIn": []
+			}
+		},
+		{
+			"about": "no owner: the attribute is omitted, and reading it is an error",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "read",
+				"requestResourceType": "Document",
+				"requestResourceId": "42"
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "read"
+					},
+					"resource": {
+						"type": "Document",
+						"id": "42"
+					},
+					"context": {},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {},
+							"parents": []
+						},
+						{
+							"uid": {
+								"type": "Document",
+								"id": "42"
+							},
+							"attrs": {},
+							"parents": []
+						}
+					]
+				},
+				"decision": "deny",
+				"determiningPolicies": [],
+				"errorsIn": ["10-permit-owner"]
+			}
+		}
+	]
+}

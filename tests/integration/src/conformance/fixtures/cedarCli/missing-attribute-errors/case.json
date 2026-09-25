@@ -1,0 +1,156 @@
+{
+	"about": "The fail-open trap: an attribute the attributes lack is omitted, a policy reading it errors, and Cedar still allows on another permit. Both evaluators must agree on that — and the collector must deny anyway.",
+	"config": {
+		"principal": {
+			"attributes": {
+				"dept": "dept"
+			}
+		}
+	},
+	"requests": [
+		{
+			"about": "dept present",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "read",
+				"requestResourceType": "Document",
+				"requestResourceId": "42",
+				"dept": "eng"
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "read"
+					},
+					"resource": {
+						"type": "Document",
+						"id": "42"
+					},
+					"context": {},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {
+								"dept": "eng"
+							},
+							"parents": []
+						},
+						{
+							"uid": {
+								"type": "Document",
+								"id": "42"
+							},
+							"attrs": {},
+							"parents": []
+						}
+					]
+				},
+				"decision": "allow",
+				"determiningPolicies": ["10-permit-eng", "20-permit-read"],
+				"errorsIn": []
+			}
+		},
+		{
+			"about": "dept absent, another permit applies: Cedar allows, with the error",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "read",
+				"requestResourceType": "Document",
+				"requestResourceId": "42"
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "read"
+					},
+					"resource": {
+						"type": "Document",
+						"id": "42"
+					},
+					"context": {},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {},
+							"parents": []
+						},
+						{
+							"uid": {
+								"type": "Document",
+								"id": "42"
+							},
+							"attrs": {},
+							"parents": []
+						}
+					]
+				},
+				"decision": "allow",
+				"determiningPolicies": ["20-permit-read"],
+				"errorsIn": ["10-permit-eng"]
+			}
+		},
+		{
+			"about": "dept absent, nothing else applies",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "write",
+				"requestResourceType": "Document",
+				"requestResourceId": "42"
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "write"
+					},
+					"resource": {
+						"type": "Document",
+						"id": "42"
+					},
+					"context": {},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {},
+							"parents": []
+						},
+						{
+							"uid": {
+								"type": "Document",
+								"id": "42"
+							},
+							"attrs": {},
+							"parents": []
+						}
+					]
+				},
+				"decision": "deny",
+				"determiningPolicies": [],
+				"errorsIn": ["10-permit-eng"]
+			}
+		}
+	]
+}

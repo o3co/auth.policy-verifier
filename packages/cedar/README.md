@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.cedar
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 Co-resident [Cedar](https://www.cedarpolicy.com/) policy evaluation for
 [auth.policy-verifier](https://github.com/o3co/auth.policy-verifier), as an
@@ -561,3 +561,22 @@ The Cedar evaluator's version is the engine package's concern:
 exactly (the version is in its [`package.json`](../cedar-wasm/package.json)),
 because Cedar minor releases can carry policy-language changes and
 upgrades should be deliberate. This package depends on no evaluator.
+
+That this collector computes what Cedar computes is measured, not assumed.
+The CLI-equivalence suite (#198,
+[`cedar-cli-equivalence.test.mts`](../../tests/integration/src/cedar-cli-equivalence.test.mts))
+runs a fixture corpus through the collector over the wasm engine and through
+the official `cedar` CLI at the pinned version, asking the CLI exactly the
+request the collector built.
+- The engine's answer and the CLI's must be one answer: the same decision, the
+  same determining policies and the same erroring policies.
+- The request the collector built must be the one each case records.
+- The collector must fail closed on an error, even where Cedar allows on
+  another permit.
+
+Each fixture policy carries `@id` with the id its file gives it. The CLI names
+a policy by `@id`, and otherwise by its position in the whole set, not by
+file. So both evaluators answer in the same names.
+
+The `http` engine is not measured there: its cedar-agent evaluates with
+cedar-policy 2.4, a different Cedar.
