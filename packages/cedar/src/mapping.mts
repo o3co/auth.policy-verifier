@@ -396,21 +396,23 @@ function mergeConflict(held: Held, offered: Contribution): Difference | undefine
 function refuseCycles(entities: readonly CedarEntity[]): void {
 	const byKey = new Map(entities.map((entity) => [uidKey(entity.uid), entity]));
 	const state = new Map<string, "open" | "done">();
-	const visit = (key: string): void => {
-		if (state.get(key) === "done") return;
-		if (state.get(key) === "open") {
+	const visit = (key: string, entity: CedarEntity): void => {
+		const at = state.get(key);
+		if (at === "done") return;
+		if (at === "open") {
 			throw new CedarInputError(
 				"the request's entities form a membership cycle — an entity would be its own ancestor",
 			);
 		}
 		state.set(key, "open");
-		for (const parent of byKey.get(key)?.parents ?? []) {
+		for (const parent of entity.parents) {
 			const parentKey = uidKey(parent);
-			if (byKey.has(parentKey)) visit(parentKey);
+			const next = byKey.get(parentKey);
+			if (next !== undefined) visit(parentKey, next);
 		}
 		state.set(key, "done");
 	};
-	for (const key of byKey.keys()) visit(key);
+	for (const [key, entity] of byKey) visit(key, entity);
 }
 
 /** A uid as one string: type and id both, so `User::"a"` and `Group::"a"` stay apart. */
@@ -438,15 +440,10 @@ function sameCedarValue(a: CedarValue | undefined, b: CedarValue | undefined): b
 
 function canonical(value: CedarValue): string {
 	if (Array.isArray(value)) return `[${[...new Set(value.map(canonical))].sort().join(",")}]`;
+	// The mapping builds no records (`toCedarValue` refuses objects): an object
+	// here is an entity reference, and is its uid.
 	if (typeof value === "object" && value !== null) {
-		const reference = (value as { __entity?: CedarEntityUid }).__entity;
-		if (reference !== undefined) return `entity:${uidKey(reference)}`;
-		// Not built by this mapping today; compared by its keys, in any order.
-		const record = value as Record<string, CedarValue>;
-		return `{${Object.keys(record)
-			.sort()
-			.map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`)
-			.join(",")}}`;
+		return `entity:${uidKey((value as { __entity: CedarEntityUid }).__entity)}`;
 	}
 	return JSON.stringify(value);
 }

@@ -395,6 +395,18 @@ describe("CedarPolicyRuleCollector — one entity per uid (#282)", () => {
 			expect(merged.passed).toBe(false);
 		});
 
+		it("refuses an attribute both declare that the resource's leaves out — the other way round too", async () => {
+			const { passed, logged } = await ask(
+				{
+					principal: { attributes: { dept: "department" } },
+					resource: { attributes: { dept: "resourceDept" } },
+				},
+				[...SELF, ["department", "eng"]],
+			);
+			expect(passed).toBe(false);
+			expect(logged).toContain('their mappings disagree on it (attribute \\"dept\\")');
+		});
+
 		it("refuses parents the resource mapping would add", async () => {
 			const own = await ask(
 				{
@@ -536,7 +548,10 @@ describe("CedarPolicyRuleCollector — one entity per uid (#282)", () => {
 
 		it("is refused at boot as anything but strict or merge", async () => {
 			await expect(collectSync({ policies: PERMIT_ALL, sharedEntity: "union" })).rejects.toThrow(
-				/sharedEntity must be one of strict, merge/,
+				/sharedEntity must be one of strict, merge, got "union"/,
+			);
+			await expect(collectSync({ policies: PERMIT_ALL, sharedEntity: 1 })).rejects.toThrow(
+				/sharedEntity must be one of strict, merge, got number/,
 			);
 		});
 	});
@@ -620,6 +635,23 @@ describe("CedarPolicyRuleCollector — one entity per uid (#282)", () => {
 				{ type: "User", id: "alice" },
 				{ type: "Action", id: "read" },
 			]);
+		});
+
+		it("takes an ancestry for what it is — the principal in its resource is no cycle", async () => {
+			const { passed, entities } = await ask(
+				{
+					principal: { parents: { Group: "groups" } },
+					resource: { parents: { Group: "resourceGroups" } },
+				},
+				[
+					["requestResourceType", "Group"],
+					["requestResourceId", "team"],
+					["groups", ["team"]],
+					["resourceGroups", ["org"]],
+				],
+			);
+			expect(passed).toBe(true);
+			expect(entities).toHaveLength(2);
 		});
 
 		it("carries an attribute called __proto__ as one", async () => {
