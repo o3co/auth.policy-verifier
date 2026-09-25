@@ -622,11 +622,18 @@ docker compose --profile cedar up --build
   restarted and pushes the set again. Each call runs under the server's
   `verify.ruleTimeoutMs` (default 2000 ms), answering `rule_timeout` when the
   agent is slower than that.
-- **Two Cedar versions.** cedar-agent 0.2.2 evaluates with cedar-policy 2.4;
-  the wasm package with the Cedar 4 release it pins (see
-  [Version pinning](#version-pinning)). Policies written to the older grammar run
-  under both; a policy using a newer construct will be refused by the agent at
-  boot, which is the right place to find out.
+- **Two Cedar versions.** cedar-agent 0.2.2 evaluates with cedar-policy
+  2.5.0. The agent does not report it; the version is read from the crate
+  path compiled into the image's binary. The wasm package evaluates with the
+  Cedar 4 release it pins (see [Version pinning](#version-pinning)).
+  - Policies written to the older grammar run under both. A policy using a
+    newer construct is refused by the agent at boot, which is the right place
+    to find out.
+  - Both are measured over one corpus (#284, see
+    [Version pinning](#version-pinning)). On it they agree on every decision,
+    every determining policy and every erroring policy. Only the wording of
+    error messages differs: `` does not have the attribute `dept` `` under 4,
+    `does not have the attribute: dept` under 2.5.
 - **The response contract is cedar-agent 0.2.x's.** `POST /v1/is_authorized`
   must answer `{ decision, diagnostics: { reason: [...], errors: [...] } }`;
   an answer missing either list is refused, and the call denies. The errors
@@ -707,5 +714,35 @@ Each fixture policy carries `@id` with the id its file gives it. The CLI names
 a policy by `@id`, and otherwise by its position in the whole set, not by
 file. So both evaluators answer in the same names.
 
-The `http` engine is not measured there: its cedar-agent evaluates with
-cedar-policy 2.4, a different Cedar.
+The `http` engine is measured by the same suite, against a real cedar-agent
+(#284). It is held to the CLI of the Cedar that agent runs, 2.5.0 in the image
+the template pins, rather than to the wasm engine's CLI.
+- **Across the two Cedars.** Each case states its answers once, and both
+  engines are held to them. So the corpus is also measured across Cedar 2.5
+  and 4: a case that meant one thing under one and another under the other
+  fails on one side. Today only the wording of error messages differs, which is
+  why each engine is held to its own version's CLI.
+- **What the agent cannot run.** A case whose file holds several policies is
+  the wasm engine's only, because cedar-agent stores one policy per id; the
+  http half says it skips it. A case under `onNoDeterminingPolicy = "abstain"`
+  runs over the agent under `"deny"`, since `"abstain"` is refused with this
+  engine. Cedar's answer does not depend on that setting, and the collector's
+  reading of it under `"abstain"` is checked on the wasm side.
+- **Where it runs.** CI's `cedar-agent-equivalence` job starts the image the
+  template's compose pins and reads the Cedar version from its binary. It
+  then installs `cedar-policy-cli` at that version and runs the suite. Bumping
+  the image moves the CLI with it.
+- **Running it locally.** Start the agent with a token, install the CLI of its
+  Cedar, and point the suite at both. Without them the http half is skipped,
+  with a notice.
+
+  ```sh
+  docker run -d --name cedar-agent -p 127.0.0.1:8180:8180 \
+    -e CEDAR_AGENT_AUTHENTICATION="$TOKEN" permitio/cedar-agent:0.2.2
+  cargo install cedar-policy-cli --locked --version 2.5.0 --root ~/.cedar-agent-cli
+  pnpm run build
+  CEDAR_AGENT_ENDPOINT=http://127.0.0.1:8180 CEDAR_AGENT_AUTHENTICATION="$TOKEN" \
+    CEDAR_AGENT_CLI=~/.cedar-agent-cli/bin/cedar CEDAR_AGENT_CEDAR_VERSION=2.5.0 \
+    pnpm --filter @o3co/auth.policy-verifier.integration-tests \
+    exec vitest run cedar-cli-equivalence
+  ```

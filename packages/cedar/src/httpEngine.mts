@@ -797,7 +797,7 @@ const UNREADABLE_POLICY_ID = "\u0000";
 /**
  * A diagnostics list as rendered text, or `undefined` when it is not a list.
  *
- * The items are strings from cedar-agent 0.2.x (cedar-policy 2.4); Cedar 3.x+
+ * The items are strings from cedar-agent 0.2.x (cedar-policy 2.5); Cedar 3.x+
  * serialises errors as objects. The rule only logs errors and decides on
  * whether there are any — which rendering cannot change — so a non-string
  * item is rendered rather than the whole answer refused (v0.10.0 audit). The
