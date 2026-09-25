@@ -473,9 +473,8 @@ function requestHeaders(configured: unknown, fromEnv: string | undefined): Recor
  * once the tabs, spaces and line breaks around it are trimmed, which `fetch`
  * does itself, a tab, printable ASCII or U+0080–U+00FF and nothing else. So a
  * token read from a file with its trailing newline still goes. `fetch`
- * refuses anything else — quoting the value for a line break, a NUL or a
- * character above U+00FF — and the load would have called the agent
- * unreachable (#271).
+ * refuses anything else — quoting the value for a line break or a NUL — and
+ * the load would have called the agent unreachable (#271).
  */
 function isSendableHeaderValue(value: string): boolean {
 	const trimmed = value.replace(/^[\t\n\r ]+|[\t\n\r ]+$/g, "");
