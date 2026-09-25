@@ -77,11 +77,12 @@ The source falls into four parts, separated by what changes them:
   [`__tests__/httpEngine.test.mts`](__tests__/httpEngine.test.mts),
   [`__tests__/httpEngineFakeAgent.test.mts`](__tests__/httpEngineFakeAgent.test.mts).
 - The `http` engine reads at most `maxAnswerBytes` of an answer — `CEDAR_ANSWER_MAX_BYTES`
-  (1 MiB) when the collector's config entry does not set it. A longer one, declared or
-  streamed, is refused — a deny — rather than held in memory for the rule deadline, because a
-  process out of memory takes every route down, not only the ones Cedar gates. The bound is
-  set per entry because an honest answer grows with the policy set. It does not check
-  `content-type`: the body is parsed and its shape checked, which is
+  (1 MiB) when the collector's config entry does not set it, and from 1 KiB to 256 MiB when
+  it does. A longer one, declared or streamed, is refused — a deny — rather than held in
+  memory for the rule deadline, because a process out of memory takes every route down, not
+  only the ones Cedar gates. The bound is set per entry because an honest answer grows with
+  the policy set; an error's body, which becomes the log line, stays within 1 MiB however
+  high it is set. It does not check `content-type`: the body is parsed and its shape checked, which is
   the check a `content-type` test would only approximate —
   [`__tests__/httpEngine.test.mts`](__tests__/httpEngine.test.mts),
   [`__tests__/httpEngineFakeAgent.test.mts`](__tests__/httpEngineFakeAgent.test.mts).

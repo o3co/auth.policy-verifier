@@ -279,6 +279,24 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 		);
 	});
 
+	it("reads a refusing agent's error body at load up to maxAnswerBytes too", async () => {
+		const doFetch = vi.fn(
+			async () =>
+				new Response(`{"description":"${"x".repeat(2048)}"}`, {
+					status: 400,
+					statusText: "Bad Request",
+				}),
+		) as unknown as typeof fetch;
+		await expect(
+			createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }).load(
+				inline(PERMIT_ALL),
+				loadContext({ maxAnswerBytes: 1024 }),
+			),
+		).rejects.toThrow(
+			/refused the policy set from inline policies \(400; policies: policies\): Bad Request$/,
+		);
+	});
+
 	it("retries an unreachable agent until the load deadline, then refuses to start naming it and the cause", async () => {
 		let attempts = 0;
 		const doFetch = vi.fn(async () => {
@@ -1025,35 +1043,50 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		);
 	});
 
-	it("reads that decision when maxAnswerBytes allows it", async () => {
+	it.each([
+		["a number", 2 * MIB],
+		// `maxAnswerBytes = ${?CEDAR_MAX_ANSWER_BYTES}` in HOCON delivers a string,
+		// as it does for the server's numeric knobs, and is read the same way.
+		["the string a HOCON env substitution delivers", String(2 * MIB)],
+	])("reads that decision when maxAnswerBytes allows it, written as %s", async (_label, bound) => {
 		const loaded = await loadAsync(
 			createCedarHttpEngine({
 				fetch: agent(() => new Response(largeAllow(40_000), { status: 200 })).doFetch,
 				env: AGENT_ENV,
 			}),
 			inline(PERMIT_ALL),
-			{ maxAnswerBytes: 2 * MIB },
+			{ maxAnswerBytes: bound },
 		);
 		const answer = await loaded.isAuthorized(request(), NEVER_ABORTS);
 		expect(answer.decision).toBe("allow");
 		expect(answer.reason).toHaveLength(40_000);
 	});
 
+	// Each bound is met exactly and exceeded by one byte, once streamed and once
+	// declared by content-length, so both checks are held at the boundary.
 	it.each([
-		[1024, "1 KiB"],
-		[1000, "1000 bytes"],
-		[3 * MIB, "3 MiB"],
-	])("refuses above a maxAnswerBytes of %i, naming it as %s", async (bound, named) => {
+		[1024, "1 KiB", "streamed"],
+		[1024, "1 KiB", "declared"],
+		[1536, "1536 bytes", "streamed"],
+		[1536, "1536 bytes", "declared"],
+		[3 * MIB, "3 MiB", "streamed"],
+	])("refuses above a maxAnswerBytes of %i, naming it as %s (%s)", async (bound, named, how) => {
 		const decision = JSON.stringify(ALLOW);
-		const over = decision + " ".repeat(bound + 1 - decision.length);
-		const exact = decision + " ".repeat(bound - decision.length);
+		const bodies = {
+			over: decision + " ".repeat(bound + 1 - decision.length),
+			exact: decision + " ".repeat(bound - decision.length),
+		};
+		const answer = (text: string): Response =>
+			how === "declared"
+				? new Response(text, {
+						status: 200,
+						headers: { "content-length": String(Buffer.byteLength(text)) },
+					})
+				: new Response(text, { status: 200 });
 		const loaded = await loadAsync(
 			createCedarHttpEngine({
-				fetch: agent(
-					(call) =>
-						new Response((call.principal as string).includes("over") ? over : exact, {
-							status: 200,
-						}),
+				fetch: agent((call) =>
+					answer((call.principal as string).includes("over") ? bodies.over : bodies.exact),
 				).doFetch,
 				env: AGENT_ENV,
 			}),
@@ -1070,7 +1103,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		);
 	});
 
-	it("applies maxAnswerBytes to an error's body too", async () => {
+	it("reads an error's body up to maxAnswerBytes when that is below the default", async () => {
 		const description = `{"description":"${"x".repeat(2048)}"}`;
 		const loaded = await loadAsync(
 			createCedarHttpEngine({
@@ -1087,15 +1120,54 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		);
 	});
 
+	// A higher bound is for decisions. An error's body is the agent's
+	// description of a failure, and becomes the log line, so it stays under
+	// the default however high maxAnswerBytes is set.
+	it("reads an error's body up to the default when maxAnswerBytes is above it", async () => {
+		const description = `{"description":"${"x".repeat(2 * MIB)}"}`;
+		const loaded = await loadAsync(
+			createCedarHttpEngine({
+				fetch: agent(
+					() => new Response(description, { status: 500, statusText: "Internal Server Error" }),
+				).doFetch,
+				env: AGENT_ENV,
+			}),
+			inline(PERMIT_ALL),
+			{ maxAnswerBytes: 8 * MIB },
+		);
+		await expect(loaded.isAuthorized(request(), NEVER_ABORTS)).rejects.toThrow(
+			/answered 500 to an authorization call: Internal Server Error$/,
+		);
+	});
+
+	it.each([
+		["exactly 1 KiB", 1024],
+		["exactly 256 MiB", 256 * MIB],
+		["a string with spaces around it", " 2097152 "],
+	])("accepts a maxAnswerBytes of %s", async (_label, value) => {
+		const { doFetch } = agent();
+		await expect(
+			loadAsync(createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }), inline(PERMIT_ALL), {
+				maxAnswerBytes: value,
+			}),
+		).resolves.toBeDefined();
+	});
+
 	it.each([
 		["zero", 0, "0"],
 		["negative", -1, "-1"],
 		["fractional", 1.5, "1.5"],
 		["NaN", Number.NaN, "NaN"],
 		["Infinity", Number.POSITIVE_INFINITY, "Infinity"],
-		["a numeric string", "1048576", '"1048576"'],
+		["below 1 KiB — a unit slip that would deny every answer", 4, "4"],
+		["above 256 MiB", 256 * MIB + 1, String(256 * MIB + 1)],
+		["an integer too large to be safe", 1e300, "1e+300"],
+		["a string that is not a number", "1 MiB", '"1 MiB"'],
+		["a blank string", "  ", '"  "'],
 		["null", null, "null"],
 		["a boolean", true, "true"],
+		["a bigint", BigInt(4194304), "4194304n"],
+		["a symbol", Symbol("bytes"), "Symbol(bytes)"],
 	])(
 		"refuses a maxAnswerBytes that is %s at load, before anything is sent",
 		async (_label, value, shown) => {
@@ -1107,7 +1179,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 				),
 			).rejects.toThrow(
 				new RegExp(
-					`^maxAnswerBytes must be a positive integer number of bytes, got ${shown.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+					`^maxAnswerBytes must be a whole number of bytes from 1 KiB to 256 MiB, got ${shown.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
 				),
 			);
 			expect(calls).toEqual([]);

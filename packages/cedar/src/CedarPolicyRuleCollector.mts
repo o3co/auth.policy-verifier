@@ -66,10 +66,11 @@ export interface CedarPolicyRuleCollectorConfig {
 	authentication?: string;
 	/**
 	 * HTTP engine only: the most bytes read from one answer from the agent. A
-	 * longer answer is refused — a deny. Absent, `CEDAR_ANSWER_MAX_BYTES`
-	 * (1 MiB); a positive integer otherwise, or the collector refuses to start.
+	 * longer answer is refused — a deny. Absent, 1 MiB (`CEDAR_ANSWER_MAX_BYTES`).
+	 * A whole number of bytes from 1 KiB to 256 MiB, as a number or the string a
+	 * HOCON env substitution delivers; anything else refuses to start.
 	 */
-	maxAnswerBytes?: number;
+	maxAnswerBytes?: number | string;
 	/** Rule group the Cedar decision joins AND-evaluation as. Default `"cedar"`. */
 	ruleType?: string;
 	/**

@@ -423,13 +423,18 @@ docker compose --profile cedar up --build
   `verify.batchConcurrency`; a deployment expecting floods on the verifier
   should size the agent for that concurrency, or put a connection-limiting
   proxy in front of it.
-- **An answer is bounded.** At most `maxAnswerBytes` of one answer is read —
-  1 MiB (`CEDAR_ANSWER_MAX_BYTES`) when the collector's config entry does not
-  set it. A longer one is refused rather than held in memory for the rule
+- **An answer is bounded.** At most `maxAnswerBytes` of one answer is read,
+  and held until it is parsed, for each concurrent call. Unset, it is 1 MiB —
+  the default, exported as `CEDAR_ANSWER_MAX_BYTES`; there is no environment
+  variable for it. A longer answer is refused rather than held for the rule
   deadline, since a process out of memory takes every route down. An answer's
   determining-policy and error lists grow with the policy set, so a large set
   can answer honestly past 1 MiB: the refusal says so, and the fix is a higher
-  `maxAnswerBytes` (a positive integer; anything else refuses to start).
+  `maxAnswerBytes` in the collector's entry — a whole number of bytes from
+  1 KiB to 256 MiB, written as a number or through a HOCON env substitution
+  (`maxAnswerBytes = ${?CEDAR_MAX_ANSWER_BYTES}`); anything else refuses to
+  start. An error's body is read up to the smaller of `maxAnswerBytes` and
+  1 MiB, since it becomes the log line.
 - **Failure after boot is a deny.** An agent that is unreachable, answers
   non-2xx, breaks off its answer, answers more than `maxAnswerBytes`, or
   answers something that is not a decision

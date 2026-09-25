@@ -3,9 +3,9 @@
 
 /*
  * The `http` engine: evaluates the policy set out of process by pushing it to a
- * cedar-agent at load and asking the agent per request. Also holds its endpoint
- * and token resolution and the rendering of Cedar entity references; the
- * package index registers it.
+ * cedar-agent at load and asking the agent per request. Also holds the
+ * resolution of its endpoint, token and answer bound, and the rendering of
+ * Cedar entity references; the package index registers it.
  */
 
 import type { Logger } from "@o3co/auth.policy-verifier.core";
@@ -404,7 +404,7 @@ function resolveEndpoint(configured: unknown, fromEnv: string | undefined): stri
 	if (configured !== undefined) {
 		if (typeof configured !== "string" || configured.length === 0) {
 			throw new CedarEngineError(
-				`endpoint must be a non-empty URL string, got ${JSON.stringify(configured)}`,
+				`endpoint must be a non-empty URL string, got ${shown(configured)}`,
 			);
 		}
 		raw = configured;
@@ -448,19 +448,47 @@ function resolveEndpoint(configured: unknown, fromEnv: string | undefined): stri
 }
 
 /**
- * The collector entry's `maxAnswerBytes`, else {@link CEDAR_ANSWER_MAX_BYTES}:
- * a positive whole number of bytes. Checked here, where `endpoint` is — the
- * collector entry reaches the engine alone, so this is its one boundary.
- * `null` is a value, and refused like any other that is not a byte count.
+ * The range `maxAnswerBytes` may be set in. Below 1 KiB even the smallest
+ * decision is refused, so every request would be denied — a unit slip (`4`
+ * meant as MiB) is caught at boot rather than in production. Above 256 MiB
+ * the text would approach the longest string V8 can hold, about 512 Mi
+ * characters, and a failure there would be reported as a broken-off answer.
+ */
+const MIN_ANSWER_BYTES = 1024;
+const MAX_ANSWER_BYTES = 256 * 1024 * 1024;
+
+/**
+ * The collector entry's `maxAnswerBytes`, else {@link CEDAR_ANSWER_MAX_BYTES}.
+ * Written as a number, or as the string a HOCON env substitution
+ * (`${?CEDAR_MAX_ANSWER_BYTES}`) delivers — the rule the server's numeric
+ * knobs follow (`resolveBound` in the server package, which this package
+ * cannot import) — and a whole number of bytes in range. Checked here, where
+ * `endpoint` is: the config schema passes a collector entry through, so the
+ * engine is where its keys are checked (`CedarEngineLoadContext.config`).
+ * `null` is a value, and refused like anything else that is not a byte count.
  */
 function resolveMaxAnswerBytes(configured: unknown): number {
 	if (configured === undefined) return CEDAR_ANSWER_MAX_BYTES;
-	if (typeof configured !== "number" || !Number.isSafeInteger(configured) || configured <= 0) {
+	const bytes = isWrittenAsNumber(configured) ? Number(configured) : Number.NaN;
+	if (!Number.isSafeInteger(bytes) || bytes < MIN_ANSWER_BYTES || bytes > MAX_ANSWER_BYTES) {
 		throw new CedarEngineError(
-			`maxAnswerBytes must be a positive integer number of bytes, got ${typeof configured === "number" ? String(configured) : JSON.stringify(configured)}`,
+			`maxAnswerBytes must be a whole number of bytes from ${byteSize(MIN_ANSWER_BYTES)} to ${byteSize(MAX_ANSWER_BYTES)}, got ${shown(configured)}`,
 		);
 	}
-	return configured;
+	return bytes;
+}
+
+/** The two forms a number is written in: a number, or a non-blank string. `Number(true)` is 1. */
+function isWrittenAsNumber(value: unknown): value is number | string {
+	return typeof value === "number" || (typeof value === "string" && value.trim() !== "");
+}
+
+/** A config value as a refusal quotes it — any value, a bigint or a symbol included. */
+function shown(value: unknown): string {
+	if (typeof value === "number") return String(value);
+	if (typeof value === "bigint") return `${value}n`;
+	if (typeof value === "symbol") return value.toString();
+	return JSON.stringify(value) ?? String(value);
 }
 
 /** A byte count as an operator would write it: MiB or KiB when it divides evenly, else bytes. */
@@ -482,7 +510,7 @@ function requestHeaders(configured: unknown, fromEnv: string | undefined): Recor
 	if (configured !== undefined) {
 		if (typeof configured !== "string" || configured.length === 0) {
 			throw new CedarEngineError(
-				`authentication must be a non-empty string, got ${JSON.stringify(configured)}`,
+				`authentication must be a non-empty string, got ${shown(configured)}`,
 			);
 		}
 		token = configured;
@@ -609,7 +637,8 @@ function parseJson(text: string): unknown {
 /**
  * cedar-agent's error body is `{ reason, description, code }`; fall back to
  * the status text. The status is the fact, so a body that does not arrive, or
- * is over the bound, leaves it to the status text — unless the read was cut
+ * is over the bound — `maxAnswerBytes`, and never more than
+ * {@link CEDAR_ANSWER_MAX_BYTES} — leaves it to the status text — unless the read was cut
  * by `signal` aborting, which is the signal's to report (#271).
  */
 async function errorDescription(
@@ -619,7 +648,9 @@ async function errorDescription(
 ): Promise<string> {
 	let text: string | typeof OVER_BOUND | undefined;
 	try {
-		text = await boundedText(response, maxAnswerBytes);
+		// Raising maxAnswerBytes is for decisions; an error's body becomes the
+		// log line, so it stays under the default however high that is set.
+		text = await boundedText(response, Math.min(maxAnswerBytes, CEDAR_ANSWER_MAX_BYTES));
 	} catch {
 		if (signal?.aborted) throw signal.reason;
 	}
