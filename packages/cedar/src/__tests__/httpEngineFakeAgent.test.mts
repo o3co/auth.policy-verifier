@@ -330,7 +330,7 @@ describe("cedarHttpEngine over the wire — a failed call rejects with CedarEngi
 				response.writeHead(200, { "content-type": "application/json" });
 				response.end(`{"decision":"Allow","padding":"${"x".repeat(1024 * 1024)}"}`);
 			},
-			/answered an authorization call with more than 1 MiB — refused$/,
+			/answered an authorization call with more than 1 MiB — refused; set maxAnswerBytes higher if its answers are this large$/,
 		],
 		[
 			"a 200 JSON array",
@@ -712,6 +712,35 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 		});
 		// A forbid is the policies' answer, not a fault.
 		expect(logger.error).not.toHaveBeenCalled();
+	});
+
+	// maxAnswerBytes travels in the collector's config entry, as endpoint does.
+	// A decision over the default bound is a deny under the default and the
+	// agent's answer once the entry raises the bound.
+	it("reads a decision over the default bound when the entry's maxAnswerBytes allows it", async () => {
+		const ids = Array.from(
+			{ length: 40_000 },
+			(_, i) => `policy-${String(i).padStart(6, "0")}-permit-read`,
+		);
+		const large = cedarAgent(decision("Allow", ids));
+
+		const { rule: bounded, logger } = await rule();
+		agent.answer(large);
+		const refused = await evaluate(attrs(), [bounded]);
+		expect(refused.decision).toBe("deny");
+		expect(outcomeOf(refused)).toMatchObject({ passed: false, evaluation: unconfirmed("failed") });
+		expect(JSON.stringify((logger.error as ReturnType<typeof vi.fn>).mock.calls)).toMatch(
+			/more than 1 MiB — refused; set maxAnswerBytes higher/,
+		);
+
+		const { rule: raised } = await rule({ maxAnswerBytes: 4 * 1024 * 1024 });
+		agent.answer(large);
+		const allowed = await evaluate(attrs(), [raised]);
+		expect(allowed.decision).toBe("allow");
+		expect(outcomeOf(allowed)).toMatchObject({
+			passed: true,
+			evaluation: unconfirmed("completed"),
+		});
 	});
 
 	it("does not take an agent's word for the revision — it cannot vouch for what it ran (#244)", async () => {

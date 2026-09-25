@@ -64,6 +64,12 @@ export interface CedarPolicyRuleCollectorConfig {
 	endpoint?: string;
 	/** HTTP engine only: the agent's `Authorization` value. Absent, `CEDAR_AUTHENTICATION`. */
 	authentication?: string;
+	/**
+	 * HTTP engine only: the most bytes read from one answer from the agent. A
+	 * longer answer is refused — a deny. Absent, `CEDAR_ANSWER_MAX_BYTES`
+	 * (1 MiB); a positive integer otherwise, or the collector refuses to start.
+	 */
+	maxAnswerBytes?: number;
 	/** Rule group the Cedar decision joins AND-evaluation as. Default `"cedar"`. */
 	ruleType?: string;
 	/**

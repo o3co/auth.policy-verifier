@@ -137,6 +137,15 @@ const NEVER_ABORTS = new AbortController().signal;
 /** The answer bound, written out so a test's sizes do not depend on the constant under test. */
 const MIB = 1024 * 1024;
 
+/** A valid Allow whose determining-policy list alone is `policies` ids long. */
+function largeAllow(policies: number): string {
+	const reason = Array.from(
+		{ length: policies },
+		(_, i) => `policy-${String(i).padStart(6, "0")}-permit-read`,
+	);
+	return JSON.stringify({ decision: "Allow", diagnostics: { reason, errors: [] } });
+}
+
 function request(): CedarRequest {
 	const principal = { type: "User", id: "alice" };
 	const resource = { type: "Document", id: "42" };
@@ -914,7 +923,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 	// hold memory for the whole rule deadline, per concurrent call, and an
 	// exhausted process takes every route down with it, not only the ones
 	// Cedar gates (#271). Over the bound, the call fails closed.
-	it("bounds an answer at 1 MiB (#271)", () => {
+	it("bounds an answer at 1 MiB by default (#271)", () => {
 		expect(CEDAR_ANSWER_MAX_BYTES).toBe(MIB);
 	});
 
@@ -938,7 +947,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		const rejected = loaded.isAuthorized(request(), NEVER_ABORTS);
 		await expect(rejected).rejects.toThrow(CedarEngineError);
 		await expect(rejected).rejects.toThrow(
-			/cedar engine at http:\/\/127\.0\.0\.1:8180 answered an authorization call with more than 1 MiB — refused$/,
+			/cedar engine at http:\/\/127\.0\.0\.1:8180 answered an authorization call with more than 1 MiB — refused; set maxAnswerBytes higher if its answers are this large$/,
 		);
 		// The stream's first pull is the source filling its queue, not a read.
 		expect(pulled).toBeLessThanOrEqual(1);
@@ -963,7 +972,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 			inline(PERMIT_ALL),
 		);
 		await expect(loaded.isAuthorized(request(), NEVER_ABORTS)).rejects.toThrow(
-			/answered an authorization call with more than 1 MiB — refused$/,
+			/answered an authorization call with more than 1 MiB — refused; set maxAnswerBytes higher if its answers are this large$/,
 		);
 		expect(sent).toBeLessThanOrEqual(MIB + 2 * 64 * 1024);
 	});
@@ -995,6 +1004,115 @@ describe("cedarHttpEngine — isAuthorized", () => {
 			/answered 500 to an authorization call: Internal Server Error$/,
 		);
 	});
+
+	// A decision can be larger than the default bound and still be the
+	// agent's honest answer: the determining-policy and error lists grow with
+	// the policy set. Through 0.13.0 such an answer was read; under the default
+	// it is refused, and `maxAnswerBytes` in the collector's config entry is the
+	// way out. Found by the v0.14.0 release audit.
+	it("refuses a valid decision larger than the default bound, saying how to raise it", async () => {
+		const answer = largeAllow(40_000);
+		expect(answer.length).toBeGreaterThan(MIB);
+		const loaded = await loadAsync(
+			createCedarHttpEngine({
+				fetch: agent(() => new Response(answer, { status: 200 })).doFetch,
+				env: AGENT_ENV,
+			}),
+			inline(PERMIT_ALL),
+		);
+		await expect(loaded.isAuthorized(request(), NEVER_ABORTS)).rejects.toThrow(
+			/answered an authorization call with more than 1 MiB — refused; set maxAnswerBytes higher if its answers are this large$/,
+		);
+	});
+
+	it("reads that decision when maxAnswerBytes allows it", async () => {
+		const loaded = await loadAsync(
+			createCedarHttpEngine({
+				fetch: agent(() => new Response(largeAllow(40_000), { status: 200 })).doFetch,
+				env: AGENT_ENV,
+			}),
+			inline(PERMIT_ALL),
+			{ maxAnswerBytes: 2 * MIB },
+		);
+		const answer = await loaded.isAuthorized(request(), NEVER_ABORTS);
+		expect(answer.decision).toBe("allow");
+		expect(answer.reason).toHaveLength(40_000);
+	});
+
+	it.each([
+		[1024, "1 KiB"],
+		[1000, "1000 bytes"],
+		[3 * MIB, "3 MiB"],
+	])("refuses above a maxAnswerBytes of %i, naming it as %s", async (bound, named) => {
+		const decision = JSON.stringify(ALLOW);
+		const over = decision + " ".repeat(bound + 1 - decision.length);
+		const exact = decision + " ".repeat(bound - decision.length);
+		const loaded = await loadAsync(
+			createCedarHttpEngine({
+				fetch: agent(
+					(call) =>
+						new Response((call.principal as string).includes("over") ? over : exact, {
+							status: 200,
+						}),
+				).doFetch,
+				env: AGENT_ENV,
+			}),
+			inline(PERMIT_ALL),
+			{ maxAnswerBytes: bound },
+		);
+		const asking = (id: string): CedarRequest => ({
+			...request(),
+			principal: { type: "User", id },
+		});
+		expect((await loaded.isAuthorized(asking("exact"), NEVER_ABORTS)).decision).toBe("allow");
+		await expect(loaded.isAuthorized(asking("over"), NEVER_ABORTS)).rejects.toThrow(
+			new RegExp(`with more than ${named} — refused; set maxAnswerBytes higher`),
+		);
+	});
+
+	it("applies maxAnswerBytes to an error's body too", async () => {
+		const description = `{"description":"${"x".repeat(2048)}"}`;
+		const loaded = await loadAsync(
+			createCedarHttpEngine({
+				fetch: agent(
+					() => new Response(description, { status: 500, statusText: "Internal Server Error" }),
+				).doFetch,
+				env: AGENT_ENV,
+			}),
+			inline(PERMIT_ALL),
+			{ maxAnswerBytes: 1024 },
+		);
+		await expect(loaded.isAuthorized(request(), NEVER_ABORTS)).rejects.toThrow(
+			/answered 500 to an authorization call: Internal Server Error$/,
+		);
+	});
+
+	it.each([
+		["zero", 0, "0"],
+		["negative", -1, "-1"],
+		["fractional", 1.5, "1.5"],
+		["NaN", Number.NaN, "NaN"],
+		["Infinity", Number.POSITIVE_INFINITY, "Infinity"],
+		["a numeric string", "1048576", '"1048576"'],
+		["null", null, "null"],
+		["a boolean", true, "true"],
+	])(
+		"refuses a maxAnswerBytes that is %s at load, before anything is sent",
+		async (_label, value, shown) => {
+			const { doFetch, calls } = agent();
+			await expect(
+				createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }).load(
+					inline(PERMIT_ALL),
+					loadContext({ maxAnswerBytes: value }),
+				),
+			).rejects.toThrow(
+				new RegExp(
+					`^maxAnswerBytes must be a positive integer number of bytes, got ${shown.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+				),
+			);
+			expect(calls).toEqual([]);
+		},
+	);
 
 	// The status can arrive before the body does, and an abort can land in
 	// between (#271): the body read then fails, and that is the signal's doing,
