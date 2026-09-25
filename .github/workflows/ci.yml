@@ -309,8 +309,12 @@ jobs:
           CEDAR_VERSION: ${{ steps.agent.outputs.version }}
         run: |
           set -euo pipefail
-          rustup toolchain install stable --profile minimal
-          cargo +stable install cedar-policy-cli --version "$CEDAR_VERSION" --locked --root ~/.cedar-agent-cli
+          # Pinned, unlike the wasm job's: an older Cedar's CLI is an older
+          # crate, and `--locked` holds its dependencies, not the compiler. A
+          # cold build (a new version, an evicted cache) uses the compiler it
+          # was verified with — 1.95.0 builds cedar-policy-cli 2.5.0.
+          rustup toolchain install 1.95.0 --profile minimal
+          cargo +1.95.0 install cedar-policy-cli --version "$CEDAR_VERSION" --locked --root ~/.cedar-agent-cli
 
       - name: Start the agent
         id: start

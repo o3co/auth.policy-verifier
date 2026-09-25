@@ -3,15 +3,16 @@
 
 /*
  * The official `cedar` CLI (cedar-policy-cli), driven as the reference
- * evaluator for the CLI-equivalence suite (#198): locating the binary, reading
+ * evaluator for the CLI-equivalence suite (#198, #284): locating the binary, reading
  * its version, running `cedar authorize --verbose`, and reading its answer back.
  *
  * The CLI has no machine-readable answer — `--error-format json` covers its
  * own failures, not the decision — so its text is parsed, strictly: a line the
  * parser has not seen is an error, never skipped, because a misread answer
  * would make two evaluators look equivalent when they are not. The format is
- * pinned by `cedar-cli-output.test.mts` against cedar-policy-cli 4.13.0's
- * literal output; a CLI that prints differently fails there first.
+ * pinned by `cedar-cli-output.test.mts` against the literal output of
+ * cedar-policy-cli 4.13.0 and 2.5.0; a CLI that prints differently fails
+ * there first.
  */
 
 import { spawnSync } from "node:child_process";
