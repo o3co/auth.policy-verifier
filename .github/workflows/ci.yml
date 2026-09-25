@@ -300,7 +300,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cedar-agent-cli
-          key: cedar-policy-cli-${{ steps.agent.outputs.version }}-${{ runner.os }}-${{ runner.arch }}
+          # Says what built it: the pinned toolchain below moves the key with it.
+          key: cedar-agent-cli-${{ steps.agent.outputs.version }}-rust-1.95.0-${{ runner.os }}-${{ runner.arch }}
 
       - name: Install the cedar CLI of the agent's Cedar
         if: steps.cedar-cli-cache.outputs.cache-hit != 'true'

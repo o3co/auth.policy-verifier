@@ -720,9 +720,9 @@ The `http` engine is measured by the same suite, against a real cedar-agent
 (#284). It is held to the CLI of the Cedar that agent runs, 2.5.0 in the image
 the template pins, rather than to the wasm engine's CLI.
 - **Across the two Cedars.** Each case states its answers once, and each
-  half holds its CLI to them. So every case is also measured across Cedar
-  2.5.0 and 4.13.0: a case that meant one thing under one and another under
-  the other fails on one side. The wording of error messages differs between
+  half holds its CLI to them. So every case is also measured across the
+  agent's Cedar and the wasm pin (2.5.0 and 4.13.0 today): a case that meant
+  one thing under one and another under the other fails on one side. The wording of error messages differs between
   them, which is why each engine is held to its own version's CLI.
 - **What the agent cannot run, declared and checked.**
   - A case whose set cedar-agent refuses states why, in its `case.json`
@@ -742,14 +742,17 @@ the template pins, rather than to the wasm engine's CLI.
 - **Running it locally.** Start the agent the template pins, with a token,
   install the CLI of its Cedar, and point the suite at both. Without them the
   http half is skipped, with a notice. The version below is the one read from
-  the image the template pins today; the CI job reads it afresh.
+  the image the template pins today; the CI job reads it afresh. `--locked`
+  holds the crate's dependencies, not the compiler, so the toolchain is the
+  one CI builds it with.
 
   ```sh
   TOKEN=$(openssl rand -hex 32)
   IMAGE=$(grep -oE 'permitio/cedar-agent:[^[:space:]]+' templates/standalone/docker-compose.yml)
   docker run -d --name cedar-agent -p 127.0.0.1:8180:8180 \
     -e CEDAR_AGENT_AUTHENTICATION="$TOKEN" "$IMAGE"
-  cargo install cedar-policy-cli --locked --version 2.5.0 --root ~/.cedar-agent-cli
+  rustup toolchain install 1.95.0 --profile minimal
+  cargo +1.95.0 install cedar-policy-cli --locked --version 2.5.0 --root ~/.cedar-agent-cli
   pnpm run build
   CEDAR_AGENT_ENDPOINT=http://127.0.0.1:8180 CEDAR_AGENT_AUTHENTICATION="$TOKEN" \
     CEDAR_AGENT_CLI=~/.cedar-agent-cli/bin/cedar CEDAR_AGENT_CEDAR_VERSION=2.5.0 \

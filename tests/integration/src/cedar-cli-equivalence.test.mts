@@ -88,6 +88,7 @@ import {
 	type LoadedCedarPolicySet,
 	loadPolicySource,
 	type NoDeterminingPolicy,
+	namePolicies,
 	type PolicySource,
 	registerCedarEngine,
 } from "@o3co/auth.policy-verifier.cedar";
@@ -138,13 +139,21 @@ interface Case {
 
 const CASES: Case[] = readdirSync(FIXTURES, { withFileTypes: true })
 	.filter((entry) => entry.isDirectory())
-	.map((entry) => ({
-		name: entry.name,
-		...(JSON.parse(readFileSync(join(FIXTURES, entry.name, "case.json"), "utf8")) as Omit<
-			Case,
-			"name"
-		>),
-	}))
+	.map((entry) => {
+		const testCase: Case = {
+			name: entry.name,
+			...(JSON.parse(readFileSync(join(FIXTURES, entry.name, "case.json"), "utf8")) as Omit<
+				Case,
+				"name"
+			>),
+		};
+		// A reason, or nothing: a refusal is stated, never a flag.
+		const refuses: unknown = testCase.agentRefuses;
+		if (refuses !== undefined && (typeof refuses !== "string" || refuses.trim() === "")) {
+			throw new Error(`${entry.name}/case.json: agentRefuses must say why, as text`);
+		}
+		return testCase;
+	})
 	.sort((a, b) => a.name.localeCompare(b.name));
 
 /** Never read: everything reaches the rule through its attributes. */
@@ -353,6 +362,12 @@ function expectStated(cliAnswer: CliAnswer, stated: CaseRequest["expect"]): void
 	);
 }
 
+// Outside the halves, so it runs once and on every machine — a CLI or not.
+it("the fixtures hold cases, each with requests", () => {
+	expect(CASES.length).toBeGreaterThan(0);
+	for (const testCase of CASES) expect(testCase.requests.length).toBeGreaterThan(0);
+});
+
 describe.each([WASM, HTTP])("the $name engine and the cedar CLI of its Cedar", (evaluator) => {
 	const cli = evaluator.cli;
 	const required = process.env[evaluator.requiredBy] === "1";
@@ -393,11 +408,6 @@ describe.each([WASM, HTTP])("the $name engine and the cedar CLI of its Cedar", (
 			expect(cedarCliVersion(reference)).toBe(evaluator.cedarVersion());
 		});
 
-		it("cover every case the fixtures hold", () => {
-			expect(CASES.length).toBeGreaterThan(0);
-			for (const testCase of CASES) expect(testCase.requests.length).toBeGreaterThan(0);
-		});
-
 		for (const testCase of CASES) {
 			const policyDir = join(FIXTURES, testCase.name, "policies");
 			const source = loadPolicySource({ policyDir });
@@ -415,6 +425,7 @@ describe.each([WASM, HTTP])("the $name engine and the cedar CLI of its Cedar", (
 					{ logger: silent },
 				);
 			let rule: AnyRule;
+			let refusal: unknown;
 			let scratch: string;
 
 			const title =
@@ -429,7 +440,14 @@ describe.each([WASM, HTTP])("the $name engine and the cedar CLI of its Cedar", (
 					registerObserved(engineName, evaluator.engine(), observed);
 					scratch = mkdtempSync(join(tmpdir(), "cedar-cli-equivalence-"));
 					writeFileSync(join(scratch, "policies.cedar"), source.text);
+					// Both under the hook timeout, which the engine's load deadline sits
+					// under: an agent that does not answer fails in the engine's words.
 					if (refused === undefined) [rule] = await create().then((c) => c.collect(context));
+					else
+						refusal = await create().then(
+							() => undefined,
+							(error: unknown) => error,
+						);
 				});
 
 				afterAll(() => {
@@ -437,10 +455,20 @@ describe.each([WASM, HTTP])("the $name engine and the cedar CLI of its Cedar", (
 				});
 
 				if (refused !== undefined) {
-					// The declaration, checked against the engine: the set is refused at
-					// boot, as the engine's docs say, not served.
-					it("is refused at boot", async () => {
-						await expect(create()).rejects.toThrow(/refused the policy set/);
+					// The declaration, checked against the engine: the agent refuses the
+					// set this load sent as one it cannot parse (400) — not a route, a
+					// size or a fault — at boot, as the engine's docs say, not served.
+					it("is refused at boot", () => {
+						const sent = namePolicies(
+							source.files.filter((file) => file.text.trim().length > 0),
+							(file) => [file.text],
+						)
+							.map(({ id }) => agentPolicyId(id, source.revision))
+							.join(", ");
+						expect(refusal).toBeInstanceOf(Error);
+						expect((refusal as Error).message).toContain(
+							`refused the policy set from ${source.description} (400; policies: ${sent}): `,
+						);
 					});
 
 					// What the case means under this Cedar, without the engine: the CLI
