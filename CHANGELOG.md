@@ -8,82 +8,102 @@ and version sections follow the release labeling policy in
 
 ## [0.14.0] - 2026-09-25
 
+This release has breaking changes. Upgrade every
+`@o3co/auth.policy-verifier.*` package together to 0.14.0, explicitly: a
+caret range on 0.13.x, which is what `@o3co/create-auth-policy-verifier`
+writes into a scaffolded project, does not admit 0.14.0, and each package
+pins the ones it depends on exactly (`.builtins`, `.cedar` and `.server` on
+`.core`; `.cedar-wasm` on `.cedar`).
+
 ### Security
 
 - **BREAKING (agents reached through a redirect): the Cedar `http` engine
   follows no redirect, so a 3xx fails closed**
   (`@o3co/auth.policy-verifier.cedar`,
   [#270](https://github.com/o3co/auth.policy-verifier/issues/270),
-  [#272](https://github.com/o3co/auth.policy-verifier/pull/272)). Through
-  0.13.0 neither of the engine's calls set `redirect`, so `fetch` followed
-  redirects. An agent, or anything in front of it, answering
-  `307 Location: <other>` sent the whole authorization call — the subject's
-  attributes included — to that other server and took its answer as the
+  [#272](https://github.com/o3co/auth.policy-verifier/pull/272)). From 0.10.0
+  through 0.13.0 neither of the engine's calls set `redirect`, so `fetch`
+  followed redirects, and whatever answered at the end was taken for the
+  agent. A 307 or 308 re-sent the whole authorization call — the subject's
+  attributes included — to the other server and took its answer as the
   decision: with a `forbid`-everything policy loaded, the call came back
-  allow. A 302 or 303 turned the call into a bodyless `GET` whose answer
-  became the decision, and at boot a 307 pushed the policy set to the other
-  origin and the load succeeded. Both calls now ask for `redirect: "manual"`.
-  A 3xx to an authorization call is a `CedarEngineError` — a deny with a
-  `failed` evaluation — and a 3xx to the policy load fails boot at once, is
-  not retried, and says that redirects are not followed. The wasm engine does
-  no I/O and is unaffected. **What to do:** a deployment whose cedar-agent is
-  reached through a redirect — an ingress that rewrites a path or adds a
-  trailing slash — now denies every decision, or fails to start with
-  `answered 30x to the policy load instead of accepting it — redirects are not
-  followed; set endpoint to the URL that answers it itself`. Point `endpoint`
-  (or `CEDAR_ENDPOINT`) at the URL that answers. A `fetch` passed to
-  `createCedarHttpEngine` must honour `init.redirect`. Upgrade every
-  `@o3co/auth.policy-verifier.*` package together to 0.14.0, explicitly: a
-  caret range on 0.13.x, which is what `@o3co/create-auth-policy-verifier`
-  writes into a scaffolded project, does not admit 0.14.0, and each package
-  pins the ones it depends on exactly (`.builtins`, `.cedar` and `.server` on
-  `.core`; `.cedar-wasm` on `.cedar`).
+  allow. A 301, 302 or 303 turned the call into a bodyless `GET` whose answer
+  became the decision. At boot a 301, 302, 307 or 308 pushed the policy set to
+  the other origin and the load succeeded, and a 303 turned the load into a
+  `GET` whose 2xx counted as a load without delivering the set. Both calls now
+  ask for `redirect: "manual"`. A 3xx to an authorization call is a
+  `CedarEngineError` — a deny with a `failed` evaluation — and a 3xx to the
+  policy load fails boot at once, is not retried, and says that redirects are
+  not followed. The wasm engine does no network I/O and is unaffected. **What
+  to do:** a deployment whose cedar-agent is reached through a redirect now
+  denies every decision, or fails to start with `answered 30x to the policy
+  load instead of accepting it — redirects are not followed; set endpoint to
+  the URL that answers it itself`. Point `endpoint` (or `CEDAR_ENDPOINT`) at
+  the URL that answers. Where the redirect is the ingress's own — one that
+  adds a trailing slash to every path, say — change the ingress to serve
+  `/v1/policies` and `/v1/is_authorized` without redirecting: the engine
+  appends those paths itself and drops a trailing slash from `endpoint`, so no
+  `endpoint` reaches them. A `fetch` passed to `createCedarHttpEngine` must
+  honour `init.redirect`.
 
 - **BREAKING (only where a host's own collector writes `NaN`): a `NaN`
   attribute fails `AttrLiteralNotEqual` and `AttrLiteralNotIn`**
   (`.builtins`, [#254](https://github.com/o3co/auth.policy-verifier/issues/254),
-  [#273](https://github.com/o3co/auth.policy-verifier/pull/273)). Through
-  0.13.0 both passed a `NaN` attribute against a numeric literal or set:
-  `NaN !== v` holds for every `v`, and `NaN` is in no set, so a restriction
-  allowed on a value that is not a number at all. Both now answer `false`
-  (safe-deny), as every other attribute rule already did, and as construction
-  already refuses a `NaN` literal. JSON carries no `NaN`, and the builtin
-  collectors promote only finite numbers, so a deployment whose attributes
-  come only from the builtins sees no difference. **What to do:** nothing,
-  unless a collector of your own computes a number that can be `NaN`: a request
-  it produces one for now gets a deny where it got an allow.
+  [#273](https://github.com/o3co/auth.policy-verifier/pull/273)). From 0.3.0
+  through 0.13.0 both passed a `NaN` attribute against a numeric literal or
+  set: `NaN !== v` holds for every `v`, and `NaN` is in no set, so a
+  restriction allowed on a value that is not a number at all. Both now answer
+  `false` (safe-deny), as every other attribute rule already did, and as
+  construction already refuses a `NaN` literal. JSON carries no `NaN`, and the
+  builtin collectors promote only finite numbers, so a deployment whose
+  attributes come only from the builtins sees no difference. **What to do:**
+  nothing, unless a collector of your own computes a number that can be
+  `NaN`: a request it produces one for now gets a deny where it got an allow.
 
 - **The Cedar `http` engine reads at most 1 MiB of an answer** (`.cedar`,
   [#271](https://github.com/o3co/auth.policy-verifier/issues/271),
-  [#274](https://github.com/o3co/auth.policy-verifier/pull/274)). Through
-  0.13.0 an answer was read whole, bounded only by the rule deadline, so a
-  faulty agent — or a proxy in front of it — streaming a large body held that
-  memory for each concurrent call, and a process out of memory takes every
-  route down, not only the ones Cedar gates. An answer longer than
-  `CEDAR_ANSWER_MAX_BYTES` (1 MiB, newly exported), declared by
-  `content-length` or found while streaming, is now cancelled and refused: a
-  deny with a `failed` evaluation, logged under `cedar authorization call
-  failed` as `answered an authorization call with more than 1 MiB — refused`.
-  An error body over the bound leaves the status text as its description.
-  `content-type` is still not checked; the body is parsed and its shape
-  checked. **What to do:** nothing; a cedar-agent answer is a decision and two
-  short lists.
+  [#274](https://github.com/o3co/auth.policy-verifier/pull/274)). From 0.10.0
+  through 0.13.0 an answer was read whole, bounded only by the rule deadline,
+  so a faulty agent — or a proxy in front of it — streaming a large body held
+  that memory for each concurrent call, and a process out of memory takes
+  every route down, not only the ones Cedar gates. An answer longer than
+  `CEDAR_ANSWER_MAX_BYTES` (1 MiB), declared by `content-length` or found
+  while streaming, is now cancelled and refused: a deny with a `failed`
+  evaluation, logged as `cedar authorization call failed — denying` with the
+  `reason` `cedar engine at … answered an authorization call with more than 1
+  MiB — refused`. An error body over the bound leaves the status text as its
+  description. `content-type` is still not checked; the body is parsed and its
+  shape checked. **What to do:** nothing; a cedar-agent answer is a decision
+  and two short lists.
 
 - **A Cedar agent token no longer reaches the log** (`.cedar`,
   [#271](https://github.com/o3co/auth.policy-verifier/issues/271),
   [#274](https://github.com/o3co/auth.policy-verifier/pull/274)). A token in
   `authentication` or `CEDAR_AUTHENTICATION` holding an ASCII control
   character other than a tab — a line break, a NUL, a DEL, a form feed — or a
-  character above U+00FF cannot be sent as a header. Through 0.13.0 `fetch`
-  refused it on every attempt, the load called the agent unreachable and
-  retried for ten seconds, and for a line break, a NUL or a character above
-  U+00FF the refusal quoted the whole token — into every retry warning and
-  the boot error. Such a token is now refused before anything is sent, naming
-  where it came from (`authentication is not a valid HTTP header value — …`)
-  and never its value. Whitespace around a token, which `fetch` trims, is
-  still accepted. **What to do:** if boot names `authentication` or
-  `CEDAR_AUTHENTICATION`, set it to the token the agent was started with; if
-  an earlier boot logged the token, rotate it.
+  character above U+00FF cannot be sent as a header. From 0.10.0 through
+  0.13.0 `fetch` refused it on every attempt, the load called the agent
+  unreachable and retried for ten seconds, and for a line break or a NUL
+  inside the token the refusal quoted the whole token — into every
+  `cedar engine unreachable, retrying` warning and the boot error. The other
+  refusals did not quote it. Such a token is now refused before anything is
+  sent, naming where it came from (`authentication is not a valid HTTP header
+  value — …`) and never its value. Whitespace around a token, which `fetch`
+  trims, is still accepted. **What to do:** if boot names `authentication` or
+  `CEDAR_AUTHENTICATION`, choose a token of printable characters — no control
+  characters, nothing above U+00FF — and set it on both sides: `authentication`
+  or `CEDAR_AUTHENTICATION` for the verifier, and `--authentication` or
+  `CEDAR_AGENT_AUTHENTICATION` for the agent (the standalone template sets
+  both from `CEDAR_AUTHENTICATION`). If an earlier boot failed this way with a
+  line break or a NUL in the token, treat that token as exposed wherever those
+  logs went.
+
+### Added
+
+- **`CEDAR_ANSWER_MAX_BYTES`** (`.cedar`,
+  [#274](https://github.com/o3co/auth.policy-verifier/pull/274)): the most
+  bytes the `http` engine reads of one answer from the agent, 1 MiB. See
+  Security.
 
 ### Fixed
 
@@ -97,10 +117,11 @@ and version sections follow the release labeling policy in
   - An abort — the rule deadline, or the caller leaving — that lands while an
     answer's body is read now rejects with the signal's reason, as one before
     the status always did, on an answer and on an error body alike. Through
-    0.13.0 it was "answered something that is not a decision". The collector
-    already rethrew the signal's reason whenever the signal had aborted, so no
-    rule's outcome changes; a direct caller of the engine port now gets the
-    reason.
+    0.13.0 it was "answered something that is not a decision" on an answer,
+    and `answered <status> to an authorization call: <status text>` on an
+    error body. The collector already rethrew the signal's reason whenever the
+    signal had aborted, so no rule's outcome changes; a direct caller of the
+    engine port now gets the reason.
   - A body that breaks off without an abort is `broke off its answer to an
     authorization call: …`, no longer "answered something that is not a
     decision".
@@ -112,9 +133,10 @@ and version sections follow the release labeling policy in
     deadline`, or, when an attempt before it failed, `the last got no response
     before the deadline, and the one before it failed: …`. Through 0.13.0 a
     refused agent could be reported as "reachable, but the request timed out"
-    when the deadline fell on its last retry — 48 of 200 loads in #269's
-    reproduction. A timeout does not show the connection was made, so the
-    message no longer says it was. A `fetch` passed to
+    when the deadline fell on its last retry — in #271's reproduction, 48 of
+    200 loads with a 50 ms load timeout and 1 ms retries; with the defaults
+    (10 s and 500 ms) it is far rarer. A timeout does not show the connection
+    was made, so the message no longer says it was. A `fetch` passed to
     `createCedarHttpEngine` must reject once `init.signal` aborts and fail a
     body still being read, as the platform's does.
 
