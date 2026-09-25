@@ -198,17 +198,28 @@ function readEvaluation(value: unknown): RuleEvaluation {
 		throw new TypeError(`a rule's evaluation.status must be one of ${[...STATUSES].join(", ")}`);
 	}
 
+	// The key checks below see own enumerable keys only, and a value is read
+	// however it is reached — so what a status may not carry is also checked on
+	// the values themselves, or a report could slip it past as a getter.
 	if (status === "not_invoked") {
 		// An evaluator that was never asked evaluated nothing, so there is no
-		// revision to claim — not an evaluated one, and not a loaded one either.
+		// revision to claim — not an evaluated one, and not a loaded one either —
+		// and no policy determined anything.
 		refuseUnknownKeys(keys, NOT_INVOKED_KEYS, 'a "not_invoked" evaluation');
+		if (
+			[revision, loadedRevision, determiningPolicies, determiningPoliciesOmitted].some(
+				(carried) => carried !== undefined,
+			)
+		) {
+			throw new TypeError(
+				'a "not_invoked" evaluation may not carry a revision, a loadedRevision or determining policies — not even inherited or through a getter; nothing was evaluated',
+			);
+		}
 		return Object.freeze({ status });
 	}
 
 	// A failed evaluation's answer is the rule failing closed, not the
 	// policies', so only a completed one may say which policies determined it.
-	// The key check sees own enumerable keys only, and a value is read however
-	// it is reached, so a failed report is checked on the values themselves too.
 	if (status === "completed") {
 		refuseUnknownKeys(keys, COMPLETED_KEYS, "a rule's evaluation");
 		const determining = readDeterminingPolicies(determiningPolicies, determiningPoliciesOmitted);
@@ -221,7 +232,7 @@ function readEvaluation(value: unknown): RuleEvaluation {
 	refuseUnknownKeys(keys, FAILED_KEYS, 'a "failed" evaluation');
 	if (determiningPolicies !== undefined || determiningPoliciesOmitted !== undefined) {
 		throw new TypeError(
-			'a "failed" evaluation names no determining policies — its answer is not the policies\'',
+			'a "failed" evaluation may not name determining policies — not even inherited or through a getter; its answer is the rule failing closed, not a decision of the policies, and only a "completed" one carries them',
 		);
 	}
 	return Object.freeze({

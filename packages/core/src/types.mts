@@ -176,8 +176,10 @@ export type RuleEvaluationStatus = "completed" | "failed" | "not_invoked";
  * of what ran. The two never share a name, so a consumer reading `revision`
  * cannot take a snapshot nobody confirmed for one that was evaluated.
  *
- * `not_invoked` has no revision key of either kind, by type and by the check
- * in `evaluate()`: an evaluator that was never asked evaluated nothing.
+ * `not_invoked` has no revision key of either kind, and no determining
+ * policies, by type and by the check in `evaluate()` — which refuses them
+ * however the value is reached, inherited or through a getter included: an
+ * evaluator that was never asked evaluated nothing.
  *
  * A reference is `scheme:encoded` — {@link POLICY_REVISION_PATTERN}, the OCI
  * digest grammar — so `sha256:<64 hex>` for a content digest, and an engine
@@ -191,8 +193,8 @@ export type RuleEvaluationStatus = "completed" | "failed" | "not_invoked";
  * the forbids that did; an empty list when no policy applied to the request.
  * It is a set, in the order the rule reports it, and absent when the rule does
  * not know (a rule that fronts no evaluator reports nothing at all). A
- * `failed` evaluation carries none: its answer is the rule failing closed, not
- * the policies'. Beside `revision: null` the ids are as unconfirmed as the
+ * `failed` evaluation carries none, checked the same way: its answer is the
+ * rule failing closed, not the policies'. Beside `revision: null` the ids are as unconfirmed as the
  * revision — they name policies in whatever set the evaluator held. An id is
  * the policy's name as its producer documents it, never an index the engine
  * made up. The shape is {@link isReportablePolicyId}'s and the bound

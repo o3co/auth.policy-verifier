@@ -592,48 +592,75 @@ describe("evaluate — what a rule may report", () => {
 		expect(String((error as Error).message)).not.toContain(secret);
 	});
 
-	// A report's own own-and-enumerable keys decide which keys it may carry,
-	// but a value is read however it is reached — so a failed evaluation
-	// carrying determining policies by any route is refused, not copied.
-	it.each([
+	// A report's own enumerable keys decide which keys it may carry, but a
+	// value is read however it is reached — so an evaluation carrying, by any
+	// route, what its status may not carry is refused rather than recorded as
+	// if it had said nothing: determining policies on a failed or not_invoked
+	// one (#199), a revision of either kind on a not_invoked one (#244).
+	const routes: ReadonlyArray<[string, (visible: object, key: string, value: unknown) => object]> =
 		[
-			"inherited from its prototype",
-			() =>
-				Object.assign(
-					Object.create({ determiningPolicies: ["20-forbid"], determiningPoliciesOmitted: 4 }),
-					{ status: "failed", revision: REVISION_A },
-				),
-		],
-		[
-			"as a non-enumerable own property",
-			() =>
-				Object.defineProperty({ status: "failed", revision: REVISION_A }, "determiningPolicies", {
-					value: ["20-forbid"],
-					enumerable: false,
-				}),
-		],
-		[
-			"through a class getter",
-			() =>
-				new (class FailedEvaluation {
-					status = "failed";
-					revision = REVISION_A;
-					get determiningPolicies() {
-						return ["20-forbid"];
-					}
-				})(),
-		],
-	])(
-		"refuses a failed evaluation that names determining policies %s (#199)",
-		async (_how, make) => {
-			const rule = sync(
-				"cedar",
-				"cedar_deny",
-				reporting(false, make() as unknown as RuleEvaluation),
-			);
-			await expect(evaluate(attrs, [rule])).rejects.toThrow(TypeError);
-		},
-	);
+			[
+				"inherited from its prototype",
+				(visible, key, value) => Object.assign(Object.create({ [key]: value }), visible),
+			],
+			[
+				"as a non-enumerable own property",
+				(visible, key, value) =>
+					Object.defineProperty({ ...visible }, key, { value, enumerable: false }),
+			],
+			[
+				"through a getter on its prototype",
+				(visible, key, value) =>
+					Object.assign(
+						Object.create(Object.defineProperty({}, key, { get: () => value })),
+						visible,
+					),
+			],
+		];
+	const FAILED = { status: "failed", revision: REVISION_A };
+	const NOT_INVOKED = { status: "not_invoked" };
+	const hidden: ReadonlyArray<[string, object, string, string, unknown]> = [
+		["failed", FAILED, "determining policies", "determiningPolicies", ["20-forbid"]],
+		["failed", FAILED, "an omitted count", "determiningPoliciesOmitted", 4],
+		["not_invoked", NOT_INVOKED, "determining policies", "determiningPolicies", ["20-forbid"]],
+		["not_invoked", NOT_INVOKED, "an omitted count", "determiningPoliciesOmitted", 4],
+		["not_invoked", NOT_INVOKED, "a revision", "revision", REVISION_A],
+		["not_invoked", NOT_INVOKED, "a null revision", "revision", null],
+		["not_invoked", NOT_INVOKED, "a loaded revision", "loadedRevision", REVISION_A],
+	];
+	it.each(
+		hidden.flatMap(([status, visible, label, key, value]) =>
+			routes.map(([how, hide]) => [status, label, how, () => hide(visible, key, value)] as const),
+		),
+	)("refuses a %s evaluation that carries %s %s", async (status, _label, _how, make) => {
+		const rule = sync("cedar", "cedar_deny", reporting(false, make() as unknown as RuleEvaluation));
+		const error = await evaluate(attrs, [rule]).catch((cause: unknown) => cause);
+		expect(error).toBeInstanceOf(TypeError);
+		const { message } = error as TypeError;
+		expect(message).toContain(`a "${status}" evaluation may not`);
+		// Refused by name, never by what the rule put there.
+		expect(message).not.toContain("20-forbid");
+		expect(message).not.toContain(REVISION_A);
+	});
+
+	it("still takes a report built with its status widened to completed | failed", () => {
+		// The union splits on `status`, so a helper typed with the wider status —
+		// as rules written before #199 are — still builds a RuleEvaluation. The
+		// typecheck is the test; the assertion only keeps the helpers used.
+		const vouched = (status: "completed" | "failed"): RuleEvaluation => ({
+			status,
+			revision: REVISION_A,
+		});
+		const unvouched = (status: "completed" | "failed"): RuleEvaluation => ({
+			status,
+			revision: null,
+			loadedRevision: REVISION_A,
+		});
+		expect([vouched("failed"), unvouched("completed")]).toEqual([
+			{ status: "failed", revision: REVISION_A },
+			{ status: "completed", revision: null, loadedRevision: REVISION_A },
+		]);
+	});
 
 	it.each([
 		["NaN", Number.NaN],

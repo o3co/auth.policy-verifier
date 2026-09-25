@@ -31,6 +31,7 @@ import {
 	consoleLogger,
 	DETERMINING_POLICIES_MAX,
 	evaluate,
+	isReportablePolicyId,
 	POLICY_ID_FORBIDDEN_RANGES,
 	POLICY_ID_MAX_LENGTH,
 	POLICY_REVISION_MAX_LENGTH,
@@ -401,6 +402,12 @@ describe("the fixture's evaluation table is core's own", () => {
 	it("states the determining-policy bounds and id shape core enforces (#199)", () => {
 		expect(evaluation.determiningPolicies.maxItems).toBe(DETERMINING_POLICIES_MAX);
 		expect(evaluation.determiningPolicies.idMaxLength).toBe(POLICY_ID_MAX_LENGTH);
+		// The unit is what core counts in: an id of astral characters at the bound
+		// holds half as many code points, and one unit more is refused.
+		expect(evaluation.determiningPolicies.idLengthUnit).toBe("UTF-16 code units");
+		const astral = "\u{1f600}".repeat(POLICY_ID_MAX_LENGTH / 2);
+		expect(isReportablePolicyId(astral)).toBe(true);
+		expect(isReportablePolicyId(`${astral}x`)).toBe(false);
 		expect(
 			evaluation.determiningPolicies.idForbiddenRanges.map(([low, high]) => [
 				Number.parseInt(low, 16),
