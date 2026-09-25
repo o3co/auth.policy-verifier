@@ -30,7 +30,7 @@ import { evaluate, RuleTimeoutError } from "@o3co/auth.policy-verifier.core";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { CedarPolicyRuleCollector } from "../CedarPolicyRuleCollector.mjs";
 import { CedarEngineError, type CedarEngineLoadContext } from "../engine.mjs";
-import { CEDAR_AUTHENTICATION_ENV, createCedarHttpEngine } from "../httpEngine.mjs";
+import { agentPolicyId, CEDAR_AUTHENTICATION_ENV, createCedarHttpEngine } from "../httpEngine.mjs";
 import type { CedarRequest } from "../mapping.mjs";
 import { computePolicyRevision, loadPolicySource, type PolicySource } from "../policySource.mjs";
 import {
@@ -63,6 +63,13 @@ function silentLogger(): Logger {
 function loadContext(config: Record<string, unknown>): CedarEngineLoadContext {
 	return { config, logger: silentLogger() };
 }
+
+/**
+ * The id a policy of {@link policySet} — and of the collector cases' `policyDir`,
+ * the same two files — is pushed under: its file id, under the load's mark
+ * (#283). An agent holding the pushed set answers with these.
+ */
+const pushed = (id: string) => agentPolicyId(id, policySet().revision);
 
 /** Two policies, one per file — the layout the http engine asks for. */
 function policySet(): PolicySource {
@@ -166,8 +173,8 @@ describe("cedarHttpEngine over the wire — what reaches the agent", () => {
 		// cedar-agent compares the header to its --authentication value: no scheme.
 		expect(put.headers.authorization).toBe("agent-token");
 		expect(parsed(put.body)).toEqual([
-			{ id: "10-permit", content: PERMIT },
-			{ id: "20-forbid", content: FORBID },
+			{ id: pushed("10-permit"), content: PERMIT },
+			{ id: pushed("20-forbid"), content: FORBID },
 		]);
 	});
 
@@ -220,14 +227,16 @@ describe("cedarHttpEngine over the wire — reading the answer", () => {
 	it("reads an Allow and a Deny, with their determining policies and errors", async () => {
 		const loaded = await loadedAgainst(agent.origin);
 
-		agent.answer(cedarAgent(decision("Allow", ["10-permit"])));
+		agent.answer(cedarAgent(decision("Allow", [pushed("10-permit")])));
 		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toEqual({
 			decision: "allow",
 			reason: ["10-permit"],
 			errors: [],
 		});
 
-		agent.answer(cedarAgent(decision("Deny", ["20-forbid"], ["policy 10-permit: no dept"])));
+		agent.answer(
+			cedarAgent(decision("Deny", [pushed("20-forbid")], ["policy 10-permit: no dept"])),
+		);
 		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toEqual({
 			decision: "deny",
 			reason: ["20-forbid"],
@@ -238,7 +247,7 @@ describe("cedarHttpEngine over the wire — reading the answer", () => {
 	it("names no revision, whatever the agent claims — cedar-agent does not say what it ran (#244)", async () => {
 		const loaded = await loadedAgainst(agent.origin);
 		agent.answer(
-			cedarAgent({ ...decision("Allow", ["10-permit"]), revision: policySet().revision }),
+			cedarAgent({ ...decision("Allow", [pushed("10-permit")]), revision: policySet().revision }),
 		);
 		const answer = await loaded.isAuthorized(request(), NEVER_ABORTS);
 		expect(answer).not.toHaveProperty("revision");
@@ -595,7 +604,7 @@ describe("cedarHttpEngine over the wire — boot", () => {
 		await expect(
 			createCedarHttpEngine({ env: {} }).load(policySet(), loadContext({ endpoint: agent.origin })),
 		).rejects.toThrow(
-			/refused the policy set from \/policies \(400; policies: 10-permit, 20-forbid\): policy 20-forbid: unexpected token/,
+			/refused the policy set from \/policies \(400; policies: 10-permit@[0-9a-f]{16}, 20-forbid@[0-9a-f]{16}\): policy 20-forbid: unexpected token/,
 		);
 	});
 
@@ -681,7 +690,7 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 	it("permits, reporting the revision it pushed as loaded and none as evaluated (#244)", async () => {
 		const { rule: permit } = await rule();
 		expect(loadedRevision).toMatch(/^sha256:[0-9a-f]{64}$/);
-		agent.answer(cedarAgent(decision("Allow", ["10-permit"])));
+		agent.answer(cedarAgent(decision("Allow", [pushed("10-permit")])));
 
 		const decided = await evaluate(attrs(), [permit]);
 		expect(decided.decision).toBe("allow");
@@ -694,14 +703,14 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 		});
 		// What was pushed is what the revision was computed over.
 		expect(parsed(agent.received[0].body)).toEqual([
-			{ id: "10-permit", content: PERMIT },
-			{ id: "20-forbid", content: FORBID },
+			{ id: pushed("10-permit"), content: PERMIT },
+			{ id: pushed("20-forbid"), content: FORBID },
 		]);
 	});
 
 	it("forbids on a determining forbid, reporting the same revisions", async () => {
 		const { rule: forbid, logger } = await rule();
-		agent.answer(cedarAgent(decision("Deny", ["20-forbid"])));
+		agent.answer(cedarAgent(decision("Deny", [pushed("20-forbid")])));
 
 		const decided = await evaluate(attrs(), [forbid]);
 		expect(decided).toMatchObject({ decision: "deny", code: "cedar_deny" });
@@ -719,10 +728,8 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 	// A decision over the default bound is a deny under the default and the
 	// agent's answer once the entry raises the bound.
 	it("reads a decision over the default bound when the entry's maxAnswerBytes allows it", async () => {
-		const ids = Array.from(
-			{ length: 40_000 },
-			(_, i) => `policy-${String(i).padStart(6, "0")}-permit-read`,
-		);
+		// Large honestly — this load's policy, named again and again — not foreign.
+		const ids = Array.from({ length: 40_000 }, () => pushed("10-permit"));
 		const large = cedarAgent(decision("Allow", ids));
 
 		const { rule: bounded, logger } = await rule();
@@ -746,7 +753,9 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 
 	it("does not take an agent's word for the revision — it cannot vouch for what it ran (#244)", async () => {
 		const { rule: permit } = await rule();
-		agent.answer(cedarAgent({ ...decision("Allow", ["10-permit"]), revision: loadedRevision }));
+		agent.answer(
+			cedarAgent({ ...decision("Allow", [pushed("10-permit")]), revision: loadedRevision }),
+		);
 		const decided = await evaluate(attrs(), [permit]);
 		expect(outcomeOf(decided).evaluation).toEqual({
 			...unconfirmed("completed"),
@@ -754,15 +763,12 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 		});
 	});
 
-	it("names the policies an agent reports in a structured form by their ids, and counts what is not one (#199)", async () => {
+	it("names the policies an agent reports in a structured form by their file ids (#199)", async () => {
 		const { rule: permit } = await rule();
 		agent.answer(
 			cedarAgent({
 				decision: "Allow",
-				diagnostics: {
-					reason: [{ policyId: "10-permit" }, 42, null, { id: "p2" }, 42],
-					errors: [],
-				},
+				diagnostics: { reason: [{ policyId: pushed("10-permit") }], errors: [] },
 			}),
 		);
 		const decided = await evaluate(attrs(), [permit]);
@@ -770,9 +776,23 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 		expect(outcomeOf(decided).evaluation).toEqual({
 			...unconfirmed("completed"),
 			determiningPolicies: ["10-permit"],
-			// Each distinct item it could not read, counted: 42 twice is one.
-			determiningPoliciesOmitted: 3,
 		});
+	});
+
+	it.each([
+		["an unmarked id — a set somebody else pushed", ["10-permit"]],
+		["another load's", [agentPolicyId("10-permit", "sha256:0000000000000000")]],
+		["an item that is not an id", [42]],
+	])("denies, and logs, an allow naming %s (#283)", async (_label, reason) => {
+		const { rule: permit, logger } = await rule({ logEvaluationErrors: false });
+		agent.answer(cedarAgent({ decision: "Allow", diagnostics: { reason, errors: [] } }));
+		const decided = await evaluate(attrs(), [permit]);
+		expect(decided.decision).toBe("deny");
+		expect(outcomeOf(decided).evaluation).toEqual(unconfirmed("failed"));
+		// Never silent: not an evaluation error, a deployment fault.
+		expect(JSON.stringify((logger.error as ReturnType<typeof vi.fn>).mock.calls)).toMatch(
+			/answered from a policy set this verifier did not load/,
+		);
 	});
 
 	it("refuses requireConfirmedRevision at boot, before anything reaches the agent (#244)", async () => {

@@ -206,9 +206,9 @@ export interface CedarPolicyRuleCollectorOptions {
  * | `deny` | determining `forbid` | fail | `completed` |
  * | `deny` | no determining policy | `onNoDeterminingPolicy` (default `"deny"`) | `completed` |
  * | anything | evaluation errors | **fail, and log** | `failed` |
- * | — | the call itself failed, or answered something that is not a decision | **fail, and log** | `failed` |
+ * | — | the call itself failed, or answered something that is not a decision (an `allow` naming no policy included) | **fail, and log** | `failed` |
  * | — | the request could not be built, so Cedar was not asked | **fail, and log** | `not_invoked` |
- * | anything | a revision other than the one loaded | **fail, and log** | `failed` |
+ * | anything | a revision other than the one loaded, or policies it never loaded (#283) | **fail, and log** | `failed` |
  *
  * The errors row is unconditional — an evaluation error is never an
  * abstention. Cedar treats a policy that errors as not satisfied, so a
@@ -407,6 +407,21 @@ interface BoundRule {
 	faultLogger: Logger;
 }
 
+/**
+ * What of a `foreign` mark the log carries: the engine's fixed label and a
+ * 16-hex mark, each only in that shape — never text the evaluator chose.
+ */
+function foreignDetail(foreign: unknown): { foreign?: string; mark?: string } {
+	const { why, mark } = (typeof foreign === "object" && foreign !== null ? foreign : {}) as {
+		why?: unknown;
+		mark?: unknown;
+	};
+	return {
+		...(why === "unknown policy" || why === "unreadable policy" ? { foreign: why } : {}),
+		...(typeof mark === "string" && /^[0-9a-f]{16}$/.test(mark) ? { mark } : {}),
+	};
+}
+
 /** How a reporter bounds determining policies — the checking core's own (#199). */
 type DeterminingPolicyBounder = NonNullable<ReportRuleEvaluation["boundDeterminingPolicies"]>;
 
@@ -534,6 +549,17 @@ function buildRule(bound: BoundRule): AnyRule {
 			);
 			return { passed: false, evaluation: unconfirmed("failed") };
 		}
+		if (answer.foreign !== undefined && answer.foreign !== null) {
+			// The engine cannot vouch for what it evaluated, but it can tell this
+			// was not it (#283): the answer names policies it never loaded. The
+			// same fault as a foreign revision, logged the same way — before the
+			// errors are looked at, so it is never an evaluation error to silence.
+			faultLogger.error(
+				{ ...identity, loadedRevision, ...foreignDetail(answer.foreign) },
+				"cedar engine answered from a policy set this verifier did not load — denying",
+			);
+			return { passed: false, evaluation: unconfirmed("failed") };
+		}
 		if (!Array.isArray(answer.reason) || !Array.isArray(answer.errors)) {
 			// After the revision check, so an answer from a foreign set is logged
 			// as that. A string here would be read by character — its letters
@@ -543,6 +569,17 @@ function buildRule(bound: BoundRule): AnyRule {
 					"cedar engine answered a decision whose reason or errors is not a list",
 				),
 			);
+		}
+		if (answer.decision === "allow" && answer.reason.length === 0) {
+			// Cedar allows only on a permit that applied, so an allow naming none
+			// is no answer of Cedar's — and it is what an engine wrapper that
+			// dropped `foreign` would hand on from a set this verifier did not load.
+			// A fault of the deployment, like `foreign` itself: never silent.
+			faultLogger.error(
+				{ ...identity, loadedRevision },
+				"cedar engine answered allow naming no determining policy — no answer of Cedar's; denying",
+			);
+			return { passed: false, evaluation: unconfirmed("failed") };
 		}
 		const confirmed = answer.revision !== undefined;
 		if (requireConfirmedRevision && !confirmed) {

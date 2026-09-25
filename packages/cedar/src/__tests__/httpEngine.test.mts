@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CedarPolicyRuleCollector } from "../CedarPolicyRuleCollector.mjs";
 import { CedarEngineError, type CedarEngineLoadContext } from "../engine.mjs";
 import {
+	agentPolicyId,
 	CEDAR_ANSWER_MAX_BYTES,
 	CEDAR_AUTHENTICATION_ENV,
 	CEDAR_ENDPOINT_ENV,
@@ -118,7 +119,10 @@ function stalledBody(status: number, head: string, statusText?: string) {
 	};
 }
 
-const ALLOW = { decision: "Allow", diagnostics: { reason: ["policies"], errors: [] } };
+/** The id the inline set's one policy is pushed under — this load's mark on it (#283). */
+const OURS = agentPolicyId("policies", inline(PERMIT_ALL).revision);
+
+const ALLOW = { decision: "Allow", diagnostics: { reason: [OURS], errors: [] } };
 
 /** A fetch that answers the policy push with 200 and every authorization call from `answer`. */
 function agent(answer: (call: Record<string, unknown>) => Response = () => json(200, ALLOW)) {
@@ -137,12 +141,9 @@ const NEVER_ABORTS = new AbortController().signal;
 /** The answer bound, written out so a test's sizes do not depend on the constant under test. */
 const MIB = 1024 * 1024;
 
-/** A valid Allow whose determining-policy list alone is `policies` ids long. */
+/** A valid Allow whose determining-policy list alone is `policies` entries long — this load's one policy, repeated. */
 function largeAllow(policies: number): string {
-	const reason = Array.from(
-		{ length: policies },
-		(_, i) => `policy-${String(i).padStart(6, "0")}-permit-read`,
-	);
+	const reason = Array.from({ length: policies }, () => OURS);
 	return JSON.stringify({ decision: "Allow", diagnostics: { reason, errors: [] } });
 }
 
@@ -180,19 +181,18 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 		const { doFetch, calls } = agent();
 		const engine = createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV });
 		const forbid = "forbid(principal, action, resource) when { context.suspended == true };";
-		await loadAsync(
-			engine,
-			dir([
-				["10-permit.cedar", PERMIT_ALL],
-				["20-forbid.cedar", forbid],
-			]),
-		);
+		const source = dir([
+			["10-permit.cedar", PERMIT_ALL],
+			["20-forbid.cedar", forbid],
+		]);
+		await loadAsync(engine, source);
 		expect(calls).toHaveLength(1);
 		expect(calls[0].url).toBe(`${AGENT}/v1/policies`);
 		expect(calls[0].init.method).toBe("PUT");
+		// Named after the file, under this load's mark (#283).
 		expect(JSON.parse(String(calls[0].init.body))).toEqual([
-			{ id: "10-permit", content: PERMIT_ALL },
-			{ id: "20-forbid", content: forbid },
+			{ id: agentPolicyId("10-permit", source.revision), content: PERMIT_ALL },
+			{ id: agentPolicyId("20-forbid", source.revision), content: forbid },
 		]);
 		expect(headersOf(calls[0])["content-type"]).toBe("application/json");
 		expect(headersOf(calls[0]).authorization).toBeUndefined();
@@ -201,9 +201,7 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 	it("names inline policies `policies` and skips blank files — the empty set is migration step one", async () => {
 		const { doFetch, calls } = agent();
 		await loadAsync(createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }), inline(PERMIT_ALL));
-		expect(JSON.parse(String(calls[0].init.body))).toEqual([
-			{ id: "policies", content: PERMIT_ALL },
-		]);
+		expect(JSON.parse(String(calls[0].init.body))).toEqual([{ id: OURS, content: PERMIT_ALL }]);
 
 		await loadAsync(
 			createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }),
@@ -275,7 +273,7 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 		await expect(
 			engine.load(dir([["20-forbid.cedar", "forbid(when;"]]), loadContext()),
 		).rejects.toThrow(
-			/refused the policy set from \/etc\/verifier\/policies \(400; policies: 20-forbid\): .*policy 20-forbid: unexpected token/,
+			/refused the policy set from \/etc\/verifier\/policies \(400; policies: 20-forbid@[0-9a-f]{16}\): .*policy 20-forbid: unexpected token/,
 		);
 	});
 
@@ -293,7 +291,7 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 				loadContext({ maxAnswerBytes: 1024 }),
 			),
 		).rejects.toThrow(
-			/refused the policy set from inline policies \(400; policies: policies\): Bad Request$/,
+			/refused the policy set from inline policies \(400; policies: policies@[0-9a-f]{16}\): Bad Request$/,
 		);
 	});
 
@@ -628,6 +626,115 @@ describe("cedarHttpEngine — where the agent is", () => {
 	});
 });
 
+/*
+ * #283: cedar-agent evaluates whatever set it holds, which anyone with its
+ * token can replace, and names no revision. The one thing an answer carries
+ * back is the ids of the policies that determined it — so the engine pushes
+ * each policy under an id carrying its load's mark, and an answer naming any
+ * other id did not come from the set this verifier loaded.
+ */
+describe("cedarHttpEngine — whose policies an answer names (#283)", () => {
+	const source = inline(PERMIT_ALL);
+	const ours = agentPolicyId("policies", source.revision);
+	const answering = (reason: unknown[]) =>
+		agent(() => json(200, { decision: "Allow", diagnostics: { reason, errors: [] } }));
+
+	it("pushes each policy under an id that carries its load's mark — the revision's first 16 hex", async () => {
+		const { doFetch, calls } = answering([ours]);
+		await loadAsync(createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }), source);
+		const pushed = JSON.parse(String(calls[0].init.body)) as Array<{ id: string }>;
+		expect(pushed.map(({ id }) => id)).toEqual([ours]);
+		expect(ours).toBe(`policies@${source.revision.slice("sha256:".length, "sha256:".length + 16)}`);
+	});
+
+	it("reports the policies of this load by their file ids — the mark stays between engine and agent", async () => {
+		const { doFetch } = answering([ours]);
+		const loaded = await loadAsync(
+			createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }),
+			source,
+		);
+		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toEqual({
+			decision: "allow",
+			reason: ["policies"],
+			errors: [],
+		});
+	});
+
+	const otherMark = agentPolicyId(
+		"x",
+		inline("forbid(principal, action, resource);").revision,
+	).split("@")[1];
+	const ownMark = ours.split("@")[1];
+	it.each([
+		["an id without a mark", ["policies"], { why: "unknown policy" }],
+		["another load's", [`policies@${otherMark}`], { why: "unknown policy", mark: otherMark }],
+		// A suffix alone is no mark: a file may be named so. Only this load's own
+		// name under another mark says another load of the same corpus.
+		[
+			"an id this load never pushed, under its own mark",
+			[`extra@${ownMark}`],
+			{ why: "unknown policy" },
+		],
+		["an id merely ending in @ and 16 hex", [`legacy@${otherMark}`], { why: "unknown policy" }],
+		["this load's beside another's", [ours, "policies"], { why: "unknown policy" }],
+		["an item it cannot read as an id", [{ id: "x" }], { why: "unreadable policy" }],
+		["an id with an @ but no mark", ["a@b"], { why: "unknown policy" }],
+	])(
+		"tells an answer naming %s for what it is: from a set this verifier did not load",
+		async (_label, reason, foreign) => {
+			const { doFetch } = answering(reason);
+			const loaded = await loadAsync(
+				createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }),
+				source,
+			);
+			expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toEqual({
+				decision: "allow",
+				// Nothing of another set's is repeated.
+				reason: [],
+				errors: [],
+				foreign,
+			});
+		},
+	);
+
+	it("tells a deny from another set too", async () => {
+		const { doFetch } = agent(() =>
+			json(200, { decision: "Deny", diagnostics: { reason: ["20-forbid"], errors: [] } }),
+		);
+		const loaded = await loadAsync(
+			createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }),
+			source,
+		);
+		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toMatchObject({
+			decision: "deny",
+			reason: [],
+			foreign: { why: "unknown policy" },
+		});
+	});
+
+	it("warns at boot when the agent is used without a token — then anyone at its port owns the set", async () => {
+		const { doFetch } = answering([ours]);
+		const context = loadContext();
+		await createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }).load(source, context);
+		expect(context.logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ endpoint: AGENT }),
+			expect.stringMatching(/used without a token/),
+		);
+		const tokened = loadContext({ authentication: "agent-token" });
+		await createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }).load(source, tokened);
+		expect(tokened.logger.warn).not.toHaveBeenCalled();
+	});
+
+	it("names each of its policies once, however often the agent repeats one — bounded by what was pushed", async () => {
+		const { doFetch } = answering(Array.from({ length: 1_000 }, () => ours));
+		const loaded = await loadAsync(
+			createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }),
+			source,
+		);
+		expect((await loaded.isAuthorized(request(), NEVER_ABORTS)).reason).toEqual(["policies"]);
+	});
+});
+
 describe("cedarHttpEngine — isAuthorized", () => {
 	it("POSTs cedar-agent's AuthorizationCall: entity references as literals, entities inline, the rule's signal", async () => {
 		const { doFetch, calls } = agent();
@@ -657,7 +764,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 			json(200, {
 				decision: "Deny",
 				diagnostics: {
-					reason: ["20-forbid"],
+					reason: [OURS],
 					errors: ["policy 10-permit: attribute dept missing"],
 				},
 			}),
@@ -668,7 +775,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		);
 		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toEqual({
 			decision: "deny",
-			reason: ["20-forbid"],
+			reason: ["policies"],
 			errors: ["policy 10-permit: attribute dept missing"],
 		});
 	});
@@ -679,8 +786,8 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		// non-string turned an agent image bump into every request denied, with
 		// a message about "well-formed diagnostics". The rule only logs errors and
 		// decides on whether there are any, so their text is enough. A reason is a
-		// policy id a decision names (#199): read out of its object, and kept as
-		// its JSON behind a NUL — never an id — when there is none to read.
+		// policy id a decision names (#199), read out of its object; an item with
+		// none to read is no policy of this load's (#283, see above).
 		const structured = { policyId: "20-forbid", error: { message: "attribute `dept` missing" } };
 		const loaded = await loadAsync(
 			createCedarHttpEngine({
@@ -688,7 +795,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 					json(200, {
 						decision: "Allow",
 						diagnostics: {
-							reason: [{ policyId: "10-permit" }, "20-permit", 42, null, { id: "x" }],
+							reason: [{ policyId: OURS }, OURS],
 							errors: [structured],
 						},
 					}),
@@ -700,13 +807,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		const answer = await loaded.isAuthorized(request(), NEVER_ABORTS);
 		expect(answer.decision).toBe("allow");
 		expect(answer.errors).toEqual([JSON.stringify(structured)]);
-		expect(answer.reason).toEqual([
-			"10-permit",
-			"20-permit",
-			"\u000042",
-			"\u0000null",
-			'\u0000{"id":"x"}',
-		]);
+		expect(answer.reason).toEqual(["policies"]);
 	});
 
 	it("rejects with CedarEngineError when the agent answers non-2xx, not JSON, or not a decision", async () => {
@@ -1070,7 +1171,8 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		);
 		const answer = await loaded.isAuthorized(request(), NEVER_ABORTS);
 		expect(answer.decision).toBe("allow");
-		expect(answer.reason).toHaveLength(40_000);
+		// Read whole, and each of this load's policies named once (#283).
+		expect(answer.reason).toEqual(["policies"]);
 	});
 
 	// Each bound is met exactly and exceeded by one byte, once streamed and once
