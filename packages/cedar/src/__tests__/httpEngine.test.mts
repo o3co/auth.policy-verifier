@@ -1070,6 +1070,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		[1536, "1536 bytes", "streamed"],
 		[1536, "1536 bytes", "declared"],
 		[3 * MIB, "3 MiB", "streamed"],
+		[3 * MIB, "3 MiB", "declared"],
 	])("refuses above a maxAnswerBytes of %i, naming it as %s (%s)", async (bound, named, how) => {
 		const decision = JSON.stringify(ALLOW);
 		const bodies = {
