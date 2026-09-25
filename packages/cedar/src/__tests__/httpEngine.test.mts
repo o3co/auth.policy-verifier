@@ -535,10 +535,9 @@ describe("cedarHttpEngine — where the agent is", () => {
 	// than a tab once the whitespace around it is trimmed, or a character
 	// above U+00FF. For a line break or a NUL its error quotes the whole
 	// value, which the load then logged on every retry; for the others it
-	// does not quote it. Either way
-	// the load called the agent unreachable and retried for ten seconds
-	// (#271). Refused at load instead, naming where the token came from,
-	// never the token.
+	// does not. Either way the load called the agent unreachable and retried
+	// for ten seconds (#271). Refused at load instead, naming where the token
+	// came from, never the token.
 	it.each([
 		["a line break inside", "s3cr3t-1\ns3cr3t-2"],
 		["a header smuggled after CRLF", "s3cr3t\r\nX-Other: y"],

@@ -43,8 +43,8 @@ pins the ones it depends on exactly (`.builtins`, `.cedar` and `.server` on
   adds a trailing slash to every path, say — change the ingress to serve
   `/v1/policies` and `/v1/is_authorized` without redirecting: the engine
   appends those paths itself and drops a trailing slash from `endpoint`, so no
-  `endpoint` reaches them. A `fetch` passed to `createCedarHttpEngine` must
-  honour `init.redirect`.
+  `endpoint` value produces the slash-suffixed path. A `fetch` passed to
+  `createCedarHttpEngine` must honour `init.redirect`.
 
 - **BREAKING (only where a host's own collector writes `NaN`): a `NaN`
   attribute fails `AttrLiteralNotEqual` and `AttrLiteralNotIn`**
@@ -94,9 +94,9 @@ pins the ones it depends on exactly (`.builtins`, `.cedar` and `.server` on
   characters, nothing above U+00FF — and set it on both sides: `authentication`
   or `CEDAR_AUTHENTICATION` for the verifier, and `--authentication` or
   `CEDAR_AGENT_AUTHENTICATION` for the agent (the standalone template sets
-  both from `CEDAR_AUTHENTICATION`). If an earlier boot failed this way with a
-  line break or a NUL in the token, treat that token as exposed wherever those
-  logs went.
+  both from `CEDAR_AUTHENTICATION`). If a boot on 0.10.0 through 0.13.0
+  failed as unreachable with a line break or a NUL in the token, treat that
+  token as exposed wherever those logs went.
 
 ### Added
 
