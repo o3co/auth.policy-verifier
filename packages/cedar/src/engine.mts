@@ -145,9 +145,10 @@ export interface CedarEngine {
 export interface CedarEngineLoadContext {
 	/**
 	 * The collector's whole config entry, as written. An engine reads the keys
-	 * that are its own (`endpoint`, `authentication` for the HTTP engine) and
-	 * validates them here, at boot — the second boundary of two-boundary
-	 * validation, since the config schema cannot know every engine's keys.
+	 * that are its own (`endpoint`, `authentication`, `maxAnswerBytes` for the
+	 * HTTP engine) and validates them here, at boot — the second boundary of
+	 * two-boundary validation, since the config schema cannot know every
+	 * engine's keys.
 	 */
 	readonly config: Readonly<Record<string, unknown>>;
 	/** For what an operator should see at boot: which engine, where, how many policies. */

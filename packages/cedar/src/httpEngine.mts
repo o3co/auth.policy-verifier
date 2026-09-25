@@ -3,9 +3,9 @@
 
 /*
  * The `http` engine: evaluates the policy set out of process by pushing it to a
- * cedar-agent at load and asking the agent per request. Also holds its endpoint
- * and token resolution and the rendering of Cedar entity references; the
- * package index registers it.
+ * cedar-agent at load and asking the agent per request. Also holds the
+ * resolution of its endpoint, token and answer bound, and the rendering of
+ * Cedar entity references; the package index registers it.
  */
 
 import type { Logger } from "@o3co/auth.policy-verifier.core";
@@ -33,13 +33,14 @@ export const CEDAR_AUTHENTICATION_ENV = "CEDAR_AUTHENTICATION";
 export const CEDAR_LOAD_TIMEOUT_MS = 10_000;
 
 /**
- * The maximum number of bytes the engine reads from one answer from the
- * agent. A longer answer — declared by `content-length` or streamed — is
- * refused, a deny, rather than held in memory for the rule's deadline: a
- * faulty agent, or a proxy in front of it, would otherwise hold that per
- * concurrent call, and a process out of memory takes every route down, not
- * only the ones Cedar gates (#271). cedar-agent's answer is a decision and
- * two short lists.
+ * The default for `maxAnswerBytes`: the maximum number of bytes the engine
+ * reads from one answer from the agent. A longer answer — declared by
+ * `content-length` or streamed — is refused, a deny, rather than held in
+ * memory for the rule's deadline: a faulty agent, or a proxy in front of it,
+ * would otherwise hold that per concurrent call, and a process out of memory
+ * takes every route down, not only the ones Cedar gates (#271). An answer's
+ * determining-policy and error lists grow with the policy set, so a large set
+ * can answer honestly past it; the collector's `maxAnswerBytes` raises it.
  */
 export const CEDAR_ANSWER_MAX_BYTES = 1024 * 1024;
 
@@ -140,7 +141,8 @@ interface AgentAuthorizationCall {
  * the answer or while its body is read. A load whose deadline passes is
  * reported as no answer in time, with how the attempt before failed, never as
  * a reachable agent: a timeout does not show the connection was made. An
- * answer longer than {@link CEDAR_ANSWER_MAX_BYTES} is refused, not read.
+ * answer longer than `maxAnswerBytes` in the collector's config entry —
+ * {@link CEDAR_ANSWER_MAX_BYTES} when it is absent — is refused, not read.
  */
 export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): CedarEngine {
 	const env = options.env ?? process.env;
@@ -157,6 +159,7 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 		async load(source: PolicySource, context: CedarEngineLoadContext) {
 			const endpoint = resolveEndpoint(context.config.endpoint, env[CEDAR_ENDPOINT_ENV]);
 			const headers = requestHeaders(context.config.authentication, env[CEDAR_AUTHENTICATION_ENV]);
+			const maxAnswerBytes = resolveMaxAnswerBytes(context.config.maxAnswerBytes);
 
 			const agent = agentKey(endpoint);
 			const holder = loaded.get(agent);
@@ -193,6 +196,7 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 						retryMs,
 					},
 					tokenSourceOf(context.config.authentication, env[CEDAR_AUTHENTICATION_ENV]),
+					maxAnswerBytes,
 				);
 			} catch (cause) {
 				loaded.delete(agent);
@@ -232,10 +236,13 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 					if (!response.ok) {
 						const redirected = response.status >= 300 && response.status < 400;
 						throw new CedarEngineError(
-							`cedar engine at ${endpoint} answered ${response.status} to an authorization call: ${await errorDescription(response, signal)}${redirected ? " — redirects are not followed; set endpoint to the URL that answers it itself" : ""}`,
+							`cedar engine at ${endpoint} answered ${response.status} to an authorization call: ${await errorDescription(response, maxAnswerBytes, signal)}${redirected ? " — redirects are not followed; set endpoint to the URL that answers it itself" : ""}`,
 						);
 					}
-					return readDecision(parseJson(await answerText(response, signal, endpoint)), endpoint);
+					return readDecision(
+						parseJson(await answerText(response, signal, endpoint, maxAnswerBytes)),
+						endpoint,
+					);
 				},
 			};
 			return policySet;
@@ -257,6 +264,7 @@ async function pushPolicies(
 	logger: Logger,
 	timing: { loadTimeoutMs: number; retryMs: number },
 	tokenSource: string | undefined,
+	maxAnswerBytes: number,
 ): Promise<void> {
 	const { loadTimeoutMs, retryMs } = timing;
 	const deadline = Date.now() + loadTimeoutMs;
@@ -336,7 +344,7 @@ async function pushPolicies(
 		// sent are listed; with one policy per file, that is the file list.
 		const ids = policies.map((policy) => policy.id).join(", ") || "none";
 		throw new CedarEngineError(
-			`cedar engine at ${endpoint} refused the policy set from ${description} (${response.status}; policies: ${ids}): ${await errorDescription(response)}`,
+			`cedar engine at ${endpoint} refused the policy set from ${description} (${response.status}; policies: ${ids}): ${await errorDescription(response, maxAnswerBytes)}`,
 		);
 	}
 }
@@ -396,7 +404,7 @@ function resolveEndpoint(configured: unknown, fromEnv: string | undefined): stri
 	if (configured !== undefined) {
 		if (typeof configured !== "string" || configured.length === 0) {
 			throw new CedarEngineError(
-				`endpoint must be a non-empty URL string, got ${JSON.stringify(configured)}`,
+				`endpoint must be a non-empty URL string, got ${shown(configured)}`,
 			);
 		}
 		raw = configured;
@@ -439,6 +447,62 @@ function resolveEndpoint(configured: unknown, fromEnv: string | undefined): stri
 	return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
 }
 
+/**
+ * The range `maxAnswerBytes` may be set in. Below 1 KiB even the smallest
+ * decision is refused, so every request would be denied — a unit slip (`4`
+ * meant as MiB) is caught at boot rather than in production. Above 256 MiB
+ * the text would approach the longest string V8 can hold, about 512 Mi
+ * characters, and a failure there would be reported as a broken-off answer.
+ */
+const MIN_ANSWER_BYTES = 1024;
+const MAX_ANSWER_BYTES = 256 * 1024 * 1024;
+
+/**
+ * The collector entry's `maxAnswerBytes`, else {@link CEDAR_ANSWER_MAX_BYTES}.
+ * Written as a number, or as the string a HOCON env substitution of the
+ * operator's own variable (`${?MY_ANSWER_BYTES}`) delivers — the rule the
+ * server's numeric knobs follow (`resolveBound` in the server package, which
+ * this package cannot import) — and a whole number of bytes in range. Checked here, where
+ * `endpoint` is: the config schema passes a collector entry through, so the
+ * engine is where its keys are checked (`CedarEngineLoadContext.config`).
+ * `null` is a value, and refused like anything else that is not a byte count.
+ */
+function resolveMaxAnswerBytes(configured: unknown): number {
+	if (configured === undefined) return CEDAR_ANSWER_MAX_BYTES;
+	const bytes = isWrittenAsNumber(configured) ? Number(configured) : Number.NaN;
+	if (!Number.isSafeInteger(bytes) || bytes < MIN_ANSWER_BYTES || bytes > MAX_ANSWER_BYTES) {
+		throw new CedarEngineError(
+			`maxAnswerBytes must be a whole number of bytes from ${byteSize(MIN_ANSWER_BYTES)} to ${byteSize(MAX_ANSWER_BYTES)}, got ${shown(configured)}`,
+		);
+	}
+	return bytes;
+}
+
+/** The two forms a number is written in: a number, or a non-blank string. `Number(true)` is 1. */
+function isWrittenAsNumber(value: unknown): value is number | string {
+	return typeof value === "number" || (typeof value === "string" && value.trim() !== "");
+}
+
+/** A config value as a refusal quotes it — any value, a bigint or a symbol included. */
+function shown(value: unknown): string {
+	if (typeof value === "number") return String(value);
+	if (typeof value === "bigint") return `${value}n`;
+	if (typeof value === "symbol") return value.toString();
+	try {
+		return JSON.stringify(value) ?? String(value);
+	} catch {
+		// A circular object, or one with no toString: say what it is.
+		return Object.prototype.toString.call(value);
+	}
+}
+
+/** A byte count as an operator would write it: MiB or KiB when it divides evenly, else bytes. */
+function byteSize(bytes: number): string {
+	if (bytes % (1024 * 1024) === 0) return `${bytes / (1024 * 1024)} MiB`;
+	if (bytes % 1024 === 0) return `${bytes / 1024} KiB`;
+	return `${bytes} bytes`;
+}
+
 /** Where the token sent to the agent came from, for a refusal to name — or `undefined` when none is sent. */
 function tokenSourceOf(configured: unknown, fromEnv: string | undefined): string | undefined {
 	if (configured !== undefined) return "authentication";
@@ -451,7 +515,7 @@ function requestHeaders(configured: unknown, fromEnv: string | undefined): Recor
 	if (configured !== undefined) {
 		if (typeof configured !== "string" || configured.length === 0) {
 			throw new CedarEngineError(
-				`authentication must be a non-empty string, got ${JSON.stringify(configured)}`,
+				`authentication must be a non-empty string, got ${shown(configured)}`,
 			);
 		}
 		token = configured;
@@ -512,10 +576,11 @@ async function answerText(
 	response: Response,
 	signal: AbortSignal,
 	endpoint: string,
+	maxAnswerBytes: number,
 ): Promise<string> {
 	let text: string | typeof OVER_BOUND;
 	try {
-		text = await boundedText(response);
+		text = await boundedText(response, maxAnswerBytes);
 	} catch (cause) {
 		if (signal.aborted) throw signal.reason;
 		throw new CedarEngineError(
@@ -524,24 +589,27 @@ async function answerText(
 	}
 	if (text === OVER_BOUND) {
 		throw new CedarEngineError(
-			`cedar engine at ${endpoint} answered an authorization call with more than ${CEDAR_ANSWER_MAX_BYTES / (1024 * 1024)} MiB — refused`,
+			`cedar engine at ${endpoint} answered an authorization call with more than ${byteSize(maxAnswerBytes)} — refused; set maxAnswerBytes higher if its answers are this large`,
 		);
 	}
 	return text;
 }
 
-/** What {@link boundedText} returns for a body past {@link CEDAR_ANSWER_MAX_BYTES}. */
+/** What {@link boundedText} returns for a body past its bound. */
 const OVER_BOUND = Symbol("over the answer bound");
 
 /**
  * A body read whole and decoded as UTF-8 with one leading BOM dropped, as the
- * Fetch standard's `text()` does, up to {@link CEDAR_ANSWER_MAX_BYTES}. Past
- * that — declared by `content-length`, or found while streaming — the read
- * stops, the body is cancelled, and {@link OVER_BOUND} comes back. A failed
- * read rejects as the stream does.
+ * Fetch standard's `text()` does, up to `maxBytes`. Past that — declared by
+ * `content-length`, or found while streaming — the read stops, the body is
+ * cancelled, and {@link OVER_BOUND} comes back. A failed read rejects as the
+ * stream does.
  */
-async function boundedText(response: Response): Promise<string | typeof OVER_BOUND> {
-	if (Number(response.headers.get("content-length")) > CEDAR_ANSWER_MAX_BYTES) {
+async function boundedText(
+	response: Response,
+	maxBytes: number,
+): Promise<string | typeof OVER_BOUND> {
+	if (Number(response.headers.get("content-length")) > maxBytes) {
 		await response.body?.cancel().catch(() => undefined);
 		return OVER_BOUND;
 	}
@@ -554,7 +622,7 @@ async function boundedText(response: Response): Promise<string | typeof OVER_BOU
 		const { done, value } = await reader.read();
 		if (done) return text + decoder.decode();
 		received += value.byteLength;
-		if (received > CEDAR_ANSWER_MAX_BYTES) {
+		if (received > maxBytes) {
 			await reader.cancel().catch(() => undefined);
 			return OVER_BOUND;
 		}
@@ -574,13 +642,20 @@ function parseJson(text: string): unknown {
 /**
  * cedar-agent's error body is `{ reason, description, code }`; fall back to
  * the status text. The status is the fact, so a body that does not arrive, or
- * is over the bound, leaves it to the status text — unless the read was cut
- * by `signal` aborting, which is the signal's to report (#271).
+ * is over the bound, leaves it to the status text, unless the read was cut by
+ * `signal` aborting, which is the signal's to report (#271). The bound is
+ * `maxAnswerBytes`, and never more than {@link CEDAR_ANSWER_MAX_BYTES}.
  */
-async function errorDescription(response: Response, signal?: AbortSignal): Promise<string> {
+async function errorDescription(
+	response: Response,
+	maxAnswerBytes: number,
+	signal?: AbortSignal,
+): Promise<string> {
 	let text: string | typeof OVER_BOUND | undefined;
 	try {
-		text = await boundedText(response);
+		// Raising maxAnswerBytes is for decisions; an error's body becomes the
+		// log line, so it stays under the default however high that is set.
+		text = await boundedText(response, Math.min(maxAnswerBytes, CEDAR_ANSWER_MAX_BYTES));
 	} catch {
 		if (signal?.aborted) throw signal.reason;
 	}
