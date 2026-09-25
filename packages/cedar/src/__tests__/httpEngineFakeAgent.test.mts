@@ -16,7 +16,6 @@
  * It turns red when the engine is fixed, and is then made an ordinary `it`.
  */
 
-import { subscribe, unsubscribe } from "node:diagnostics_channel";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -96,14 +95,6 @@ function request(): CedarRequest {
 
 const NEVER_ABORTS = new AbortController().signal;
 
-/**
- * Whether Node's `fetch` publishes `undici:request:bodyChunkReceived`, which
- * {@link firstBodyChunk} waits on. The undici bundled with Node 22 (6.x) does
- * not: there the wait never ends, so a case that waits on it is skipped
- * rather than left to time out red for a reason that is not the engine's.
- */
-const PUBLISHES_BODY_CHUNKS = Number(process.versions.undici?.split(".")[0]) >= 7;
-
 function parsed(body: string): unknown {
 	return JSON.parse(body);
 }
@@ -119,22 +110,31 @@ async function loadedAgainst(endpoint: string, config: Record<string, unknown> =
 }
 
 /**
- * Resolves once the client side has read the first chunk of a response body
- * from `path`, and the promise jobs that follow have run — so the engine has its
- * `Response` and is reading the body. Observed on undici's diagnostics
- * channel, which is what Node's `fetch` publishes; nothing is stubbed.
+ * An engine of its own over the global `fetch`, loaded against `endpoint`,
+ * and a promise that resolves once `fetch` has handed the engine the
+ * `Response` to an authorization call — its status and headers are in, and
+ * the body is what the engine reads next. The `fetch` is the real one, called
+ * with the engine's own arguments and returning its own result: this only
+ * observes when it resolves, which every Node's `fetch` does. (The body-chunk
+ * diagnostics channel this used to wait on is not published by the undici
+ * that Node 22 ships, so the case it served was skipped there.)
  */
-function firstBodyChunk(path: string): Promise<void> {
-	const channel = "undici:request:bodyChunkReceived";
-	return new Promise((resolve) => {
-		const onChunk = (message: unknown) => {
-			const received = message as { request?: { path?: string } };
-			if (received.request?.path !== path) return;
-			unsubscribe(channel, onChunk);
-			setTimeout(resolve, 0);
-		};
-		subscribe(channel, onChunk);
+async function loadedObservingAnswers(endpoint: string) {
+	let answered!: () => void;
+	const headersIn = new Promise<void>((resolve) => {
+		answered = resolve;
 	});
+	const observing: typeof fetch = async (input, init) => {
+		const response = await globalThis.fetch(input, init);
+		if (String(input).endsWith("/v1/is_authorized")) answered();
+		return response;
+	};
+	const loaded = await createCedarHttpEngine({ env: {}, fetch: observing }).load(
+		policySet(),
+		loadContext({ endpoint }),
+	);
+	if (!loaded.async) throw new Error("the http engine answers asynchronously");
+	return { loaded, headersIn };
 }
 
 let agent: FakeCedarAgent;
@@ -405,30 +405,27 @@ describe("cedarHttpEngine over the wire — the deadline", () => {
 	// arrive first, and an abort then fails the body read rather than `fetch`
 	// itself. The engine used to read that as "answered something that is not
 	// a decision", telling a direct caller of the port the agent answered
-	// garbage when it timed out. Skipped where the body-chunk channel is silent
-	// (see PUBLISHES_BODY_CHUNKS); `httpEngine.test.mts` pins the same contract
-	// against a scripted body on every Node.
-	(PUBLISHES_BODY_CHUNKS ? it : it.skip)(
-		"rejects with the signal's reason when the deadline passes mid-body, too",
-		async () => {
-			const loaded = await loadedAgainst(agent.origin);
-			agent.answer(
-				authorizeWith((_request, response) => {
-					response.writeHead(200, { "content-type": "application/json", "content-length": 200 });
-					response.write('{"decision":"Allow",');
-					agent.hold(response);
-				}),
-			);
-			const controller = new AbortController();
-			const reason = new Error("rule deadline");
-			const reading = firstBodyChunk("/v1/is_authorized");
-			const failure = loaded.isAuthorized(request(), controller.signal);
-			failure.catch(() => undefined);
-			await reading;
-			controller.abort(reason);
-			await expect(failure).rejects.toBe(reason);
-		},
-	);
+	// garbage when it timed out. Aborted once `fetch` has resolved and a task
+	// has passed, so the engine is reading a body the agent holds open; on
+	// every Node, since nothing here depends on what undici publishes.
+	it("rejects with the signal's reason when the deadline passes mid-body, too", async () => {
+		const { loaded, headersIn } = await loadedObservingAnswers(agent.origin);
+		agent.answer(
+			authorizeWith((_request, response) => {
+				response.writeHead(200, { "content-type": "application/json", "content-length": 200 });
+				response.write('{"decision":"Allow",');
+				agent.hold(response);
+			}),
+		);
+		const controller = new AbortController();
+		const reason = new Error("rule deadline");
+		const failure = loaded.isAuthorized(request(), controller.signal);
+		failure.catch(() => undefined);
+		await headersIn;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		controller.abort(reason);
+		await expect(failure).rejects.toBe(reason);
+	});
 });
 
 describe("cedarHttpEngine over the wire — redirects", () => {
