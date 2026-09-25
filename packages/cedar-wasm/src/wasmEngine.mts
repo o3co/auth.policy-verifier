@@ -8,8 +8,8 @@
  */
 
 import {
-	checkParsePolicySet,
 	type DetailedError,
+	policySetTextToParts,
 	preparsePolicySet,
 	statefulIsAuthorized,
 } from "@cedar-policy/cedar-wasm/nodejs";
@@ -18,6 +18,8 @@ import {
 	type CedarEngine,
 	CedarEngineError,
 	type CedarRequest,
+	namePolicies,
+	type PolicyFile,
 	type PolicySource,
 	type SyncCedarPolicySet,
 } from "@o3co/auth.policy-verifier.cedar";
@@ -38,9 +40,16 @@ let policySetCounter = 0;
  * The in-process Cedar engine: the official `@cedar-policy/cedar-wasm`
  * bindings behind the `CedarEngine` port.
  *
- * `load` parse-checks every file individually — so a syntax error names the
- * file that contains it — then compiles the concatenated set once, at boot,
- * into wasm memory under a per-load id. `isAuthorized` references that id per
+ * `load` parses every file on its own — so a syntax error names the file that
+ * contains it — splits it into its policies, and names each for its file
+ * (`namePolicies`, #199): the file's name for a file that holds one, numbered
+ * `#1`, `#2`… for one that holds several. Those are the ids Cedar answers with
+ * in `diagnostics.reason` and names in `errors`, and the ids the http engine
+ * gives cedar-agent, so a corpus laid out one policy per file reads the same
+ * under both. Refused at load: two policies that would share an id (`a.cedar`
+ * holding two, beside `a#1.cedar`), a policy in a file named only `.cedar`,
+ * and a template. The set is then compiled once, at boot, into
+ * wasm memory under a per-load id. `isAuthorized` references that id per
  * request and re-parses nothing; the call is synchronous, deterministic, and a
  * few tens of microseconds, so the policy set answers as a plain `Rule`.
  *
@@ -63,17 +72,14 @@ export const cedarWasmEngine: CedarWasmEngine = {
 	confirmsRevision: true,
 
 	load(source: PolicySource): SyncCedarPolicySet {
-		for (const file of source.files) {
-			const answer = checkParsePolicySet({ staticPolicies: file.text });
-			if (answer.type === "failure") {
-				throw new CedarEngineError(`${file.source} failed to parse: ${details(answer.errors)}`);
-			}
-		}
+		const policies = namePolicies(source.files, policiesOf);
 
 		// Captured with the compile below, not read per answer — see the doc comment.
 		const { revision } = source;
 		const policySetId = `auth.policy-verifier.cedar-wasm:${policySetCounter++}`;
-		const compiled = preparsePolicySet(policySetId, { staticPolicies: source.text });
+		const compiled = preparsePolicySet(policySetId, {
+			staticPolicies: Object.fromEntries(policies.map((policy) => [policy.id, policy.text])),
+		});
 		if (compiled.type === "failure") {
 			throw new CedarEngineError(
 				`policy set from ${source.description} failed to compile: ${details(compiled.errors)}`,
@@ -100,6 +106,33 @@ export const cedarWasmEngine: CedarWasmEngine = {
 		};
 	},
 };
+
+/**
+ * The policies of one file, as text, in the file's order. Cedar splits a file
+ * under positional ids — `policy0`, `policy1`… — and hands the parts back
+ * sorted by those ids as strings, so `policy10` comes before `policy2`; the
+ * order is undone here by sorting the same ids the same way. That sort is the
+ * pinned `@cedar-policy/cedar-wasm`'s (see package.json); the test of a file
+ * holding a dozen policies fails on a release that sorts otherwise.
+ */
+function policiesOf(file: PolicyFile): string[] {
+	const parts = policySetTextToParts(file.text);
+	if (parts.type === "failure") {
+		throw new CedarEngineError(`${file.source} failed to parse: ${details(parts.errors)}`);
+	}
+	if (parts.policy_templates.length > 0) {
+		// An unlinked template never applies, and this engine links none.
+		throw new CedarEngineError(
+			`${file.source} holds a template — a policy with ?principal or ?resource never applies here, because nothing links it`,
+		);
+	}
+	const sorted = parts.policies.map((_, position) => `policy${position}`).sort();
+	const inFileOrder = new Array<string>(parts.policies.length);
+	for (const [at, id] of sorted.entries()) {
+		inFileOrder[Number(id.slice("policy".length))] = parts.policies[at];
+	}
+	return inFileOrder;
+}
 
 function details(errors: DetailedError[]): string {
 	return errors.map((error) => error.message).join("; ");

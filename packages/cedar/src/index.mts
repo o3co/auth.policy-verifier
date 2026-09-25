@@ -47,8 +47,12 @@ export {
 export type { AttributeMapping, CedarRequest, EntityMappingConfig } from "./mapping.mjs";
 export { CedarInputError } from "./mapping.mjs";
 export { cedarPolicyModule } from "./module.mjs";
-export type { PolicyFile, PolicySource } from "./policySource.mjs";
-export { computePolicyRevision, loadPolicySource } from "./policySource.mjs";
+export type { NamedPolicy, PolicyFile, PolicySource } from "./policySource.mjs";
+export {
+	computePolicyRevision,
+	loadPolicySource,
+	namePolicies,
+} from "./policySource.mjs";
 export { RequestFactsCollector } from "./RequestFactsCollector.mjs";
 
 /*

@@ -18,7 +18,7 @@ import {
 	type CedarEngineLoadContext,
 } from "./engine.mjs";
 import type { CedarRequest } from "./mapping.mjs";
-import type { PolicySource } from "./policySource.mjs";
+import { namePolicies, type PolicySource } from "./policySource.mjs";
 
 /** The name this engine registers under, and the config value that selects it. */
 export const CEDAR_HTTP_ENGINE_NAME = "http" as const;
@@ -116,10 +116,10 @@ interface AgentAuthorizationCall {
  *
  * cedar-agent stores policies one by one, so **each `.cedar` file must hold
  * exactly one policy** (and inline `policies` one policy); a file with two is
- * refused at boot with the agent's message. The wasm engine concatenates and
- * does not care — a policy corpus laid out one policy per file works under
- * both, and reads better under this one, because `diagnostics.reason` then
- * names files rather than `policy0`. `PUT /v1/policies` replaces the agent's
+ * refused at boot with the agent's message. Each is given the id
+ * `namePolicies` makes of its file's name — the id the wasm engine compiles a
+ * one-policy file under too — so a corpus laid out one policy per file works
+ * under both and names its policies alike (#199). `PUT /v1/policies` replaces the agent's
  * whole set, so one collector per agent: a second `load` against the same
  * endpoint is refused rather than silently overwriting the first.
  *
@@ -161,6 +161,14 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 			const headers = requestHeaders(context.config.authentication, env[CEDAR_AUTHENTICATION_ENV]);
 			const maxAnswerBytes = resolveMaxAnswerBytes(context.config.maxAnswerBytes);
 
+			const nonBlank = source.files.filter((file) => file.text.trim().length > 0);
+			// One policy per file (see the doc comment), so each file is one
+			// policy — named before the endpoint is reserved, so a refusal holds nothing.
+			const policies = namePolicies(nonBlank, (file) => [file.text]).map(({ id, text }) => ({
+				id,
+				content: text,
+			}));
+
 			const agent = agentKey(endpoint);
 			const holder = loaded.get(agent);
 			if (holder !== undefined) {
@@ -171,17 +179,6 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 			// Reserved before the first request, not after the last: two collectors
 			// loading concurrently must not both pass the check above.
 			loaded.set(agent, source.description);
-
-			const nonBlank = source.files.filter((file) => file.text.trim().length > 0);
-			const policies = nonBlank.map((file) => ({ id: policyId(file.name), content: file.text }));
-			for (const [index, policy] of policies.entries()) {
-				if (policy.id.length === 0) {
-					loaded.delete(agent);
-					throw new CedarEngineError(
-						`"${nonBlank[index].source}" yields an empty policy id — the file needs a name before .cedar`,
-					);
-				}
-			}
 
 			try {
 				await pushPolicies(
@@ -347,18 +344,6 @@ async function pushPolicies(
 			`cedar engine at ${endpoint} refused the policy set from ${description} (${response.status}; policies: ${ids}): ${await errorDescription(response, maxAnswerBytes)}`,
 		);
 	}
-}
-
-/** cedar-agent policy ids are free-form; the file name reads best in `diagnostics.reason`. */
-/**
- * The id the agent is given for a policy: the file's name without its
- * extension. Derived from `PolicyFile.name` — the very string the policy
- * revision hashes (#244) — so "a rename changes the revision because it
- * changes the policy id" is true by construction rather than by two readings
- * of the path agreeing. The inline set's name is `policies` already.
- */
-function policyId(name: string): string {
-	return name.replace(/\.cedar$/, "");
 }
 
 // --- the endpoint -------------------------------------------------------------
@@ -688,7 +673,7 @@ function readDecision(body: unknown, endpoint: string): CedarDecision {
 	// Both lists are required, as cedar-agent always sends them: an answer
 	// without them is some other shape, and "no errors" must not be inferred
 	// from a field that is not there — that is the fail-open direction.
-	const reason = renderedList((diagnostics as Record<string, unknown> | undefined)?.reason);
+	const reason = policyIds((diagnostics as Record<string, unknown> | undefined)?.reason);
 	const errors = renderedList((diagnostics as Record<string, unknown> | undefined)?.errors);
 	if (
 		typeof diagnostics !== "object" ||
@@ -704,14 +689,37 @@ function readDecision(body: unknown, endpoint: string): CedarDecision {
 }
 
 /**
+ * `diagnostics.reason` as policy ids, or `undefined` when it is not a list.
+ *
+ * The ids are what a decision's `determiningPolicies` names (#199), so an item
+ * is read, not rendered: a string is the id, and an object carrying a string
+ * `policyId` — the structured form Cedar gives an error — yields that. Any
+ * other item is kept as its JSON behind a NUL: never a reportable id, so the
+ * collector counts it in `determiningPoliciesOmitted` — once per distinct item
+ * — and never names it, while the list's emptiness still decides the answer.
+ * Refusing the whole answer for it is what turned an agent image bump into
+ * every request denied (v0.10.0 audit). The list itself stays required.
+ */
+function policyIds(value: unknown): string[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	return value.map((item) => {
+		if (typeof item === "string") return item;
+		const policyId = (item as { policyId?: unknown } | null)?.policyId;
+		return typeof policyId === "string" ? policyId : UNREADABLE_POLICY_ID + JSON.stringify(item);
+	});
+}
+
+/** Marks a reason item that is not an id: a control character, which no reportable id holds. */
+const UNREADABLE_POLICY_ID = "\u0000";
+
+/**
  * A diagnostics list as rendered text, or `undefined` when it is not a list.
  *
  * The items are strings from cedar-agent 0.2.x (cedar-policy 2.4); Cedar 3.x+
- * serialises them as objects. `CedarDecision` keeps them as text because the
- * rule only logs them and decides on whether the list is empty — which
- * rendering cannot change — so a non-string item is rendered rather than the
- * whole answer refused. Refusing it turned an agent image bump into every
- * request denied (v0.10.0 audit). The list itself stays required.
+ * serialises errors as objects. The rule only logs errors and decides on
+ * whether there are any — which rendering cannot change — so a non-string
+ * item is rendered rather than the whole answer refused (v0.10.0 audit). The
+ * list itself stays required.
  */
 function renderedList(value: unknown): string[] | undefined {
 	if (!Array.isArray(value)) return undefined;

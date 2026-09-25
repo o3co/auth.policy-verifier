@@ -35,8 +35,8 @@ it, and engine packages such as
 
 **Owns.**
 
-- Policy loading and the policy revision (`loadPolicySource`,
-  `computePolicyRevision`).
+- Policy loading, the policy revision and the policy ids (`loadPolicySource`,
+  `computePolicyRevision`, `namePolicies`).
 - The mapping from merged attributes to a Cedar request, with entities
   synthesized inline.
 - The rule: how an engine's answer becomes pass, fail or a logged deny
@@ -92,7 +92,7 @@ attribute {
 rule {
   collectors = [
     { collector = "CedarPolicyRuleCollector"
-      # *.cedar files, sorted and concatenated — byte-identical to what a
+      # *.cedar files, read in name order — each byte-identical to what a
       # Cedar agent would load. XOR an inline `policies = "..."` string.
       policyDir = "config/policies"
 
@@ -239,10 +239,12 @@ engine.
   directory is deliberately not part of it, and no path ever appears in a
   decision.
 - **A changed policy changes it even when its policy id does not.** Policy ids
-  are positional (`policy0`) under wasm and file names under http; neither
-  moves when a policy's text is edited. The revision does.
-- **A rename changes it**, because under the http engine the file name *is* the
-  policy id the agent is given.
+  are made from file names under either engine (below), and do not move when a
+  policy's text is edited — a numbered one moves when policies around it are
+  added, removed or reordered (below). The revision does.
+- **A rename changes it**, because the file name is what its policies are
+  called — the id cedar-agent is given under the http engine, and the id a
+  decision's `determiningPolicies` names under either.
 - **The framing is there because concatenation is not injective**: `"X\n"` + `"Y"`
   and `"X"` + `"\nY"` are one policy text and two policy sets.
 
@@ -279,6 +281,48 @@ origin. It is refused at boot over
 an engine that does not declare `confirmsRevision` — today, `engine = "http"` —
 because there every answer would be that deny.
 
+**Which policies determined it (#199).** A `completed` evaluation also names
+the policies Cedar says determined the answer — its `diagnostics.reason`: for
+an allow the permits that applied, for a deny the forbids that did, and `[]`
+when none applied (the implicit deny, or an abstention under
+`onNoDeterminingPolicy = "abstain"`):
+
+```json
+{ "status": "completed", "revision": "sha256:…", "determiningPolicies": ["30-forbid-contractors"] }
+```
+
+- **The ids are the file names**, the same under both engines
+  (`namePolicies`): a file that holds one policy is named for the file without
+  `.cedar` (`30-forbid-contractors`), and the policies of a file that holds
+  several — which only the wasm engine accepts — are numbered in the file's
+  order (`20-rules#1`, `20-rules#2`). The inline set's are `policies`, or
+  `policies#1`…. A layout that would give two policies one id (`a.cedar`
+  holding two, beside `a#1.cedar`) is refused at boot, naming both files, and
+  so is a policy in a file named only `.cedar`, which has no name to give.
+- **A number is a position, not a name.** Adding, removing or reordering a
+  policy in a file that holds several renumbers the ones after it, and a file
+  that gains a second policy turns `a` into `a#1` — so `20-rules#2` in one
+  revision can be another policy in the next. An id means something beside its
+  revision. Where ids must stay put — a dashboard, an alert keyed on one — lay
+  the corpus out one policy per file, which the http engine requires anyway.
+- **Sorted, each once, at most 32.** Cedar keeps `reason` in a set, so it is
+  sorted to give equal attributes an equal record. What does not fit, and an
+  id core cannot carry — a file name over 128 UTF-16 units, or with a control
+  character in it — is counted in `determiningPoliciesOmitted` instead. The
+  bounds are those of the core that checks the report — the server's — applied
+  through its reporter (`report.boundDeterminingPolicies`).
+- **Only a completed answer names any.** A `failed` one names none: Cedar's
+  errors mean the answer is the rule failing closed, not the policies deciding.
+- **Only to an evaluator that reads them.** A core older than #199 refuses the
+  keys, and its reporter has no `boundDeterminingPolicies`; under a server that
+  predates them the rule reports the rest of the evaluation without them.
+  Upgrading this package ahead of the server is safe; the ids appear once the
+  server catches up.
+- **Beside `revision: null`** — every answer of the http engine — the ids are
+  what cedar-agent answered, as unconfirmed as the revision. An item it answers
+  in a form that is not an id is counted in `determiningPoliciesOmitted`, not
+  named.
+
 ## Engines
 
 This package has no evaluator of its own. `CedarPolicyRuleCollector` loads the
@@ -301,9 +345,12 @@ documentation, in [`src/engine.mts`](src/engine.mts); the contract in short:
 - A loaded set answers either synchronously (in-process), or asynchronously
   with an `AbortSignal` for the rule's deadline (over I/O). Its `async` must
   match the engine's declaration.
-- An answer is a `CedarDecision`: the decision, the determining policies and
-  the evaluation errors as text, and optionally the revision it was evaluated
-  against. A call that failed outright rejects with `CedarEngineError`.
+- An answer is a `CedarDecision`: the decision; the ids of the determining
+  policies, which a decision records (#199), so an engine names its policies
+  with `namePolicies` and reads its evaluator's items as ids;
+  the evaluation errors as text; and optionally the revision it was evaluated
+  against. Both lists must be lists — the rule fails an answer otherwise. A
+  call that failed outright rejects with `CedarEngineError`.
 
 `CedarDecision.revision` is the port's confirmation contract (see [Policy
 revision](#policy-revision-which-policies-decided)): an engine names
@@ -396,8 +443,9 @@ docker compose --profile cedar up --build
   sends. A load the agent refuses as unauthenticated fails boot naming
   `CEDAR_AUTHENTICATION`.
 - **The verifier owns the policies.** At boot the engine `PUT`s the policy set
-  to the agent, one entry per `.cedar` file with the file's name as the policy
-  id, so the agent holds exactly `config/policies` and nothing is converted or
+  to the agent, one entry per `.cedar` file with the file's name without
+  `.cedar` as the policy id (`namePolicies`), so the agent holds exactly
+  `config/policies` and nothing is converted or
   mounted twice. Boot retries an unreachable agent for 10 s (a compose sibling
   may be a few hundred milliseconds behind) and then refuses to start. The
   error names the cause — `connect ECONNREFUSED …`, `getaddrinfo ENOTFOUND …`,
@@ -407,10 +455,10 @@ docker compose --profile cedar up --build
   message.
 - **One policy per file.** cedar-agent stores policies one by one, so each
   `.cedar` file — and an inline `policies` string — must hold exactly one
-  policy; a file with two is refused at boot. The wasm engine concatenates and
-  does not care, so a corpus laid out one policy per file runs under both, and
-  reads better under this one: `diagnostics.reason` then names files
-  (`10-permit-eng`) rather than `policy0`.
+  policy; a file with two is refused at boot. The wasm engine accepts several
+  and numbers them (`20-rules#1`), so a corpus laid out one policy per file
+  runs under both and names its policies the same way under each
+  ([which policies determined it](#policy-revision-which-policies-decided)).
 - **One collector per agent.** `PUT /v1/policies` replaces the agent's whole
   set, so a second `CedarPolicyRuleCollector` pointed at the same agent is
   refused at boot rather than silently overwriting the first. Every loopback

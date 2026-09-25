@@ -689,7 +689,8 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 			code: "cedar_deny",
 			message: "Denied by Cedar policy",
 			passed: true,
-			evaluation: unconfirmed("completed"),
+			// The agent's reason, as unconfirmed as the revision (#199).
+			evaluation: { ...unconfirmed("completed"), determiningPolicies: ["10-permit"] },
 		});
 		// What was pushed is what the revision was computed over.
 		expect(parsed(agent.received[0].body)).toEqual([
@@ -704,10 +705,12 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 
 		const decided = await evaluate(attrs(), [forbid]);
 		expect(decided).toMatchObject({ decision: "deny", code: "cedar_deny" });
-		expect(outcomeOf(decided)).toMatchObject({
-			passed: false,
-			evaluation: unconfirmed("completed"),
-		});
+		expect(outcomeOf(decided)).toEqual(
+			expect.objectContaining({
+				passed: false,
+				evaluation: { ...unconfirmed("completed"), determiningPolicies: ["20-forbid"] },
+			}),
+		);
 		// A forbid is the policies' answer, not a fault.
 		expect(logger.error).not.toHaveBeenCalled();
 	});
@@ -745,7 +748,31 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 		const { rule: permit } = await rule();
 		agent.answer(cedarAgent({ ...decision("Allow", ["10-permit"]), revision: loadedRevision }));
 		const decided = await evaluate(attrs(), [permit]);
-		expect(outcomeOf(decided).evaluation).toEqual(unconfirmed("completed"));
+		expect(outcomeOf(decided).evaluation).toEqual({
+			...unconfirmed("completed"),
+			determiningPolicies: ["10-permit"],
+		});
+	});
+
+	it("names the policies an agent reports in a structured form by their ids, and counts what is not one (#199)", async () => {
+		const { rule: permit } = await rule();
+		agent.answer(
+			cedarAgent({
+				decision: "Allow",
+				diagnostics: {
+					reason: [{ policyId: "10-permit" }, 42, null, { id: "p2" }, 42],
+					errors: [],
+				},
+			}),
+		);
+		const decided = await evaluate(attrs(), [permit]);
+		expect(decided.decision).toBe("allow");
+		expect(outcomeOf(decided).evaluation).toEqual({
+			...unconfirmed("completed"),
+			determiningPolicies: ["10-permit"],
+			// Each distinct item it could not read, counted: 42 twice is one.
+			determiningPoliciesOmitted: 3,
+		});
 	});
 
 	it("refuses requireConfirmedRevision at boot, before anything reaches the agent (#244)", async () => {

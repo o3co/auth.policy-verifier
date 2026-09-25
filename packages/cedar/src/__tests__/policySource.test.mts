@@ -7,8 +7,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { POLICY_REVISION_PATTERN } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
+import { CedarEngineError } from "../engine.mjs";
 import * as cedar from "../index.mjs";
-import { computePolicyRevision, loadPolicySource } from "../policySource.mjs";
+import {
+	computePolicyRevision,
+	loadPolicySource,
+	namePolicies,
+	type PolicyFile,
+	policyIdsOf,
+} from "../policySource.mjs";
 
 /** A fresh directory holding exactly these files. */
 function policyDir(files: Record<string, string>): string {
@@ -179,5 +186,104 @@ describe("loadPolicySource — the policy revision", () => {
 		const [file] = loadPolicySource({ policyDir: dir }).files;
 		expect(file.name).toBe("10-permit.cedar");
 		expect(file.source).toBe(join(dir, "10-permit.cedar"));
+	});
+});
+
+describe("policyIdsOf — the ids a file's policies are known by (#199)", () => {
+	const file = (name: string) => ({ name, source: `/etc/verifier/policies/${name}`, text: "" });
+
+	it("names a file's one policy for the file, without .cedar — the id the http engine gives it", () => {
+		expect(policyIdsOf(file("10-permit-eng.cedar"), 1)).toEqual(["10-permit-eng"]);
+	});
+
+	it("numbers the policies of a file that holds several from 1, in the file's order", () => {
+		expect(policyIdsOf(file("20-rules.cedar"), 3)).toEqual([
+			"20-rules#1",
+			"20-rules#2",
+			"20-rules#3",
+		]);
+	});
+
+	it("names the inline set's policies after its name, `policies`", () => {
+		const inline = { name: "policies", source: "policies (inline)", text: "" };
+		expect(policyIdsOf(inline, 1)).toEqual(["policies"]);
+		expect(policyIdsOf(inline, 2)).toEqual(["policies#1", "policies#2"]);
+	});
+
+	it("names nothing in a file that holds no policy", () => {
+		expect(policyIdsOf(file("00-blank.cedar"), 0)).toEqual([]);
+	});
+
+	it("refuses a file named only .cedar that holds a policy, naming where it is", () => {
+		expect(() => policyIdsOf(file(".cedar"), 1)).toThrow(CedarEngineError);
+		expect(() => policyIdsOf(file(".cedar"), 2)).toThrow(
+			/"\/etc\/verifier\/policies\/\.cedar" yields an empty policy id/,
+		);
+		expect(policyIdsOf(file(".cedar"), 0)).toEqual([]);
+	});
+
+	it.each([
+		["negative", -1],
+		["a fraction", 1.5],
+		["NaN", Number.NaN],
+	])("refuses a count that is %s", (_label, count) => {
+		expect(() => policyIdsOf(file("10-permit-eng.cedar"), count)).toThrow(RangeError);
+	});
+
+	it("is not exported from the package — engines name through namePolicies", () => {
+		// namePolicies is the one entry point, and refuses collisions too.
+		expect("policyIdsOf" in cedar).toBe(false);
+	});
+});
+
+describe("namePolicies — every policy of a set, named for its file (#199)", () => {
+	const file = (name: string, text: string): PolicyFile => ({
+		name,
+		source: `/etc/verifier/policies/${name}`,
+		text,
+	});
+	/** Splits on blank lines — enough for the naming under test. */
+	const byBlankLine = (f: PolicyFile) => f.text.split("\n\n").filter((part) => part.length > 0);
+
+	it("names each file's policies in the files' order and each file's order", () => {
+		const named = namePolicies(
+			[file("10-one.cedar", "p"), file("20-two.cedar", "a\n\nb"), file("30-none.cedar", "")],
+			byBlankLine,
+		);
+		expect(named.map(({ id, text }) => [id, text])).toEqual([
+			["10-one", "p"],
+			["20-two#1", "a"],
+			["20-two#2", "b"],
+		]);
+		expect(named[2].file.source).toBe("/etc/verifier/policies/20-two.cedar");
+	});
+
+	it("refuses two policies that would share an id, naming both files", () => {
+		const colliding = [file("a.cedar", "x\n\ny"), file("a#1.cedar", "z")];
+		expect(() => namePolicies(colliding, byBlankLine)).toThrow(CedarEngineError);
+		expect(() => namePolicies(colliding, byBlankLine)).toThrow(
+			'policy id "a#1" names a policy in /etc/verifier/policies/a.cedar and one in /etc/verifier/policies/a#1.cedar',
+		);
+	});
+
+	it("lets ids that only look alike stand — a#1.cedar holding two beside a.cedar holding two", () => {
+		const named = namePolicies(
+			[file("a.cedar", "w\n\nx"), file("a#1.cedar", "y\n\nz")],
+			byBlankLine,
+		);
+		expect(named.map(({ id }) => id)).toEqual(["a#1", "a#2", "a#1#1", "a#1#2"]);
+	});
+
+	it("passes on what the split throws, unchanged", () => {
+		const boom = new Error("unparseable");
+		expect(() =>
+			namePolicies([file("a.cedar", "x")], () => {
+				throw boom;
+			}),
+		).toThrow(boom);
+	});
+
+	it("is exported from the package, for an engine built outside it", () => {
+		expect(cedar.namePolicies).toBe(namePolicies);
 	});
 });

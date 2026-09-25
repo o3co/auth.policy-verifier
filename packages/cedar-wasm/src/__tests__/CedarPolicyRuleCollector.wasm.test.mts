@@ -361,8 +361,8 @@ describe("CedarPolicyRuleCollector on the wasm engine — the evaluation behind 
 	});
 
 	it("changes the revision when a policy's contents change under the same policy id", async () => {
-		// Both sets are one file of one policy, so Cedar calls the policy
-		// `policy0` in each: the id cannot tell them apart, the revision must.
+		// Both sets are one file of one policy, so the policy is `10-rule` in
+		// each: the id cannot tell them apart, the revision must.
 		const dirWith = (text: string) => {
 			const dir = mkdtempSync(join(tmpdir(), "cedar-revision-"));
 			writeFileSync(join(dir, "10-rule.cedar"), text);
@@ -403,6 +403,27 @@ describe("CedarPolicyRuleCollector on the wasm engine — the evaluation behind 
 		expect(decision.reason.groups[0].evaluated[0].evaluation).toEqual({
 			status: "completed",
 			revision: revisionOf(FORBID_ALL),
+			// The inline set's one policy, named for it (#199).
+			determiningPolicies: ["policies"],
+		});
+	});
+
+	it("names the policies that decided for their files, through core evaluate (#199)", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "cedar-determining-"));
+		writeFileSync(join(dir, "10-permit-read.cedar"), PERMIT_READ);
+		writeFileSync(
+			join(dir, "20-rules.cedar"),
+			[
+				`forbid(principal, action == Action::"delete", resource);`,
+				"permit(principal, action, resource);",
+			].join("\n"),
+		);
+		const rule = await collectRule({ policyDir: dir });
+		const decision = await evaluate(attrsWith(), [rule]);
+		expect(decision.decision).toBe("allow");
+		expect(decision.reason.groups[0].evaluated[0].evaluation).toMatchObject({
+			status: "completed",
+			determiningPolicies: ["10-permit-read", "20-rules#2"],
 		});
 	});
 });

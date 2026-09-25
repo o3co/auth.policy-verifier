@@ -57,6 +57,10 @@ The source falls into four parts, separated by what changes them:
   [`__tests__/engine.test.mts`](__tests__/engine.test.mts).
 - `index.mts` is the only file that registers an engine, and `keys.mts` the only one that
   reserves attribute keys; both do it at import.
+- Policy ids are made in one place — `namePolicies` (over `policyIdsOf`) in `policySource.mts` —
+  and both engines use it, so a policy is called the same whichever engine answers, and a
+  decision records that name (#199) —
+  [`__tests__/policySource.test.mts`](__tests__/policySource.test.mts).
 - The only I/O here is reading the policy set, at boot (`policySource.mts`), and the `http`
   engine's calls to its agent.
 - An evaluation error, a failed call, a request that could not be built or an answer from a
