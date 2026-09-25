@@ -100,10 +100,15 @@ export function isReportablePolicyId(value: unknown): value is string {
  * the engine does not keep stable, or two replicas record one decision two
  * ways. `names` is iterated once.
  */
-export function boundDeterminingPolicies(names: Iterable<unknown>): {
+export function boundDeterminingPolicies(names: Iterable<unknown> & object): {
 	readonly determiningPolicies: readonly string[];
 	readonly determiningPoliciesOmitted?: number;
 } {
+	// A string is iterable too, by character: one id passed bare would come
+	// back as a list of letters — a wrong record that looks complete.
+	if (typeof names === "string") {
+		throw new TypeError("boundDeterminingPolicies takes a list of names, not one name");
+	}
 	const distinct = new Set<unknown>(names);
 	const listed: string[] = [];
 	for (const name of distinct) {
@@ -280,7 +285,7 @@ function readDeterminingPolicies(list: unknown, omitted: unknown): DeterminingPo
 		const id: unknown = list[index];
 		if (!isReportablePolicyId(id)) {
 			throw new TypeError(
-				`a rule's evaluation.determiningPolicies holds an id that is not 1 to ${POLICY_ID_MAX_LENGTH} UTF-16 units of well-formed text free of control and bidi characters — build the report with boundDeterminingPolicies, which counts such an id in determiningPoliciesOmitted`,
+				`a rule's evaluation.determiningPolicies holds an id that is not 1 to ${POLICY_ID_MAX_LENGTH} UTF-16 units of well-formed text outside POLICY_ID_FORBIDDEN_RANGES — build the report with boundDeterminingPolicies, which counts such an id in determiningPoliciesOmitted`,
 			);
 		}
 		if (seen.has(id)) {

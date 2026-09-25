@@ -830,6 +830,10 @@ describe("boundDeterminingPolicies — what a rule reports, made to fit (#199)",
 		).toEqual({ determiningPolicies: ["20-forbid"], determiningPoliciesOmitted: 5 });
 	});
 
+	it("refuses one name passed bare — a string is iterable, by character", () => {
+		expect(() => boundDeterminingPolicies("20-forbid" as unknown as string[])).toThrow(TypeError);
+	});
+
 	it("answers an empty list for no names — no policy determined the answer", () => {
 		expect(boundDeterminingPolicies([])).toEqual({ determiningPolicies: [] });
 	});
@@ -880,6 +884,12 @@ describe("isReportablePolicyId (#199)", () => {
 		["a C1 control", false, "a\u0085b"],
 		["the last C1 control", false, "a\u009fb"],
 		["the first character after C1", true, "a\u00a0b"],
+		["a soft hyphen", false, "a\u00adb"],
+		["a zero-width space", false, "20-forbid\u200b"],
+		["a zero-width joiner — emoji and Indic text need it", true, "a\u200db"],
+		["a word joiner", false, "a\u2060b"],
+		["a byte order mark", false, "\ufeff20-forbid"],
+		["a tag character", false, "a\u{e0041}b"],
 		["an Arabic letter mark", false, "a\u061cb"],
 		["a left-to-right mark", false, "a\u200eb"],
 		["a line separator", false, "a\u2028b"],

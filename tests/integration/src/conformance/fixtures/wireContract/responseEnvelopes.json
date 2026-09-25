@@ -90,13 +90,18 @@
 			"idForbiddenRanges": [
 				["0000", "001F"],
 				["007F", "009F"],
+				["00AD", "00AD"],
 				["061C", "061C"],
+				["180E", "180E"],
+				["200B", "200B"],
 				["200E", "200F"],
 				["2028", "202E"],
-				["2066", "2069"]
+				["2060", "2069"],
+				["FEFF", "FEFF"],
+				["E0000", "E007F"]
 			],
 			"omitted": { "minimum": 1, "onlyBeside": "determiningPolicies" },
-			"about": "A set of distinct policy ids. Each is well-formed UTF-16 (no lone surrogate), 1 to idMaxLength UTF-16 code units long, and holds no code point in idForbiddenRanges (inclusive, hex): the controls and the characters that break or reorder a displayed line. `determiningPoliciesOmitted` is an integer of at least `omitted.minimum`, present only beside the list."
+			"about": "A set of distinct policy ids. Each is well-formed UTF-16 (no lone surrogate), 1 to idMaxLength UTF-16 code units long, and holds no code point in idForbiddenRanges (inclusive, hex): the controls, and the characters that break or reorder a displayed line or hide in it. `determiningPoliciesOmitted` is an integer of at least `omitted.minimum`, present only beside the list."
 		},
 		"revision": {
 			"pattern": "^[a-z0-9]+(?:[+._-][a-z0-9]+)*:[A-Za-z0-9=_-]+$",

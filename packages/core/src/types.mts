@@ -241,8 +241,9 @@ export const POLICY_REVISION_MAX_LENGTH = 256;
  * audit line carries them, and so may its response: a handful answers "which
  * policy decided", and the rest are counted, not dropped. With
  * {@link POLICY_ID_MAX_LENGTH} this bounds one evaluation's ids at 4,096
- * UTF-16 units — about 4 KiB of ASCII, at most 12 KiB of UTF-8 — so the
- * decision line stays under the 16 KiB a line-splitting log driver cuts at.
+ * UTF-16 units — about 4 KiB of ASCII, at most 12 KiB of UTF-8 — under the
+ * 16 KiB a line-splitting log driver cuts at. That is one evaluation's; a
+ * decision line carries one per reporting rule.
  */
 export const DETERMINING_POLICIES_MAX = 32;
 
@@ -253,21 +254,30 @@ export const DETERMINING_POLICIES_MAX = 32;
 export const POLICY_ID_MAX_LENGTH = 128;
 
 /**
- * The code points a determining policy id may not hold, as inclusive ranges:
- * the C0 controls, DEL and the C1 controls; the Arabic letter mark; the
- * left-to-right and right-to-left marks; the line and paragraph separators
- * and the bidi embeddings and overrides beside them; and the bidi isolates.
- * Each can break a log line or make an id display as another. An id must
- * also be well-formed UTF-16 — no lone surrogate, which does not survive a
- * JSON round trip. Published so the wire contract can be checked against it.
+ * The code points a determining policy id may not hold, as inclusive ranges.
+ * They break a log line (the C0 controls, DEL, the C1 controls, the line and
+ * paragraph separators), reorder it (the bidi controls: the Arabic letter
+ * mark, LRM and RLM, the embeddings and overrides, the isolates), or hide in
+ * it so that an id displays as another (the soft hyphen, the Mongolian vowel
+ * separator, the zero-width space, the word joiner and the invisible
+ * operators, the byte order mark, the tag characters). The zero-width joiner
+ * and non-joiner are allowed: Persian and Indic text and emoji need them.
+ * Look-alike letters are not in scope — no range can rule them out. An id
+ * must also be well-formed UTF-16 (no lone surrogate, which does not survive
+ * a JSON round trip). Published so the wire contract can be checked against it.
  */
 export const POLICY_ID_FORBIDDEN_RANGES: ReadonlyArray<readonly [number, number]> = Object.freeze([
 	Object.freeze([0x0000, 0x001f] as const),
 	Object.freeze([0x007f, 0x009f] as const),
+	Object.freeze([0x00ad, 0x00ad] as const),
 	Object.freeze([0x061c, 0x061c] as const),
+	Object.freeze([0x180e, 0x180e] as const),
+	Object.freeze([0x200b, 0x200b] as const),
 	Object.freeze([0x200e, 0x200f] as const),
 	Object.freeze([0x2028, 0x202e] as const),
-	Object.freeze([0x2066, 0x2069] as const),
+	Object.freeze([0x2060, 0x2069] as const),
+	Object.freeze([0xfeff, 0xfeff] as const),
+	Object.freeze([0xe0000, 0xe007f] as const),
 ]);
 
 /**

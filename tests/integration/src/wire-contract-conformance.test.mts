@@ -440,6 +440,39 @@ describe("the fixture's evaluation table is core's own", () => {
 		expect([...evaluation.evaluated.onlyWhenCompleted].sort()).toEqual(Object.keys(keys).sort());
 	});
 
+	it("states the omitted count's rules and id well-formedness as core holds them (#199)", async () => {
+		const accepts = async (report: Record<string, unknown>): Promise<boolean> =>
+			evaluate(new Map(), [
+				{
+					ruleType: "policy",
+					code: "policy_deny",
+					message: "Denied by policy",
+					verify: (_attrs, tell) => {
+						tell?.(report as RuleEvaluation);
+						return false;
+					},
+				},
+			]).then(
+				() => true,
+				() => false,
+			);
+		const { omitted, idWellFormed } = evaluation.determiningPolicies;
+		const completed = { status: "completed", revision: null };
+		const list = { [omitted.onlyBeside]: [] };
+		expect(
+			await accepts({ ...completed, ...list, determiningPoliciesOmitted: omitted.minimum }),
+		).toBe(true);
+		expect(
+			await accepts({ ...completed, ...list, determiningPoliciesOmitted: omitted.minimum - 1 }),
+		).toBe(false);
+		expect(await accepts({ ...completed, determiningPoliciesOmitted: omitted.minimum })).toBe(
+			false,
+		);
+		// Core refuses a lone surrogate, so the fixture must say ids are well-formed.
+		expect(idWellFormed).toBe(true);
+		expect(await accepts({ ...completed, determiningPolicies: ["a\ud800"] })).toBe(false);
+	});
+
 	it("lists exactly the statuses core accepts", async () => {
 		const accepts = async (status: string): Promise<boolean> => {
 			const report = status === "not_invoked" ? { status } : { status, revision: null };
