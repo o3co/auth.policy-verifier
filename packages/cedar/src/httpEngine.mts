@@ -16,6 +16,7 @@ import {
 	type CedarEngine,
 	CedarEngineError,
 	type CedarEngineLoadContext,
+	type ForeignAnswer,
 } from "./engine.mjs";
 import type { CedarRequest } from "./mapping.mjs";
 import { namePolicies, type PolicySource } from "./policySource.mjs";
@@ -83,7 +84,8 @@ interface AgentAuthorizationCall {
  * ## What it does
  *
  * At `load` the policy set is pushed to the agent — `PUT /v1/policies`, one
- * entry per file, the file's name as the policy id — so the agent holds
+ * entry per file, under the file's name and the load's mark (`agentPolicyId`,
+ * #283) — so the agent holds
  * exactly the verifier's `config/policies` and nothing has to be converted or
  * mounted twice. The agent parses on receipt; a set it refuses fails boot
  * here, with the agent's message and the ids that were sent (the agent does
@@ -119,7 +121,9 @@ interface AgentAuthorizationCall {
  * refused at boot with the agent's message. Each is given the id
  * `namePolicies` makes of its file's name — the id the wasm engine compiles a
  * one-policy file under too — so a corpus laid out one policy per file works
- * under both and names its policies alike (#199). `PUT /v1/policies` replaces the agent's
+ * under both and names its policies alike (#199); the agent holds it under
+ * that id and the load's mark (`agentPolicyId`, #283), by which an answer from
+ * a set this verifier did not load is told apart. `PUT /v1/policies` replaces the agent's
  * whole set, so one collector per agent: a second `load` against the same
  * endpoint is refused rather than silently overwriting the first.
  *
@@ -164,8 +168,11 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 			const nonBlank = source.files.filter((file) => file.text.trim().length > 0);
 			// One policy per file (see the doc comment), so each file is one
 			// policy — named before the endpoint is reserved, so a refusal holds nothing.
-			const policies = namePolicies(nonBlank, (file) => [file.text]).map(({ id, text }) => ({
-				id,
+			// Pushed under this load's mark (#283); the file id is what a decision records.
+			const named = namePolicies(nonBlank, (file) => [file.text]);
+			const ownIds = new Map(named.map(({ id }) => [agentPolicyId(id, source.revision), id]));
+			const policies = named.map(({ id, text }) => ({
+				id: agentPolicyId(id, source.revision),
 				content: text,
 			}));
 
@@ -179,6 +186,14 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 			// Reserved before the first request, not after the last: two collectors
 			// loading concurrently must not both pass the check above.
 			loaded.set(agent, source.description);
+			if (headers.authorization === undefined) {
+				// Nothing here can check what a token holder does to the set (see
+				// `ownDecision`); without a token, that is anyone who reaches the port.
+				context.logger.warn(
+					{ engine: CEDAR_HTTP_ENGINE_NAME, endpoint },
+					`cedar agent at ${endpoint} is used without a token — anything that reaches its port can replace the policy set, and every decision after it; set authentication (or ${CEDAR_AUTHENTICATION_ENV}), and start the agent with it`,
+				);
+			}
 
 			try {
 				await pushPolicies(
@@ -236,15 +251,70 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 							`cedar engine at ${endpoint} answered ${response.status} to an authorization call: ${await errorDescription(response, maxAnswerBytes, signal)}${redirected ? " — redirects are not followed; set endpoint to the URL that answers it itself" : ""}`,
 						);
 					}
-					return readDecision(
-						parseJson(await answerText(response, signal, endpoint, maxAnswerBytes)),
-						endpoint,
+					return ownDecision(
+						readDecision(
+							parseJson(await answerText(response, signal, endpoint, maxAnswerBytes)),
+							endpoint,
+						),
+						ownIds,
 					);
 				},
 			};
 			return policySet;
 		},
 	};
+}
+
+/**
+ * The id the agent holds a policy under (#283): its file id, and the load's
+ * mark — the first 16 hex of the policy set's revision — after an `@`
+ * (`10-permit-eng@9f2c…`). cedar-agent evaluates whatever set it holds, which
+ * anyone with its token can replace, and names no revision; the ids of the
+ * policies that determined an answer are all it gives back. Under this mark
+ * those ids say which load they came from. It is the revision's own digest,
+ * so replicas loading the same files push the same ids and do not take each
+ * other's answers for foreign ones, while a replica with other files — a
+ * rolling deploy sharing an agent, an agent restarted on its own set — does.
+ */
+export function agentPolicyId(id: string, revision: string): string {
+	// 16 of the digest's hex — 64 bits, far past any collision two loads could
+	// meet. The revision is always `sha256:<64 hex>` (computePolicyRevision).
+	return `${id}@${revision.slice(revision.indexOf(":") + 1).slice(0, 16)}`;
+}
+
+/**
+ * An answer, read against what this load pushed (#283). Every determining
+ * policy must be one of this load's, under its mark; then the answer names
+ * them by their file ids, each once — so it can name no more than were
+ * pushed. One that is not — no mark, another load's, an id never pushed, an
+ * item that is not an id at all — means the answer did not come from this
+ * set: it is marked `foreign`, and names nothing of it.
+ *
+ * The mark is no secret and no authenticator: the ids are in every answer, in
+ * the agent's `GET /v1/policies`, and computable from the policy files. It
+ * catches a set this verifier did not load — replaced, shared, reloaded — not
+ * someone holding the agent's token, who can rewrite a policy under its own
+ * marked id, or delete one, and be answered for as this load. No check of an
+ * answer can see that; the agent's token is the boundary.
+ */
+function ownDecision(decision: CedarDecision, ownIds: ReadonlyMap<string, string>): CedarDecision {
+	const reason: string[] = [];
+	const seen = new Set<string>();
+	for (const item of decision.reason) {
+		const id = ownIds.get(item);
+		if (id === undefined) return { ...decision, reason: [], foreign: foreignAnswer(item) };
+		if (seen.has(id)) continue;
+		seen.add(id);
+		reason.push(id);
+	}
+	return { ...decision, reason };
+}
+
+/** Why `item` is not this load's — a fixed label, and a mark only when it is 16 hex. */
+function foreignAnswer(item: string): ForeignAnswer {
+	if (item.startsWith(UNREADABLE_POLICY_ID)) return { why: "unreadable policy" };
+	const mark = /@([0-9a-f]{16})$/.exec(item)?.[1];
+	return mark === undefined ? { why: "unknown policy" } : { why: "unknown policy", mark };
 }
 
 /** The engine a deployment gets by naming `engine = "http"`, or by default when the wasm package is not imported. */
@@ -694,11 +764,13 @@ function readDecision(body: unknown, endpoint: string): CedarDecision {
  * The ids are what a decision's `determiningPolicies` names (#199), so an item
  * is read, not rendered: a string is the id, and an object carrying a string
  * `policyId` — the structured form Cedar gives an error — yields that. Any
- * other item is kept as its JSON behind a NUL: never a reportable id, so the
- * collector counts it in `determiningPoliciesOmitted` — once per distinct item
- * — and never names it, while the list's emptiness still decides the answer.
- * Refusing the whole answer for it is what turned an agent image bump into
- * every request denied (v0.10.0 audit). The list itself stays required.
+ * other item is kept as its JSON behind a NUL, which no policy id is: the
+ * answer is then read as not this load's (`ownDecision`, #283), since a permit
+ * that cannot be named cannot be attributed — `"unreadable policy"`, told
+ * apart in the log from a policy this load never pushed. An agent image that
+ * changed the shape of its reason items would so deny every permit, loudly
+ * and saying why; before #283 such items were only counted. The list itself
+ * stays required.
  */
 function policyIds(value: unknown): string[] | undefined {
 	if (!Array.isArray(value)) return undefined;

@@ -278,7 +278,7 @@ tells them apart:
 | Cedar answered without errors — a permit, a forbid, or no policy determining the request | `completed` | `revision`, when the engine vouches for it |
 | Cedar answered with evaluation errors | `failed` | `revision`, when the engine vouches for it |
 | the call itself failed | `failed` | `revision: null` — nothing answered, so nothing vouched |
-| the engine named a revision other than the one loaded | `failed` | `revision: null` — it answered from a policy set this verifier did not load |
+| the engine named a revision other than the one loaded, or policies it never loaded (#283) | `failed` | `revision: null` — it answered from a policy set this verifier did not load |
 | the engine named no revision, under `requireConfirmedRevision` | `failed` | `revision: null` |
 | the request could not be built from the attributes, so Cedar was not asked | `not_invoked` | no revision key at all |
 
@@ -337,6 +337,35 @@ loaded one is answering from a policy set this verifier did not load, and the
 rule fails it closed — and logs it whatever `logEvaluationErrors` says, because
 that is a fault of the deployment and not a policy reading a missing attribute.
 
+**What the http engine can tell (#283).** It cannot vouch for an answer, but it
+can tell a foreign one. The ids of the policies that determined an answer are
+the one thing cedar-agent gives back. The engine pushes each policy under an id
+carrying its load's mark (below), so an answer naming any other id came from a
+set this verifier did not load. Three ways that happens:
+- the set was replaced under the agent;
+- an agent restarted on its own `--policies`;
+- a replica with other files, during a rolling deploy, shares the agent.
+
+Such an answer is failed and logged like a foreign revision, never read. The
+log line carries the reason, `foreign: "unknown policy"` or `"unreadable
+policy"`. When the id it could not place carried a mark, the line also carries
+that other load's mark, which tells an operator which revision took the agent.
+
+**The mark is neither a secret nor an authenticator.** Anyone can learn the
+ids:
+- they are in every answer;
+- they are in the agent's `GET /v1/policies`;
+- they can be computed from the policy files.
+
+So the mark catches a set this verifier did not load by mistake. It does
+nothing against someone holding the agent's token. A token holder can rewrite a
+policy under its own marked id, or delete one, and the answers still read as
+this load's. No check of an answer can see that. The agent's token is the
+boundary (see [Running out of process](#running-out-of-process)), and that is
+why the engine still does not declare `confirmsRevision`. Reading the agent's
+set back and comparing it with what was pushed would catch it between answers,
+though not within one; that is not done today.
+
 **`requireConfirmedRevision = true`** is for a deployment whose audit has to
 name the policies behind every decision: an answer nobody vouched for becomes a
 deny — always logged, like the mismatch above — instead of a permit of unknown
@@ -382,9 +411,9 @@ when none applied (the implicit deny, or an abstention under
   Upgrading this package ahead of the server is safe; the ids appear once the
   server catches up.
 - **Beside `revision: null`** — every answer of the http engine — the ids are
-  what cedar-agent answered, as unconfirmed as the revision. An item it answers
-  in a form that is not an id is counted in `determiningPoliciesOmitted`, not
-  named.
+  what cedar-agent answered, as unconfirmed as the revision. Each must be one
+  this load pushed, so an item the agent answers in a form that is not an id
+  makes the answer foreign (#283), not a count.
 
 ## Engines
 
@@ -411,9 +440,13 @@ documentation, in [`src/engine.mts`](src/engine.mts); the contract in short:
 - An answer is a `CedarDecision`: the decision; the ids of the determining
   policies, which a decision records (#199), so an engine names its policies
   with `namePolicies` and reads its evaluator's items as ids;
-  the evaluation errors as text; and optionally the revision it was evaluated
-  against. Both lists must be lists — the rule fails an answer otherwise. A
-  call that failed outright rejects with `CedarEngineError`.
+  the evaluation errors as text; optionally the revision it was evaluated
+  against; and `foreign` when the engine can tell the answer did not come from
+  the set it loaded, though it cannot vouch for one that did (#283). An
+  `allow` names at least one determining policy: Cedar allows only on a
+  permit, and one naming none is refused as not a decision. Both lists
+  must be lists — the rule fails an answer otherwise. A call that failed
+  outright rejects with `CedarEngineError`.
 
 `CedarDecision.revision` is the port's confirmation contract (see [Policy
 revision](#policy-revision-which-policies-decided)): an engine names
@@ -504,18 +537,32 @@ docker compose --profile cedar up --build
   namespace it MUST be set. The template's compose profile starts the agent
   with `CEDAR_AGENT_AUTHENTICATION` from the same `CEDAR_AUTHENTICATION` the app
   sends. A load the agent refuses as unauthenticated fails boot naming
-  `CEDAR_AUTHENTICATION`.
+  `CEDAR_AUTHENTICATION`. Boot warns when no token is configured.
+  The token is also the boundary of what the engine can check. Policy ids
+  (next) catch a set this verifier did not load: replaced, shared or
+  reloaded. They do not catch a token holder who rewrites or deletes one of
+  this load's policies under its own id.
 - **The verifier owns the policies.** At boot the engine `PUT`s the policy set
-  to the agent, one entry per `.cedar` file with the file's name without
-  `.cedar` as the policy id (`namePolicies`), so the agent holds exactly
-  `config/policies` and nothing is converted or
-  mounted twice. Boot retries an unreachable agent for 10 s (a compose sibling
-  may be a few hundred milliseconds behind) and then refuses to start. The
-  error names the cause — `connect ECONNREFUSED …`, `getaddrinfo ENOTFOUND …`,
-  a TLS error — or, when the deadline passes while an attempt is still
-  waiting, says no answer came in time, with how the attempt before failed if
-  one did. A set the agent refuses fails boot at once, with the agent's
-  message.
+  to the agent, one entry per `.cedar` file, so the agent holds exactly
+  `config/policies` and nothing is converted or mounted twice.
+  - **The policy id** is the file's name without `.cedar` (`namePolicies`),
+    followed by the load's mark after an `@`: the first 16 hex of the policy
+    set's revision (`10-permit-eng@9f2c…`, `agentPolicyId`, #283).
+  - **The mark is the revision's own digest.** Replicas loading the same files
+    push the same ids. A replica with other files does not.
+  - **An answer's determining policies** must all be this load's; the answer
+    is otherwise refused as foreign (above). They are recorded by their file
+    ids, the mark removed, each once.
+  - **Operators see the marked ids** in the agent (`GET /v1/policies`), in
+    the agent's evaluation-error strings the rule logs, and in a boot
+    refusal's list of the ids sent. A decision records the file ids.
+
+  Boot retries an unreachable agent for 10 s (a compose sibling may be a few
+  hundred milliseconds behind) and then refuses to start. The error names the
+  cause — `connect ECONNREFUSED …`, `getaddrinfo ENOTFOUND …`, a TLS error — or,
+  when the deadline passes while an attempt is still waiting, says no answer
+  came in time, with how the attempt before failed if one did. A set the agent
+  refuses fails boot at once, with the agent's message.
 - **One policy per file.** cedar-agent stores policies one by one, so each
   `.cedar` file — and an inline `policies` string — must hold exactly one
   policy; a file with two is refused at boot. The wasm engine accepts several
@@ -527,6 +574,18 @@ docker compose --profile cedar up --build
   refused at boot rather than silently overwriting the first. Every loopback
   spelling of a host (`localhost`, `127.0.0.1`, `[::1]`) on one port counts as
   the same agent.
+- **One agent per replica, across deploys too (#283).** That refusal is
+  per process. Replicas sharing an agent overwrite each other's set, and now
+  that answers carry the load's mark, the loser fails closed.
+  - **During a rolling deploy:** once the first new replica pushes, every old
+    replica sharing the agent denies every request a policy would permit, and
+    logs it.
+  - **After a rollback:** the survivors keep denying until they restart,
+    because nothing re-pushes after boot.
+
+  Run an agent per replica, as the template's sidecar does, and restart
+  replicas after a rollback. Replicas with identical files push identical ids
+  and do not disturb each other.
 - **Connections are not capped.** The engine uses the process's global `fetch`
   dispatcher with keep-alive, so concurrent decisions map one-to-one onto
   concurrent agent connections. Each call is bounded by `verify.ruleTimeoutMs`
@@ -567,10 +626,14 @@ docker compose --profile cedar up --build
   boot, which is the right place to find out.
 - **The response contract is cedar-agent 0.2.x's.** `POST /v1/is_authorized`
   must answer `{ decision, diagnostics: { reason: [...], errors: [...] } }`;
-  an answer missing either list is refused, and the call denies. The items of
-  both lists are read as text — an agent on a newer Cedar that reports
-  structured errors still has its errors seen (and denied on), rather than
-  every answer refused as malformed.
+  an answer missing either list is refused, and the call denies. The errors
+  are read as text, so an agent on a newer Cedar that reports structured errors
+  still has its errors seen (and denied on), rather than every answer refused
+  as malformed. The reason items are read as policy ids: a string, or an object
+  with a `policyId`. An item in any other shape cannot be attributed to this
+  load, so the answer is refused as foreign, logged `"unreadable policy"` (#283).
+  An agent image that changed that shape would deny every permit, loudly and
+  saying why.
 - **Entities travel inline, and the agent reads them.** Each call carries the
   request's entities in `entities`; nothing is written to the agent's own
   `/v1/data` store. #225 left open whether cedar-agent honours inline entities

@@ -16,6 +16,7 @@ export type {
 	CedarDecision,
 	CedarEngine,
 	CedarEngineLoadContext,
+	ForeignAnswer,
 	LoadedCedarPolicySet,
 	SyncCedarPolicySet,
 } from "./engine.mjs";
@@ -27,6 +28,7 @@ export {
 } from "./engine.mjs";
 export type { CedarHttpEngineOptions } from "./httpEngine.mjs";
 export {
+	agentPolicyId,
 	CEDAR_ANSWER_MAX_BYTES,
 	CEDAR_AUTHENTICATION_ENV,
 	CEDAR_ENDPOINT_ENV,

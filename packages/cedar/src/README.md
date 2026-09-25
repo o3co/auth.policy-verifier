@@ -75,6 +75,9 @@ The source falls into four parts, separated by what changes them:
 - Nothing here evaluates Cedar, so the port and the collector are tested against a stand-in
   engine that evaluates nothing ([`__tests__/scriptedEngine.mts`](__tests__/scriptedEngine.mts));
   the real evaluator is tested end to end in `packages/cedar-wasm`.
+- The `http` engine pushes each policy under its load's mark (`agentPolicyId`), and an answer
+  naming any policy it did not push is `foreign`: failed and logged like a foreign revision,
+  never read (#283) — [`__tests__/httpEngine.test.mts`](__tests__/httpEngine.test.mts).
 - The `http` engine follows no redirect (#270). A 3xx to an authorization call is a
   `CedarEngineError` — a deny with a `failed` evaluation — and a 3xx to the policy load fails
   boot, so a decision and a policy set only ever come from the configured endpoint.

@@ -1351,6 +1351,84 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 			expect((await askAsync(rule, attrsWith())).passed).toBe(false);
 			expect(error).toHaveBeenCalledOnce();
 		});
+
+		it("fails closed and logs an answer the engine can tell came from another set — unvouched as it is (#283)", async () => {
+			// The http engine cannot vouch for a revision, but it can tell when an
+			// answer names policies it never pushed. That is the same fault as a
+			// foreign revision, and just as never silent.
+			const { logger, error } = fakeLogger();
+			async.answer = () => ({
+				...ALLOW,
+				foreign: { why: "unknown policy", mark: "0123456789abcdef" },
+			});
+			const rule = await collectAsync({ policies: PERMIT_ALL, logEvaluationErrors: false }, logger);
+			expect(await askAsync(rule, attrsWith())).toEqual({
+				passed: false,
+				evaluation: { status: "failed", revision: null, loadedRevision: REVISION },
+			});
+			expect(error).toHaveBeenCalledOnce();
+			expect(error).toHaveBeenCalledWith(
+				expect.objectContaining({ foreign: "unknown policy", mark: "0123456789abcdef" }),
+				"cedar engine answered from a policy set this verifier did not load — denying",
+			);
+		});
+
+		it("says so before it looks at errors — a foreign answer with errors is no evaluation error to silence (#283)", async () => {
+			const { logger, error } = fakeLogger();
+			async.answer = () => ({
+				...ALLOW,
+				errors: ["policy 10: boom"],
+				foreign: { why: "unreadable policy" },
+			});
+			const rule = await collectAsync({ policies: PERMIT_ALL, logEvaluationErrors: false }, logger);
+			expect((await askAsync(rule, attrsWith())).passed).toBe(false);
+			expect(error).toHaveBeenCalledWith(
+				expect.objectContaining({ foreign: "unreadable policy" }),
+				"cedar engine answered from a policy set this verifier did not load — denying",
+			);
+		});
+
+		it("logs only the engine's fixed label and a 16-hex mark — never other text it put there", async () => {
+			const { logger, error } = fakeLogger();
+			async.answer = () =>
+				({
+					...ALLOW,
+					foreign: { why: "evil\nline", mark: "not-a-mark" },
+				}) as unknown as CedarDecision;
+			const rule = await collectAsync({ policies: PERMIT_ALL }, logger);
+			expect((await askAsync(rule, attrsWith())).passed).toBe(false);
+			const [fields] = error.mock.calls[0];
+			expect(fields).not.toHaveProperty("foreign");
+			expect(fields).not.toHaveProperty("mark");
+		});
+
+		it("refuses an allow naming no determining policy — Cedar allows only on a permit — and never silently", async () => {
+			// What a wrapper that dropped `foreign` would hand on from another set.
+			const { logger, error } = fakeLogger();
+			async.answer = () => ({ decision: "allow", reason: [], errors: [] });
+			const rule = await collectAsync({ policies: PERMIT_ALL, logEvaluationErrors: false }, logger);
+			expect(await askAsync(rule, attrsWith())).toEqual({
+				passed: false,
+				evaluation: { status: "failed", revision: null, loadedRevision: REVISION },
+			});
+			expect(error).toHaveBeenCalledWith(
+				expect.anything(),
+				"cedar engine answered allow naming no determining policy — no answer of Cedar's; denying",
+			);
+		});
+
+		it.each([
+			["true", true],
+			["an empty object", {}],
+			["false", false],
+		])(
+			"takes a foreign mark of any shape — %s — for foreign: it fails closed",
+			async (_label, foreign) => {
+				async.answer = () => ({ ...ALLOW, foreign }) as unknown as CedarDecision;
+				const rule = await collectAsync({ policies: PERMIT_ALL }, fakeLogger().logger);
+				expect((await askAsync(rule, attrsWith())).passed).toBe(false);
+			},
+		);
 	});
 
 	describe("the loaded revision is the collector's own reading, taken before the engine has the source", () => {

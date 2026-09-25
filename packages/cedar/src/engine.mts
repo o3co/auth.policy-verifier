@@ -29,7 +29,9 @@ export interface CedarDecision {
 	/**
 	 * The ids of the determining policies (`10-permit-eng`) — what a
 	 * decision's `determiningPolicies` names (#199). Empty: no policy
-	 * determined the request. An entry the engine cannot read as an id stays
+	 * determined the request — which only a `deny` can say: Cedar allows only
+	 * on a permit, so an `allow` naming none is refused as not a decision
+	 * (#283). An entry the engine cannot read as an id stays
 	 * in the list — its emptiness decides an answer — as a string no id can be
 	 * (one holding a control character), so the decision counts it in
 	 * `determiningPoliciesOmitted` rather than naming it.
@@ -58,6 +60,34 @@ export interface CedarDecision {
 	 * set this verifier did not load; the collector fails it closed.
 	 */
 	revision?: string;
+	/**
+	 * Present when the engine can tell this answer did **not** come from the
+	 * set it loaded, though it cannot vouch for one that did (#283) — the http
+	 * engine, whose agent names no revision but answers with the ids of the
+	 * policies that determined it: an id it never pushed under this load's
+	 * mark is somebody else's policy. The collector fails it closed and logs it
+	 * as it logs a foreign revision. `reason` is then empty: another set's ids
+	 * are not this verifier's to record. Any value other than `undefined` or
+	 * `null` is taken as foreign — `false` included — so a malformed mark fails
+	 * closed.
+	 */
+	foreign?: ForeignAnswer;
+}
+
+/**
+ * Why an engine takes an answer for another set's (#283): a fixed label, and
+ * the other load's mark when the id it could not place carried one — both
+ * safe to log, since neither is text the evaluator chose.
+ */
+export interface ForeignAnswer {
+	/**
+	 * `"unknown policy"`: a determining policy this load never pushed.
+	 * `"unreadable policy"`: an item that is no policy id at all — an agent
+	 * reporting in a shape this engine does not read, which it cannot attribute.
+	 */
+	readonly why: "unknown policy" | "unreadable policy";
+	/** The other load's mark, 16 hex, when the id carried one. */
+	readonly mark?: string;
 }
 
 /** A compiled policy set that answers in-process, synchronously. */
