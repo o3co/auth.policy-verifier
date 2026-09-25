@@ -99,9 +99,13 @@ function parsed(body: string): unknown {
 	return JSON.parse(body);
 }
 
-/** An engine of its own over the global `fetch`, loaded against `endpoint`. */
-async function loadedAgainst(endpoint: string, config: Record<string, unknown> = {}) {
-	const loaded = await createCedarHttpEngine({ env: {} }).load(
+/** An engine of its own over the global `fetch` (or `fetch`, when given), loaded against `endpoint`. */
+async function loadedAgainst(
+	endpoint: string,
+	config: Record<string, unknown> = {},
+	fetch?: typeof globalThis.fetch,
+) {
+	const loaded = await createCedarHttpEngine({ env: {}, fetch }).load(
 		policySet(),
 		loadContext({ endpoint, ...config }),
 	);
@@ -129,12 +133,7 @@ async function loadedObservingAnswers(endpoint: string) {
 		if (String(input).endsWith("/v1/is_authorized")) answered();
 		return response;
 	};
-	const loaded = await createCedarHttpEngine({ env: {}, fetch: observing }).load(
-		policySet(),
-		loadContext({ endpoint }),
-	);
-	if (!loaded.async) throw new Error("the http engine answers asynchronously");
-	return { loaded, headersIn };
+	return { loaded: await loadedAgainst(endpoint, {}, observing), headersIn };
 }
 
 let agent: FakeCedarAgent;
@@ -421,7 +420,9 @@ describe("cedarHttpEngine over the wire — the deadline", () => {
 		const reason = new Error("rule deadline");
 		const failure = loaded.isAuthorized(request(), controller.signal);
 		failure.catch(() => undefined);
-		await headersIn;
+		// Raced with the call, so a call that fails before its headers arrive
+		// fails the case with its own error instead of timing it out.
+		await Promise.race([headersIn, failure]);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		controller.abort(reason);
 		await expect(failure).rejects.toBe(reason);
