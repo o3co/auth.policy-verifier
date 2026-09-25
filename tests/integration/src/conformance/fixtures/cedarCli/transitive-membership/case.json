@@ -1,0 +1,129 @@
+{
+	"about": "`in` is transitive over the entities a request carries. The principal is in a team, and the resource is that team, whose own parents the mapping synthesizes from `resourceGroups` — so the principal is in the org through it.",
+	"config": {
+		"principal": {
+			"parents": {
+				"Group": "groups"
+			}
+		},
+		"resource": {
+			"parents": {
+				"Group": "resourceGroups"
+			}
+		}
+	},
+	"requests": [
+		{
+			"about": "through the team the request carries",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "read",
+				"requestResourceType": "Group",
+				"requestResourceId": "team",
+				"groups": ["team"],
+				"resourceGroups": ["org"]
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "read"
+					},
+					"resource": {
+						"type": "Group",
+						"id": "team"
+					},
+					"context": {},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {},
+							"parents": [
+								{
+									"type": "Group",
+									"id": "team"
+								}
+							]
+						},
+						{
+							"uid": {
+								"type": "Group",
+								"id": "team"
+							},
+							"attrs": {},
+							"parents": [
+								{
+									"type": "Group",
+									"id": "org"
+								}
+							]
+						}
+					]
+				},
+				"decision": "allow",
+				"determiningPolicies": ["10-permit-org"],
+				"errorsIn": []
+			}
+		},
+		{
+			"about": "the team is in no org: nothing carries the step",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "read",
+				"requestResourceType": "Group",
+				"requestResourceId": "team",
+				"groups": ["team"]
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "read"
+					},
+					"resource": {
+						"type": "Group",
+						"id": "team"
+					},
+					"context": {},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {},
+							"parents": [
+								{
+									"type": "Group",
+									"id": "team"
+								}
+							]
+						},
+						{
+							"uid": {
+								"type": "Group",
+								"id": "team"
+							},
+							"attrs": {},
+							"parents": []
+						}
+					]
+				},
+				"decision": "deny",
+				"determiningPolicies": [],
+				"errorsIn": []
+			}
+		}
+	]
+}

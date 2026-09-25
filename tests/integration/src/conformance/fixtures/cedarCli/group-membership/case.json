@@ -1,0 +1,170 @@
+{
+	"about": "`principal in Group::\"admins\"` is decided by the parents the mapping synthesizes from the `groups` attribute. Under `onNoDeterminingPolicy = \"abstain\"`, a request no policy determines passes the group.",
+	"config": {
+		"principal": {
+			"parents": {
+				"Group": "groups"
+			}
+		},
+		"onNoDeterminingPolicy": "abstain"
+	},
+	"requests": [
+		{
+			"about": "a member",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "read",
+				"requestResourceType": "Document",
+				"requestResourceId": "42",
+				"groups": ["eng", "admins"]
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "read"
+					},
+					"resource": {
+						"type": "Document",
+						"id": "42"
+					},
+					"context": {},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {},
+							"parents": [
+								{
+									"type": "Group",
+									"id": "eng"
+								},
+								{
+									"type": "Group",
+									"id": "admins"
+								}
+							]
+						},
+						{
+							"uid": {
+								"type": "Document",
+								"id": "42"
+							},
+							"attrs": {},
+							"parents": []
+						}
+					]
+				},
+				"decision": "allow",
+				"determiningPolicies": ["10-permit-admins"],
+				"errorsIn": []
+			}
+		},
+		{
+			"about": "not a member",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "read",
+				"requestResourceType": "Document",
+				"requestResourceId": "42",
+				"groups": ["eng"]
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "read"
+					},
+					"resource": {
+						"type": "Document",
+						"id": "42"
+					},
+					"context": {},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {},
+							"parents": [
+								{
+									"type": "Group",
+									"id": "eng"
+								}
+							]
+						},
+						{
+							"uid": {
+								"type": "Document",
+								"id": "42"
+							},
+							"attrs": {},
+							"parents": []
+						}
+					]
+				},
+				"decision": "deny",
+				"determiningPolicies": [],
+				"errorsIn": []
+			}
+		},
+		{
+			"about": "in no groups: the attribute is absent",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "read",
+				"requestResourceType": "Document",
+				"requestResourceId": "42"
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "read"
+					},
+					"resource": {
+						"type": "Document",
+						"id": "42"
+					},
+					"context": {},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {},
+							"parents": []
+						},
+						{
+							"uid": {
+								"type": "Document",
+								"id": "42"
+							},
+							"attrs": {},
+							"parents": []
+						}
+					]
+				},
+				"decision": "deny",
+				"determiningPolicies": [],
+				"errorsIn": []
+			}
+		}
+	]
+}

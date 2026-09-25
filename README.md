@@ -1,6 +1,6 @@
 # auth.policy-verifier
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 [![CI](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth.policy-verifier.core)](https://www.npmjs.com/package/@o3co/auth.policy-verifier.core)
@@ -104,7 +104,7 @@ so the enforcement layer can implement against the same table.
 - **JWKS support** — Point `jwksUri` at auth.provider's `https://.../.well-known/jwks.json` for automatic key rotation. The endpoint must be TLS-protected (loopback hosts excepted for local development), and the fetch is bounded by an operator-set timeout, cooldown and cache age so a provider outage cannot stall the decision path.
 - **Answerable in production** — one structured `decision` event per decision (subject, resource, action, the rule that decided, request id, latency) and a Prometheus `/metrics` endpoint with allow/deny counters. Every metric label is bounded; the bearer token, the claim set beyond `sub`, and the caller's `context` never reach the log. See [Observability](#observability).
 - **Pluggable architecture** — Module system for registering custom collectors, rules, and resource parsers via factories.
-- **No DSL lock-in** — Authorization logic is TypeScript; no DSL is ever required. Cedar is available as an *optional co-resident language* ([`packages/cedar`](packages/cedar/)): the real Cedar evaluator runs as one rule group beside your TypeScript rules, deciding over collector-gathered facts with no entity store to build or sync — in-process via [`packages/cedar-wasm`](packages/cedar-wasm/), or out of process against a cedar-agent through the same port — a dependency choice per deployment, with a measured sizing table in `packages/cedar`. Whichever language you choose, the topology doesn't bind you — the same `.cedar` files later load unchanged into an embedded evaluator, or into a Cedar Agent when laid out one policy per file, and [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) can still swap the whole backend for OPA or Cedar behind the common `VerifierEndpoint`.
+- **No DSL lock-in** — Authorization logic is TypeScript; no DSL is ever required. Cedar is available as an *optional co-resident language* ([`packages/cedar`](packages/cedar/)): the real Cedar evaluator runs as one rule group beside your TypeScript rules, deciding over collector-gathered facts with no entity store to build or sync — in-process via [`packages/cedar-wasm`](packages/cedar-wasm/), or out of process against a cedar-agent through the same port — a dependency choice per deployment, with a measured sizing table in `packages/cedar`. Whichever language you choose, the topology doesn't bind you — the same `.cedar` files later load unchanged into an embedded evaluator, or into a Cedar Agent when laid out one policy per file, and [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) can still swap the whole backend for OPA or Cedar behind the common `VerifierEndpoint`. That the in-process evaluator answers as Cedar itself does is measured against the official `cedar` CLI on a fixture corpus ([`cedar-cli-equivalence.test.mts`](tests/integration/src/cedar-cli-equivalence.test.mts), #198).
 
 ## When to choose this
 

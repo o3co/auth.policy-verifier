@@ -1,0 +1,61 @@
+{
+	"about": "Only the attributes `context` maps reach Cedar's context. An attribute the mapping does not name — however it got into the attributes — is not there to test.",
+	"config": {
+		"context": {
+			"suspended": "suspended"
+		}
+	},
+	"requests": [
+		{
+			"about": "an unmapped attribute stays out of the context",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "read",
+				"requestResourceType": "Document",
+				"requestResourceId": "42",
+				"suspended": false,
+				"secret": true
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "read"
+					},
+					"resource": {
+						"type": "Document",
+						"id": "42"
+					},
+					"context": {
+						"suspended": false
+					},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {},
+							"parents": []
+						},
+						{
+							"uid": {
+								"type": "Document",
+								"id": "42"
+							},
+							"attrs": {},
+							"parents": []
+						}
+					]
+				},
+				"decision": "allow",
+				"determiningPolicies": ["10-permit-read"],
+				"errorsIn": []
+			}
+		}
+	]
+}

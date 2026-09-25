@@ -1,0 +1,110 @@
+{
+	"about": "A forbid that applies wins over a permit that applies, and the answer names the forbid alone.",
+	"config": {
+		"context": {
+			"suspended": "suspended"
+		}
+	},
+	"requests": [
+		{
+			"about": "not suspended: the permit decides",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "read",
+				"requestResourceType": "Document",
+				"requestResourceId": "42",
+				"suspended": false
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "read"
+					},
+					"resource": {
+						"type": "Document",
+						"id": "42"
+					},
+					"context": {
+						"suspended": false
+					},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {},
+							"parents": []
+						},
+						{
+							"uid": {
+								"type": "Document",
+								"id": "42"
+							},
+							"attrs": {},
+							"parents": []
+						}
+					]
+				},
+				"decision": "allow",
+				"determiningPolicies": ["10-permit-read"],
+				"errorsIn": []
+			}
+		},
+		{
+			"about": "suspended: the forbid decides",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "read",
+				"requestResourceType": "Document",
+				"requestResourceId": "42",
+				"suspended": true
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "read"
+					},
+					"resource": {
+						"type": "Document",
+						"id": "42"
+					},
+					"context": {
+						"suspended": true
+					},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {},
+							"parents": []
+						},
+						{
+							"uid": {
+								"type": "Document",
+								"id": "42"
+							},
+							"attrs": {},
+							"parents": []
+						}
+					]
+				},
+				"decision": "deny",
+				"determiningPolicies": ["20-forbid-suspended"],
+				"errorsIn": []
+			}
+		}
+	]
+}

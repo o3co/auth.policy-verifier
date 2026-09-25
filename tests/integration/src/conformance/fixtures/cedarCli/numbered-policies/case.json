@@ -1,0 +1,110 @@
+{
+	"about": "A file holding several policies names them `stem#1`, `stem#2`… in the file's order — the ids the wasm engine answers with, declared here with `@id` for the CLI.",
+	"config": {
+		"context": {
+			"suspended": "suspended"
+		}
+	},
+	"requests": [
+		{
+			"about": "both permits",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "read",
+				"requestResourceType": "Document",
+				"requestResourceId": "42",
+				"suspended": false
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "read"
+					},
+					"resource": {
+						"type": "Document",
+						"id": "42"
+					},
+					"context": {
+						"suspended": false
+					},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {},
+							"parents": []
+						},
+						{
+							"uid": {
+								"type": "Document",
+								"id": "42"
+							},
+							"attrs": {},
+							"parents": []
+						}
+					]
+				},
+				"decision": "allow",
+				"determiningPolicies": ["20-rules#2", "20-rules#3"],
+				"errorsIn": []
+			}
+		},
+		{
+			"about": "the forbid",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "read",
+				"requestResourceType": "Document",
+				"requestResourceId": "42",
+				"suspended": true
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "read"
+					},
+					"resource": {
+						"type": "Document",
+						"id": "42"
+					},
+					"context": {
+						"suspended": true
+					},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {},
+							"parents": []
+						},
+						{
+							"uid": {
+								"type": "Document",
+								"id": "42"
+							},
+							"attrs": {},
+							"parents": []
+						}
+					]
+				},
+				"decision": "deny",
+				"determiningPolicies": ["20-rules#1"],
+				"errorsIn": []
+			}
+		}
+	]
+}

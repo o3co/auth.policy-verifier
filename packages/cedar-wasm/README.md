@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.cedar-wasm
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 The in-process Cedar engine for
 [`@o3co/auth.policy-verifier.cedar`](../cedar/README.md): the official
@@ -82,3 +82,36 @@ a dependency change, not a config change.
 `@cedar-policy/cedar-wasm` is pinned exactly: Cedar minor releases can carry
 policy-language changes, so upgrades should be deliberate and re-validated,
 not fall out of a range resolution.
+
+The re-validation is a suite (#198):
+[`cedar-cli-equivalence.test.mts`](../../tests/integration/src/cedar-cli-equivalence.test.mts)
+holds this engine, behind `CedarPolicyRuleCollector`, to the official `cedar`
+CLI at the pinned version.
+- **What it compares.** For every request of a fixture corpus, the CLI is
+  asked exactly the request the collector built, and both evaluators must agree
+  on the decision, on the policies that determined it, and on which policies
+  raised errors. The request itself must be the one the case records, so a
+  change to how requests are built shows as a diff. The corpus covers the cases
+  the entity synthesis decides:
+  - group membership, direct and transitive;
+  - entity references;
+  - a missing attribute;
+  - `forbid` over `permit`;
+  - the context allowlist;
+  - `resource.idWhenAbsent`.
+- **Policy names.** Each fixture policy carries `@id` with the id its file
+  gives it. The CLI names a policy by `@id`, and otherwise by its position, so
+  this is how it answers in this engine's names.
+- **How the versions stay together.** CI installs `cedar-policy-cli` at the
+  version read from this package's `package.json`, so bumping the pin moves the
+  CLI with it. A CLI at any other version fails the suite's version check.
+- **Running it locally.** Install the CLI at the pinned version, then build
+  and run the suite. Without a CLI the suite is skipped, with a notice.
+
+  ```sh
+  cargo install cedar-policy-cli --locked --version \
+    "$(node -p 'require("./packages/cedar-wasm/package.json").dependencies["@cedar-policy/cedar-wasm"]')"
+  pnpm run build
+  CEDAR_CLI="$(command -v cedar)" pnpm --filter @o3co/auth.policy-verifier.integration-tests \
+    exec vitest run cedar-cli-
+  ```

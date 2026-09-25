@@ -1,0 +1,103 @@
+{
+	"about": "`resource.idWhenAbsent` names the resource when the request carries no id — a collection rather than a member of it.",
+	"config": {
+		"resource": {
+			"idWhenAbsent": "*"
+		}
+	},
+	"requests": [
+		{
+			"about": "no id: the fallback names the collection",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "list",
+				"requestResourceType": "Collection"
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "list"
+					},
+					"resource": {
+						"type": "Collection",
+						"id": "*"
+					},
+					"context": {},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {},
+							"parents": []
+						},
+						{
+							"uid": {
+								"type": "Collection",
+								"id": "*"
+							},
+							"attrs": {},
+							"parents": []
+						}
+					]
+				},
+				"decision": "allow",
+				"determiningPolicies": ["10-permit-list"],
+				"errorsIn": []
+			}
+		},
+		{
+			"about": "an id: a member, not the collection",
+			"attributes": {
+				"userId": "alice",
+				"requestAction": "list",
+				"requestResourceType": "Collection",
+				"requestResourceId": "7"
+			},
+			"expect": {
+				"request": {
+					"principal": {
+						"type": "User",
+						"id": "alice"
+					},
+					"action": {
+						"type": "Action",
+						"id": "list"
+					},
+					"resource": {
+						"type": "Collection",
+						"id": "7"
+					},
+					"context": {},
+					"entities": [
+						{
+							"uid": {
+								"type": "User",
+								"id": "alice"
+							},
+							"attrs": {},
+							"parents": []
+						},
+						{
+							"uid": {
+								"type": "Collection",
+								"id": "7"
+							},
+							"attrs": {},
+							"parents": []
+						}
+					]
+				},
+				"decision": "deny",
+				"determiningPolicies": [],
+				"errorsIn": []
+			}
+		}
+	]
+}
