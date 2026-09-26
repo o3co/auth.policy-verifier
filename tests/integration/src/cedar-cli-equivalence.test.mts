@@ -64,12 +64,13 @@
  *
  * What each engine needs, and without it the engine's half is skipped with a
  * notice (its `…_REQUIRED=1` — set by the CI job that provides it — turns the
- * absence into a failure, and so does a half configured in part):
+ * absence into a failure, and so does a half configured in part; an empty
+ * variable counts as unset):
  * - wasm: the CLI as `CEDAR_CLI`, else `cedar` on the PATH, at the version
  *   `@cedar-policy/cedar-wasm` is pinned to. `CEDAR_CLI_REQUIRED`.
- * - http: an agent at `CEDAR_AGENT_ENDPOINT` (`CEDAR_AGENT_AUTHENTICATION` its
- *   token), the CLI of its Cedar as `CEDAR_AGENT_CLI`, and that version as
- *   `CEDAR_AGENT_CEDAR_VERSION` — read from the agent image by the CI job,
+ * - http: an agent at `CEDAR_AGENT_ENDPOINT`, the CLI of its Cedar as
+ *   `CEDAR_AGENT_CLI`, and that version as `CEDAR_AGENT_CEDAR_VERSION` — all
+ *   three or none — the version read from the agent image by the CI job,
  *   since the agent does not say. `CEDAR_AGENT_REQUIRED`.
  */
 
@@ -192,13 +193,14 @@ interface RunConfig {
 interface Evaluator {
 	/** The engine's config name; each case registers it observed, as `cli-equivalence-<name>-<case>`. */
 	name: string;
-	/** Absent: the engine's half is skipped, or fails when `requiredBy` is set to 1. */
+	/** Absent: the engine's half is skipped, or fails when `requiredBy` is set to 1 or `partly` is set. */
 	cli: string | undefined;
 	/** The variable that turns a skip into a failure. */
 	requiredBy: string;
 	/**
 	 * What is unset while the rest of the engine's half is configured: a half
-	 * configured is a mistake, not an opt-out, so it fails rather than skips.
+	 * configured in part is a mistake, not an opt-out, so it fails rather than
+	 * skips.
 	 */
 	partly?: string;
 	/** What is missing, for the notice. */
@@ -250,13 +252,24 @@ const WASM: Evaluator = {
 	revision: (source) => ({ revision: source.revision }),
 };
 
-/** The http half's configuration: all of it, or none. */
+/** A variable's value; empty is unset, as `VAR=` clears one, and as `CEDAR_CLI` reads. */
+function setting(name: string): string | undefined {
+	const value = process.env[name];
+	return value === undefined || value === "" ? undefined : value;
+}
+
+/**
+ * The http half's configuration: all of it, or none. The token is not part of
+ * it — an agent may run without one (the engine warns), and cedar-agent reads
+ * the same variable, so it is often exported on its own.
+ */
 const AGENT_ENV = ["CEDAR_AGENT_ENDPOINT", "CEDAR_AGENT_CLI", "CEDAR_AGENT_CEDAR_VERSION"];
-const agentUnset = AGENT_ENV.filter((name) => process.env[name] === undefined);
-const AGENT_ENDPOINT = process.env.CEDAR_AGENT_ENDPOINT;
+const agentUnset = AGENT_ENV.filter((name) => setting(name) === undefined);
+const AGENT_ENDPOINT = setting("CEDAR_AGENT_ENDPOINT");
+const AGENT_AUTHENTICATION = setting("CEDAR_AGENT_AUTHENTICATION");
 const HTTP: Evaluator = {
 	name: "http",
-	cli: agentUnset.length === 0 ? process.env.CEDAR_AGENT_CLI : undefined,
+	cli: agentUnset.length === 0 ? setting("CEDAR_AGENT_CLI") : undefined,
 	requiredBy: "CEDAR_AGENT_REQUIRED",
 	partly:
 		agentUnset.length > 0 && agentUnset.length < AGENT_ENV.length
@@ -265,7 +278,7 @@ const HTTP: Evaluator = {
 	needs:
 		"a cedar-agent (CEDAR_AGENT_ENDPOINT) and the CLI of its Cedar (CEDAR_AGENT_CLI, CEDAR_AGENT_CEDAR_VERSION)",
 	cedarVersion: () => {
-		const version = process.env.CEDAR_AGENT_CEDAR_VERSION;
+		const version = setting("CEDAR_AGENT_CEDAR_VERSION");
 		if (version === undefined || !/^\d+\.\d+\.\d+$/.test(version)) {
 			throw new Error(
 				"CEDAR_AGENT_CEDAR_VERSION must name the cedar-policy version the agent runs — the agent does not say",
@@ -274,13 +287,13 @@ const HTTP: Evaluator = {
 		return version;
 	},
 	// Under vitest's 10 s hook timeout, so an agent that does not answer fails
-	// with the engine's own words rather than a bare "hook timed out".
-	engine: () => createCedarHttpEngine({ loadTimeoutMs: 5_000 }),
+	// with the engine's own words rather than a bare "hook timed out". No
+	// environment: the suite reads its own variables only, never a
+	// CEDAR_ENDPOINT or CEDAR_AUTHENTICATION left in the shell.
+	engine: () => createCedarHttpEngine({ loadTimeoutMs: 5_000, env: {} }),
 	config: {
 		endpoint: AGENT_ENDPOINT,
-		...(process.env.CEDAR_AGENT_AUTHENTICATION === undefined
-			? {}
-			: { authentication: process.env.CEDAR_AGENT_AUTHENTICATION }),
+		...(AGENT_AUTHENTICATION === undefined ? {} : { authentication: AGENT_AUTHENTICATION }),
 	},
 	refuses: (testCase) => testCase.agentRefuses,
 	// "abstain" is refused over an out-of-process engine; Cedar's answer does
@@ -395,7 +408,7 @@ describe.each([WASM, HTTP])("the $name engine and the cedar CLI of its Cedar", (
 		it.skip(`skips this engine's half — it needs ${evaluator.needs}`, () => {});
 	});
 	describe.runIf(cli === undefined && required)("required", () => {
-		it("is provided in full — required, or partly configured", () => {
+		it("is configured in full", () => {
 			expect.fail(
 				evaluator.partly !== undefined
 					? `the ${evaluator.name} engine's half is partly configured — ${evaluator.partly}; set all of it, or none`

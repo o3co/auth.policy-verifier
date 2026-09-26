@@ -332,7 +332,8 @@ jobs:
           # interface, said here rather than left to the image's default: the
           # template sets 127.0.0.1 because it shares the app's network
           # namespace, and a container listening on its own loopback is not
-          # reachable through the published port.
+          # reachable through the published port. On the Docker bridge the
+          # token guards it.
           docker run -d --name cedar-agent -p 127.0.0.1:8180:8180 \
             -e CEDAR_AGENT_ADDR=0.0.0.0 -e CEDAR_AGENT_PORT=8180 \
             -e CEDAR_AGENT_AUTHENTICATION="$token" "$IMAGE"

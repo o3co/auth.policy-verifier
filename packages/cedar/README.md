@@ -740,16 +740,23 @@ the template pins, rather than to the wasm engine's CLI.
   then installs `cedar-policy-cli` at that version and runs the suite. Bumping
   the image moves the CLI with it.
 - **Running it locally.** Start the agent the template pins, with a token,
-  install the CLI of its Cedar, and point the suite at both. Without them the
-  http half is skipped, with a notice; with only some of them set, it fails. The version below is the one read from
-  the image the template pins today; the CI job reads it afresh. `--locked`
-  holds the crate's dependencies, not the compiler, so the toolchain is the
-  one CI builds it with.
+  install the CLI of its Cedar, and point the suite at both.
+  - `CEDAR_AGENT_ENDPOINT`, `CEDAR_AGENT_CLI` and `CEDAR_AGENT_CEDAR_VERSION`
+    go together. With none of them set, the http half is skipped, with a
+    notice; with only some, it fails. The token,
+    `CEDAR_AGENT_AUTHENTICATION`, is the agent's own and optional here.
+  - The version below is the one read from the image the template pins today;
+    the CI job reads it afresh.
+  - `--locked` holds the crate's dependencies, not the compiler, so the
+    toolchain is the one CI builds it with.
+  - The agent listens on every interface inside its container, as in CI,
+    and is published on the host's loopback only.
 
   ```sh
   TOKEN=$(openssl rand -hex 32)
   IMAGE=$(grep -oE 'permitio/cedar-agent:[^[:space:]]+' templates/standalone/docker-compose.yml)
   docker run -d --name cedar-agent -p 127.0.0.1:8180:8180 \
+    -e CEDAR_AGENT_ADDR=0.0.0.0 -e CEDAR_AGENT_PORT=8180 \
     -e CEDAR_AGENT_AUTHENTICATION="$TOKEN" "$IMAGE"
   rustup toolchain install 1.95.0 --profile minimal
   cargo +1.95.0 install cedar-policy-cli --locked --version 2.5.0 --root ~/.cedar-agent-cli
