@@ -361,7 +361,12 @@ const ATTRIBUTE_EVALUATION_ERROR = "error occurred while evaluating entity attri
  * that ends an id. So an id of this load's is read to where this load's mark
  * ends it; any other, to the first `` `: ``. Either way the slice starts at
  * the id, so the message after it — which may carry the request's values —
- * cannot make another set's id read as this load's.
+ * cannot make another set's id read as this load's, unless one of this
+ * load's own file names holds `` `: ``: there the text is ambiguous, and no
+ * reading can tell an error of `` a`: b `` from one of `a` whose message
+ * begins `` b@<mark>`: ``. An erroring answer is denied either way; only
+ * which line logs it is at stake. For such a name, too, another load's mark
+ * is not read off it — the answer is foreign without one.
  */
 function erroringPolicy(item: unknown, ownMark: string): string | undefined {
 	if (typeof item === "string") {
@@ -885,7 +890,10 @@ function policyIds(value: unknown): string[] | undefined {
 	});
 }
 
-/** Marks a reason or error item that names no id this engine can read: a control character, which no reportable id holds. */
+/**
+ * Marks a reason or error item that names no id this engine can read: a
+ * control character, which no reportable id holds.
+ */
 const UNREADABLE_POLICY_ID = "\u0000";
 
 /**

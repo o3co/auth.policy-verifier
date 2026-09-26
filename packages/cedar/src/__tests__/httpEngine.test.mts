@@ -713,8 +713,13 @@ describe("cedarHttpEngine — whose policies an answer names (#283)", () => {
 			`error while evaluating policy \`${ours}\`: \`User::"alice"\` does not have the attribute \`dept\``,
 		],
 		["Cedar 3+'s structured error", { policyId: ours, error: { message: "no dept" } }],
-		// The message is the agent's text, whatever it holds.
+		// The message is the agent's text, whatever it holds — the request's
+		// values included, this load's mark and the delimiter after it too.
 		["a message holding the same delimiter", `${evaluating(ours)} \`x\`: y`],
+		[
+			"a message holding this load's mark and the delimiter",
+			`error occurred while evaluating policy \`${ours}\`: \`User::"x@${ownMark}\`: "\` does not have the attribute: dept`,
+		],
 	])("reads an error naming one of its policies, in %s, as this load's", async (_label, error) => {
 		const loaded = await loadAsync(
 			createCedarHttpEngine({ fetch: erring([error]).doFetch, env: AGENT_ENV }),
@@ -766,6 +771,15 @@ describe("cedarHttpEngine — whose policies an answer names (#283)", () => {
 				why: "unreadable policy",
 			},
 		],
+		// The id ends where the message starts: one of ours in the message,
+		// delimiter and all, does not make another set's id ours.
+		[
+			"another id, with one of this load's in its message",
+			[
+				`error occurred while evaluating policy \`other\`: \`User::"x\`: ${ours}\`: "\` does not have the attribute: dept`,
+			],
+			{ why: "unknown policy" },
+		],
 		// No escape_debug writes a code point past U+10FFFF: read as it stands,
 		// it names nothing of this load's — and the call does not throw.
 		[
@@ -797,8 +811,8 @@ describe("cedarHttpEngine — whose policies an answer names (#283)", () => {
 		["double quotes", 'say"hi"', 'say\\"hi\\"'],
 		["a backslash", "back\\slash", "back\\\\slash"],
 		["a tab", "tab\tbed", "tab\\tbed"],
-		["a no-break space", "nb sp", "nb\\u{a0}sp"],
-		["a zero-width space", "zw​sp", "zw\\u{200b}sp"],
+		["a no-break space", "nb\u00a0sp", "nb\\u{a0}sp"],
+		["a zero-width space", "zw\u200bsp", "zw\\u{200b}sp"],
 		["the delimiter itself", "a`: b", "a`: b"],
 	])(
 		"reads an error naming a policy whose file name holds %s as this load's",

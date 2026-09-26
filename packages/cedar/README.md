@@ -355,7 +355,9 @@ policy"`. When the id is one of this load's own policies under another mark,
 the line also carries that mark. That is the same corpus loaded from other
 files, such as a rolling deploy sharing the agent, and the mark tells an operator
 which revision took it. It is what the other side spelled, unverified. An id
-that merely ends in `@` and 16 hex, as a file may be named, gives no mark.
+that merely ends in `@` and 16 hex, as a file may be named, gives no mark;
+nor does an error naming one of this load's files whose name holds `` `: ``,
+where Cedar's text cannot say where the id ends.
 
 **The mark is neither a secret nor an authenticator.** Anyone can learn the
 ids:
