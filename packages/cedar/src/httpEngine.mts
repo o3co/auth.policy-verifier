@@ -367,6 +367,14 @@ const ATTRIBUTE_EVALUATION_ERROR = "error occurred while evaluating entity attri
  * begins `` b@<mark>`: ``. An erroring answer is denied either way; only
  * which line logs it is at stake. For such a name, too, another load's mark
  * is not read off it — the answer is foreign without one.
+ *
+ * Nor can the text tell one of this load's ids from another set's id that
+ * embeds it and the delimiter (`` a@<mark>`: x ``): that reads as this load's.
+ * Only a token holder can push such an id, and a token holder can already
+ * answer as this load (see `ownDecision`). Refusing the ambiguity instead
+ * would hand it to the request: its values reach the message, so a requester
+ * could turn this load's own errors into foreign-set alarms. The answer is
+ * denied either way.
  */
 function erroringPolicy(item: unknown, ownMark: string): string | undefined {
 	if (typeof item === "string") {

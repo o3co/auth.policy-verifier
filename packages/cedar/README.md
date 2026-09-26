@@ -368,7 +368,8 @@ ids:
 So the mark catches a set this verifier did not load by mistake. It does
 nothing against someone holding the agent's token. A token holder can rewrite a
 policy under its own marked id, or delete one, and the answers still read as
-this load's. No check of an answer can see that. The agent's token is the
+this load's; or push an id that embeds one of this load's, whose errors then
+read as this load's. No check of an answer can see that. The agent's token is the
 boundary (see [Running out of process](#running-out-of-process)), and that is
 why the engine still does not declare `confirmsRevision`. Reading the agent's
 set back and comparing it with what was pushed would catch it between answers,
