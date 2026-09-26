@@ -781,7 +781,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 	});
 
 	it("reads structured diagnostics rather than refusing the answer (v0.10.0 audit, #199)", async () => {
-		// cedar-agent 0.2.x rides cedar-policy 2.4, which reports errors as
+		// cedar-agent 0.2.x rides cedar-policy 2.5, which reports errors as
 		// strings; Cedar 3.x+ serialises them as objects. Refusing every
 		// non-string turned an agent image bump into every request denied, with
 		// a message about "well-formed diagnostics". The rule only logs errors and

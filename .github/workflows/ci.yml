@@ -251,6 +251,132 @@ jobs:
           export CEDAR_CLI_REQUIRED=1
           pnpm --filter @o3co/auth.policy-verifier.integration-tests exec vitest run cedar-cli-
 
+  # The same suite's http half (#284): the http engine against a real
+  # cedar-agent, held to the CLI of the Cedar that agent runs. The agent is the
+  # image the template's compose pins — the one a deployment gets — and the
+  # agent does not say which Cedar it runs, so the version is read from the
+  # crate path compiled into its binary.
+  cedar-agent-equivalence:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    # A cold `cargo install` takes minutes; a hung one should not take hours.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Read the cedar-agent image and the Cedar it runs
+        id: agent
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The template's compose is the one place the image is named.
+          # `|| true`: no match is reported below, in words, not by pipefail.
+          image=$(grep -oE 'permitio/cedar-agent:[^[:space:]]+' templates/standalone/docker-compose.yml | sort -u || true)
+          if [[ $(wc -l <<<"$image") -ne 1 || ! "$image" =~ @sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::templates/standalone/docker-compose.yml must pin one cedar-agent image by digest, found: $image"
+            exit 1
+          fi
+          docker pull --quiet "$image"
+          container=$(docker create "$image")
+          docker cp "$container:/agent/cedar-agent" "$RUNNER_TEMP/cedar-agent"
+          docker rm "$container"
+          # The crate's source path in the cargo registry, compiled into panic
+          # locations: one version, or the check below refuses.
+          version=$(strings "$RUNNER_TEMP/cedar-agent" | grep -oE '/cedar-policy-[0-9]+\.[0-9]+\.[0-9]+/' | sort -u | tr -d / || true)
+          version=${version#cedar-policy-}
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::could not read one cedar-policy version from $image's binary, found: $version"
+            exit 1
+          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the cedar CLI of the agent's Cedar
+        id: cedar-cli-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cedar-agent-cli
+          # Says what built it: the pinned toolchain below moves the key with it.
+          key: cedar-agent-cli-${{ steps.agent.outputs.version }}-rust-1.95.0-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install the cedar CLI of the agent's Cedar
+        if: steps.cedar-cli-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          CEDAR_VERSION: ${{ steps.agent.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Pinned, unlike the wasm job's: an older Cedar's CLI is an older
+          # crate, and `--locked` holds its dependencies, not the compiler. A
+          # cold build (a new version, an evicted cache) uses the compiler it
+          # was verified with — 1.95.0 builds cedar-policy-cli 2.5.0.
+          rustup toolchain install 1.95.0 --profile minimal
+          cargo +1.95.0 install cedar-policy-cli --version "$CEDAR_VERSION" --locked --root ~/.cedar-agent-cli
+
+      - name: Start the agent
+        id: start
+        shell: bash
+        env:
+          IMAGE: ${{ steps.agent.outputs.image }}
+        run: |
+          set -euo pipefail
+          token=$(openssl rand -hex 32)
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+          # Published on the host's loopback only, with a token, as the template
+          # runs it. Inside its own container the agent listens on every
+          # interface, said here rather than left to the image's default: the
+          # template sets 127.0.0.1 because it shares the app's network
+          # namespace, and a container listening on its own loopback is not
+          # reachable through the published port. On the Docker bridge the
+          # token guards it.
+          docker run -d --name cedar-agent -p 127.0.0.1:8180:8180 \
+            -e CEDAR_AGENT_ADDR=0.0.0.0 -e CEDAR_AGENT_PORT=8180 \
+            -e CEDAR_AGENT_AUTHENTICATION="$token" "$IMAGE"
+          for _ in $(seq 1 30); do
+            if curl -fsS -o /dev/null -H "Authorization: $token" http://127.0.0.1:8180/v1/policies; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::the agent did not answer on 127.0.0.1:8180 within 30 s"
+          docker logs cedar-agent
+          exit 1
+
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+
+      - name: Run the CLI-equivalence suite against the agent
+        shell: bash
+        env:
+          CEDAR_AGENT_ENDPOINT: http://127.0.0.1:8180
+          CEDAR_AGENT_AUTHENTICATION: ${{ steps.start.outputs.token }}
+          CEDAR_AGENT_CEDAR_VERSION: ${{ steps.agent.outputs.version }}
+          CEDAR_AGENT_REQUIRED: '1'
+        run: |
+          set -euo pipefail
+          export CEDAR_AGENT_CLI="$HOME/.cedar-agent-cli/bin/cedar"
+          pnpm --filter @o3co/auth.policy-verifier.integration-tests exec vitest run cedar-cli-equivalence
+
+      - name: The agent's log
+        if: failure()
+        run: docker logs cedar-agent || true
+
   # Simulates the post-publish state: tarball every package `pnpm -r publish`
   # would offer to the registry, then build the scaffold a consumer actually
   # receives against those tarballs instead of the `workspace:*` links a local

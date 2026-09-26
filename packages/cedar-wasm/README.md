@@ -106,7 +106,9 @@ CLI at the pinned version.
   version read from this package's `package.json`, so bumping the pin moves the
   CLI with it. A CLI at any other version fails the suite's version check.
 - **Running it locally.** Install the CLI at the pinned version, then build
-  and run the suite. Without a CLI the suite is skipped, with a notice.
+  and run the suite. Without a CLI this engine's half is skipped, with a
+  notice. The suite's other half measures the `http` engine against a real
+  cedar-agent (#284, see the cedar package's README).
 
   ```sh
   cargo install cedar-policy-cli --locked --version \

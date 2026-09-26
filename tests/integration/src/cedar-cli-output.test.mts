@@ -6,7 +6,9 @@
  * parser is the suite's only interpretation of the reference evaluator, so it
  * is pinned here against the CLI's literal output — without the CLI, so that a
  * change to the parser is caught on every machine, not only where the binary
- * is installed. The samples are cedar-policy-cli 4.13.0's, verbatim.
+ * is installed. The samples are cedar-policy-cli 4.13.0's, verbatim, and
+ * 2.5.0's where it words an answer differently — the Cedar cedar-agent 0.2.2
+ * runs, which the suite's http half is held to (#284).
  */
 
 import { describe, expect, it } from "vitest";
@@ -66,6 +68,26 @@ describe("parseAuthorizeOutput — cedar authorize --verbose, read back", () => 
 					policyId: "10-permit-eng",
 					message: '`User::"alice"` does not have the attribute `dept`',
 				},
+			],
+		});
+	});
+
+	it("reads cedar-policy-cli 2.5's evaluation errors too — the Cedar cedar-agent 0.2.2 runs (#284)", () => {
+		const out = [
+			"",
+			"ALLOW",
+			"",
+			'error occurred while evaluating policy `10-permit-eng`: `User::"alice"` does not have the attribute: dept',
+			"",
+			"note: this decision was due to the following policies:",
+			"  20-permit-read",
+			"",
+		].join("\n");
+		expect(parseAuthorizeOutput(out)).toEqual({
+			decision: "allow",
+			reason: ["20-permit-read"],
+			errors: [
+				{ policyId: "10-permit-eng", message: '`User::"alice"` does not have the attribute: dept' },
 			],
 		});
 	});

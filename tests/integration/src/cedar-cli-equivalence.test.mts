@@ -2,13 +2,36 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * The CLI-equivalence suite (#198): for the same `.cedar` files and the same
- * request, `CedarPolicyRuleCollector` over the wasm engine and the official
- * `cedar` CLI must agree — on the decision, on the policies that determined
- * it, and on which policies raised evaluation errors. It is the proof #185
- * called the migration criterion: that the entity synthesis, the context
- * allowlist and the answer interpretation here do not drift from what Cedar
- * computes, so a corpus can move to another Cedar evaluator unchanged.
+ * The CLI-equivalence suite (#198, #284): for the same `.cedar` files and the
+ * same request, `CedarPolicyRuleCollector` over each engine and the official
+ * `cedar` CLI of that engine's Cedar must agree — on the decision, on the
+ * policies that determined it, and on which policies raised evaluation errors.
+ * It is the proof #185 called the migration criterion: that the entity
+ * synthesis, the context allowlist and the answer interpretation here do not
+ * drift from what Cedar computes, so a corpus can move to another Cedar
+ * evaluator unchanged.
+ *
+ * Two engines, two Cedars:
+ * - **wasm** evaluates in-process with `@cedar-policy/cedar-wasm`, held to the
+ *   CLI of the version that package is pinned to (4.x).
+ * - **http** hands the request to a real cedar-agent, which evaluates with the
+ *   cedar-policy compiled into its image (2.5 in `permitio/cedar-agent:0.2.2`),
+ *   held to the CLI of that version.
+ *
+ * Every case is measured under both Cedars, since what a case means is its
+ * CLIs' answer, not an engine's: each half holds its CLI to the case's stated
+ * answers, so a case that meant one thing under 4.x and another under 2.5
+ * fails on one side. What an engine cannot load is declared, and the
+ * declaration is checked:
+ * - A case whose set cedar-agent refuses states why (`agentRefuses` — a file
+ *   holding several policies, where the agent stores one per id). The http
+ *   half checks that the agent does refuse it at boot, and still holds the
+ *   CLI of the agent's Cedar to the case's answers, asked the recorded
+ *   requests. A case that stops being refused fails, as does one that starts.
+ * - `onNoDeterminingPolicy = "abstain"` is refused at boot over an
+ *   out-of-process engine, so the http half runs such a case under `"deny"`
+ *   and says so in its name: Cedar's answer does not depend on it, and the
+ *   collector's reading of it under `"abstain"` is the wasm half's to check.
  *
  * Each case under `conformance/fixtures/cedarCli/` holds `policies/*.cedar`
  * and a `case.json` of the collector's mapping config and the requests: the
@@ -31,20 +54,26 @@
  * the stated answers (`decision`, `determiningPolicies`, `errorsIn`) still
  * hold the meaning.
  *
- * Policy ids. The wasm engine names each policy for its file (`namePolicies`)
- * and ignores `@id`; the CLI names a policy by its `@id` annotation, else by
- * its position in the set. Every fixture policy carries `@id` with the id its
- * file gives it, so both answer in the same names, and a policy the engine
- * named differently is a mismatch.
+ * Policy ids. The engines name each policy for its file (`namePolicies`) and
+ * ignore `@id`; the CLI names a policy by its `@id` annotation, else by its
+ * position in the set. Every fixture policy carries `@id` with the id its file
+ * gives it, so both answer in the same names, and a policy an engine named
+ * differently is a mismatch. The agent holds each id under the load's mark
+ * (#283), and its error strings carry it: this load's mark is set aside to
+ * compare, and an error naming a policy under any other mark is a mismatch.
  *
- * Only the wasm engine is measured. The `http` engine hands the request to a
- * cedar-agent that evaluates with cedar-policy 2.4, a different Cedar; checking
- * it against Cedar needs that CLI or a real agent, and is not this suite's.
- *
- * The CLI is found as `CEDAR_CLI`, else `cedar` on the PATH, and must be the
- * version `@cedar-policy/cedar-wasm` is pinned to. Without it the suite is
- * skipped with a notice; `CEDAR_CLI_REQUIRED=1` — set by the CI job that
- * installs it — turns a missing CLI into a failure.
+ * What each engine needs, and without it the engine's half is skipped with a
+ * notice (its `…_REQUIRED=1` — set by the CI job that provides it — turns the
+ * absence into a failure, and so does a half configured in part; an empty
+ * variable counts as unset):
+ * - wasm: the CLI as `CEDAR_CLI`, else `cedar` on the PATH, at the version
+ *   `@cedar-policy/cedar-wasm` is pinned to. `CEDAR_CLI_REQUIRED`.
+ * - http: an agent at `CEDAR_AGENT_ENDPOINT`, the CLI of its Cedar as
+ *   `CEDAR_AGENT_CLI`, and that version as `CEDAR_AGENT_CEDAR_VERSION` — all
+ *   three or none — the version read from the agent image by the CI job,
+ *   since the agent does not say. Its token, if it has one, as
+ *   `CEDAR_AGENT_AUTHENTICATION`, not one of the three. Only these are read:
+ *   `CEDAR_ENDPOINT` and `CEDAR_AUTHENTICATION` are not. `CEDAR_AGENT_REQUIRED`.
  */
 
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -52,21 +81,28 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+	agentPolicyId,
 	type CedarDecision,
+	type CedarEngine,
 	CedarPolicyRuleCollector,
 	type CedarRequest,
+	createCedarHttpEngine,
 	entityUidLiteral,
+	type LoadedCedarPolicySet,
 	loadPolicySource,
 	type NoDeterminingPolicy,
+	namePolicies,
+	type PolicySource,
 	registerCedarEngine,
 } from "@o3co/auth.policy-verifier.cedar";
 import { cedarWasmEngine } from "@o3co/auth.policy-verifier.cedar-wasm";
 import {
+	type AnyRule,
 	type CollectorContext,
+	type EvaluatedRevision,
 	evaluate,
-	isAsyncRule,
 	type Logger,
-	type Rule,
+	type RuleEvaluation,
 	type RuleOutcome,
 } from "@o3co/auth.policy-verifier.core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -74,6 +110,7 @@ import {
 	type CliAnswer,
 	cedarAuthorize,
 	cedarCliVersion,
+	EVALUATION_ERROR,
 	locateCedarCli,
 } from "./conformance/cedarCli.mjs";
 
@@ -96,6 +133,8 @@ interface CaseRequest {
 interface Case {
 	name: string;
 	about: string;
+	/** Why cedar-agent refuses this case's set at boot, when it does. */
+	agentRefuses?: string;
 	/** The collector's mapping config, without `policyDir` and `engine`. */
 	config: Record<string, unknown> & { onNoDeterminingPolicy?: NoDeterminingPolicy };
 	requests: CaseRequest[];
@@ -103,41 +142,22 @@ interface Case {
 
 const CASES: Case[] = readdirSync(FIXTURES, { withFileTypes: true })
 	.filter((entry) => entry.isDirectory())
-	.map((entry) => ({
-		name: entry.name,
-		...(JSON.parse(readFileSync(join(FIXTURES, entry.name, "case.json"), "utf8")) as Omit<
-			Case,
-			"name"
-		>),
-	}))
-	.sort((a, b) => a.name.localeCompare(b.name));
-
-/*
- * The wasm engine, observed: every request the collector hands it and what it
- * answered, so the CLI is asked exactly what the engine was. Registered once,
- * at module scope, under a fixed name — which assumes the file is evaluated
- * once per global, as vitest's default isolation does; `--no-isolate` would
- * register it twice and be refused. The tests run one at a time, so the one
- * `observed` list is theirs in turn.
- */
-const OBSERVED_ENGINE = "cli-equivalence-wasm";
-const observed: Array<{ request: CedarRequest; answer: CedarDecision }> = [];
-registerCedarEngine({
-	name: OBSERVED_ENGINE,
-	async: false,
-	confirmsRevision: true,
-	load(source) {
-		const loaded = cedarWasmEngine.load(source);
-		return {
-			async: false,
-			isAuthorized(request: CedarRequest): CedarDecision {
-				const answer = loaded.isAuthorized(request);
-				observed.push({ request, answer });
-				return answer;
-			},
+	.map((entry) => {
+		const testCase: Case = {
+			name: entry.name,
+			...(JSON.parse(readFileSync(join(FIXTURES, entry.name, "case.json"), "utf8")) as Omit<
+				Case,
+				"name"
+			>),
 		};
-	},
-});
+		// A reason, or nothing: a refusal is stated, never a flag.
+		const refuses: unknown = testCase.agentRefuses;
+		if (refuses !== undefined && (typeof refuses !== "string" || refuses.trim() === "")) {
+			throw new Error(`${entry.name}/case.json: agentRefuses must say why, as text`);
+		}
+		return testCase;
+	})
+	.sort((a, b) => a.name.localeCompare(b.name));
 
 /** Never read: everything reaches the rule through its attributes. */
 const context: CollectorContext = {
@@ -164,145 +184,377 @@ function versionAt(dir: string): string {
 		.version;
 }
 
-const CLI = locateCedarCli();
-const REQUIRED = process.env.CEDAR_CLI_REQUIRED === "1";
-
-// Skipped, not silent: said on stderr, where the default reporter does not
-// swallow it, and by a skipped test that says why, for a verbose reporter.
-if (CLI === undefined && !REQUIRED) {
-	process.stderr.write(
-		"cedar-cli-equivalence: no cedar CLI found (CEDAR_CLI, or `cedar` on the PATH) — the suite is skipped\n",
-	);
+/** The case's mapping config as an engine runs it, and what was changed to run it. */
+interface RunConfig {
+	config: Case["config"];
+	/** Said in the case's test name, so a changed config is never silent. */
+	changed?: string;
 }
-describe.runIf(CLI === undefined && !REQUIRED)("the cedar CLI, not found", () => {
-	it.skip("skips the CLI-equivalence suite — install cedar-policy-cli at the version @cedar-policy/cedar-wasm is pinned to, on the PATH or as CEDAR_CLI, to run it", () => {});
-});
 
-describe.runIf(CLI === undefined && REQUIRED)("the cedar CLI, required", () => {
-	it("is installed — CEDAR_CLI_REQUIRED is set, so a missing CLI fails rather than skips", () => {
-		expect.fail(
-			"CEDAR_CLI_REQUIRED=1 but no cedar CLI was found (CEDAR_CLI, or `cedar` on the PATH)",
-		);
-	});
-});
+/** One engine, the CLI of its Cedar, and how its answers are read. */
+interface Evaluator {
+	/** The engine's config name; each case registers it observed, as `cli-equivalence-<name>-<case>`. */
+	name: string;
+	/** Absent: the engine's half is skipped, or fails when `requiredBy` is set to 1 or `partly` is set. */
+	cli: string | undefined;
+	/** The variable that turns a skip into a failure. */
+	requiredBy: string;
+	/**
+	 * What is unset while the rest of the engine's half is configured: a half
+	 * configured in part is a mistake, not an opt-out, so it fails rather than
+	 * skips.
+	 */
+	partly?: string;
+	/** What is missing, for the notice. */
+	needs: string;
+	/** The Cedar version the engine runs, which its CLI must be. */
+	cedarVersion: () => string;
+	/**
+	 * The engine a case loads its set into. The http engine holds one agent per
+	 * engine, so each case gets its own; the wasm engine has no state to keep
+	 * apart and is shared.
+	 */
+	engine: () => CedarEngine;
+	/** Collector config the engine reads (endpoint, token). */
+	config: Record<string, unknown>;
+	/** Why the engine refuses a case's set at boot, or `undefined` when it loads it. */
+	refuses: (testCase: Case) => string | undefined;
+	runConfig: (testCase: Case) => RunConfig;
+	/** The engine's errors as `policyId: message`, in the file ids the CLI uses. */
+	errors: (answer: CedarDecision, source: PolicySource) => string[];
+	/** What a completed or failed evaluation reports of the revision. */
+	revision: (source: PolicySource) => EvaluatedRevision;
+}
 
-describe.runIf(CLI !== undefined)("CedarPolicyRuleCollector and the cedar CLI agree (#198)", () => {
-	const cli = CLI as string;
-	// Read when the suite runs, not when it is collected: a skipped suite must
-	// load wherever the package is laid out.
-	const pinned = () =>
-		(
+const WASM: Evaluator = {
+	name: "wasm",
+	cli: locateCedarCli(),
+	requiredBy: "CEDAR_CLI_REQUIRED",
+	needs: "the cedar CLI (CEDAR_CLI, or `cedar` on the PATH)",
+	cedarVersion: () => {
+		const pinned = (
 			JSON.parse(readFileSync(join(CEDAR_WASM, "package.json"), "utf8")) as {
 				dependencies: Record<string, string>;
 			}
 		).dependencies["@cedar-policy/cedar-wasm"];
-	const installed = () => versionAt(join(CEDAR_WASM, "node_modules/@cedar-policy/cedar-wasm"));
-
-	// Every comparison below is meaningless across two Cedar versions, so a
-	// mismatch fails here, once, in words — not as a dozen answers that differ.
-	beforeAll(() => {
-		const [version, wasm, pin] = [cedarCliVersion(cli), installed(), pinned()];
-		if (version !== wasm || wasm !== pin) {
+		const installed = versionAt(join(CEDAR_WASM, "node_modules/@cedar-policy/cedar-wasm"));
+		if (installed !== pinned) {
 			throw new Error(
-				`Cedar versions differ: the cedar CLI at ${cli} is ${version}, @cedar-policy/cedar-wasm is pinned to ${pin} and ${wasm} is installed — run pnpm install, and install cedar-policy-cli ${pin}`,
+				`@cedar-policy/cedar-wasm is pinned to ${pinned} and ${installed} is installed — run pnpm install`,
 			);
 		}
-	});
+		return installed;
+	},
+	engine: () => cedarWasmEngine,
+	config: {},
+	refuses: () => undefined,
+	runConfig: (testCase) => ({ config: testCase.config }),
+	// The wasm engine renders an error `policyId: message` already.
+	errors: (answer) => [...answer.errors],
+	revision: (source) => ({ revision: source.revision }),
+};
 
-	it("run the same Cedar — the CLI is the version the wasm engine is pinned to and runs", () => {
-		expect(installed()).toBe(pinned());
-		expect(cedarCliVersion(cli)).toBe(installed());
-	});
+/** A variable's value; empty is unset, as `VAR=` clears one, and as `CEDAR_CLI` reads. */
+function setting(name: string): string | undefined {
+	const value = process.env[name];
+	return value === undefined || value === "" ? undefined : value;
+}
 
-	it("cover every case the fixtures hold", () => {
-		expect(CASES.length).toBeGreaterThan(0);
-		for (const testCase of CASES) expect(testCase.requests.length).toBeGreaterThan(0);
-	});
-
-	describe.each(CASES)("$name", (testCase) => {
-		const policyDir = join(FIXTURES, testCase.name, "policies");
-		const source = loadPolicySource({ policyDir });
-		let rule: Rule;
-		let scratch: string;
-
-		beforeAll(async () => {
-			const collector = await CedarPolicyRuleCollector.create(
-				{ ...testCase.config, policyDir, engine: OBSERVED_ENGINE },
-				{ logger: silent },
+/**
+ * The http half's configuration: all of it, or none. The token is not part of
+ * it — an agent may run without one (the engine warns, silenced here), and
+ * cedar-agent reads the same variable, so it is often exported on its own.
+ */
+const AGENT_ENV = ["CEDAR_AGENT_ENDPOINT", "CEDAR_AGENT_CLI", "CEDAR_AGENT_CEDAR_VERSION"];
+const agentUnset = AGENT_ENV.filter((name) => setting(name) === undefined);
+const AGENT_ENDPOINT = setting("CEDAR_AGENT_ENDPOINT");
+const AGENT_AUTHENTICATION = setting("CEDAR_AGENT_AUTHENTICATION");
+const HTTP: Evaluator = {
+	name: "http",
+	cli: agentUnset.length === 0 ? setting("CEDAR_AGENT_CLI") : undefined,
+	requiredBy: "CEDAR_AGENT_REQUIRED",
+	partly:
+		agentUnset.length > 0 && agentUnset.length < AGENT_ENV.length
+			? `${agentUnset.join(", ")} unset while the rest is set`
+			: undefined,
+	needs:
+		"a cedar-agent (CEDAR_AGENT_ENDPOINT) and the CLI of its Cedar (CEDAR_AGENT_CLI, CEDAR_AGENT_CEDAR_VERSION)",
+	cedarVersion: () => {
+		const version = setting("CEDAR_AGENT_CEDAR_VERSION");
+		if (version === undefined || !/^\d+\.\d+\.\d+$/.test(version)) {
+			throw new Error(
+				"CEDAR_AGENT_CEDAR_VERSION must name the cedar-policy version the agent runs — the agent does not say",
 			);
-			const [collected] = await collector.collect(context);
-			if (isAsyncRule(collected)) throw new Error("the wasm engine answers synchronously");
-			rule = collected;
-			scratch = mkdtempSync(join(tmpdir(), "cedar-cli-equivalence-"));
-			writeFileSync(join(scratch, "policies.cedar"), source.text);
-		});
+		}
+		return version;
+	},
+	// Under vitest's 10 s hook timeout, so an agent that does not answer fails
+	// with the engine's own words rather than a bare "hook timed out". No
+	// environment: the suite reads its own variables only, never a
+	// CEDAR_ENDPOINT or CEDAR_AUTHENTICATION left in the shell.
+	engine: () => createCedarHttpEngine({ loadTimeoutMs: 5_000, env: {} }),
+	config: {
+		endpoint: AGENT_ENDPOINT,
+		...(AGENT_AUTHENTICATION === undefined ? {} : { authentication: AGENT_AUTHENTICATION }),
+	},
+	refuses: (testCase) => testCase.agentRefuses,
+	// "abstain" is refused over an out-of-process engine; Cedar's answer does
+	// not depend on it, so the case runs under "deny".
+	runConfig: (testCase) =>
+		testCase.config.onNoDeterminingPolicy === "abstain"
+			? {
+					config: { ...testCase.config, onNoDeterminingPolicy: "deny" },
+					changed: 'run under onNoDeterminingPolicy = "deny"',
+				}
+			: { config: testCase.config },
+	// The agent's own strings, each policy id under the load's mark (#283): read
+	// with the CLI's parser, and only this load's mark set aside — an id under
+	// another stays as it is, and fails to match.
+	errors: (answer, source) =>
+		answer.errors.map((rendered) => {
+			const error = EVALUATION_ERROR.exec(rendered);
+			if (error === null) throw new Error(`an agent error this suite cannot read: ${rendered}`);
+			const [, id, message] = error;
+			const at = id.lastIndexOf("@");
+			const stem = at === -1 ? id : id.slice(0, at);
+			return `${agentPolicyId(stem, source.revision) === id ? stem : id}: ${message}`;
+		}),
+	// The agent cannot vouch for what it ran (#244).
+	revision: (source) => ({ revision: null, loadedRevision: source.revision }),
+};
 
-		afterAll(() => {
-			if (scratch !== undefined) rmSync(scratch, { recursive: true, force: true });
-		});
-
-		it.each(testCase.requests)("$about", async (request) => {
-			observed.length = 0;
-			const decision = await evaluate(new Map(Object.entries(request.attributes)), [rule]);
-			const outcome: RuleOutcome = decision.reason.groups[0].evaluated[0];
-			expect(observed).toHaveLength(1);
-			const [{ request: asked, answer }] = observed;
-
-			// The synthesis, against the case: the request the collector built.
-			expect(asked).toEqual(request.expect.request);
-
-			// The CLI is asked what the engine was asked.
-			const files = {
-				policies: join(scratch, "policies.cedar"),
-				entities: join(scratch, "entities.json"),
-				request: join(scratch, "request.json"),
-			};
-			writeFileSync(files.entities, JSON.stringify(asked.entities));
-			writeFileSync(
-				files.request,
-				JSON.stringify({
-					principal: entityUidLiteral(asked.principal),
-					action: entityUidLiteral(asked.action),
-					resource: entityUidLiteral(asked.resource),
-					context: asked.context,
-				}),
-			);
-			const reference: CliAnswer = cedarAuthorize(cli, files);
-
-			// Cedar's answer, twice: the engine's and the CLI's are one answer. The
-			// wasm engine renders an error `policyId: message`; so is the CLI's here.
-			expect(answer.decision).toBe(reference.decision);
-			expect([...answer.reason].sort()).toEqual([...reference.reason].sort());
-			expect([...answer.errors].sort()).toEqual(
-				reference.errors.map(({ policyId, message }) => `${policyId}: ${message}`).sort(),
-			);
-
-			// …and it is the answer the case states, so both cannot drift together.
-			expect(reference.decision).toBe(request.expect.decision);
-			expect([...reference.reason].sort()).toEqual([...request.expect.determiningPolicies].sort());
-			expect(reference.errors.map((error) => error.policyId).sort()).toEqual(
-				[...request.expect.errorsIn].sort(),
-			);
-
-			// What the collector made of it: its answer table, over Cedar's answer.
-			if (answer.errors.length > 0) {
-				// An erroring policy stops deciding, so Cedar may allow on another
-				// permit; the collector denies instead — the fail-open trap, closed.
-				expect(outcome).toMatchObject({
-					passed: false,
-					evaluation: { status: "failed", revision: source.revision },
-				});
-				return;
+/**
+ * `inner`, registered under `name` with every request it is asked and its
+ * answer pushed to `observed` — so the CLI is asked exactly what it was.
+ */
+function registerObserved(
+	name: string,
+	inner: CedarEngine,
+	observed: Array<{ request: CedarRequest; answer: CedarDecision }>,
+): void {
+	registerCedarEngine({
+		name,
+		async: inner.async,
+		confirmsRevision: inner.confirmsRevision,
+		async load(source, loadContext): Promise<LoadedCedarPolicySet> {
+			const loaded = await inner.load(source, loadContext);
+			if (loaded.async) {
+				return {
+					async: true,
+					async isAuthorized(request, signal) {
+						const answer = await loaded.isAuthorized(request, signal);
+						observed.push({ request, answer });
+						return answer;
+					},
+				};
 			}
-			const abstains = (testCase.config.onNoDeterminingPolicy ?? "deny") === "abstain";
-			expect(outcome.passed).toBe(
-				answer.decision === "allow" || (answer.reason.length === 0 && abstains),
+			return {
+				async: false,
+				isAuthorized(request) {
+					const answer = loaded.isAuthorized(request);
+					observed.push({ request, answer });
+					return answer;
+				},
+			};
+		},
+	});
+}
+
+/** Asks the CLI at `cli` the request, over the set in `scratch/policies.cedar`. */
+function askCli(cli: string, scratch: string, request: CedarRequest): CliAnswer {
+	const files = {
+		policies: join(scratch, "policies.cedar"),
+		entities: join(scratch, "entities.json"),
+		request: join(scratch, "request.json"),
+	};
+	writeFileSync(files.entities, JSON.stringify(request.entities));
+	writeFileSync(
+		files.request,
+		JSON.stringify({
+			principal: entityUidLiteral(request.principal),
+			action: entityUidLiteral(request.action),
+			resource: entityUidLiteral(request.resource),
+			context: request.context,
+		}),
+	);
+	return cedarAuthorize(cli, files);
+}
+
+/** The CLI's answer is the one the case states: what the case means, under this Cedar. */
+function expectStated(cliAnswer: CliAnswer, stated: CaseRequest["expect"]): void {
+	expect(cliAnswer.decision).toBe(stated.decision);
+	expect([...cliAnswer.reason].sort()).toEqual([...stated.determiningPolicies].sort());
+	expect(cliAnswer.errors.map((error) => error.policyId).sort()).toEqual(
+		[...stated.errorsIn].sort(),
+	);
+}
+
+// Outside the halves, so it runs once and on every machine — a CLI or not.
+it("the fixtures hold cases, each with requests", () => {
+	expect(CASES.length).toBeGreaterThan(0);
+	for (const testCase of CASES) expect(testCase.requests.length).toBeGreaterThan(0);
+});
+
+describe.each([WASM, HTTP])("the $name engine and the cedar CLI of its Cedar", (evaluator) => {
+	const cli = evaluator.cli;
+	const required = process.env[evaluator.requiredBy] === "1" || evaluator.partly !== undefined;
+
+	// Skipped, not silent: said on stderr, where the default reporter does not
+	// swallow it, and by a skipped test that says why, for a verbose reporter.
+	if (cli === undefined && !required) {
+		process.stderr.write(
+			`cedar-cli-equivalence: the ${evaluator.name} engine's half is skipped — it needs ${evaluator.needs}\n`,
+		);
+	}
+	describe.runIf(cli === undefined && !required)("not provided", () => {
+		it.skip(`skips this engine's half — it needs ${evaluator.needs}`, () => {});
+	});
+	describe.runIf(cli === undefined && required)("required", () => {
+		it("is configured in full", () => {
+			expect.fail(
+				evaluator.partly !== undefined
+					? `the ${evaluator.name} engine's half is partly configured — ${evaluator.partly}; set all of it, or none`
+					: `${evaluator.requiredBy}=1, and the ${evaluator.name} engine's half cannot run — it needs ${evaluator.needs}`,
 			);
-			expect(outcome.evaluation).toEqual({
-				status: "completed",
-				revision: source.revision,
-				determiningPolicies: [...reference.reason].sort(),
-			});
 		});
+	});
+
+	describe.runIf(cli !== undefined)("agree", () => {
+		const reference = cli as string;
+
+		// Every comparison below is meaningless across two Cedar versions, so a
+		// mismatch fails here, once, in words — not as a dozen answers that differ.
+		beforeAll(() => {
+			const [version, expected] = [cedarCliVersion(reference), evaluator.cedarVersion()];
+			if (version !== expected) {
+				throw new Error(
+					`Cedar versions differ: the ${evaluator.name} engine runs ${expected}, the CLI at ${reference} is ${version} — install cedar-policy-cli ${expected}`,
+				);
+			}
+		});
+
+		it("run the same Cedar — the CLI is the version the engine runs", () => {
+			expect(cedarCliVersion(reference)).toBe(evaluator.cedarVersion());
+		});
+
+		for (const testCase of CASES) {
+			const policyDir = join(FIXTURES, testCase.name, "policies");
+			const source = loadPolicySource({ policyDir });
+			const refused = evaluator.refuses(testCase);
+			const { config, changed } = evaluator.runConfig(testCase);
+			// The engine, observed: every request the collector hands it and what it
+			// answered, so the CLI is asked exactly what the engine was.
+			const observed: Array<{ request: CedarRequest; answer: CedarDecision }> = [];
+			// Registered per case, under its own name: the http engine holds one
+			// agent per engine, and each case loads its own set into it.
+			const engineName = `cli-equivalence-${evaluator.name}-${testCase.name}`;
+			const create = () =>
+				CedarPolicyRuleCollector.create(
+					{ ...config, ...evaluator.config, policyDir, engine: engineName },
+					{ logger: silent },
+				);
+			let rule: AnyRule;
+			let refusal: unknown;
+			let scratch: string;
+
+			const title =
+				refused !== undefined
+					? `${testCase.name} — refused by the engine: ${refused}`
+					: changed !== undefined
+						? `${testCase.name} — ${changed}`
+						: testCase.name;
+
+			describe(title, () => {
+				beforeAll(async () => {
+					registerObserved(engineName, evaluator.engine(), observed);
+					scratch = mkdtempSync(join(tmpdir(), "cedar-cli-equivalence-"));
+					writeFileSync(join(scratch, "policies.cedar"), source.text);
+					// Both under the hook timeout, which the engine's load deadline sits
+					// under: an agent that does not answer fails in the engine's words.
+					if (refused === undefined) [rule] = await create().then((c) => c.collect(context));
+					else
+						refusal = await create().then(
+							() => undefined,
+							(error: unknown) => error,
+						);
+				});
+
+				afterAll(() => {
+					if (scratch !== undefined) rmSync(scratch, { recursive: true, force: true });
+				});
+
+				if (refused !== undefined) {
+					// The declaration, checked against the engine: the agent refuses the
+					// set this load sent as one it cannot parse (400) — not a route, a
+					// size or a fault — at boot, as the engine's docs say, not served.
+					it("is refused at boot", () => {
+						const sent = namePolicies(
+							source.files.filter((file) => file.text.trim().length > 0),
+							(file) => [file.text],
+						)
+							.map(({ id }) => agentPolicyId(id, source.revision))
+							.join(", ");
+						expect(refusal).toBeInstanceOf(Error);
+						expect((refusal as Error).message).toContain(
+							`refused the policy set from ${source.description} (400; policies: ${sent}): `,
+						);
+					});
+
+					// What the case means under this Cedar, without the engine: the CLI
+					// is asked the recorded request, which the wasm half checks is the
+					// one the collector builds.
+					it.each(testCase.requests)("$about — the CLI alone", (request) => {
+						expectStated(askCli(reference, scratch, request.expect.request), request.expect);
+					});
+					return;
+				}
+
+				it.each(testCase.requests)("$about", async (request) => {
+					observed.length = 0;
+					const decision = await evaluate(new Map(Object.entries(request.attributes)), [rule]);
+					const outcome: RuleOutcome = decision.reason.groups[0].evaluated[0];
+					expect(observed).toHaveLength(1);
+					const [{ request: asked, answer }] = observed;
+
+					// The synthesis, against the case: the request the collector built.
+					expect(asked).toEqual(request.expect.request);
+
+					// The CLI is asked what the engine was asked.
+					const cliAnswer = askCli(reference, scratch, asked);
+
+					// Cedar's answer, twice: the engine's and the CLI's are one answer.
+					expect(answer).not.toHaveProperty("foreign");
+					expect(answer.decision).toBe(cliAnswer.decision);
+					expect([...answer.reason].sort()).toEqual([...cliAnswer.reason].sort());
+					expect(evaluator.errors(answer, source).sort()).toEqual(
+						cliAnswer.errors.map(({ policyId, message }) => `${policyId}: ${message}`).sort(),
+					);
+
+					// …and it is the answer the case states, so neither engine, nor either
+					// Cedar, can drift alone — or both together.
+					expectStated(cliAnswer, request.expect);
+
+					// What the collector made of it: its answer table, over Cedar's answer.
+					if (answer.errors.length > 0) {
+						// An erroring policy stops deciding, so Cedar may allow on another
+						// permit; the collector denies instead — the fail-open trap, closed.
+						expect(outcome).toMatchObject({
+							passed: false,
+							evaluation: { status: "failed", ...evaluator.revision(source) },
+						});
+						return;
+					}
+					const abstains = (config.onNoDeterminingPolicy ?? "deny") === "abstain";
+					expect(outcome.passed).toBe(
+						answer.decision === "allow" || (answer.reason.length === 0 && abstains),
+					);
+					expect(outcome.evaluation).toEqual({
+						status: "completed",
+						...evaluator.revision(source),
+						determiningPolicies: [...cliAnswer.reason].sort(),
+					} as RuleEvaluation);
+				});
+			});
+		}
 	});
 });

@@ -1,5 +1,6 @@
 {
 	"about": "A file holding several policies names them `stem#1`, `stem#2`… in the file's order — the ids the wasm engine answers with, declared here with `@id` for the CLI.",
+	"agentRefuses": "a file holds several policies, and cedar-agent stores one per id",
 	"config": {
 		"context": {
 			"suspended": "suspended"
