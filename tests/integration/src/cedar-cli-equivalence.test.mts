@@ -71,7 +71,9 @@
  * - http: an agent at `CEDAR_AGENT_ENDPOINT`, the CLI of its Cedar as
  *   `CEDAR_AGENT_CLI`, and that version as `CEDAR_AGENT_CEDAR_VERSION` — all
  *   three or none — the version read from the agent image by the CI job,
- *   since the agent does not say. `CEDAR_AGENT_REQUIRED`.
+ *   since the agent does not say. Its token, if it has one, as
+ *   `CEDAR_AGENT_AUTHENTICATION`, not one of the three. Only these are read:
+ *   `CEDAR_ENDPOINT` and `CEDAR_AUTHENTICATION` are not. `CEDAR_AGENT_REQUIRED`.
  */
 
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -260,8 +262,8 @@ function setting(name: string): string | undefined {
 
 /**
  * The http half's configuration: all of it, or none. The token is not part of
- * it — an agent may run without one (the engine warns), and cedar-agent reads
- * the same variable, so it is often exported on its own.
+ * it — an agent may run without one (the engine warns, silenced here), and
+ * cedar-agent reads the same variable, so it is often exported on its own.
  */
 const AGENT_ENV = ["CEDAR_AGENT_ENDPOINT", "CEDAR_AGENT_CLI", "CEDAR_AGENT_CEDAR_VERSION"];
 const agentUnset = AGENT_ENV.filter((name) => setting(name) === undefined);

@@ -743,8 +743,11 @@ the template pins, rather than to the wasm engine's CLI.
   install the CLI of its Cedar, and point the suite at both.
   - `CEDAR_AGENT_ENDPOINT`, `CEDAR_AGENT_CLI` and `CEDAR_AGENT_CEDAR_VERSION`
     go together. With none of them set, the http half is skipped, with a
-    notice; with only some, it fails. The token,
-    `CEDAR_AGENT_AUTHENTICATION`, is the agent's own and optional here.
+    notice; with only some, it fails. An empty one counts as unset.
+  - The token, `CEDAR_AGENT_AUTHENTICATION`, is not one of the three: set it
+    to the token the agent was started with, or leave it unset for an agent
+    without one. The suite reads only `CEDAR_AGENT_*`; `CEDAR_ENDPOINT` and
+    `CEDAR_AUTHENTICATION` are ignored, whatever the engine's own hint says.
   - The version below is the one read from the image the template pins today;
     the CI job reads it afresh.
   - `--locked` holds the crate's dependencies, not the compiler, so the
