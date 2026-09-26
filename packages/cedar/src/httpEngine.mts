@@ -171,6 +171,7 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 			// Pushed under this load's mark (#283); the file id is what a decision records.
 			const named = namePolicies(nonBlank, (file) => [file.text]);
 			const ownIds = new Map(named.map(({ id }) => [agentPolicyId(id, source.revision), id]));
+			const ownMark = loadMark(source.revision);
 			const policies = named.map(({ id, text }) => ({
 				id: agentPolicyId(id, source.revision),
 				content: text,
@@ -257,6 +258,7 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 							endpoint,
 						),
 						ownIds,
+						ownMark,
 					);
 				},
 			};
@@ -277,18 +279,28 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
  * rolling deploy sharing an agent, an agent restarted on its own set — does.
  */
 export function agentPolicyId(id: string, revision: string): string {
+	return `${id}${loadMark(revision)}`;
+}
+
+/** A load's mark as it follows an id: `@` and the revision's first 16 hex. */
+function loadMark(revision: string): string {
 	// 16 of the digest's hex — 64 bits, far past any collision two loads could
 	// meet. The revision is always `sha256:<64 hex>` (computePolicyRevision).
-	return `${id}@${revision.slice(revision.indexOf(":") + 1).slice(0, 16)}`;
+	return `@${revision.slice(revision.indexOf(":") + 1).slice(0, 16)}`;
 }
 
 /**
- * An answer, read against what this load pushed (#283). Every determining
- * policy must be one of this load's, under its mark; then the answer names
- * them by their file ids, each once — so it can name no more than were
- * pushed. One that is not — no mark, another load's, an id never pushed, an
- * item that is not an id at all — means the answer did not come from this
- * set: it is marked `foreign`, and names nothing of it.
+ * An answer, read against what this load pushed (#283). Every policy it
+ * names must be one of this load's, under its mark — each determining policy,
+ * and the policy each evaluation error names; then the answer names the
+ * determining ones by their file ids, each once — so it can name no more than
+ * were pushed. One that is not — no mark, another load's, an id never pushed,
+ * an item that is not an id at all — means the answer did not come from this
+ * set: it is marked `foreign`, and names nothing of it. The errors count as
+ * much as the reason: a set this verifier did not load can answer with errors
+ * alone, and they would otherwise be logged as this load's.
+ *
+ * The errors stay the agent's text, marked ids and all, for the log.
  *
  * The mark is no secret and no authenticator: the ids are in every answer, in
  * the agent's `GET /v1/policies`, and computable from the policy files. It
@@ -297,7 +309,11 @@ export function agentPolicyId(id: string, revision: string): string {
  * marked id, or delete one, and be answered for as this load. No check of an
  * answer can see that; the agent's token is the boundary.
  */
-function ownDecision(decision: CedarDecision, ownIds: ReadonlyMap<string, string>): CedarDecision {
+function ownDecision(
+	{ decision, errorItems }: AgentAnswer,
+	ownIds: ReadonlyMap<string, string>,
+	ownMark: string,
+): CedarDecision {
 	const reason: string[] = [];
 	const seen = new Set<string>();
 	for (const item of decision.reason) {
@@ -309,8 +325,85 @@ function ownDecision(decision: CedarDecision, ownIds: ReadonlyMap<string, string
 		seen.add(id);
 		reason.push(id);
 	}
+	for (const item of errorItems) {
+		const policy = erroringPolicy(item, ownMark);
+		if (policy !== undefined && !ownIds.has(policy)) {
+			return { ...decision, reason: [], foreign: foreignAnswer(policy, ownIds) };
+		}
+	}
 	return { ...decision, reason };
 }
+
+/**
+ * The start of an evaluation error as cedar-agent's Cedar words it, up to the
+ * policy id: `error occurred while evaluating policy` in cedar-policy 2.5
+ * (cedar-agent 0.2.2), `error while evaluating policy` in 4.x.
+ */
+const EVALUATION_ERROR = /^error (?:occurred )?while evaluating policy `/;
+
+/**
+ * The one error Cedar 2.5 raises before any policy is evaluated — an entity
+ * or context attribute it could not evaluate. It names no policy, this load's
+ * or another's, so it says nothing of which set answered. (4.x has no such
+ * error; this engine sends no extension values that could raise it today.)
+ */
+const ATTRIBUTE_EVALUATION_ERROR = "error occurred while evaluating entity attributes: ";
+
+/**
+ * The policy an evaluation error names, or `undefined` for the one error that
+ * names none: the id in an error string, or the `policyId` of a structured
+ * one (Cedar 3.x+). An item that names no id it can read is
+ * {@link UNREADABLE_POLICY_ID}, no policy of this load's.
+ *
+ * In a string, Cedar prints the id through Rust's `escape_debug` — in
+ * `diagnostics.reason` it is sent raw — so it is unescaped to compare. And a
+ * backtick is not escaped: a file named `` a`: b.cedar `` holds the `` `: ``
+ * that ends an id. So an id of this load's is read to where this load's mark
+ * ends it; any other, to the first `` `: ``. Either way the slice starts at
+ * the id, so the message after it — which may carry the request's values —
+ * cannot make another set's id read as this load's, unless one of this
+ * load's own file names holds `` `: ``: there the text is ambiguous, and no
+ * reading can tell an error of `` a`: b `` from one of `a` whose message
+ * begins `` b@<mark>`: ``. An erroring answer is denied either way; only
+ * which line logs it is at stake. For such a name, too, another load's mark
+ * is not read off it — the answer is foreign without one.
+ *
+ * Nor can the text tell one of this load's ids from another set's id that
+ * embeds it and the delimiter (`` a@<mark>`: x ``): that reads as this load's.
+ * Only a token holder can push such an id, and a token holder can already
+ * answer as this load (see `ownDecision`). Refusing the ambiguity instead
+ * would hand it to the request: its values reach the message, so a requester
+ * could turn this load's own errors into foreign-set alarms. The answer is
+ * denied either way.
+ */
+function erroringPolicy(item: unknown, ownMark: string): string | undefined {
+	if (typeof item === "string") {
+		if (item.startsWith(ATTRIBUTE_EVALUATION_ERROR)) return undefined;
+		const start = EVALUATION_ERROR.exec(item);
+		if (start === null) return UNREADABLE_POLICY_ID;
+		const from = start[0].length;
+		const own = item.indexOf(`${ownMark}\`: `, from);
+		const end = own !== -1 ? own + ownMark.length : item.indexOf("`: ", from);
+		return end === -1 ? UNREADABLE_POLICY_ID : unescapeDebug(item.slice(from, end));
+	}
+	const policyId = (item as { policyId?: unknown } | null)?.policyId;
+	return typeof policyId === "string" ? policyId : UNREADABLE_POLICY_ID;
+}
+
+/**
+ * Undoes Rust's `str::escape_debug`: `\0 \t \r \n \\ \" \'` and `\u{…}`, which
+ * is everything it writes a backslash for — so the inverse is exact. Any other
+ * backslash is left as it is: no `escape_debug` wrote it.
+ */
+function unescapeDebug(text: string): string {
+	return text.replace(/\\(?:u\{([0-9a-f]{1,6})\}|([0tnr\\"']))/g, (written, hex, char) => {
+		if (hex === undefined) return DEBUG_ESCAPES[char as keyof typeof DEBUG_ESCAPES];
+		const codePoint = Number.parseInt(hex, 16);
+		return codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : written;
+	});
+}
+
+const DEBUG_ESCAPES = { "0": "\0", t: "\t", r: "\r", n: "\n", "\\": "\\", '"': '"', "'": "'" };
 
 /**
  * Why `item` is not this load's: a fixed label, and — only when `item` is one
@@ -736,8 +829,18 @@ async function errorDescription(
 	return response.statusText || "no description";
 }
 
+/**
+ * A decision as the agent answered it, and its errors as it sent them: each
+ * names the policy that raised it, but for the one that names none
+ * ({@link ATTRIBUTE_EVALUATION_ERROR}).
+ */
+interface AgentAnswer {
+	decision: CedarDecision;
+	errorItems: readonly unknown[];
+}
+
 /** Reads cedar-agent's `AuthorizationAnswer`; anything else is the engine not answering. */
-function readDecision(body: unknown, endpoint: string): CedarDecision {
+function readDecision(body: unknown, endpoint: string): AgentAnswer {
 	if (typeof body !== "object" || body === null) {
 		throw new CedarEngineError(
 			`cedar engine at ${endpoint} answered something that is not a decision`,
@@ -754,7 +857,8 @@ function readDecision(body: unknown, endpoint: string): CedarDecision {
 	// without them is some other shape, and "no errors" must not be inferred
 	// from a field that is not there — that is the fail-open direction.
 	const reason = policyIds((diagnostics as Record<string, unknown> | undefined)?.reason);
-	const errors = renderedList((diagnostics as Record<string, unknown> | undefined)?.errors);
+	const errorItems = (diagnostics as Record<string, unknown> | undefined)?.errors;
+	const errors = renderedList(errorItems);
 	if (
 		typeof diagnostics !== "object" ||
 		diagnostics === null ||
@@ -765,7 +869,10 @@ function readDecision(body: unknown, endpoint: string): CedarDecision {
 			`cedar engine at ${endpoint} answered a decision without well-formed diagnostics`,
 		);
 	}
-	return { decision: normalized, reason, errors };
+	return {
+		decision: { decision: normalized, reason, errors },
+		errorItems: errorItems as unknown[],
+	};
 }
 
 /**
@@ -791,7 +898,10 @@ function policyIds(value: unknown): string[] | undefined {
 	});
 }
 
-/** Marks a reason item that is not an id: a control character, which no reportable id holds. */
+/**
+ * Marks a reason or error item that names no id this engine can read: a
+ * control character, which no reportable id holds.
+ */
 const UNREADABLE_POLICY_ID = "\u0000";
 
 /**

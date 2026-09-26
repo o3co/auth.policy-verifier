@@ -697,6 +697,183 @@ describe("cedarHttpEngine — whose policies an answer names (#283)", () => {
 		},
 	);
 
+	// The policies an answer's errors name are this load's too, or the answer
+	// is not: a set this verifier did not load can answer with errors alone,
+	// naming no determining policy — a deny either way, but its errors would be
+	// logged as this load's evaluation errors, not as a foreign answer.
+	const erring = (errors: unknown[], reason: unknown[] = []) =>
+		agent(() => json(200, { decision: "Deny", diagnostics: { reason, errors } }));
+	const evaluating = (id: string) =>
+		`error occurred while evaluating policy \`${id}\`: \`User::"alice"\` does not have the attribute: dept`;
+
+	it.each([
+		["Cedar 2.5's wording (cedar-agent 0.2.2)", evaluating(ours)],
+		[
+			"Cedar 4's wording",
+			`error while evaluating policy \`${ours}\`: \`User::"alice"\` does not have the attribute \`dept\``,
+		],
+		["Cedar 3+'s structured error", { policyId: ours, error: { message: "no dept" } }],
+		// The message is the agent's text, whatever it holds — the request's
+		// values included, this load's mark and the delimiter after it too.
+		["a message holding the same delimiter", `${evaluating(ours)} \`x\`: y`],
+		[
+			"a message holding this load's mark and the delimiter",
+			`error occurred while evaluating policy \`${ours}\`: \`User::"x@${ownMark}\`: "\` does not have the attribute: dept`,
+		],
+	])("reads an error naming one of its policies, in %s, as this load's", async (_label, error) => {
+		const loaded = await loadAsync(
+			createCedarHttpEngine({ fetch: erring([error]).doFetch, env: AGENT_ENV }),
+			source,
+		);
+		const answer = await loaded.isAuthorized(request(), NEVER_ABORTS);
+		expect(answer).not.toHaveProperty("foreign");
+		expect(answer.errors).toHaveLength(1);
+	});
+
+	it.each([
+		["an id without a mark", [evaluating("policies")], { why: "unknown policy" }],
+		[
+			"another load's",
+			[evaluating(`policies@${otherMark}`)],
+			{ why: "unknown policy", mark: otherMark },
+		],
+		["an id this load never pushed", [evaluating(`extra@${ownMark}`)], { why: "unknown policy" }],
+		[
+			"this load's beside another's",
+			[evaluating(ours), evaluating("policies")],
+			{
+				why: "unknown policy",
+			},
+		],
+		[
+			"a structured error of another load's",
+			[{ policyId: `policies@${otherMark}`, error: { message: "no dept" } }],
+			{ why: "unknown policy", mark: otherMark },
+		],
+		[
+			"a string it cannot read a policy from",
+			["policy policies: no dept"],
+			{
+				why: "unreadable policy",
+			},
+		],
+		[
+			"a structured error naming no policy",
+			[{ error: { message: "no dept" } }],
+			{
+				why: "unreadable policy",
+			},
+		],
+		[
+			"an error line cut short",
+			[`error while evaluating policy \`${ours}`],
+			{
+				why: "unreadable policy",
+			},
+		],
+		// The id ends where the message starts: one of ours in the message,
+		// delimiter and all, does not make another set's id ours.
+		[
+			"another id, with one of this load's in its message",
+			[
+				`error occurred while evaluating policy \`other\`: \`User::"x\`: ${ours}\`: "\` does not have the attribute: dept`,
+			],
+			{ why: "unknown policy" },
+		],
+		// No escape_debug writes a code point past U+10FFFF: read as it stands,
+		// it names nothing of this load's — and the call does not throw.
+		[
+			"an escape past Unicode",
+			[evaluating(`policies\\u{110000}@${ownMark}`)],
+			{ why: "unknown policy" },
+		],
+	])(
+		"tells an answer whose errors name %s for what it is: from a set this verifier did not load",
+		async (_label, errors, foreign) => {
+			const loaded = await loadAsync(
+				createCedarHttpEngine({ fetch: erring(errors).doFetch, env: AGENT_ENV }),
+				source,
+			);
+			expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toMatchObject({
+				decision: "deny",
+				reason: [],
+				foreign,
+			});
+		},
+	);
+
+	// Cedar prints the id in an error through Rust's `escape_debug`, though it
+	// sends it raw in `diagnostics.reason`: a file named with a quote, a
+	// backslash or an invisible character is spelled otherwise in its errors.
+	// And a backtick is not escaped, so an id may hold the "`: " that ends one.
+	it.each([
+		["a quote", "it's", "it\\'s"],
+		["double quotes", 'say"hi"', 'say\\"hi\\"'],
+		["a backslash", "back\\slash", "back\\\\slash"],
+		["a tab", "tab\tbed", "tab\\tbed"],
+		["a no-break space", "nb\u00a0sp", "nb\\u{a0}sp"],
+		["a zero-width space", "zw\u200bsp", "zw\\u{200b}sp"],
+		["the delimiter itself", "a`: b", "a`: b"],
+	])(
+		"reads an error naming a policy whose file name holds %s as this load's",
+		async (_label, stem, printed) => {
+			const set = dir([[`${stem}.cedar`, PERMIT_ALL]]);
+			const own = agentPolicyId(stem, set.revision);
+			const mark = own.slice(stem.length);
+			const loaded = await loadAsync(
+				createCedarHttpEngine({
+					fetch: erring([`${evaluating(`${printed}${mark}`)} \`x\`: y`], [own]).doFetch,
+					env: AGENT_ENV,
+				}),
+				set,
+			);
+			const answer = await loaded.isAuthorized(request(), NEVER_ABORTS);
+			expect(answer).not.toHaveProperty("foreign");
+			expect(answer.reason).toEqual([stem]);
+		},
+	);
+
+	it("reads another load's mark on one of its own file names, as Cedar prints the name", async () => {
+		const set = dir([["it's.cedar", PERMIT_ALL]]);
+		const loaded = await loadAsync(
+			createCedarHttpEngine({
+				fetch: erring([evaluating(`it\\'s@${otherMark}`)]).doFetch,
+				env: AGENT_ENV,
+			}),
+			set,
+		);
+		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toMatchObject({
+			foreign: { why: "unknown policy", mark: otherMark },
+		});
+	});
+
+	it("leaves an error that names no policy out of it — Cedar 2.5's entity attributes, before any policy", async () => {
+		const error = "error occurred while evaluating entity attributes: invalid IP address: x";
+		const loaded = await loadAsync(
+			createCedarHttpEngine({ fetch: erring([error]).doFetch, env: AGENT_ENV }),
+			source,
+		);
+		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toEqual({
+			decision: "deny",
+			reason: [],
+			errors: [error],
+		});
+	});
+
+	it("tells an answer from another set by its errors even when its determining policies are this load's", async () => {
+		const loaded = await loadAsync(
+			createCedarHttpEngine({
+				fetch: erring([evaluating("20-forbid")], [ours]).doFetch,
+				env: AGENT_ENV,
+			}),
+			source,
+		);
+		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toMatchObject({
+			reason: [],
+			foreign: { why: "unknown policy" },
+		});
+	});
+
 	it("tells a deny from another set too", async () => {
 		const { doFetch } = agent(() =>
 			json(200, { decision: "Deny", diagnostics: { reason: ["20-forbid"], errors: [] } }),
@@ -760,14 +937,10 @@ describe("cedarHttpEngine — isAuthorized", () => {
 	});
 
 	it("reads Deny with the determining policies and the agent's error strings", async () => {
+		// As cedar-agent 0.2.2 words it, naming the policy under this load's mark.
+		const error = `error occurred while evaluating policy \`${OURS}\`: \`User::"alice"\` does not have the attribute: dept`;
 		const { doFetch } = agent(() =>
-			json(200, {
-				decision: "Deny",
-				diagnostics: {
-					reason: [OURS],
-					errors: ["policy 10-permit: attribute dept missing"],
-				},
-			}),
+			json(200, { decision: "Deny", diagnostics: { reason: [OURS], errors: [error] } }),
 		);
 		const loaded = await loadAsync(
 			createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }),
@@ -776,7 +949,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toEqual({
 			decision: "deny",
 			reason: ["policies"],
-			errors: ["policy 10-permit: attribute dept missing"],
+			errors: [error],
 		});
 	});
 
@@ -786,9 +959,10 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		// non-string turned an agent image bump into every request denied, with
 		// a message about "well-formed diagnostics". The rule only logs errors and
 		// decides on whether there are any, so their text is enough. A reason is a
-		// policy id a decision names (#199), read out of its object; an item with
-		// none to read is no policy of this load's (#283, see above).
-		const structured = { policyId: "20-forbid", error: { message: "attribute `dept` missing" } };
+		// policy id a decision names (#199), read out of its object, and so is the
+		// policy an error names; an item with none to read is no policy of this
+		// load's (#283, see above).
+		const structured = { policyId: OURS, error: { message: "attribute `dept` missing" } };
 		const loaded = await loadAsync(
 			createCedarHttpEngine({
 				fetch: agent(() =>

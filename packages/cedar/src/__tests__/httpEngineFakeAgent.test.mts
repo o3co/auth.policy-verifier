@@ -234,13 +234,12 @@ describe("cedarHttpEngine over the wire — reading the answer", () => {
 			errors: [],
 		});
 
-		agent.answer(
-			cedarAgent(decision("Deny", [pushed("20-forbid")], ["policy 10-permit: no dept"])),
-		);
+		const error = `error occurred while evaluating policy \`${pushed("10-permit")}\`: no dept`;
+		agent.answer(cedarAgent(decision("Deny", [pushed("20-forbid")], [error])));
 		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toEqual({
 			decision: "deny",
 			reason: ["20-forbid"],
-			errors: ["policy 10-permit: no dept"],
+			errors: [error],
 		});
 	});
 
@@ -794,6 +793,31 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 			/answered from a policy set this verifier did not load/,
 		);
 	});
+
+	it.each([true, false])(
+		"denies, and logs as a foreign answer, errors alone naming a policy this load never pushed — logEvaluationErrors = %s (#283)",
+		async (logEvaluationErrors) => {
+			// A set this verifier did not load, answering with errors only: before,
+			// logged as this load's evaluation errors — and silenced with them.
+			const { rule: permit, logger } = await rule({ logEvaluationErrors });
+			agent.answer(
+				cedarAgent({
+					decision: "Deny",
+					diagnostics: {
+						reason: [],
+						errors: ["error occurred while evaluating policy `10-permit`: no dept"],
+					},
+				}),
+			);
+			const decided = await evaluate(attrs(), [permit]);
+			expect(decided.decision).toBe("deny");
+			expect(outcomeOf(decided).evaluation).toEqual(unconfirmed("failed"));
+			const logged = JSON.stringify((logger.error as ReturnType<typeof vi.fn>).mock.calls);
+			expect(logged).toMatch(/answered from a policy set this verifier did not load/);
+			// Not as this load's evaluation errors, where they are logged at all.
+			expect(logged).not.toMatch(/raised errors/);
+		},
+	);
 
 	it("refuses requireConfirmedRevision at boot, before anything reaches the agent (#244)", async () => {
 		await expect(rule({ requireConfirmedRevision: true })).rejects.toThrow(
