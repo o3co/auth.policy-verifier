@@ -63,9 +63,9 @@ export interface CedarDecision {
 	/**
 	 * Present when the engine can tell this answer did **not** come from the
 	 * set it loaded, though it cannot vouch for one that did (#283) — the http
-	 * engine, whose agent names no revision but answers with the ids of the
-	 * policies that determined it: an id it never pushed under this load's
-	 * mark is somebody else's policy. The collector fails it closed and logs it
+	 * engine, whose agent names no revision but answers with policy ids — of
+	 * the policies that determined it, and in each evaluation error: an id it
+	 * never pushed under this load's mark is somebody else's policy. The collector fails it closed and logs it
 	 * as it logs a foreign revision. `reason` is then empty: another set's ids
 	 * are not this verifier's to record. Any value other than `undefined` or
 	 * `null` is taken as foreign — `false` included — so a malformed mark fails

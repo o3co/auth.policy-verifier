@@ -234,13 +234,12 @@ describe("cedarHttpEngine over the wire — reading the answer", () => {
 			errors: [],
 		});
 
-		agent.answer(
-			cedarAgent(decision("Deny", [pushed("20-forbid")], ["policy 10-permit: no dept"])),
-		);
+		const error = `error occurred while evaluating policy \`${pushed("10-permit")}\`: no dept`;
+		agent.answer(cedarAgent(decision("Deny", [pushed("20-forbid")], [error])));
 		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toEqual({
 			decision: "deny",
 			reason: ["20-forbid"],
-			errors: ["policy 10-permit: no dept"],
+			errors: [error],
 		});
 	});
 

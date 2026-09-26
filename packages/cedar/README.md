@@ -338,10 +338,13 @@ rule fails it closed — and logs it whatever `logEvaluationErrors` says, becaus
 that is a fault of the deployment and not a policy reading a missing attribute.
 
 **What the http engine can tell (#283).** It cannot vouch for an answer, but it
-can tell a foreign one. The ids of the policies that determined an answer are
-the one thing cedar-agent gives back. The engine pushes each policy under an id
-carrying its load's mark (below), so an answer naming any other id came from a
-set this verifier did not load. Three ways that happens:
+can tell a foreign one. The policy ids an answer names are the one thing
+cedar-agent gives back about its set: the policies that determined it, and the
+policy each evaluation error names. The engine pushes each policy under an id
+carrying its load's mark (below), so an answer naming any other id, in either
+list, came from a set this verifier did not load. The errors count as much as
+the determining policies: a foreign set can answer with errors alone. Three
+ways that happens:
 - the set was replaced under the agent;
 - an agent restarted on its own `--policies`;
 - a replica with other files, during a rolling deploy, shares the agent.
@@ -553,9 +556,11 @@ docker compose --profile cedar up --build
     set's revision (`10-permit-eng@9f2c…`, `agentPolicyId`, #283).
   - **The mark is the revision's own digest.** Replicas loading the same files
     push the same ids. A replica with other files does not.
-  - **An answer's determining policies** must all be this load's; the answer
-    is otherwise refused as foreign (above). They are recorded by their file
-    ids, the mark removed, each once.
+  - **The policies an answer names** must all be this load's: its
+    determining policies, and the policy each of its errors names. The answer
+    is otherwise refused as foreign (above). The determining policies are
+    recorded by their file ids, the mark removed, each once; the errors stay
+    the agent's text, marked ids and all, for the log.
   - **Operators see the marked ids** in the agent (`GET /v1/policies`), in
     the agent's evaluation-error strings the rule logs, and in a boot
     refusal's list of the ids sent. A decision records the file ids.
@@ -642,10 +647,18 @@ docker compose --profile cedar up --build
   are read as text, so an agent on a newer Cedar that reports structured errors
   still has its errors seen (and denied on), rather than every answer refused
   as malformed. The reason items are read as policy ids: a string, or an object
-  with a `policyId`. An item in any other shape cannot be attributed to this
-  load, so the answer is refused as foreign, logged `"unreadable policy"` (#283).
-  An agent image that changed that shape would deny every permit, loudly and
-  saying why.
+  with a `policyId`. Each error is read for the policy it names:
+  - in a string, the id after `` error occurred while evaluating policy ` ``
+    (Cedar 2.5, as cedar-agent 0.2.2 words it) or
+    `` error while evaluating policy ` `` (4.x), up to the first `` `: ``;
+  - in a structured error, its `policyId`.
+
+  An item in any other shape cannot be attributed to this load, so the answer
+  is refused as foreign, logged `"unreadable policy"` (#283). An agent image
+  that changed the shape of its reason items would deny every permit, and one
+  that changed how it words its errors would have every erroring answer logged
+  as foreign rather than as an evaluation error — loudly, and saying why,
+  either way. Both deny.
 - **Entities travel inline, and the agent reads them.** Each call carries the
   request's entities in `entities`; nothing is written to the agent's own
   `/v1/data` store. #225 left open whether cedar-agent honours inline entities

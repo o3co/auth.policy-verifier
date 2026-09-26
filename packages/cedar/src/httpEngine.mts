@@ -283,12 +283,17 @@ export function agentPolicyId(id: string, revision: string): string {
 }
 
 /**
- * An answer, read against what this load pushed (#283). Every determining
- * policy must be one of this load's, under its mark; then the answer names
- * them by their file ids, each once — so it can name no more than were
- * pushed. One that is not — no mark, another load's, an id never pushed, an
- * item that is not an id at all — means the answer did not come from this
- * set: it is marked `foreign`, and names nothing of it.
+ * An answer, read against what this load pushed (#283). Every policy it
+ * names must be one of this load's, under its mark — each determining policy,
+ * and the policy each evaluation error names; then the answer names the
+ * determining ones by their file ids, each once — so it can name no more than
+ * were pushed. One that is not — no mark, another load's, an id never pushed,
+ * an item that is not an id at all — means the answer did not come from this
+ * set: it is marked `foreign`, and names nothing of it. The errors count as
+ * much as the reason: a set this verifier did not load can answer with errors
+ * alone, and they would otherwise be logged as this load's.
+ *
+ * The errors stay the agent's text, marked ids and all, for the log.
  *
  * The mark is no secret and no authenticator: the ids are in every answer, in
  * the agent's `GET /v1/policies`, and computable from the policy files. It
@@ -297,7 +302,10 @@ export function agentPolicyId(id: string, revision: string): string {
  * marked id, or delete one, and be answered for as this load. No check of an
  * answer can see that; the agent's token is the boundary.
  */
-function ownDecision(decision: CedarDecision, ownIds: ReadonlyMap<string, string>): CedarDecision {
+function ownDecision(
+	{ decision, errorItems }: AgentAnswer,
+	ownIds: ReadonlyMap<string, string>,
+): CedarDecision {
 	const reason: string[] = [];
 	const seen = new Set<string>();
 	for (const item of decision.reason) {
@@ -309,7 +317,38 @@ function ownDecision(decision: CedarDecision, ownIds: ReadonlyMap<string, string
 		seen.add(id);
 		reason.push(id);
 	}
+	for (const item of errorItems) {
+		const policy = erroringPolicy(item);
+		if (!ownIds.has(policy)) {
+			return { ...decision, reason: [], foreign: foreignAnswer(policy, ownIds) };
+		}
+	}
 	return { ...decision, reason };
+}
+
+/**
+ * The start of an evaluation error as cedar-agent's Cedar words it, up to the
+ * policy id: `error occurred while evaluating policy` in cedar-policy 2.5
+ * (cedar-agent 0.2.2), `error while evaluating policy` in 4.x. The id runs to
+ * the first `` `: `` — the message after it is Cedar's, whatever it holds.
+ */
+const EVALUATION_ERROR = /^error (?:occurred )?while evaluating policy `/;
+
+/**
+ * The policy an evaluation error names: the id in an error string, or the
+ * `policyId` of a structured one (Cedar 3.x+). An item that names none it can
+ * read is kept as its text behind a NUL, as an unreadable reason item is — so
+ * it is no policy of this load's, and says why.
+ */
+function erroringPolicy(item: unknown): string {
+	if (typeof item === "string") {
+		const start = EVALUATION_ERROR.exec(item);
+		const end = start === null ? -1 : item.indexOf("`: ", start[0].length);
+		if (start !== null && end !== -1) return item.slice(start[0].length, end);
+		return UNREADABLE_POLICY_ID + item;
+	}
+	const policyId = (item as { policyId?: unknown } | null)?.policyId;
+	return typeof policyId === "string" ? policyId : UNREADABLE_POLICY_ID + JSON.stringify(item);
 }
 
 /**
@@ -737,7 +776,13 @@ async function errorDescription(
 }
 
 /** Reads cedar-agent's `AuthorizationAnswer`; anything else is the engine not answering. */
-function readDecision(body: unknown, endpoint: string): CedarDecision {
+/** A decision as the agent answered it, and its errors as it sent them — each names a policy. */
+interface AgentAnswer {
+	decision: CedarDecision;
+	errorItems: readonly unknown[];
+}
+
+function readDecision(body: unknown, endpoint: string): AgentAnswer {
 	if (typeof body !== "object" || body === null) {
 		throw new CedarEngineError(
 			`cedar engine at ${endpoint} answered something that is not a decision`,
@@ -754,7 +799,8 @@ function readDecision(body: unknown, endpoint: string): CedarDecision {
 	// without them is some other shape, and "no errors" must not be inferred
 	// from a field that is not there — that is the fail-open direction.
 	const reason = policyIds((diagnostics as Record<string, unknown> | undefined)?.reason);
-	const errors = renderedList((diagnostics as Record<string, unknown> | undefined)?.errors);
+	const errorItems = (diagnostics as Record<string, unknown> | undefined)?.errors;
+	const errors = renderedList(errorItems);
 	if (
 		typeof diagnostics !== "object" ||
 		diagnostics === null ||
@@ -765,7 +811,10 @@ function readDecision(body: unknown, endpoint: string): CedarDecision {
 			`cedar engine at ${endpoint} answered a decision without well-formed diagnostics`,
 		);
 	}
-	return { decision: normalized, reason, errors };
+	return {
+		decision: { decision: normalized, reason, errors },
+		errorItems: errorItems as unknown[],
+	};
 }
 
 /**
