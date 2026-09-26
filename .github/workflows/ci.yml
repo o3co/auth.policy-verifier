@@ -327,8 +327,14 @@ jobs:
           token=$(openssl rand -hex 32)
           echo "::add-mask::$token"
           echo "token=$token" >> "$GITHUB_OUTPUT"
-          # Loopback only, and a token, as the template runs it.
+          # Published on the host's loopback only, with a token, as the template
+          # runs it. Inside its own container the agent listens on every
+          # interface, said here rather than left to the image's default: the
+          # template sets 127.0.0.1 because it shares the app's network
+          # namespace, and a container listening on its own loopback is not
+          # reachable through the published port.
           docker run -d --name cedar-agent -p 127.0.0.1:8180:8180 \
+            -e CEDAR_AGENT_ADDR=0.0.0.0 -e CEDAR_AGENT_PORT=8180 \
             -e CEDAR_AGENT_AUTHENTICATION="$token" "$IMAGE"
           for _ in $(seq 1 30); do
             if curl -fsS -o /dev/null -H "Authorization: $token" http://127.0.0.1:8180/v1/policies; then

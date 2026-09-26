@@ -633,9 +633,9 @@ docker compose --profile cedar up --build
     [Version pinning](#version-pinning)). Measured on cedar-policy 2.5.0 and
     4.13.0, they agree on every decision, every determining policy and every
     erroring policy of it, and the suite fails if they stop agreeing. Only the
-    wording of error messages differs:
-    `` does not have the attribute `dept` `` under 4.13.0,
-    `does not have the attribute: dept` under 2.5.0.
+    wording of error messages differs, for the same missing attribute:
+    `` `User::"alice"` does not have the attribute `dept` `` under 4.13.0,
+    `` `User::"alice"` does not have the attribute: dept `` under 2.5.0.
 - **The response contract is cedar-agent 0.2.x's.** `POST /v1/is_authorized`
   must answer `{ decision, diagnostics: { reason: [...], errors: [...] } }`;
   an answer missing either list is refused, and the call denies. The errors
@@ -741,7 +741,7 @@ the template pins, rather than to the wasm engine's CLI.
   the image moves the CLI with it.
 - **Running it locally.** Start the agent the template pins, with a token,
   install the CLI of its Cedar, and point the suite at both. Without them the
-  http half is skipped, with a notice. The version below is the one read from
+  http half is skipped, with a notice; with only some of them set, it fails. The version below is the one read from
   the image the template pins today; the CI job reads it afresh. `--locked`
   holds the crate's dependencies, not the compiler, so the toolchain is the
   one CI builds it with.

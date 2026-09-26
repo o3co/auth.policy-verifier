@@ -64,7 +64,7 @@
  *
  * What each engine needs, and without it the engine's half is skipped with a
  * notice (its `…_REQUIRED=1` — set by the CI job that provides it — turns the
- * absence into a failure):
+ * absence into a failure, and so does a half configured in part):
  * - wasm: the CLI as `CEDAR_CLI`, else `cedar` on the PATH, at the version
  *   `@cedar-policy/cedar-wasm` is pinned to. `CEDAR_CLI_REQUIRED`.
  * - http: an agent at `CEDAR_AGENT_ENDPOINT` (`CEDAR_AGENT_AUTHENTICATION` its
@@ -196,6 +196,11 @@ interface Evaluator {
 	cli: string | undefined;
 	/** The variable that turns a skip into a failure. */
 	requiredBy: string;
+	/**
+	 * What is unset while the rest of the engine's half is configured: a half
+	 * configured is a mistake, not an opt-out, so it fails rather than skips.
+	 */
+	partly?: string;
 	/** What is missing, for the notice. */
 	needs: string;
 	/** The Cedar version the engine runs, which its CLI must be. */
@@ -245,11 +250,18 @@ const WASM: Evaluator = {
 	revision: (source) => ({ revision: source.revision }),
 };
 
+/** The http half's configuration: all of it, or none. */
+const AGENT_ENV = ["CEDAR_AGENT_ENDPOINT", "CEDAR_AGENT_CLI", "CEDAR_AGENT_CEDAR_VERSION"];
+const agentUnset = AGENT_ENV.filter((name) => process.env[name] === undefined);
 const AGENT_ENDPOINT = process.env.CEDAR_AGENT_ENDPOINT;
 const HTTP: Evaluator = {
 	name: "http",
-	cli: AGENT_ENDPOINT === undefined ? undefined : process.env.CEDAR_AGENT_CLI,
+	cli: agentUnset.length === 0 ? process.env.CEDAR_AGENT_CLI : undefined,
 	requiredBy: "CEDAR_AGENT_REQUIRED",
+	partly:
+		agentUnset.length > 0 && agentUnset.length < AGENT_ENV.length
+			? `${agentUnset.join(", ")} unset while the rest is set`
+			: undefined,
 	needs:
 		"a cedar-agent (CEDAR_AGENT_ENDPOINT) and the CLI of its Cedar (CEDAR_AGENT_CLI, CEDAR_AGENT_CEDAR_VERSION)",
 	cedarVersion: () => {
@@ -370,7 +382,7 @@ it("the fixtures hold cases, each with requests", () => {
 
 describe.each([WASM, HTTP])("the $name engine and the cedar CLI of its Cedar", (evaluator) => {
 	const cli = evaluator.cli;
-	const required = process.env[evaluator.requiredBy] === "1";
+	const required = process.env[evaluator.requiredBy] === "1" || evaluator.partly !== undefined;
 
 	// Skipped, not silent: said on stderr, where the default reporter does not
 	// swallow it, and by a skipped test that says why, for a verbose reporter.
@@ -383,9 +395,11 @@ describe.each([WASM, HTTP])("the $name engine and the cedar CLI of its Cedar", (
 		it.skip(`skips this engine's half — it needs ${evaluator.needs}`, () => {});
 	});
 	describe.runIf(cli === undefined && required)("required", () => {
-		it("is provided — the CI job that requires it failed to", () => {
+		it("is provided in full — required, or partly configured", () => {
 			expect.fail(
-				`${evaluator.requiredBy}=1, and the ${evaluator.name} engine's half cannot run — it needs ${evaluator.needs}`,
+				evaluator.partly !== undefined
+					? `the ${evaluator.name} engine's half is partly configured — ${evaluator.partly}; set all of it, or none`
+					: `${evaluator.requiredBy}=1, and the ${evaluator.name} engine's half cannot run — it needs ${evaluator.needs}`,
 			);
 		});
 	});
