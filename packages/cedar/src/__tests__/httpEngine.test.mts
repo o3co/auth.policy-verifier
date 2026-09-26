@@ -766,6 +766,13 @@ describe("cedarHttpEngine — whose policies an answer names (#283)", () => {
 				why: "unreadable policy",
 			},
 		],
+		// No escape_debug writes a code point past U+10FFFF: read as it stands,
+		// it names nothing of this load's — and the call does not throw.
+		[
+			"an escape past Unicode",
+			[evaluating(`policies\\u{110000}@${ownMark}`)],
+			{ why: "unknown policy" },
+		],
 	])(
 		"tells an answer whose errors name %s for what it is: from a set this verifier did not load",
 		async (_label, errors, foreign) => {
@@ -780,6 +787,64 @@ describe("cedarHttpEngine — whose policies an answer names (#283)", () => {
 			});
 		},
 	);
+
+	// Cedar prints the id in an error through Rust's `escape_debug`, though it
+	// sends it raw in `diagnostics.reason`: a file named with a quote, a
+	// backslash or an invisible character is spelled otherwise in its errors.
+	// And a backtick is not escaped, so an id may hold the "`: " that ends one.
+	it.each([
+		["a quote", "it's", "it\\'s"],
+		["double quotes", 'say"hi"', 'say\\"hi\\"'],
+		["a backslash", "back\\slash", "back\\\\slash"],
+		["a tab", "tab\tbed", "tab\\tbed"],
+		["a no-break space", "nb sp", "nb\\u{a0}sp"],
+		["a zero-width space", "zw​sp", "zw\\u{200b}sp"],
+		["the delimiter itself", "a`: b", "a`: b"],
+	])(
+		"reads an error naming a policy whose file name holds %s as this load's",
+		async (_label, stem, printed) => {
+			const set = dir([[`${stem}.cedar`, PERMIT_ALL]]);
+			const own = agentPolicyId(stem, set.revision);
+			const mark = own.slice(stem.length);
+			const loaded = await loadAsync(
+				createCedarHttpEngine({
+					fetch: erring([`${evaluating(`${printed}${mark}`)} \`x\`: y`], [own]).doFetch,
+					env: AGENT_ENV,
+				}),
+				set,
+			);
+			const answer = await loaded.isAuthorized(request(), NEVER_ABORTS);
+			expect(answer).not.toHaveProperty("foreign");
+			expect(answer.reason).toEqual([stem]);
+		},
+	);
+
+	it("reads another load's mark on one of its own file names, as Cedar prints the name", async () => {
+		const set = dir([["it's.cedar", PERMIT_ALL]]);
+		const loaded = await loadAsync(
+			createCedarHttpEngine({
+				fetch: erring([evaluating(`it\\'s@${otherMark}`)]).doFetch,
+				env: AGENT_ENV,
+			}),
+			set,
+		);
+		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toMatchObject({
+			foreign: { why: "unknown policy", mark: otherMark },
+		});
+	});
+
+	it("leaves an error that names no policy out of it — Cedar 2.5's entity attributes, before any policy", async () => {
+		const error = "error occurred while evaluating entity attributes: invalid IP address: x";
+		const loaded = await loadAsync(
+			createCedarHttpEngine({ fetch: erring([error]).doFetch, env: AGENT_ENV }),
+			source,
+		);
+		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toEqual({
+			decision: "deny",
+			reason: [],
+			errors: [error],
+		});
+	});
 
 	it("tells an answer from another set by its errors even when its determining policies are this load's", async () => {
 		const loaded = await loadAsync(

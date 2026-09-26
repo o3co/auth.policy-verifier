@@ -650,8 +650,16 @@ docker compose --profile cedar up --build
   with a `policyId`. Each error is read for the policy it names:
   - in a string, the id after `` error occurred while evaluating policy ` ``
     (Cedar 2.5, as cedar-agent 0.2.2 words it) or
-    `` error while evaluating policy ` `` (4.x), up to the first `` `: ``;
+    `` error while evaluating policy ` `` (4.x). Cedar prints it escaped, as
+    Rust's `escape_debug` does (a quote, a backslash, an invisible
+    character), so it is unescaped to compare. One of this load's ids is read
+    to where the load's mark ends it, since a backtick in a file name is not
+    escaped; any other, to the first `` `: ``;
   - in a structured error, its `policyId`.
+
+  Cedar 2.5's one error that names no policy,
+  `error occurred while evaluating entity attributes: …`, says nothing of
+  which set answered, and is left out of it.
 
   An item in any other shape cannot be attributed to this load, so the answer
   is refused as foreign, logged `"unreadable policy"` (#283). An agent image
