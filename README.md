@@ -1,6 +1,6 @@
 # auth.policy-verifier
 
-Last updated: 2026-09-26
+Last updated: 2026-09-28
 
 [![CI](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth.policy-verifier.core)](https://www.npmjs.com/package/@o3co/auth.policy-verifier.core)
@@ -431,8 +431,9 @@ verify {
   batchConcurrency     = ${?VERIFY_BATCH_CONCURRENCY}
 
   # Whether the decision RESPONSE carries each policy-backed rule's evaluation —
-  # its status and the policy revision it evaluated (#244). The `decision` log
-  # event always does. See "Recording which policy revision decided" below.
+  # its status, the policy revision it evaluated (#244) and, for a completed
+  # answer, the policies that determined it (#199). The `decision` log event
+  # always does. See "Recording which policy revision decided" below.
   evaluationInResponse = "omit" # or "include"
   evaluationInResponse = ${?VERIFY_EVALUATION_IN_RESPONSE}
 }
@@ -609,7 +610,7 @@ One structured event per decision, named `decision`, at `info`:
 
 `satisfiedBy` replaces `deniedBy` on an allow, naming the rule that satisfied each group. A `POST /verify/batch` of N entries emits N lines sharing one `requestId`. `durationMs` is time in the pipelines and the evaluator, not the HTTP round trip.
 
-When a rule reports the evaluation behind its answer (#244) — `packages/cedar` does — the line also carries `evaluations`, one entry per reporting rule in evaluation order: `{"ruleType":"cedar","code":"cedar_deny","passed":false,"evaluation":{"status":"completed","revision":"sha256:9f2c…"}}`. `passed` is there because a group is an OR: a rule that forbade, followed by one that permitted, is an allow whose line lists both, and the first is the revision that *refused*. See [Recording which policy revision decided](#recording-which-policy-revision-decided). A deployment with no policy-backed rule writes the line it always wrote.
+When a rule reports the evaluation behind its answer (#244) — `packages/cedar` does — the line also carries `evaluations`, one entry per reporting rule in evaluation order: `{"ruleType":"cedar","code":"cedar_deny","passed":false,"evaluation":{"status":"completed","revision":"sha256:9f2c…","determiningPolicies":["30-forbid-contractors"]}}` — a completed Cedar answer names the policies that determined it (#199). `passed` is there because a group is an OR: a rule that forbade, followed by one that permitted, is an allow whose line lists both, and the first is the revision that *refused*. See [Recording which policy revision decided](#recording-which-policy-revision-decided). A deployment with no policy-backed rule writes the line it always wrote.
 
 `logging.level` (`LOG_LEVEL`) is the switch — the line is `info`, so `warn` turns the stream off, and there is no second flag. A deny is a normal outcome for a decision point rather than a fault, so it is not routed to `warn`: that would let any caller manufacture warn-level noise. Alert on the metrics, read the log for the "why".
 
@@ -657,7 +658,7 @@ After a policy update or during a rolling deployment, a decision's result and ru
 
 ```json
 "evaluation": { "status": "completed", "revision": "sha256:9f2c…",
-                "determiningPolicies": ["20-forbid-contractors"] }
+                "determiningPolicies": ["30-forbid-contractors"] }
 ```
 
 `determiningPolicies` is a set of policy ids as the rule's producer names them, and an empty list when no policy applied. It holds at most `DETERMINING_POLICIES_MAX` (32) ids, each 1–128 UTF-16 units of well-formed text with none of `POLICY_ID_FORBIDDEN_RANGES` — the controls, and the characters that break, reorder or hide in a line (`POLICY_ID_MAX_LENGTH`). Whatever the evaluator named beyond that — past the bound, or an id outside that shape — is counted in `determiningPoliciesOmitted`, present only when it is not zero. Beside `"revision": null` the ids are as unconfirmed as the revision: they name policies in whatever set the evaluator held. A `failed` or `not_invoked` evaluation carries neither key, because no policy decided that answer; neither does a rule that does not know — **absence means the rule did not say**. A rule names them through its reporter (`report.boundDeterminingPolicies`), which applies the bounds of the core that checks them and is absent on a core that predates them — so a package that reports them can be upgraded ahead of the server: under an older one it reports the rest without them, rather than fail. The deny `code` is unchanged: the ids sit beside it, not instead of it.
