@@ -398,8 +398,9 @@ empty.
 - **When.** Behind an answer, never before one: when an answer is asked for
   and the wait since the last check has passed, one `GET` starts, and the
   answer goes ahead on what is already known. The wait is drawn anew after
-  each check, from half of `readBackIntervalMs` to all of it, so when the next
-  check falls cannot be read off the last one. This is detection with a
+  each check, from half of `readBackIntervalMs` to all of it: the next check
+  falls no sooner than half an interval after the last, and past that, when
+  is a guess. This is detection with a
   window, up to an interval plus the check's own time, not proof per answer —
   up to about two intervals when only a read of the set is blocked, since a
   read that cannot reach the agent counts against it only once a call was
@@ -427,18 +428,17 @@ empty.
   heals within an interval, where it used to deny everything until the
   verifier restarted.
 - **Never pushed over anything else.** A policy of this load's rewritten or
-  deleted, or one added, marked or not (the mark is public), is what an attack
-  looks like. Pushing over it would hand a token holder a fresh window each
-  time they changed it again, so it is left for an operator to see. Another
-  load's set (a replica sharing the agent) would be overwritten back and
-  forth. Answers stay refused until the agent holds this load's set again,
+  deleted, or one added, marked or not (the mark is public), is what
+  tampering looks like, and is left for an operator to see. Another load's
+  set (a replica sharing the agent) would be overwritten back and forth. Answers stay refused until the agent holds this load's set again,
   however it gets there; restarting the verifier pushes it.
 - **What it does not do is stop a token holder.** Whoever holds the agent's
   token can lift a refusal themselves: put the set back as it was, or empty
   the agent so it is pushed again. They can then change it again after the
-  next check, where the drawn wait makes their timing a guess, not a
-  certainty. The read-back detects, logs and refuses what it sees, and heals
-  a restarted agent. The token is the boundary, as it is for the marks above,
+  next check. One who sees a check knows the next is at least half an
+  interval away, so a change made and undone within that goes unseen for
+  certain; only past it is their timing a guess. The read-back detects, logs
+  and refuses what it sees, and heals a restarted agent. The token is the boundary, as it is for the marks above,
   and why the engine still does not declare `confirmsRevision`.
 - **An agent that answers, but not with a set that can be compared** —
   an error, a set larger than `maxAnswerBytes`, something that is not a set,

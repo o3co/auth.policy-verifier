@@ -22,8 +22,9 @@
  * A check runs behind an answer, never before it: when an answer is asked for
  * and the wait since the last check has passed, one starts, and the answer
  * goes ahead on what is known. The wait is drawn anew after each check, from
- * half the interval to all of it, so when the next check falls cannot be read
- * off the last one. So this is detection with a window — up to an interval,
+ * half the interval to all of it: the next check falls no sooner than half an
+ * interval after the last, and past that, when is a guess. So this is
+ * detection with a window — up to an interval,
  * and the check's own time — not proof per answer; the engine still does not
  * confirm a revision. A verifier that answers nothing checks nothing, and has
  * nothing to protect.
@@ -58,10 +59,12 @@
  *
  * What this does not do is stop someone holding the agent's token. They can
  * lift a refusal themselves — put the set back as it was, or empty the agent
- * so it is pushed again — and change it again after the next check, which is
- * where the drawn wait above makes their timing a guess. The read-back
- * detects, logs and refuses what it sees, and heals a restarted agent; the
- * token is the boundary, as it is for #283's marks.
+ * so it is pushed again — and change it again after the next check. One who
+ * sees a check knows the next is at least half an interval away: a change
+ * made and undone within that goes unseen for certain, and only past it is
+ * their timing a guess. The read-back detects, logs and refuses what it sees,
+ * and heals a restarted agent; the token is the boundary, as it is for #283's
+ * marks.
  */
 
 import type { Logger } from "@o3co/auth.policy-verifier.core";
@@ -154,8 +157,20 @@ export interface AgentReadBack {
 
 export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBack {
 	const { intervalMs, now, random, read, push, logger, fields } = options;
-	/** From half the interval to all of it, drawn anew after every check. */
-	const drawWait = () => intervalMs * (0.5 + 0.5 * Math.min(Math.max(random(), 0), 1));
+	/**
+	 * From half the interval to all of it, drawn anew after every check. A
+	 * draw that throws or is not a number is the whole interval: the checks go
+	 * on whatever the source does.
+	 */
+	const drawWait = () => {
+		let draw: number;
+		try {
+			draw = random();
+		} catch {
+			draw = 1;
+		}
+		return intervalMs * (0.5 + 0.5 * (Number.isFinite(draw) ? Math.min(Math.max(draw, 0), 1) : 1));
+	};
 	let wait = drawWait();
 	let baseline = options.pushed;
 	let refusal: ReadBackRefusal | undefined;
@@ -293,6 +308,7 @@ export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBac
 					}
 				})
 				.finally(() => {
+					running = undefined;
 					// Still refusing: back off, up to the interval, so a set that stays
 					// refused is not read — and parsed — every second. A refusal that
 					// changes kind is still one refusal; one begun anew starts at a second.
@@ -301,7 +317,6 @@ export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBac
 							? Math.min(recheckMs * 2, intervalMs)
 							: RECHECK_WHILE_REFUSING_MS;
 					wait = drawWait();
-					running = undefined;
 				});
 			return running;
 		},

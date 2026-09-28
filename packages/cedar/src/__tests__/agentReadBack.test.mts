@@ -163,6 +163,25 @@ describe("createAgentReadBack — when it reads the agent's set back", () => {
 		}
 	});
 
+	it.each([
+		[
+			"throws",
+			() => {
+				throw new Error("no entropy");
+			},
+		],
+		["answers NaN", () => Number.NaN],
+	])("waits the whole interval when the draw %s — the checks go on", async (_label, random) => {
+		const { check, read, tick } = readBack(() => holding(PUSHED), undefined, random);
+		tick(29_999);
+		expect(check.poll()).toBeUndefined();
+		tick(1);
+		await check.poll();
+		tick(30_000);
+		await check.poll();
+		expect(read).toHaveBeenCalledTimes(2);
+	});
+
 	it("runs one check at a time, however many answers ask while it is out", async () => {
 		const reading = deferred<AgentSetRead>();
 		const { check, read, tick } = readBack(() => reading.promise);
@@ -248,8 +267,7 @@ describe("createAgentReadBack — what it makes of the set the agent holds", () 
 	});
 
 	it.each([
-		// Rewritten, deleted, added: what an attack looks like. Pushing over it
-		// would hand a token holder a fresh window each time they changed it again.
+		// Rewritten, deleted, added: what tampering looks like, left for an operator to see.
 		[
 			"one of its policies rewritten under its own id",
 			new Map([...PUSHED, [`10-permit${MARK}`, "permit(principal, action, resource);"]]),

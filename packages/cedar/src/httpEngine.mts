@@ -54,10 +54,11 @@ export const CEDAR_LOAD_TIMEOUT_MS = 10_000;
 export const CEDAR_ANSWER_MAX_BYTES = 1024 * 1024;
 
 /**
- * The default for `readBackIntervalMs` (#286): how long after one read-back of
- * the agent's policy set the next is due. A check starts behind an answer, so
- * it bounds how long a changed or emptied set goes unseen while the verifier
- * is answering — and costs one `GET` of the whole set per interval.
+ * The default for `readBackIntervalMs` (#286): the most one read-back of the
+ * agent's policy set waits for the next — each wait is drawn from half of it
+ * to all of it. A check starts behind an answer, so it bounds how long a
+ * changed or emptied set goes unseen while the verifier is answering, at the
+ * cost of one `GET` of the whole set per wait: up to two per interval.
  */
 export const CEDAR_READ_BACK_INTERVAL_MS = 30_000;
 
@@ -272,16 +273,22 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 			// The agent's set, read back behind answers and compared with its copy
 			// of what was pushed (#286): a token holder's edits and an emptied agent
 			// show there, not in any answer.
-			const readBack = createAgentReadBack({
-				pushed,
-				intervalMs: readBackIntervalMs,
-				now,
-				random,
-				read,
-				push,
-				logger: context.logger,
-				fields: { engine: CEDAR_HTTP_ENGINE_NAME, endpoint, policySet: source.description },
-			});
+			let readBack: ReturnType<typeof createAgentReadBack>;
+			try {
+				readBack = createAgentReadBack({
+					pushed,
+					intervalMs: readBackIntervalMs,
+					now,
+					random,
+					read,
+					push,
+					logger: context.logger,
+					fields: { engine: CEDAR_HTTP_ENGINE_NAME, endpoint, policySet: source.description },
+				});
+			} catch (cause) {
+				loaded.delete(agent);
+				throw cause;
+			}
 			context.logger.info(
 				{
 					engine: CEDAR_HTTP_ENGINE_NAME,

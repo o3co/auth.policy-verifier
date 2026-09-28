@@ -79,8 +79,9 @@ export interface CedarPolicyRuleCollectorConfig {
 	 */
 	maxAnswerBytes?: number | string;
 	/**
-	 * HTTP engine only (#286): how long after one read-back of the agent's
-	 * policy set the next is due, while answers are not refused. Absent, 30 s
+	 * HTTP engine only (#286): the most one read-back of the agent's policy set
+	 * waits for the next, while answers are not refused — each wait is drawn
+	 * from half of it to all of it. Absent, 30 s
 	 * (`CEDAR_READ_BACK_INTERVAL_MS`). A whole number of milliseconds from 1000
 	 * to 3600000, as a number or a numeric string; anything else refuses to
 	 * start.
