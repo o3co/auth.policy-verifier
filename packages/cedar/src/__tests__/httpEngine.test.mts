@@ -19,6 +19,7 @@ import {
 	CEDAR_ANSWER_MAX_BYTES,
 	CEDAR_AUTHENTICATION_ENV,
 	CEDAR_ENDPOINT_ENV,
+	CEDAR_READ_BACK_INTERVAL_MS,
 	createCedarHttpEngine,
 	entityUidLiteral,
 } from "../httpEngine.mjs";
@@ -910,6 +911,206 @@ describe("cedarHttpEngine — whose policies an answer names (#283)", () => {
 		);
 		expect((await loaded.isAuthorized(request(), NEVER_ABORTS)).reason).toEqual(["policies"]);
 	});
+});
+
+describe("cedarHttpEngine — reading the agent's set back (#286)", () => {
+	const source = inline(PERMIT_ALL);
+
+	/**
+	 * A scripted cedar-agent that holds what it was last PUT, as the real one
+	 * does, answers GET with it, and every authorization call with ALLOW; and a
+	 * clock the read-back interval is measured on.
+	 */
+	function holdingAgent() {
+		let held: unknown[] = [];
+		let clock = 5_000_000;
+		const calls: Array<{ method: string; url: string; init: RequestInit }> = [];
+		let onPut: (body: unknown[]) => Promise<Response> = async (body) => json(200, body);
+		const doFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+			const url = String(input);
+			const method = init?.method ?? "GET";
+			calls.push({ method, url, init: init ?? {} });
+			if (url.endsWith("/v1/policies") && method === "PUT") {
+				const body = JSON.parse(String(init?.body)) as unknown[];
+				const answer = await onPut(body);
+				if (answer.ok) held = body;
+				return answer;
+			}
+			if (url.endsWith("/v1/policies")) return json(200, held);
+			return json(200, ALLOW);
+		}) as unknown as typeof fetch;
+		return {
+			engine: (config?: Record<string, unknown>) =>
+				loadAsync(
+					createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV, now: () => clock }),
+					source,
+					config,
+				),
+			calls,
+			of: (method: string) => calls.filter((call) => call.method === method),
+			/** What the agent holds, as a token holder or a restart leaves it. */
+			hold: (set: unknown[]) => {
+				held = set;
+			},
+			held: () => held,
+			tick: (ms = CEDAR_READ_BACK_INTERVAL_MS) => {
+				clock += ms;
+			},
+			putWith: (answer: typeof onPut) => {
+				onPut = answer;
+			},
+		};
+	}
+
+	it("reads the set back with GET, the token verbatim, not following a redirect — once an interval has passed, behind an answer", async () => {
+		const agent = holdingAgent();
+		const loaded = await agent.engine({ authentication: "agent-token" });
+		await loaded.isAuthorized(request(), NEVER_ABORTS);
+		expect(agent.of("GET")).toHaveLength(0);
+		agent.tick();
+		// The answer that finds a check due goes ahead on what is known.
+		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toEqual({
+			decision: "allow",
+			reason: ["policies"],
+			errors: [],
+		});
+		await vi.waitFor(() => expect(agent.of("GET")).toHaveLength(1));
+		const [get] = agent.of("GET");
+		expect(get.url).toBe(`${AGENT}/v1/policies`);
+		expect(headersOf(get).authorization).toBe("agent-token");
+		expect(get.init.redirect).toBe("manual");
+	});
+
+	it("refuses every answer, without asking the agent, while its set is not the one pushed — and pushes this load's again", async () => {
+		const agent = holdingAgent();
+		const loaded = await agent.engine();
+		// A token holder rewrites this load's policy under its own id.
+		agent.hold([{ id: OURS, content: "forbid(principal, action, resource);" }]);
+		let pushed!: () => void;
+		agent.putWith(
+			(body) =>
+				new Promise((resolve) => {
+					pushed = () => resolve(json(200, body));
+				}),
+		);
+		agent.tick();
+		await loaded.isAuthorized(request(), NEVER_ABORTS);
+		await vi.waitFor(() => expect(agent.of("PUT")).toHaveLength(2));
+
+		const asked = agent.of("POST").length;
+		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toEqual({
+			decision: "deny",
+			reason: [],
+			errors: [],
+			foreign: { why: "altered policy set" },
+		});
+		// Nothing of the request went to an agent holding another set.
+		expect(agent.of("POST")).toHaveLength(asked);
+		// The same set, pushed again.
+		expect(JSON.parse(String(agent.of("PUT")[1].init.body))).toEqual(
+			JSON.parse(String(agent.of("PUT")[0].init.body)),
+		);
+
+		pushed();
+		await vi.waitFor(async () =>
+			expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).not.toHaveProperty("foreign"),
+		);
+	});
+
+	it("pushes this load's set into an agent that came back empty — a restart heals", async () => {
+		const agent = holdingAgent();
+		const loaded = await agent.engine();
+		agent.hold([]);
+		agent.tick();
+		await loaded.isAuthorized(request(), NEVER_ABORTS);
+		await vi.waitFor(async () =>
+			expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).not.toHaveProperty("foreign"),
+		);
+		expect(agent.of("PUT")).toHaveLength(2);
+		expect(agent.held()).toHaveLength(1);
+	});
+
+	it("never pushes over a set holding another's policies — it refuses until the agent holds this load's again", async () => {
+		const agent = holdingAgent();
+		const loaded = await agent.engine();
+		const other = [
+			{
+				id: agentPolicyId("policies", inline("forbid(principal, action, resource);").revision),
+				content: "x",
+			},
+		];
+		agent.hold(other);
+		agent.tick();
+		await loaded.isAuthorized(request(), NEVER_ABORTS);
+		await vi.waitFor(async () =>
+			expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toMatchObject({
+				foreign: { why: "altered policy set" },
+			}),
+		);
+		expect(agent.of("PUT")).toHaveLength(1);
+		expect(agent.held()).toBe(other);
+	});
+
+	it.each([
+		["something that is not a set", () => json(200, { ok: true })],
+		["a set without the policy sent", () => json(200, [])],
+		["a set of other ids", () => json(200, [{ id: "other", content: "x" }])],
+		[
+			"a set with one more",
+			(body: unknown[]) => json(200, [...body, { id: "extra", content: "x" }]),
+		],
+		["no body", () => new Response(null, { status: 200 })],
+	])(
+		"refuses to start when the agent answers the push with %s — there would be nothing to compare with",
+		async (_label, answer) => {
+			const agent = holdingAgent();
+			agent.putWith(async (body) => answer(body));
+			await expect(agent.engine()).rejects.toThrow(
+				/answered the policy load from inline policies with something other than the set it was sent/,
+			);
+		},
+	);
+
+	it("refuses to start when the agent's copy of the set is longer than maxAnswerBytes", async () => {
+		const agent = holdingAgent();
+		agent.putWith(async (body) =>
+			json(
+				200,
+				[...body].map((policy) => ({ ...(policy as object), content: "x".repeat(2048) })),
+			),
+		);
+		await expect(agent.engine({ maxAnswerBytes: 1024 })).rejects.toThrow(
+			/answered the policy load with more than 1 KiB — refused; set maxAnswerBytes higher/,
+		);
+	});
+
+	it.each([
+		[undefined, CEDAR_READ_BACK_INTERVAL_MS],
+		[5_000, 5_000],
+		["60000", 60_000],
+	])("reads back every readBackIntervalMs — %s", async (configured, interval) => {
+		const agent = holdingAgent();
+		const loaded = await agent.engine(
+			configured === undefined ? {} : { readBackIntervalMs: configured },
+		);
+		agent.tick(interval - 1);
+		await loaded.isAuthorized(request(), NEVER_ABORTS);
+		expect(agent.of("GET")).toHaveLength(0);
+		agent.tick(1);
+		await loaded.isAuthorized(request(), NEVER_ABORTS);
+		await vi.waitFor(() => expect(agent.of("GET")).toHaveLength(1));
+	});
+
+	it.each([0, 999, 3_600_001, 1.5, "soon", "", true, null, -1])(
+		"refuses readBackIntervalMs = %j at boot, before anything reaches the agent",
+		async (configured) => {
+			const agent = holdingAgent();
+			await expect(agent.engine({ readBackIntervalMs: configured })).rejects.toThrow(
+				/readBackIntervalMs must be a whole number of milliseconds from 1000 to 3600000/,
+			);
+			expect(agent.calls).toHaveLength(0);
+		},
+	);
 });
 
 describe("cedarHttpEngine — isAuthorized", () => {

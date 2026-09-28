@@ -417,7 +417,9 @@ function foreignDetail(foreign: unknown): { foreign?: string; mark?: string } {
 		mark?: unknown;
 	};
 	return {
-		...(why === "unknown policy" || why === "unreadable policy" ? { foreign: why } : {}),
+		...(why === "unknown policy" || why === "unreadable policy" || why === "altered policy set"
+			? { foreign: why }
+			: {}),
 		...(typeof mark === "string" && /^[0-9a-f]{16}$/.test(mark) ? { mark } : {}),
 	};
 }

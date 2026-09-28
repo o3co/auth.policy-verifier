@@ -29,8 +29,13 @@ import type {
 import { evaluate, RuleTimeoutError } from "@o3co/auth.policy-verifier.core";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { CedarPolicyRuleCollector } from "../CedarPolicyRuleCollector.mjs";
-import { CedarEngineError, type CedarEngineLoadContext } from "../engine.mjs";
-import { agentPolicyId, CEDAR_AUTHENTICATION_ENV, createCedarHttpEngine } from "../httpEngine.mjs";
+import { CedarEngineError, type CedarEngineLoadContext, registerCedarEngine } from "../engine.mjs";
+import {
+	agentPolicyId,
+	CEDAR_AUTHENTICATION_ENV,
+	CEDAR_READ_BACK_INTERVAL_MS,
+	createCedarHttpEngine,
+} from "../httpEngine.mjs";
 import type { CedarRequest } from "../mapping.mjs";
 import { computePolicyRevision, loadPolicySource, type PolicySource } from "../policySource.mjs";
 import {
@@ -197,6 +202,28 @@ describe("cedarHttpEngine over the wire — what reaches the agent", () => {
 			context: { mfa: true },
 			entities: request().entities,
 		});
+	});
+
+	it("reads the set back with GET <base>/v1/policies, the token verbatim, once an interval has passed (#286)", async () => {
+		let clock = 0;
+		const loaded = await createCedarHttpEngine({ env: {}, now: () => clock }).load(
+			policySet(),
+			loadContext({ endpoint: `${agent.origin}/cedar`, authentication: "agent-token" }),
+		);
+		if (!loaded.async) throw new Error("the http engine answers asynchronously");
+		clock += CEDAR_READ_BACK_INTERVAL_MS;
+		await loaded.isAuthorized(request(), NEVER_ABORTS);
+		// Behind the answer, not before it: the two race to the agent.
+		await vi.waitFor(() =>
+			expect(agent.received.map(({ method }) => method).sort()).toEqual(["GET", "POST", "PUT"]),
+		);
+		const get = agent.received.find(({ method }) => method === "GET");
+		if (get === undefined) throw new Error("no GET");
+		expect(get.path).toBe("/cedar/v1/policies");
+		expect(get.headers.authorization).toBe("agent-token");
+		// The agent holds what was pushed: nothing is refused, nothing pushed again.
+		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).not.toHaveProperty("foreign");
+		expect(agent.received.filter(({ method }) => method === "PUT")).toHaveLength(1);
 	});
 
 	it("sends no Authorization header at all when no token is configured", async () => {
@@ -818,6 +845,40 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 			expect(logged).not.toMatch(/raised errors/);
 		},
 	);
+
+	it("denies, and logs as a set this verifier did not load, while the agent holds another's (#286)", async () => {
+		let clock = 0;
+		registerCedarEngine({
+			...createCedarHttpEngine({ env: {}, now: () => clock }),
+			name: "http-read-back",
+		});
+		const logger = silentLogger();
+		const collector = await CedarPolicyRuleCollector.create(
+			{ engine: "http-read-back", endpoint: `${agent.origin}/read-back`, policyDir },
+			{ logger },
+		);
+		const [permit] = await collector.collect(context);
+		// Another load's set, replacing this one's: never pushed over.
+		const theirs = [
+			{ id: agentPolicyId("10-permit", `sha256:${"0".repeat(64)}`), content: PERMIT },
+		];
+		agent.answer((request, response) =>
+			request.method === "GET"
+				? sendJson(response, 200, theirs)
+				: sendJson(response, 200, decision("Allow", [pushed("10-permit")])),
+		);
+		clock += CEDAR_READ_BACK_INTERVAL_MS;
+		await evaluate(attrs(), [permit as AnyRule]);
+		await vi.waitFor(async () =>
+			expect(outcomeOf(await evaluate(attrs(), [permit as AnyRule])).evaluation).toEqual(
+				unconfirmed("failed"),
+			),
+		);
+		const logged = JSON.stringify((logger.error as ReturnType<typeof vi.fn>).mock.calls);
+		expect(logged).toMatch(/answered from a policy set this verifier did not load/);
+		expect(logged).toMatch(/"foreign":"altered policy set"/);
+		expect(logged).toMatch(/holds policies of another's/);
+	});
 
 	it("refuses requireConfirmedRevision at boot, before anything reaches the agent (#244)", async () => {
 		await expect(rule({ requireConfirmedRevision: true })).rejects.toThrow(

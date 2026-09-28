@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.cedar
 
-Last updated: 2026-09-26
+Last updated: 2026-09-28
 
 Co-resident [Cedar](https://www.cedarpolicy.com/) policy evaluation for
 [auth.policy-verifier](https://github.com/o3co/auth.policy-verifier), as an
@@ -371,9 +371,45 @@ policy under its own marked id, or delete one, and the answers still read as
 this load's; or push an id that embeds one of this load's, whose errors then
 read as this load's. No check of an answer can see that. The agent's token is the
 boundary (see [Running out of process](#running-out-of-process)), and that is
-why the engine still does not declare `confirmsRevision`. Reading the agent's
-set back and comparing it with what was pushed would catch it between answers,
-though not within one; that is not done today.
+why the engine still does not declare `confirmsRevision`. What an answer
+cannot show, the agent's own copy of the set does: the engine reads it back
+and compares it with what it pushed (next), which catches a rewrite or a
+deletion between answers, though not within one.
+
+**Reading the set back (#286).** `PUT /v1/policies` answers with the agent's
+own copy of the set: each id, and each policy as the agent's Cedar re-printed
+it. A later `GET /v1/policies` answers the same bytes while nothing has changed
+the set (verified against cedar-agent 0.2.2). The engine keeps the copy the
+push was answered with, and reads the agent's set back to compare it by id. A
+policy rewritten, deleted or added shows, and so does an agent that came back
+empty.
+- **When.** Behind an answer, never before one: when an answer is asked for
+  and `readBackIntervalMs` has passed since the last check, one `GET` starts,
+  and the answer goes ahead on what is already known. This is detection with a
+  window, up to an interval plus the check's own time, not proof per answer.
+  A verifier that answers nothing checks nothing, and has nothing to protect.
+  - The default interval is 30 s, exported as `CEDAR_READ_BACK_INTERVAL_MS`.
+  - Set it with `readBackIntervalMs` in the collector's entry: a whole number
+    of milliseconds from 1000 to 3600000, written as `maxAnswerBytes` is.
+  - Each check costs one `GET` of the whole set, bounded by
+    `maxAnswerBytes`, as the agent's answer to the push is at boot.
+- **While the set differs**, every answer is refused without asking the
+  agent, and nothing of the request reaches it. The answer is failed and
+  logged like any foreign one, as `foreign: "altered policy set"`. The engine
+  logs the difference once, in counts (`changed`, `missing`, `added`), never
+  ids or policy text.
+- **Pushed again only when the set is plainly this load's to restore:** the
+  agent holds nothing, or only ids under this load's mark. Answers resume once
+  the push lands. So an agent that restarted or was recreated heals within an
+  interval, where it used to deny everything until the verifier restarted.
+- **Never pushed over anything else:** another load's ids (a replica sharing
+  the agent; two loads would take turns overwriting each other), or an id
+  without a mark (which a token holder added, and an operator should see).
+  Answers stay refused until the agent holds this load's set again, however it
+  gets there.
+- **A check that cannot finish** (the agent unreachable, a non-2xx, something
+  that is not a set) changes nothing, is logged, and is tried again an
+  interval later.
 
 **`requireConfirmedRevision = true`** is for a deployment whose audit has to
 name the policies behind every decision: an answer nobody vouched for becomes a
@@ -591,8 +627,9 @@ docker compose --profile cedar up --build
   - **During a rolling deploy:** once the first new replica pushes, every old
     replica sharing the agent denies every request a policy would permit, and
     logs it.
-  - **After a rollback:** the survivors keep denying until they restart,
-    because nothing re-pushes after boot.
+  - **After a rollback:** the survivors keep denying until they restart. The
+    read-back (#286) pushes a set again only over this load's own ids or an
+    empty agent, never over another load's.
 
   Run an agent per replica, as the template's sidecar does, and restart
   replicas after a rollback. Replicas with identical files push identical ids
@@ -610,7 +647,9 @@ docker compose --profile cedar up --build
   variable for it. A longer answer is refused rather than held for the rule
   deadline, since a process out of memory takes every route down. An answer's
   determining-policy and error lists grow with the policy set, so a large set
-  can answer honestly past 1 MiB: the refusal says so, and the fix is a higher
+  can answer honestly past 1 MiB, and the agent's copy of the whole set, read
+  at boot and at each read-back (#286), grows with it too: the refusal says
+  so, and the fix is a higher
   `maxAnswerBytes` in the collector's entry — a whole number of bytes from
   1 KiB to 256 MiB, written as a number (`maxAnswerBytes = 4194304`) or a
   numeric string, which is what a HOCON env substitution of a variable of your
@@ -624,10 +663,11 @@ docker compose --profile cedar up --build
   makes the rule fail and log (`cedar authorization call failed`); the log
   line's `reason` names the cause, as the boot error does. An agent that is up but has
   lost the policy set — restarted, or recreated by `docker compose up` — is
-  not a failure it can see: it answers "deny, no determining policy" to every
-  request, which is why `onNoDeterminingPolicy = "abstain"` is refused with
-  this engine; under the default it denies everything until the verifier is
-  restarted and pushes the set again. Each call runs under the server's
+  not a failure an answer shows: it answers "deny, no determining policy" to
+  every request, which is why `onNoDeterminingPolicy = "abstain"` is refused
+  with this engine. Under the default it denies until the read-back finds the
+  agent empty and pushes the set again, within `readBackIntervalMs` of the
+  next answer asked for (#286). Each call runs under the server's
   `verify.ruleTimeoutMs` (default 2000 ms), answering `rule_timeout` when the
   agent is slower than that.
 - **Two Cedar versions.** cedar-agent 0.2.2 evaluates with cedar-policy

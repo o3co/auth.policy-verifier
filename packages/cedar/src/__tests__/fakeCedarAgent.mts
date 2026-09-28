@@ -6,8 +6,9 @@
  * an ephemeral loopback port that the HTTP engine reaches through Node's real
  * `fetch`. It evaluates nothing. It records every request it receives — method,
  * path, headers, body — and answers each one with whatever the test programmed,
- * by default the way cedar-agent 0.2.x does: `PUT …/v1/policies` accepted,
- * `POST …/v1/is_authorized` answered with an Allow. Paths are matched on their
+ * by default the way cedar-agent 0.2.x does: `PUT …/v1/policies` accepted and
+ * answered with the set, `GET …/v1/policies` answered with what was last put
+ * there (#286), `POST …/v1/is_authorized` answered with an Allow. Paths are matched on their
  * suffix, so one agent serves several base URLs (`/rule-1`, `/rule-2`), which is
  * how collector tests that share the registered engine stay one agent each.
  */
@@ -52,11 +53,20 @@ export function sendJson(response: ServerResponse, status: number, body: unknown
 	response.end(text);
 }
 
-/** What cedar-agent does with the two calls the engine makes, answering every decision with `answer`. */
+/**
+ * What cedar-agent does with the calls the engine makes, answering every
+ * decision with `answer`: it holds the set last put at each base URL — the
+ * real one echoes it re-printed; this one, as sent — and answers a GET with it.
+ */
 export function cedarAgent(answer: Record<string, unknown> = decision("Allow")): Handler {
+	const held = new Map<string, unknown>();
 	return (request, response) => {
 		if (request.method === "PUT" && request.path.endsWith("/v1/policies")) {
-			sendJson(response, 200, JSON.parse(request.body));
+			const set = JSON.parse(request.body);
+			held.set(request.path, set);
+			sendJson(response, 200, set);
+		} else if (request.method === "GET" && request.path.endsWith("/v1/policies")) {
+			sendJson(response, 200, held.get(request.path) ?? []);
 		} else if (request.method === "POST" && request.path.endsWith("/v1/is_authorized")) {
 			sendJson(response, 200, answer);
 		} else {
