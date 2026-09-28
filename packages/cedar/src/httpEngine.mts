@@ -9,7 +9,14 @@
  */
 
 import type { Logger } from "@o3co/auth.policy-verifier.core";
-import { type AgentPolicySet, agentPolicySetOf, createAgentReadBack } from "./agentReadBack.mjs";
+import {
+	type AgentPolicySet,
+	type AgentSetRead,
+	agentPolicySetOf,
+	createAgentReadBack,
+	type ReadBackRefusal,
+	sameAgentSet,
+} from "./agentReadBack.mjs";
 import type { CedarEntityUid } from "./cedarJson.mjs";
 import {
 	type AsyncCedarPolicySet,
@@ -75,7 +82,11 @@ export interface CedarHttpEngineOptions {
 	loadTimeoutMs?: number;
 	/** The pause between those retries. Defaults to 500 ms. */
 	retryMs?: number;
-	/** The clock the read-back interval is measured on (#286). Defaults to `Date.now`. */
+	/**
+	 * The clock the read-back interval is measured on (#286), in milliseconds.
+	 * Defaults to `performance.now`: monotonic, so a wall clock stepped back
+	 * does not stop the checks.
+	 */
 	now?: () => number;
 }
 
@@ -164,7 +175,7 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 	const doFetch: typeof fetch = (input, init) => (options.fetch ?? globalThis.fetch)(input, init);
 	const loadTimeoutMs = options.loadTimeoutMs ?? CEDAR_LOAD_TIMEOUT_MS;
 	const retryMs = options.retryMs ?? LOAD_RETRY_MS;
-	const now = options.now ?? Date.now;
+	const now = options.now ?? (() => performance.now());
 	/** Endpoints already holding a policy set from this engine — one collector per agent. */
 	const loaded = new Map<string, string>();
 
@@ -224,9 +235,25 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 					tokenSourceOf(context.config.authentication, env[CEDAR_AUTHENTICATION_ENV]),
 					maxAnswerBytes,
 				);
+			const read = () => readAgentSet(doFetch, endpoint, headers, maxAnswerBytes, loadTimeoutMs);
 			let pushed: AgentPolicySet;
 			try {
 				pushed = await push();
+				// The read-back rests on the agent answering its set as it answered
+				// the push, and on GET reaching it with the token: both checked here,
+				// on this corpus, so neither is found out as a refusal in service.
+				const first = await read();
+				const unlike =
+					"unverifiable" in first
+						? first.unverifiable
+						: sameAgentSet(first.held, pushed)
+							? undefined
+							: "GET /v1/policies answers another set";
+				if (unlike !== undefined) {
+					throw new CedarEngineError(
+						`cedar engine at ${endpoint} does not read back the policy set from ${source.description} as it accepted it (${unlike}) — the engine reads the set back to tell a changed one (#286), so GET /v1/policies must reach the agent with the token and answer the set it holds`,
+					);
+				}
 			} catch (cause) {
 				loaded.delete(agent);
 				throw cause;
@@ -236,10 +263,9 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 			// show there, not in any answer.
 			const readBack = createAgentReadBack({
 				pushed,
-				ownMark,
 				intervalMs: readBackIntervalMs,
 				now,
-				read: () => readAgentSet(doFetch, endpoint, headers, maxAnswerBytes, loadTimeoutMs),
+				read,
 				push,
 				logger: context.logger,
 				fields: { engine: CEDAR_HTTP_ENGINE_NAME, endpoint, policySet: source.description },
@@ -258,9 +284,9 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 				async: true,
 				async isAuthorized(request: CedarRequest, signal: AbortSignal): Promise<CedarDecision> {
 					readBack.poll();
-					// The agent holds a set other than this load's: nothing it answers is
-					// this load's, and nothing of the request goes to it.
-					if (readBack.altered) return ALTERED;
+					// The agent holds a set other than this load's, or would not show it:
+					// nothing it answers is this load's, and nothing of the request goes to it.
+					if (readBack.refusal !== undefined) return refused(readBack.refusal);
 					const call: AgentAuthorizationCall = {
 						principal: entityUidLiteral(request.principal),
 						action: entityUidLiteral(request.action),
@@ -285,14 +311,14 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 							`cedar engine at ${endpoint} answered ${response.status} to an authorization call: ${await errorDescription(response, maxAnswerBytes, signal)}${redirected ? " — redirects are not followed; set endpoint to the URL that answers it itself" : ""}`,
 						);
 					}
-					return ownDecision(
-						readDecision(
-							parseJson(await answerText(response, signal, endpoint, maxAnswerBytes)),
-							endpoint,
-						),
-						ownIds,
-						ownMark,
+					const answer = readDecision(
+						parseJson(await answerText(response, signal, endpoint, maxAnswerBytes)),
+						endpoint,
 					);
+					// A check that finished while the call was out found the set is not
+					// this load's: the answer came from it.
+					if (readBack.refusal !== undefined) return refused(readBack.refusal);
+					return ownDecision(answer, ownIds, ownMark);
 				},
 			};
 			return policySet;
@@ -521,7 +547,12 @@ async function pushPolicies(
 			await new Promise((resolve) => setTimeout(resolve, retryMs));
 			continue;
 		}
-		if (response.ok) return pushedCopy(response, endpoint, description, policies, maxAnswerBytes);
+		if (response.ok) {
+			return pushedCopy(response, attemptSignal, endpoint, description, policies, {
+				maxAnswerBytes,
+				loadTimeoutMs,
+			});
+		}
 		if (response.status >= 300 && response.status < 400) {
 			// Not retried: the endpoint is configuration, and it did not answer
 			// the load itself.
@@ -552,13 +583,10 @@ async function pushPolicies(
 	}
 }
 
-/** Every answer while the agent holds a set other than this load's (#286). */
-const ALTERED: CedarDecision = Object.freeze({
-	decision: "deny",
-	reason: [],
-	errors: [],
-	foreign: Object.freeze({ why: "altered policy set" }),
-}) as CedarDecision;
+/** Every answer while the read-back refuses (#286): a fresh one each time, nothing shared. */
+function refused(why: ReadBackRefusal): CedarDecision {
+	return { decision: "deny", reason: [], errors: [], foreign: { why } };
+}
 
 /**
  * The agent's answer to the push: its own copy of the set — the ids sent,
@@ -568,17 +596,20 @@ const ALTERED: CedarDecision = Object.freeze({
  */
 async function pushedCopy(
 	response: Response,
+	signal: AbortSignal,
 	endpoint: string,
 	description: string,
 	policies: ReadonlyArray<{ id: string }>,
-	maxAnswerBytes: number,
+	{ maxAnswerBytes, loadTimeoutMs }: { maxAnswerBytes: number; loadTimeoutMs: number },
 ): Promise<AgentPolicySet> {
 	let text: string | typeof OVER_BOUND;
 	try {
 		text = await boundedText(response, maxAnswerBytes);
 	} catch (cause) {
 		throw new CedarEngineError(
-			`cedar engine at ${endpoint} broke off its answer to the policy load: ${describeFailure(cause)}`,
+			signal.aborted
+				? `cedar engine at ${endpoint} did not finish answering the policy load from ${description} within ${loadTimeoutMs} ms`
+				: `cedar engine at ${endpoint} broke off its answer to the policy load: ${describeFailure(cause)}`,
 		);
 	}
 	if (text === OVER_BOUND) {
@@ -599,48 +630,56 @@ async function pushedCopy(
 	return copy;
 }
 
-/** The set the agent holds: `GET /v1/policies`, bounded as an answer is, within the load's deadline. */
+/**
+ * The set the agent holds: `GET /v1/policies`, bounded as an answer is, within
+ * the load's deadline (#286). What the agent answered and cannot be compared —
+ * an error, a set past the bound, something that is not a set, nothing within
+ * the deadline — comes back as `unverifiable`, and refuses answers: a token
+ * holder who can grow the set could otherwise turn the read-back off. Only an
+ * agent that cannot be reached, or that breaks the connection off, rejects.
+ */
 async function readAgentSet(
 	doFetch: typeof fetch,
 	endpoint: string,
 	headers: Record<string, string>,
 	maxAnswerBytes: number,
 	timeoutMs: number,
-): Promise<AgentPolicySet> {
+): Promise<AgentSetRead> {
 	const signal = AbortSignal.timeout(timeoutMs);
-	const response = await send(doFetch, `${endpoint}${POLICIES_PATH}`, {
-		method: "GET",
-		headers,
-		signal,
-		// Not followed (#270): the set is read from the configured endpoint.
-		redirect: "manual",
-	});
-	if (!response.ok) {
+	let response: Response;
+	try {
+		response = await doFetch(`${endpoint}${POLICIES_PATH}`, {
+			method: "GET",
+			headers,
+			signal,
+			// Not followed (#270): the set is read from the configured endpoint.
+			redirect: "manual",
+		});
+	} catch (cause) {
+		if (signal.aborted) return { unverifiable: `no answer within ${timeoutMs} ms` };
 		throw new CedarEngineError(
-			`cedar engine at ${endpoint} answered ${response.status} to reading its policy set back: ${await errorDescription(response, maxAnswerBytes, signal)}`,
+			`cedar engine at ${endpoint} is unreachable: ${describeFailure(cause)}`,
 		);
+	}
+	if (!response.ok) {
+		return {
+			unverifiable: `answered ${response.status}: ${await errorDescription(response, maxAnswerBytes, signal)}`,
+		};
 	}
 	let text: string | typeof OVER_BOUND;
 	try {
 		text = await boundedText(response, maxAnswerBytes);
 	} catch (cause) {
-		if (signal.aborted) throw signal.reason;
+		if (signal.aborted) return { unverifiable: `no whole answer within ${timeoutMs} ms` };
 		throw new CedarEngineError(
 			`cedar engine at ${endpoint} broke off its policy set: ${describeFailure(cause)}`,
 		);
 	}
 	if (text === OVER_BOUND) {
-		throw new CedarEngineError(
-			`cedar engine at ${endpoint} answered with a policy set of more than ${byteSize(maxAnswerBytes)}`,
-		);
+		return { unverifiable: `a policy set of more than ${byteSize(maxAnswerBytes)}` };
 	}
-	const set = agentPolicySetOf(parseJson(text));
-	if (set === undefined) {
-		throw new CedarEngineError(
-			`cedar engine at ${endpoint} answered reading its policy set back with something that is not a policy set`,
-		);
-	}
-	return set;
+	const held = agentPolicySetOf(parseJson(text));
+	return held === undefined ? { unverifiable: "something that is not a policy set" } : { held };
 }
 
 // --- the endpoint -------------------------------------------------------------

@@ -7,12 +7,19 @@
  * set again, and when it runs at all. The engine's wiring of it is pinned in
  * `httpEngine.test.mts`; the agent's own behaviour — its PUT answer and a
  * later GET byte-identical, a token holder's edits showing in the GET, a
- * restart coming back empty — was checked against a real cedar-agent 0.2.2.
+ * restart coming back empty — was checked against a real cedar-agent 0.2.2,
+ * and the first is checked again at every boot.
  */
 
 import type { Logger } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it, vi } from "vitest";
-import { type AgentPolicySet, agentPolicySetOf, createAgentReadBack } from "../agentReadBack.mjs";
+import {
+	type AgentPolicySet,
+	type AgentSetRead,
+	agentPolicySetOf,
+	createAgentReadBack,
+	sameAgentSet,
+} from "../agentReadBack.mjs";
 
 const MARK = "@0123456789abcdef";
 const OTHER_MARK = "@fedcba9876543210";
@@ -36,7 +43,7 @@ function logger(): Logger {
 	return log;
 }
 
-/** A promise and the functions that settle it — to hold a push open. */
+/** A promise and the functions that settle it — to hold a read or a push open. */
 function deferred<T>() {
 	let resolve!: (value: T) => void;
 	let reject!: (reason: unknown) => void;
@@ -47,17 +54,19 @@ function deferred<T>() {
 	return { promise, resolve, reject };
 }
 
+/** What a read of `held` comes to: the set, as the agent answered it. */
+const holding = (held: AgentPolicySet): AgentSetRead => ({ held });
+
 function readBack(
-	held: () => AgentPolicySet | Promise<AgentPolicySet>,
+	answer: () => AgentSetRead | Promise<AgentSetRead>,
 	push: () => Promise<AgentPolicySet> = async () => PUSHED,
 ) {
 	let clock = 1_000_000;
 	const log = logger();
-	const read = vi.fn(async () => held());
+	const read = vi.fn(async () => answer());
 	const pushed = vi.fn(push);
 	const check = createAgentReadBack({
 		pushed: PUSHED,
-		ownMark: MARK,
 		intervalMs: 30_000,
 		now: () => clock,
 		read,
@@ -77,8 +86,8 @@ function readBack(
 	};
 }
 
-const errorLines = (log: Logger) =>
-	(log.error as ReturnType<typeof vi.fn>).mock.calls.map(([, message]) => message);
+const messages = (method: unknown) =>
+	(method as ReturnType<typeof vi.fn>).mock.calls.map(([, message]) => message);
 
 describe("agentPolicySetOf — the agent's answer to PUT and GET /v1/policies", () => {
 	it("reads a list of { id, content } as the set, by id", () => {
@@ -112,11 +121,17 @@ describe("agentPolicySetOf — the agent's answer to PUT and GET /v1/policies", 
 	])("reads %s as no set at all", (_label, body) => {
 		expect(agentPolicySetOf(body)).toBeUndefined();
 	});
+
+	it("compares two copies by id and text, whatever order they came in", () => {
+		expect(sameAgentSet(PUSHED, new Map([...PUSHED].reverse()))).toBe(true);
+		expect(sameAgentSet(PUSHED, new Map([...PUSHED].slice(1)))).toBe(false);
+		expect(sameAgentSet(PUSHED, new Map([...PUSHED, [`10-permit${MARK}`, "x"]]))).toBe(false);
+	});
 });
 
 describe("createAgentReadBack — when it reads the agent's set back", () => {
 	it("reads nothing within an interval of the push, and once when one has passed", async () => {
-		const { check, read, tick } = readBack(() => PUSHED);
+		const { check, read, tick } = readBack(() => holding(PUSHED));
 		expect(check.poll()).toBeUndefined();
 		tick(29_999);
 		expect(check.poll()).toBeUndefined();
@@ -128,50 +143,49 @@ describe("createAgentReadBack — when it reads the agent's set back", () => {
 	});
 
 	it("runs one check at a time, however many answers ask while it is out", async () => {
-		const reading = deferred<AgentPolicySet>();
+		const reading = deferred<AgentSetRead>();
 		const { check, read, tick } = readBack(() => reading.promise);
 		tick();
 		const first = check.poll();
 		tick();
 		expect(check.poll()).toBe(first);
-		reading.resolve(PUSHED);
+		reading.resolve(holding(PUSHED));
 		await first;
 		expect(read).toHaveBeenCalledTimes(1);
+	});
+
+	it("reads again every second while it refuses, not every interval — answers resume as soon as they can", async () => {
+		const { check, read, tick } = readBack(() => ({ unverifiable: "answered 503" }));
+		tick();
+		await check.poll();
+		expect(check.refusal).toBe("unverifiable policy set");
+		tick(999);
+		expect(check.poll()).toBeUndefined();
+		tick(1);
+		await check.poll();
+		expect(read).toHaveBeenCalledTimes(2);
 	});
 });
 
 describe("createAgentReadBack — what it makes of the set the agent holds", () => {
 	it("answers on while the agent holds this load's set as pushed", async () => {
-		const { check, push, tick } = readBack(() => new Map(PUSHED));
+		const { check, push, tick } = readBack(() => holding(new Map(PUSHED)));
 		tick();
 		await check.poll();
-		expect(check.altered).toBe(false);
+		expect(check.refusal).toBeUndefined();
 		expect(push).not.toHaveBeenCalled();
 	});
 
 	it.each([
 		[
-			"a policy rewritten under its own id",
+			"one of its policies rewritten under its own id",
 			new Map([...PUSHED, [`10-permit${MARK}`, "permit(principal, action, resource);"]]),
 			{ changed: 1, missing: 0, added: 0 },
 		],
 		[
-			"a policy deleted",
-			new Map([[`10-permit${MARK}`, PUSHED.get(`10-permit${MARK}`)]]),
-			{
-				changed: 0,
-				missing: 1,
-				added: 0,
-			},
-		],
-		[
-			"a policy added under this load's mark",
-			new Map([...PUSHED, [`evil${MARK}`, "permit(p, a, r);"]]),
-			{
-				changed: 0,
-				missing: 0,
-				added: 1,
-			},
+			"one of its policies deleted",
+			new Map([[`10-permit${MARK}`, PUSHED.get(`10-permit${MARK}`) as string]]),
+			{ changed: 0, missing: 1, added: 0 },
 		],
 		["nothing — an agent restarted", new Map(), { changed: 0, missing: 2, added: 0 }],
 	])(
@@ -179,53 +193,63 @@ describe("createAgentReadBack — what it makes of the set the agent holds", () 
 		async (_label, held, difference) => {
 			const pushing = deferred<AgentPolicySet>();
 			const { check, push, log, tick } = readBack(
-				() => held as AgentPolicySet,
+				() => holding(held),
 				() => pushing.promise,
 			);
 			tick();
 			const checking = check.poll();
 			await vi.waitFor(() => expect(push).toHaveBeenCalledTimes(1));
 			// Refused from the moment the difference is seen until the push lands.
-			expect(check.altered).toBe(true);
+			expect(check.refusal).toBe("altered policy set");
 			expect(log.error).toHaveBeenCalledWith(
-				expect.objectContaining({ endpoint: "http://127.0.0.1:8180", ...difference }),
-				expect.stringMatching(/not the one this verifier pushed/),
+				expect.objectContaining({
+					endpoint: "http://127.0.0.1:8180",
+					...difference,
+					restorable: true,
+				}),
+				expect.stringMatching(/not the one this verifier pushed — denying, and pushing it again/),
 			);
 			pushing.resolve(PUSHED);
 			await checking;
-			expect(check.altered).toBe(false);
-			expect(log.warn).toHaveBeenCalledWith(
-				expect.objectContaining({ endpoint: "http://127.0.0.1:8180" }),
-				expect.stringMatching(/pushed .* again/),
-			);
+			expect(check.refusal).toBeUndefined();
+			expect(messages(log.warn)).toEqual([expect.stringMatching(/pushed .* again — answering/)]);
 		},
 	);
 
 	it.each([
-		["an id without a mark beside this load's", new Map([...PUSHED, ["evil", "permit(p, a, r);"]])],
+		// Marked or not, the mark being public: what was added is for an operator to see.
+		[
+			"a policy added under this load's mark",
+			new Map([...PUSHED, [`evil${MARK}`, "permit(p, a, r);"]]),
+		],
+		["a policy added without a mark", new Map([...PUSHED, ["evil", "permit(p, a, r);"]])],
 		["another load's set", new Map([[`10-permit${OTHER_MARK}`, "permit(p, a, r);"]])],
 		[
 			"this load's and another load's",
 			new Map([...PUSHED, [`30-extra${OTHER_MARK}`, "permit(p, a, r);"]]),
 		],
 	])("refuses while the agent holds %s, and never pushes over it", async (_label, held) => {
-		const { check, push, tick } = readBack(() => held);
+		const { check, push, log, tick } = readBack(() => holding(held));
 		tick();
 		await check.poll();
-		expect(check.altered).toBe(true);
+		expect(check.refusal).toBe("altered policy set");
 		expect(push).not.toHaveBeenCalled();
+		expect(log.error).toHaveBeenCalledWith(
+			expect.objectContaining({ restorable: false }),
+			expect.stringMatching(/holds policies it did not push/),
+		);
 	});
 
 	it("answers again once the agent holds this load's set again, restored by someone else", async () => {
 		let held: AgentPolicySet = new Map([...PUSHED, ["evil", "permit(p, a, r);"]]);
-		const { check, log, tick } = readBack(() => held);
+		const { check, log, tick } = readBack(() => holding(held));
 		tick();
 		await check.poll();
-		expect(check.altered).toBe(true);
+		expect(check.refusal).toBe("altered policy set");
 		held = new Map(PUSHED);
-		tick();
+		tick(1_000);
 		await check.poll();
-		expect(check.altered).toBe(false);
+		expect(check.refusal).toBeUndefined();
 		expect(log.info).toHaveBeenCalledWith(
 			expect.objectContaining({ endpoint: "http://127.0.0.1:8180" }),
 			expect.stringMatching(/holds this verifier's policy set again/),
@@ -233,84 +257,135 @@ describe("createAgentReadBack — what it makes of the set the agent holds", () 
 	});
 
 	it("says a changed set once, not at every check it stays changed", async () => {
-		const { check, log, tick } = readBack(() => new Map([...PUSHED, ["evil", "p"]]));
+		const { check, log, tick } = readBack(() => holding(new Map([...PUSHED, ["evil", "p"]])));
 		tick();
 		await check.poll();
 		tick();
 		await check.poll();
-		expect(errorLines(log)).toHaveLength(1);
+		expect(messages(log.error)).toHaveLength(1);
 	});
 
 	it("compares with what the agent answered the last push — a push again is the new baseline", async () => {
 		const reprinted: AgentPolicySet = new Map([[`10-permit${MARK}`, "re-printed"]]);
 		let held: AgentPolicySet = new Map();
 		const { check, push, tick } = readBack(
-			() => held,
+			() => holding(held),
 			async () => reprinted,
 		);
 		tick();
 		await check.poll();
-		expect(check.altered).toBe(false);
+		expect(check.refusal).toBeUndefined();
 		held = reprinted;
 		tick();
 		await check.poll();
-		expect(check.altered).toBe(false);
+		expect(check.refusal).toBeUndefined();
 		// Compared with the agent's copy of the push again, not the first: no difference, no push.
 		expect(push).toHaveBeenCalledTimes(1);
 	});
 });
 
+describe("createAgentReadBack — an agent that will not show its set", () => {
+	it.each([
+		"answered 503: no description",
+		"a policy set of more than 1 MiB",
+		"something that is not a policy set",
+		"no answer within 10000 ms",
+	])(
+		"refuses when the agent answers with %s — it cannot be turned off by growing the set",
+		async (why) => {
+			const { check, push, log, tick } = readBack(() => ({ unverifiable: why }));
+			tick();
+			await check.poll();
+			expect(check.refusal).toBe("unverifiable policy set");
+			// It cannot see what the agent holds, so it pushes nothing over it.
+			expect(push).not.toHaveBeenCalled();
+			expect(log.error).toHaveBeenCalledWith(
+				expect.objectContaining({ reason: why }),
+				expect.stringMatching(/did not answer its policy set in a way that can be compared/),
+			);
+		},
+	);
+
+	it("answers again once the set can be read and is this load's", async () => {
+		let answer: AgentSetRead = { unverifiable: "a policy set of more than 1 MiB" };
+		const { check, tick } = readBack(() => answer);
+		tick();
+		await check.poll();
+		answer = holding(PUSHED);
+		tick(1_000);
+		await check.poll();
+		expect(check.refusal).toBeUndefined();
+	});
+
+	it("goes from a set it cannot read to one it sees changed, and pushes it again", async () => {
+		let answer: AgentSetRead = { unverifiable: "answered 500: boom" };
+		const { check, push, tick } = readBack(() => answer);
+		tick();
+		await check.poll();
+		answer = holding(new Map());
+		tick(1_000);
+		await check.poll();
+		expect(push).toHaveBeenCalledTimes(1);
+		expect(check.refusal).toBeUndefined();
+	});
+});
+
 describe("createAgentReadBack — when a check cannot finish", () => {
-	it("keeps what it knew when the set cannot be read, says so, and reads again an interval on", async () => {
-		let failing = true;
+	it("keeps what it knew when the agent cannot be reached, says so, and reads again an interval on", async () => {
+		let reachable = false;
 		const { check, read, log, tick } = readBack(() => {
-			if (failing) throw new Error("connect ECONNREFUSED 127.0.0.1:8180");
-			return PUSHED;
+			if (!reachable) throw new Error("connect ECONNREFUSED 127.0.0.1:8180");
+			return holding(PUSHED);
 		});
 		tick();
 		await check.poll();
-		expect(check.altered).toBe(false);
+		expect(check.refusal).toBeUndefined();
 		expect(log.warn).toHaveBeenCalledWith(
 			expect.objectContaining({ reason: expect.stringMatching(/ECONNREFUSED/) }),
-			expect.stringMatching(/could not read .* back/),
+			expect.stringMatching(/could not reach the cedar agent to read its policy set back/),
 		);
-		failing = false;
+		reachable = true;
 		tick();
 		await check.poll();
 		expect(read).toHaveBeenCalledTimes(2);
 	});
 
-	it("keeps refusing when a set it could not read follows one it saw changed", async () => {
-		let held: () => AgentPolicySet = () => new Map([...PUSHED, ["evil", "p"]]);
-		const { check, tick } = readBack(() => held());
+	it("keeps refusing when an agent it saw changed cannot then be reached", async () => {
+		let answer: () => AgentSetRead = () => holding(new Map([...PUSHED, ["evil", "p"]]));
+		const { check, tick } = readBack(() => answer());
 		tick();
 		await check.poll();
-		held = () => {
-			throw new Error("503");
+		answer = () => {
+			throw new Error("connect ECONNREFUSED 127.0.0.1:8180");
 		};
-		tick();
+		tick(1_000);
 		await check.poll();
-		expect(check.altered).toBe(true);
+		expect(check.refusal).toBe("altered policy set");
 	});
 
 	it("keeps refusing, and says so, when pushing this load's set again fails", async () => {
 		const { check, log, tick } = readBack(
-			() => new Map(),
+			() => holding(new Map()),
 			async () => {
 				throw new Error("the agent refused the policy set");
 			},
 		);
 		tick();
 		await check.poll();
-		expect(check.altered).toBe(true);
-		expect(errorLines(log)).toEqual([
+		expect(check.refusal).toBe("altered policy set");
+		expect(messages(log.error)).toEqual([
 			expect.stringMatching(/not the one this verifier pushed/),
 			expect.stringMatching(/could not push .* again/),
 		]);
 	});
 
-	it("never rejects — a check runs behind an answer, where nothing would catch it", async () => {
-		const { check, log, tick } = readBack(() => new Map());
+	it("never rejects, and says what went wrong while the log can — a check runs behind an answer, where nothing would catch it", async () => {
+		// A read that answers nothing this knows: a fault here, not the agent's.
+		const { check, log, tick } = readBack(() => undefined as unknown as AgentSetRead);
+		tick();
+		await expect(check.poll()).resolves.toBeUndefined();
+		expect(messages(log.error)).toEqual([expect.stringMatching(/failed unexpectedly/)]);
+
 		(log.error as ReturnType<typeof vi.fn>).mockImplementation(() => {
 			throw new Error("the log is gone");
 		});

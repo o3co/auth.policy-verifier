@@ -26,6 +26,7 @@ import {
 	type CedarDecision,
 	type CedarEngine,
 	CedarEngineError,
+	type ForeignAnswer,
 	type LoadedCedarPolicySet,
 	registeredCedarEngines,
 	resolveCedarEngine,
@@ -75,6 +76,14 @@ export interface CedarPolicyRuleCollectorConfig {
 	 * delivers); anything else refuses to start.
 	 */
 	maxAnswerBytes?: number | string;
+	/**
+	 * HTTP engine only (#286): how long after one read-back of the agent's
+	 * policy set the next is due, while answers are not refused. Absent, 30 s
+	 * (`CEDAR_READ_BACK_INTERVAL_MS`). A whole number of milliseconds from 1000
+	 * to 3600000, as a number or a numeric string; anything else refuses to
+	 * start.
+	 */
+	readBackIntervalMs?: number | string;
 	/** Rule group the Cedar decision joins AND-evaluation as. Default `"cedar"`. */
 	ruleType?: string;
 	/**
@@ -408,6 +417,17 @@ interface BoundRule {
 }
 
 /**
+ * The labels an engine may give a foreign answer (`ForeignAnswer.why`) — the
+ * only text of it logged.
+ */
+const FOREIGN_LABELS: readonly string[] = [
+	"unknown policy",
+	"unreadable policy",
+	"altered policy set",
+	"unverifiable policy set",
+] satisfies ReadonlyArray<ForeignAnswer["why"]>;
+
+/**
  * What of a `foreign` mark the log carries: the engine's fixed label and a
  * 16-hex mark, each only in that shape — never text the evaluator chose.
  */
@@ -417,9 +437,7 @@ function foreignDetail(foreign: unknown): { foreign?: string; mark?: string } {
 		mark?: unknown;
 	};
 	return {
-		...(why === "unknown policy" || why === "unreadable policy" || why === "altered policy set"
-			? { foreign: why }
-			: {}),
+		...(typeof why === "string" && FOREIGN_LABELS.includes(why) ? { foreign: why } : {}),
 		...(typeof mark === "string" && /^[0-9a-f]{16}$/.test(mark) ? { mark } : {}),
 	};
 }

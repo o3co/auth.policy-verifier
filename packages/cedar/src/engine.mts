@@ -88,8 +88,15 @@ export interface ForeignAnswer {
 	 * reporting in a shape this engine does not read, which it cannot attribute.
 	 * `"altered policy set"`: the engine read the set back and found it is not
 	 * the one it loaded (#286); it answers so without asking, until it is.
+	 * `"unverifiable policy set"`: the agent answered reading its set back in a
+	 * way that cannot be compared — an error, a set past the answer bound,
+	 * something else, nothing in time (#286); answered so until it can be.
 	 */
-	readonly why: "unknown policy" | "unreadable policy" | "altered policy set";
+	readonly why:
+		| "unknown policy"
+		| "unreadable policy"
+		| "altered policy set"
+		| "unverifiable policy set";
 	/**
 	 * Another load's mark, 16 hex — given only when the id is one of this
 	 * load's own policy ids under a different mark: the same corpus, loaded

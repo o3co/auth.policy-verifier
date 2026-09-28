@@ -13,11 +13,11 @@
  *
  * The agent's own copy of the set shows both. `PUT /v1/policies` answers with
  * it — each id, and the policy re-printed by the agent's Cedar — and a later
- * `GET /v1/policies` answers the same bytes while nothing changed it
- * (verified against cedar-agent 0.2.2). So the copy the push was answered with
- * is the baseline, and the agent's set is read back and compared with it by
- * id: a policy rewritten, deleted or added, or an empty agent, is a
- * difference.
+ * `GET /v1/policies` answers the same bytes while nothing changed it (checked
+ * at every boot, and against cedar-agent 0.2.2). So the copy the push was
+ * answered with is the baseline, and the agent's set is read back and
+ * compared with it by id: a policy rewritten, deleted or added, or an empty
+ * agent, is a difference.
  *
  * A check runs behind an answer, never before it: when an answer is asked for
  * and an interval has passed since the last check, one starts, and the answer
@@ -26,11 +26,21 @@
  * does not confirm a revision. A verifier that answers nothing checks nothing,
  * and has nothing to protect.
  *
- * While the agent's set differs, every answer is refused. The set is pushed
- * again only when it is plainly this load's to restore: the agent holds
- * nothing, or holds only ids under this load's mark. A set holding anything
- * else — another load's ids, from a replica sharing the agent; an id without a
- * mark, which a token holder added — is not written over: two loads would
+ * Every answer is refused while the agent was last seen holding a set other
+ * than this load's — or answering its set in a way that cannot be compared:
+ * an error, a set past the answer bound, something that is not a set, nothing
+ * within the deadline. That the read-back cannot be made to fail is what makes
+ * it worth anything: a token holder who pads the set past the bound would
+ * otherwise turn it off. Only an agent that cannot be reached at all leaves
+ * things as they were — its answers fail on their own, and "altered" would
+ * misname the fault. While refusing, the set is read again every second, not
+ * every interval, so answers resume as soon as it is this load's again.
+ *
+ * The set is pushed again only when it is plainly a damaged copy of this
+ * load's: nothing in it but this load's own policies, some rewritten or gone —
+ * or nothing at all, an agent restarted. A set holding anything this load did
+ * not push — another load's, from a replica sharing the agent; a policy a
+ * token holder added, marked or not — is not written over: two loads would
  * take turns overwriting each other, and what was added is for an operator to
  * see. It stays refused until the agent holds this load's set again, however
  * it gets there.
@@ -40,6 +50,19 @@ import type { Logger } from "@o3co/auth.policy-verifier.core";
 
 /** An agent's policy set, by id: each policy as the agent's Cedar re-printed it. */
 export type AgentPolicySet = ReadonlyMap<string, string>;
+
+/**
+ * What reading the agent's set came to: the set it holds, or why what it
+ * answered cannot be compared. Reading rejects only when the agent could not
+ * be reached.
+ */
+export type AgentSetRead = { readonly held: AgentPolicySet } | { readonly unverifiable: string };
+
+/** Why answers are refused: the read-back's labels for a foreign answer (`ForeignAnswer`). */
+export type ReadBackRefusal = "altered policy set" | "unverifiable policy set";
+
+/** How soon the set is read again while answers are refused. */
+const RECHECK_WHILE_REFUSING_MS = 1_000;
 
 /**
  * The set in cedar-agent's answer to `PUT` or `GET /v1/policies` — a list of
@@ -60,17 +83,22 @@ export function agentPolicySetOf(body: unknown): AgentPolicySet | undefined {
 	return set;
 }
 
+/** Whether two copies of a set are the same: the same ids, each the same text. */
+export function sameAgentSet(a: AgentPolicySet, b: AgentPolicySet): boolean {
+	if (a.size !== b.size) return false;
+	for (const [id, content] of a) if (b.get(id) !== content) return false;
+	return true;
+}
+
 export interface AgentReadBackOptions {
 	/** The agent's copy of this load's set, as it answered the push. */
 	pushed: AgentPolicySet;
-	/** This load's mark, as it follows an id: `@` and 16 hex. */
-	ownMark: string;
-	/** How long after a check the next is due. */
+	/** How long after a check the next is due, while answers are not refused. */
 	intervalMs: number;
-	/** The clock the interval is measured on. */
+	/** The clock the interval is measured on: monotonic. */
 	now: () => number;
-	/** Reads the agent's set; rejects when it cannot. */
-	read: () => Promise<AgentPolicySet>;
+	/** Reads the agent's set; rejects only when the agent cannot be reached. */
+	read: () => Promise<AgentSetRead>;
 	/** Pushes this load's set again; resolves with the agent's copy of it. */
 	push: () => Promise<AgentPolicySet>;
 	/** For what an operator must see: a difference found, a push again, a check that failed. */
@@ -81,10 +109,10 @@ export interface AgentReadBackOptions {
 
 export interface AgentReadBack {
 	/**
-	 * Whether the agent was last seen holding a set other than this load's —
-	 * and every answer is refused until it is seen holding this load's again.
+	 * Why every answer is refused, or `undefined` while the agent was last seen
+	 * holding this load's set as pushed.
 	 */
-	readonly altered: boolean;
+	readonly refusal: ReadBackRefusal | undefined;
 	/**
 	 * Starts a check when one is due, in the background: never waits for it,
 	 * and never rejects. Returns the check running — the one started, or one
@@ -94,41 +122,52 @@ export interface AgentReadBack {
 }
 
 export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBack {
-	const { ownMark, intervalMs, now, read, push, logger, fields } = options;
+	const { intervalMs, now, read, push, logger, fields } = options;
 	let baseline = options.pushed;
-	let altered = false;
+	let refusal: ReadBackRefusal | undefined;
 	let lastCheck = now();
 	let running: Promise<void> | undefined;
 
 	async function check(): Promise<void> {
-		let held: AgentPolicySet;
+		let answer: AgentSetRead;
 		try {
-			held = await read();
+			answer = await read();
 		} catch (cause) {
-			// Nothing learned: what was known stands, and the next check is an
-			// interval on. An agent that cannot be read cannot answer either, and
-			// its answers fail on their own.
+			// Not reached at all: nothing learned, and what was known stands. Its
+			// answers fail on their own, saying so; "altered" would misname it.
 			logger.warn(
 				{ ...fields, reason: describe(cause) },
-				"could not read the cedar agent's policy set back — checking again after the interval",
+				"could not reach the cedar agent to read its policy set back — checking again after the interval",
 			);
 			return;
 		}
-		if (sameSet(held, baseline)) {
-			if (altered) {
-				altered = false;
+		if ("unverifiable" in answer) {
+			if (refusal !== "unverifiable policy set") {
+				refusal = "unverifiable policy set";
+				logger.error(
+					{ ...fields, reason: answer.unverifiable },
+					"cedar agent did not answer its policy set in a way that can be compared with the one this verifier pushed — denying until it does",
+				);
+			}
+			return;
+		}
+		const { held } = answer;
+		if (sameAgentSet(held, baseline)) {
+			if (refusal !== undefined) {
+				refusal = undefined;
 				logger.info(fields, "cedar agent holds this verifier's policy set again — answering");
 			}
 			return;
 		}
-		const restorable = held.size === 0 || [...held.keys()].every((id) => id.endsWith(ownMark));
-		if (!altered) {
-			altered = true;
+		// A damaged copy of this load's set, or none: nothing in it this load did not push.
+		const restorable = [...held.keys()].every((id) => baseline.has(id));
+		if (refusal !== "altered policy set") {
+			refusal = "altered policy set";
 			logger.error(
 				{ ...fields, ...difference(baseline, held), restorable },
 				restorable
 					? "cedar agent's policy set is not the one this verifier pushed — denying, and pushing it again"
-					: "cedar agent's policy set is not the one this verifier pushed, and holds policies of another's — denying until it holds this verifier's again",
+					: "cedar agent's policy set is not the one this verifier pushed, and holds policies it did not push — denying until it holds this verifier's again",
 			);
 		}
 		if (!restorable) return;
@@ -141,34 +180,39 @@ export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBac
 			);
 			return;
 		}
-		altered = false;
+		refusal = undefined;
 		logger.warn(fields, "pushed the policy set to the cedar agent again — answering");
 	}
 
 	return {
-		get altered() {
-			return altered;
+		get refusal() {
+			return refusal;
 		},
 		poll() {
 			if (running !== undefined) return running;
-			if (now() - lastCheck < intervalMs) return undefined;
+			const due =
+				refusal === undefined ? intervalMs : Math.min(intervalMs, RECHECK_WHILE_REFUSING_MS);
+			if (now() - lastCheck < due) return undefined;
 			lastCheck = now();
 			running = check()
-				// Behind an answer nothing awaits it, so nothing may escape it — a
-				// logger that throws included. What it knew stands.
-				.catch(() => undefined)
+				// Behind an answer nothing awaits it, so nothing may escape it. What
+				// it knew stands; the fault is said if the log still can say it.
+				.catch((cause: unknown) => {
+					try {
+						logger.error(
+							{ ...fields, reason: describe(cause) },
+							"cedar agent policy set read-back failed unexpectedly",
+						);
+					} catch {
+						// The log is what failed; there is nowhere left to say it.
+					}
+				})
 				.finally(() => {
 					running = undefined;
 				});
 			return running;
 		},
 	};
-}
-
-function sameSet(a: AgentPolicySet, b: AgentPolicySet): boolean {
-	if (a.size !== b.size) return false;
-	for (const [id, content] of a) if (b.get(id) !== content) return false;
-	return true;
 }
 
 /** How the held set differs from the baseline, in counts: ids and policy text are not the log's. */

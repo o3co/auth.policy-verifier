@@ -16,6 +16,7 @@
  * It turns red when the engine is fixed, and is then made an ordinary `it`.
  */
 
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -169,7 +170,8 @@ describe("cedarHttpEngine over the wire — what reaches the agent", () => {
 	it("PUTs the policy set to <base>/v1/policies: one { id, content } per file, JSON, the token verbatim", async () => {
 		await loadedAgainst(`${agent.origin}/cedar/`, { authentication: "agent-token" });
 
-		expect(agent.received).toHaveLength(1);
+		// The push, then the set read back as the agent accepted it (#286).
+		expect(agent.received.map(({ method }) => method)).toEqual(["PUT", "GET"]);
 		const [put] = agent.received;
 		expect(put.method).toBe("PUT");
 		// The trailing slash of the base URL does not double up, and nothing is appended.
@@ -189,8 +191,8 @@ describe("cedarHttpEngine over the wire — what reaches the agent", () => {
 		});
 		await loaded.isAuthorized(request(), NEVER_ABORTS);
 
-		expect(agent.received).toHaveLength(2);
-		const post = agent.received[1];
+		expect(agent.received.map(({ method }) => method)).toEqual(["PUT", "GET", "POST"]);
+		const post = agent.received[2];
 		expect(post.method).toBe("POST");
 		expect(post.path).toBe("/cedar/v1/is_authorized");
 		expect(post.headers["content-type"]).toBe("application/json");
@@ -214,10 +216,16 @@ describe("cedarHttpEngine over the wire — what reaches the agent", () => {
 		clock += CEDAR_READ_BACK_INTERVAL_MS;
 		await loaded.isAuthorized(request(), NEVER_ABORTS);
 		// Behind the answer, not before it: the two race to the agent.
+		// The first GET is boot's; the second, behind the answer — the two race to the agent.
 		await vi.waitFor(() =>
-			expect(agent.received.map(({ method }) => method).sort()).toEqual(["GET", "POST", "PUT"]),
+			expect(agent.received.map(({ method }) => method).sort()).toEqual([
+				"GET",
+				"GET",
+				"POST",
+				"PUT",
+			]),
 		);
-		const get = agent.received.find(({ method }) => method === "GET");
+		const get = agent.received.filter(({ method }) => method === "GET")[1];
 		if (get === undefined) throw new Error("no GET");
 		expect(get.path).toBe("/cedar/v1/policies");
 		expect(get.headers.authorization).toBe("agent-token");
@@ -230,7 +238,7 @@ describe("cedarHttpEngine over the wire — what reaches the agent", () => {
 		const loaded = await loadedAgainst(agent.origin);
 		await loaded.isAuthorized(request(), NEVER_ABORTS);
 
-		expect(agent.received.map((received) => received.method)).toEqual(["PUT", "POST"]);
+		expect(agent.received.map((received) => received.method)).toEqual(["PUT", "GET", "POST"]);
 		for (const received of agent.received) {
 			expect(received.headers).not.toHaveProperty("authorization");
 		}
@@ -244,6 +252,7 @@ describe("cedarHttpEngine over the wire — what reaches the agent", () => {
 		await loaded.isAuthorized(request(), NEVER_ABORTS);
 
 		expect(agent.received.map((received) => received.headers.authorization)).toEqual([
+			"from-env",
 			"from-env",
 			"from-env",
 		]);
@@ -415,7 +424,8 @@ describe("cedarHttpEngine over the wire — a failed call rejects with CedarEngi
 		await expect(failure).rejects.toThrow(CedarEngineError);
 		await expect(failure).rejects.toThrow(
 			new RegExp(
-				`cedar engine at ${gone.origin}/v1/is_authorized is unreachable: fetch failed: connect ECONNREFUSED 127\\.0\\.0\\.1:\\d+$`,
+				// Refused, or reset: boot's read-back leaves a kept-alive connection the stop cuts.
+				`cedar engine at ${gone.origin}/v1/is_authorized is unreachable: fetch failed: (connect ECONNREFUSED 127\\.0\\.0\\.1:\\d+|read ECONNRESET)$`,
 			),
 		);
 	});
@@ -488,6 +498,7 @@ describe("cedarHttpEngine over the wire — redirects", () => {
 		await expect(failure).rejects.toThrow(CedarEngineError);
 		await expect(failure).rejects.toThrow(/answered 307 to an authorization call/);
 		expect(agent.received.map((received) => received.path)).toEqual([
+			"/v1/policies",
 			"/v1/policies",
 			"/v1/is_authorized",
 		]);
@@ -848,13 +859,16 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 
 	it("denies, and logs as a set this verifier did not load, while the agent holds another's (#286)", async () => {
 		let clock = 0;
+		// A name of its own each run: the registry is process-wide and refuses a
+		// second engine under a taken name, as a retry would register.
+		const engine = `http-read-back-${randomUUID()}`;
 		registerCedarEngine({
 			...createCedarHttpEngine({ env: {}, now: () => clock }),
-			name: "http-read-back",
+			name: engine,
 		});
 		const logger = silentLogger();
 		const collector = await CedarPolicyRuleCollector.create(
-			{ engine: "http-read-back", endpoint: `${agent.origin}/read-back`, policyDir },
+			{ engine, endpoint: `${agent.origin}/read-back`, policyDir },
 			{ logger },
 		);
 		const [permit] = await collector.collect(context);
@@ -877,7 +891,7 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 		const logged = JSON.stringify((logger.error as ReturnType<typeof vi.fn>).mock.calls);
 		expect(logged).toMatch(/answered from a policy set this verifier did not load/);
 		expect(logged).toMatch(/"foreign":"altered policy set"/);
-		expect(logged).toMatch(/holds policies of another's/);
+		expect(logged).toMatch(/holds policies it did not push/);
 	});
 
 	it("refuses requireConfirmedRevision at boot, before anything reaches the agent (#244)", async () => {
@@ -937,7 +951,7 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 		await expect(evaluate(attrs(), [slow], { ruleTimeoutMs: 50 })).rejects.toBeInstanceOf(
 			RuleTimeoutError,
 		);
-		expect(agent.received.map((received) => received.method)).toEqual(["PUT", "POST"]);
+		expect(agent.received.map((received) => received.method)).toEqual(["PUT", "GET", "POST"]);
 	});
 
 	it("overruns the rule deadline when the agent stalls mid-body, too", async () => {

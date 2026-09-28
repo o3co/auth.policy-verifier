@@ -80,9 +80,11 @@ The source falls into four parts, separated by what changes them:
   naming any policy it did not push is `foreign`: failed and logged like a foreign revision,
   never read (#283) — [`__tests__/httpEngine.test.mts`](__tests__/httpEngine.test.mts).
 - The `http` engine reads the agent's set back behind answers and compares it with the agent's
-  copy of the push (`agentReadBack.mts`, #286). While it differs, every answer is `foreign`
-  without asking the agent. The set is pushed again only over an empty agent or this load's
-  own ids — [`__tests__/agentReadBack.test.mts`](__tests__/agentReadBack.test.mts).
+  copy of the push (`agentReadBack.mts`, #286); boot reads it back once and refuses to start
+  unless it is that copy. While it differs, or the agent answers it in a way that cannot be
+  compared, every answer is `foreign` without asking the agent. The set is pushed again only
+  over an empty agent or a damaged copy of this load's, nothing added —
+  [`__tests__/agentReadBack.test.mts`](__tests__/agentReadBack.test.mts).
 - The `http` engine follows no redirect (#270). A 3xx to an authorization call is a
   `CedarEngineError` — a deny with a `failed` evaluation — and a 3xx to the policy load fails
   boot, so a decision and a policy set only ever come from the configured endpoint.

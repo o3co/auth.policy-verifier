@@ -125,19 +125,32 @@ const OURS = agentPolicyId("policies", inline(PERMIT_ALL).revision);
 
 const ALLOW = { decision: "Allow", diagnostics: { reason: [OURS], errors: [] } };
 
-/** A fetch that answers the policy push with 200 and every authorization call from `answer`. */
+/**
+ * A fetch that answers the policy push with 200 and the set, as cedar-agent
+ * does; a read of the set (GET) with what was last pushed (#286); and every
+ * authorization call from `answer`.
+ */
 function agent(answer: (call: Record<string, unknown>) => Response = () => json(200, ALLOW)) {
 	const calls: Array<{ url: string; init: RequestInit }> = [];
+	let held: unknown = [];
 	const doFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
 		const url = String(input);
 		calls.push({ url, init: init ?? {} });
-		if (url.endsWith("/v1/policies")) return json(200, JSON.parse(String(init?.body)));
+		if (url.endsWith("/v1/policies") && init?.method === "PUT") {
+			held = JSON.parse(String(init.body));
+			return json(200, held);
+		}
+		if (url.endsWith("/v1/policies")) return json(200, held);
 		return answer(JSON.parse(String(init?.body)));
 	}) as unknown as typeof fetch;
 	return { doFetch, calls };
 }
 
 const NEVER_ABORTS = new AbortController().signal;
+
+/** The pushes among `calls` — boot also reads the set back once (#286). */
+const pushes = <Call extends { init: RequestInit }>(calls: Call[]) =>
+	calls.filter((call) => call.init.method === "PUT");
 
 /** The answer bound, written out so a test's sizes do not depend on the constant under test. */
 const MIB = 1024 * 1024;
@@ -187,7 +200,8 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 			["20-forbid.cedar", forbid],
 		]);
 		await loadAsync(engine, source);
-		expect(calls).toHaveLength(1);
+		// The push, then the set read back as the agent accepted it (#286).
+		expect(calls.map((call) => call.init.method)).toEqual(["PUT", "GET"]);
 		expect(calls[0].url).toBe(`${AGENT}/v1/policies`);
 		expect(calls[0].init.method).toBe("PUT");
 		// Named after the file, under this load's mark (#283).
@@ -208,7 +222,7 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 			createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV }),
 			dir([["blank.cedar", "  \n"]]),
 		);
-		expect(JSON.parse(String(calls[1].init.body))).toEqual([]);
+		expect(JSON.parse(String(pushes(calls)[1].init.body))).toEqual([]);
 	});
 
 	it("refuses a file whose name yields an empty policy id, before sending anything", async () => {
@@ -231,7 +245,7 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 		await loadAsync(createCedarHttpEngine({ fetch: doFetch, env }), inline(PERMIT_ALL), {
 			authentication: "from-config",
 		});
-		expect(headersOf(calls[1]).authorization).toBe("from-config");
+		expect(headersOf(pushes(calls)[1]).authorization).toBe("from-config");
 	});
 
 	it("names the token when the agent refuses the load as unauthenticated (v0.10.0 audit)", async () => {
@@ -386,6 +400,7 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 		let attempts = 0;
 		const { doFetch } = agent();
 		const flaky = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+			if (init?.method !== "PUT") return doFetch(input, init);
 			attempts++;
 			if (attempts < 3) throw refused();
 			return doFetch(input, init);
@@ -462,7 +477,7 @@ describe("cedarHttpEngine — where the agent is", () => {
 			endpoint: "http://127.0.0.1:9002/cedar/",
 		});
 		await loadAsync(createCedarHttpEngine({ fetch: doFetch, env }), inline(PERMIT_ALL));
-		expect(calls.map((call) => call.url)).toEqual([
+		expect(pushes(calls).map((call) => call.url)).toEqual([
 			"http://127.0.0.1:9002/cedar/v1/policies",
 			"http://localhost:9001/v1/policies",
 		]);
@@ -506,7 +521,7 @@ describe("cedarHttpEngine — where the agent is", () => {
 				},
 			);
 		}
-		expect(calls.at(-5)?.url).toBe("http://[::1]:8180/v1/policies");
+		expect(pushes(calls).at(-5)?.url).toBe("http://[::1]:8180/v1/policies");
 		// Look-alikes are routable names and stay refused.
 		for (const endpoint of ["http://127.0.0.1.attacker.test", "http://localhost.attacker.test"]) {
 			await expect(
@@ -925,24 +940,32 @@ describe("cedarHttpEngine — reading the agent's set back (#286)", () => {
 		let held: unknown[] = [];
 		let clock = 5_000_000;
 		const calls: Array<{ method: string; url: string; init: RequestInit }> = [];
-		let onPut: (body: unknown[]) => Promise<Response> = async (body) => json(200, body);
+		let onPut: (body: unknown[], init: RequestInit) => Promise<Response> = async (body) =>
+			json(200, body);
+		let onGet: ((init: RequestInit) => Promise<Response>) | undefined;
+		let onPost: (() => Promise<Response>) | undefined;
 		const doFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
 			const url = String(input);
 			const method = init?.method ?? "GET";
 			calls.push({ method, url, init: init ?? {} });
 			if (url.endsWith("/v1/policies") && method === "PUT") {
 				const body = JSON.parse(String(init?.body)) as unknown[];
-				const answer = await onPut(body);
+				const answer = await onPut(body, init ?? {});
 				if (answer.ok) held = body;
 				return answer;
 			}
-			if (url.endsWith("/v1/policies")) return json(200, held);
-			return json(200, ALLOW);
+			if (url.endsWith("/v1/policies")) return onGet?.(init ?? {}) ?? json(200, held);
+			return onPost?.() ?? json(200, ALLOW);
 		}) as unknown as typeof fetch;
 		return {
-			engine: (config?: Record<string, unknown>) =>
+			engine: (config?: Record<string, unknown>, loadTimeoutMs?: number) =>
 				loadAsync(
-					createCedarHttpEngine({ fetch: doFetch, env: AGENT_ENV, now: () => clock }),
+					createCedarHttpEngine({
+						fetch: doFetch,
+						env: AGENT_ENV,
+						now: () => clock,
+						loadTimeoutMs,
+					}),
 					source,
 					config,
 				),
@@ -959,14 +982,156 @@ describe("cedarHttpEngine — reading the agent's set back (#286)", () => {
 			putWith: (answer: typeof onPut) => {
 				onPut = answer;
 			},
+			/** How the agent answers reading its set back, from now on. */
+			getWith: (answer: typeof onGet) => {
+				onGet = answer;
+			},
+			/** How the agent answers an authorization call, from now on. */
+			postWith: (answer: typeof onPost) => {
+				onPost = answer;
+			},
 		};
 	}
+
+	/** Moves `agent` a read-back on and asks until the answer is refused as `why`. */
+	async function refusedAs(
+		agent: ReturnType<typeof holdingAgent>,
+		loaded: Awaited<ReturnType<ReturnType<typeof holdingAgent>["engine"]>>,
+		why: string,
+	) {
+		agent.tick();
+		await loaded.isAuthorized(request(), NEVER_ABORTS);
+		await vi.waitFor(async () =>
+			expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toEqual({
+				decision: "deny",
+				reason: [],
+				errors: [],
+				foreign: { why },
+			}),
+		);
+	}
+
+	it.each([
+		["an error", () => json(503, { description: "busy" })],
+		["a set past maxAnswerBytes", () => json(200, [{ id: OURS, content: "x".repeat(2048) }])],
+		["something that is not a set", () => json(200, { policies: [] })],
+	])(
+		"refuses while the agent answers reading its set back with %s — a token holder who pads the set cannot turn it off",
+		async (_label, answer) => {
+			const agent = holdingAgent();
+			const loaded = await agent.engine({ maxAnswerBytes: 1024 });
+			agent.getWith(async () => answer());
+			await refusedAs(agent, loaded, "unverifiable policy set");
+			// Nothing is pushed over a set it cannot see.
+			expect(agent.of("PUT")).toHaveLength(1);
+		},
+	);
+
+	it("refuses while the agent does not answer reading its set back within the deadline", async () => {
+		const agent = holdingAgent();
+		const loaded = await agent.engine({}, 50);
+		agent.getWith(
+			(init) =>
+				new Promise((_resolve, reject) => {
+					init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+				}),
+		);
+		await refusedAs(agent, loaded, "unverifiable policy set");
+	});
+
+	it.each([
+		[
+			"cannot be reached",
+			async (): Promise<Response> => {
+				throw refused();
+			},
+		],
+		[
+			"breaks its answer off",
+			async () =>
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(new TextEncoder().encode("[{"));
+							controller.error(new Error("socket hang up"));
+						},
+					}),
+					{ status: 200 },
+				),
+		],
+	])(
+		"keeps answering when the agent %s on a read-back — its answers fail on their own, and 'altered' would misname it",
+		async (_label, answer) => {
+			const agent = holdingAgent();
+			const loaded = await agent.engine();
+			agent.getWith(answer);
+			agent.tick();
+			await loaded.isAuthorized(request(), NEVER_ABORTS);
+			await vi.waitFor(() => expect(agent.of("GET")).toHaveLength(2));
+			expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).not.toHaveProperty("foreign");
+		},
+	);
+
+	it("refuses the answer to a call that was out when a read-back found the set changed", async () => {
+		const agent = holdingAgent();
+		const loaded = await agent.engine();
+		let answer!: () => void;
+		agent.postWith(
+			() =>
+				new Promise((resolve) => {
+					answer = () => resolve(json(200, ALLOW));
+				}),
+		);
+		agent.hold([{ id: "evil", content: "permit(principal, action, resource);" }]);
+		agent.tick();
+		const outstanding = loaded.isAuthorized(request(), NEVER_ABORTS);
+		await vi.waitFor(() => expect(agent.of("GET")).toHaveLength(2));
+		// The check has seen the set changed; now the agent's answer to the call arrives.
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		answer();
+		expect(await outstanding).toMatchObject({ foreign: { why: "altered policy set" } });
+	});
+
+	it.each([
+		["another set", async () => json(200, [])],
+		["an error", async () => json(403, { description: "forbidden by the proxy" })],
+	])(
+		"refuses to start when the agent reads its set back as %s right after accepting it",
+		async (_label, answer) => {
+			const agent = holdingAgent();
+			agent.getWith(answer);
+			await expect(agent.engine()).rejects.toThrow(
+				/does not read back the policy set from inline policies as it accepted it .* GET \/v1\/policies must reach the agent with the token/,
+			);
+		},
+	);
+
+	it("says a push whose answer did not arrive within the deadline for what it is", async () => {
+		const agent = holdingAgent();
+		// As the platform's fetch does: the body errors once the signal aborts.
+		agent.putWith(
+			async (_body, init) =>
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(new TextEncoder().encode("["));
+							init.signal?.addEventListener("abort", () => controller.error(init.signal?.reason));
+						},
+					}),
+					{ status: 200 },
+				),
+		);
+		await expect(agent.engine({}, 50)).rejects.toThrow(
+			/did not finish answering the policy load from inline policies within 50 ms/,
+		);
+	});
 
 	it("reads the set back with GET, the token verbatim, not following a redirect — once an interval has passed, behind an answer", async () => {
 		const agent = holdingAgent();
 		const loaded = await agent.engine({ authentication: "agent-token" });
 		await loaded.isAuthorized(request(), NEVER_ABORTS);
-		expect(agent.of("GET")).toHaveLength(0);
+		// Boot's own read-back only (the set as the agent accepted it).
+		expect(agent.of("GET")).toHaveLength(1);
 		agent.tick();
 		// The answer that finds a check due goes ahead on what is known.
 		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toEqual({
@@ -974,8 +1139,8 @@ describe("cedarHttpEngine — reading the agent's set back (#286)", () => {
 			reason: ["policies"],
 			errors: [],
 		});
-		await vi.waitFor(() => expect(agent.of("GET")).toHaveLength(1));
-		const [get] = agent.of("GET");
+		await vi.waitFor(() => expect(agent.of("GET")).toHaveLength(2));
+		const get = agent.of("GET")[1];
 		expect(get.url).toBe(`${AGENT}/v1/policies`);
 		expect(headersOf(get).authorization).toBe("agent-token");
 		expect(get.init.redirect).toBe("manual");
@@ -1095,10 +1260,10 @@ describe("cedarHttpEngine — reading the agent's set back (#286)", () => {
 		);
 		agent.tick(interval - 1);
 		await loaded.isAuthorized(request(), NEVER_ABORTS);
-		expect(agent.of("GET")).toHaveLength(0);
+		expect(agent.of("GET")).toHaveLength(1);
 		agent.tick(1);
 		await loaded.isAuthorized(request(), NEVER_ABORTS);
-		await vi.waitFor(() => expect(agent.of("GET")).toHaveLength(1));
+		await vi.waitFor(() => expect(agent.of("GET")).toHaveLength(2));
 	});
 
 	it.each([0, 999, 3_600_001, 1.5, "soon", "", true, null, -1])(
@@ -1124,7 +1289,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		const answer = await loaded.isAuthorized(request(), controller.signal);
 		expect(answer).toEqual({ decision: "allow", reason: ["policies"], errors: [] });
 
-		const call = calls[1];
+		const call = calls[2];
 		expect(call.url).toBe(`${AGENT}/v1/is_authorized`);
 		expect(call.init.method).toBe("POST");
 		expect(call.init.signal).toBe(controller.signal);

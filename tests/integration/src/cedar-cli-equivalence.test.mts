@@ -16,7 +16,10 @@
  *   CLI of the version that package is pinned to (4.x).
  * - **http** hands the request to a real cedar-agent, which evaluates with the
  *   cedar-policy compiled into its image (2.5 in `permitio/cedar-agent:0.2.2`),
- *   held to the CLI of that version.
+ *   held to the CLI of that version. Each case's boot also reads the agent's
+ *   set back and requires the copy the push was answered with (#286): the
+ *   engine's read-back rests on that, and it is checked here, against the
+ *   real agent, on every case of the corpus.
  *
  * Every case is measured under both Cedars, since what a case means is its
  * CLIs' answer, not an engine's: each half holds its CLI to the case's stated

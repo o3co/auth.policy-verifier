@@ -351,8 +351,9 @@ ways that happens:
 
 Such an answer is failed and logged like a foreign revision, never read. The
 log line carries the reason, `foreign: "unknown policy"` or `"unreadable
-policy"`. When the id is one of this load's own policies under another mark,
-the line also carries that mark. That is the same corpus loaded from other
+policy"` — or, from the read-back below, `"altered policy set"` or
+`"unverifiable policy set"`. When the id is one of this load's own policies
+under another mark, the line also carries that mark. That is the same corpus loaded from other
 files, such as a rolling deploy sharing the agent, and the mark tells an operator
 which revision took it. It is what the other side spelled, unverified. An id
 that merely ends in `@` and 16 hex, as a file may be named, gives no mark;
@@ -383,6 +384,12 @@ the set (verified against cedar-agent 0.2.2). The engine keeps the copy the
 push was answered with, and reads the agent's set back to compare it by id. A
 policy rewritten, deleted or added shows, and so does an agent that came back
 empty.
+- **At boot** the set is read back once, right after the push, and must be
+  the copy the push was answered with. Otherwise the verifier refuses to
+  start, naming what it got. This checks, on your own corpus, that the agent
+  answers its set the same way twice. It also checks that `GET /v1/policies`
+  reaches the agent with the token: a proxy that passes `PUT` and `POST` but
+  not `GET` fails boot here instead of refusing every answer in service.
 - **When.** Behind an answer, never before one: when an answer is asked for
   and `readBackIntervalMs` has passed since the last check, one `GET` starts,
   and the answer goes ahead on what is already known. This is detection with a
@@ -393,23 +400,38 @@ empty.
     of milliseconds from 1000 to 3600000, written as `maxAnswerBytes` is.
   - Each check costs one `GET` of the whole set, bounded by
     `maxAnswerBytes`, as the agent's answer to the push is at boot.
+  - While answers are refused, the set is read again every second instead,
+    so they resume as soon as it is this load's again.
 - **While the set differs**, every answer is refused without asking the
   agent, and nothing of the request reaches it. The answer is failed and
   logged like any foreign one, as `foreign: "altered policy set"`. The engine
   logs the difference once, in counts (`changed`, `missing`, `added`), never
-  ids or policy text.
-- **Pushed again only when the set is plainly this load's to restore:** the
-  agent holds nothing, or only ids under this load's mark. Answers resume once
-  the push lands. So an agent that restarted or was recreated heals within an
-  interval, where it used to deny everything until the verifier restarted.
-- **Never pushed over anything else:** another load's ids (a replica sharing
-  the agent; two loads would take turns overwriting each other), or an id
-  without a mark (which a token holder added, and an operator should see).
-  Answers stay refused until the agent holds this load's set again, however it
-  gets there.
-- **A check that cannot finish** (the agent unreachable, a non-2xx, something
-  that is not a set) changes nothing, is logged, and is tried again an
-  interval later.
+  ids or policy text. An answer to a call that was out when a check found the
+  difference is refused too.
+- **Pushed again only when the set is plainly a damaged copy of this load's:**
+  nothing in it but this load's own policies, some rewritten or gone, or
+  nothing at all. Answers resume once the push lands. So an agent that
+  restarted or was recreated heals within an interval, where it used to deny
+  everything until the verifier restarted.
+- **Never pushed over anything else:** another load's policies (a replica
+  sharing the agent; two loads would take turns overwriting each other), or a
+  policy this load did not push, whether or not it carries this load's mark,
+  which is public. What was added is for an operator to see. Answers stay
+  refused until the agent holds this load's set again, however it gets there.
+- **An agent that answers, but not with a set that can be compared** —
+  an error, a set larger than `maxAnswerBytes`, something that is not a set,
+  or nothing within the load deadline — refuses every answer too, as
+  `foreign: "unverifiable policy set"`, and nothing is pushed over what it
+  cannot see. Otherwise a token holder could turn the read-back off by padding
+  the set past the bound. Only an agent that cannot be reached at all, or
+  that breaks the connection off, leaves things as they were: its answers
+  fail on their own, saying why, and "altered" would misname the fault. That
+  is logged, and tried again an interval later.
+- **Reading and pushing are two calls,** and cedar-agent has no conditional
+  `PUT`. A replica of another revision that pushes between them is
+  overwritten. The next check then sees the set, and the other replica
+  refuses until it is restarted. This is one more reason to run one agent per
+  replica (below).
 
 **`requireConfirmedRevision = true`** is for a deployment whose audit has to
 name the policies behind every decision: an answer nobody vouched for becomes a
@@ -628,8 +650,10 @@ docker compose --profile cedar up --build
     replica sharing the agent denies every request a policy would permit, and
     logs it.
   - **After a rollback:** the survivors keep denying until they restart. The
-    read-back (#286) pushes a set again only over this load's own ids or an
-    empty agent, never over another load's.
+    read-back (#286) pushes a set again only over a damaged copy of its own or
+    an empty agent, never over another load's. Its read and its push are two
+    calls, though, so an agent that restarts mid-deploy can be taken back by
+    whichever replica checks first.
 
   Run an agent per replica, as the template's sidecar does, and restart
   replicas after a rollback. Replicas with identical files push identical ids
