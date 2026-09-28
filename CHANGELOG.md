@@ -6,6 +6,288 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
+## [0.15.0] - 2026-09-28
+
+This release has breaking changes. Upgrade every
+`@o3co/auth.policy-verifier.*` package together to 0.15.0, explicitly: a
+caret range on 0.14.x, which is what `@o3co/create-auth-policy-verifier`
+writes into a scaffolded project, does not admit 0.15.0, and each package
+pins the ones it depends on exactly (`.builtins`, `.cedar` and `.server` on
+`.core`; `.cedar-wasm` on `.cedar`). Most of it is in the Cedar `http`
+engine: read Security before upgrading a deployment that runs one.
+
+### Security
+
+- **BREAKING (Cedar `http` engine, an agent shared or replaced): an answer
+  from a policy set this verifier did not load is refused** (`.cedar`,
+  [#283](https://github.com/o3co/auth.policy-verifier/issues/283),
+  [#287](https://github.com/o3co/auth.policy-verifier/pull/287),
+  [#289](https://github.com/o3co/auth.policy-verifier/pull/289)). cedar-agent
+  0.2.2 evaluates whatever set it holds, names no revision, and ignores a set
+  sent with a request. Through 0.14.0, an agent whose set had been replaced —
+  by anyone with its token, by an agent restarted on its own policies, by
+  another replica sharing it — answered, and its answer was taken: with a
+  `forbid` removed, the call came back allow. The engine now pushes each policy
+  as `<file id>@<first 16 hex of the policy set's revision>` (`agentPolicyId`,
+  exported), and every policy an answer names — each determining policy, and
+  the policy each evaluation error names, read as Cedar prints it — must be
+  one of this load's. Anything else is a deny with a `failed` evaluation,
+  logged on the fault logger whatever `logEvaluationErrors` says:
+  `cedar engine answered from a policy set this verifier did not load —
+  denying`, with `foreign: "unknown policy"` or `"unreadable policy"`, and,
+  when the id is one of this load's file ids under another load's mark, that
+  `mark`. Decisions record the file ids; the marked ids show in the agent
+  (`GET /v1/policies`), in the agent's evaluation-error strings the rule logs,
+  and in a boot refusal's list of the ids sent. An agent image whose
+  `reason` items are neither strings nor `{ policyId }` now denies every
+  allow, saying `"unreadable policy"`. The
+  mark comes from the revision, so replicas loading the same files push the
+  same ids and do not refuse each other. Boot now warns when the agent is
+  used without a token. **What to do:** run one agent per replica — the
+  template's `cedar-engine` sidecar does. Replicas with different policy files
+  that share an agent now deny every request a policy would permit, and log
+  it, where 0.14.0 answered from whichever set was pushed last: during a
+  rolling deploy, and after a rollback until the survivors restart. During the
+  0.14.0 → 0.15.0 rollout itself, a 0.14.0 replica that starts against an agent
+  0.15.0 replicas share pushes unmarked ids, and the 0.15.0 replicas refuse
+  every answer until they restart. If an agent must be shared, upgrade every
+  replica together and restart them after any rollback. A log filter on the
+  agent's own policy ids needs the marked form.
+
+- **BREAKING (Cedar `http` engine, boot and service): the engine reads the
+  agent's set back and refuses while it is not the one pushed** (`.cedar`,
+  [#286](https://github.com/o3co/auth.policy-verifier/issues/286),
+  [#290](https://github.com/o3co/auth.policy-verifier/pull/290)). No answer
+  shows a token holder rewriting or deleting one of this load's policies under
+  its own id, nor an agent that lost its set — restarted or recreated, it
+  answered "no determining policy" to everything, a silent deny until the
+  verifier restarted. The agent's own copy of the set shows both:
+  `PUT /v1/policies` answers with it, and `GET /v1/policies` answers the same
+  bytes while nothing has changed it.
+  - **At boot**, the agent's answer to the push must be a set of exactly the
+    ids sent, and one `GET` right after must return that same copy; otherwise
+    the verifier refuses to start, saying what it got. The read gets a load
+    deadline of its own (`CEDAR_LOAD_TIMEOUT_MS`, 10 s), so boot can take up
+    to twice that; the same deadline bounds each read-back and each push
+    again in service.
+  - **In service**, one `GET` of the whole set runs behind an answer, never
+    before one, when the wait since the last check has passed: each wait is
+    drawn from half of `readBackIntervalMs` to all of it — a new key in the
+    `CedarPolicyRuleCollector` entry, 1000 to 3600000, written as
+    `maxAnswerBytes` is. Its default, 30000, is exported as
+    `CEDAR_READ_BACK_INTERVAL_MS`; there is no environment variable for it —
+    use `${?YOUR_VAR}` in the entry. While refusing, the set is read again
+    after a second, doubling up to the interval.
+  - **A set that differs** — a policy rewritten, deleted or added — refuses
+    every answer without asking the agent (`foreign: "altered policy set"`).
+    An agent that holds nothing is pushed into again, and answers resume: a
+    restarted agent heals within an interval. Anything else is not pushed
+    over; answers stay refused until the agent holds this load's set again —
+    restarting the verifier pushes it.
+  - **A set that cannot be compared** — an error status, a copy larger than
+    `maxAnswerBytes`, something that is not a set, an answer broken off or
+    late, or an agent that answered calls but cannot be connected to for a
+    read — refuses every answer (`foreign: "unverifiable policy set"`). Only a
+    connection that fails outright while no call is answered either leaves
+    things as they were: the agent is down, and its calls fail on their own.
+  - **An answer to a call that was out** when a refusal began is refused too,
+    even if the set was restored before the answer arrived.
+  - **Logs.** A refusal is a deny with a `failed` evaluation, logged on the
+    fault logger as `cedar engine's agent does not hold, or does not show,
+    the policy set this verifier loaded — denying without using its answer`,
+    with `foreign`. The engine says each change once, on the logger the
+    collector gives it:
+    - errors that begin a refusal: `cedar agent's policy set is not the one
+      this verifier pushed…` (with `changed`, `missing` and `added` counts,
+      never ids or text), `cedar agent holds no policy set — restarted or
+      recreated…`, `cedar agent did not answer its policy set in a way that
+      can be compared…`, and `cedar agent answered authorization calls since
+      the last check but its policy set could not be read back — blocked, or
+      gone down since…`;
+    - an error while refusing: `could not push the policy set to the cedar
+      agent again — denying until it holds it`;
+    - `cedar agent policy set read-back failed unexpectedly` (an error; it
+      refuses nothing, and what the last check found stands);
+    - `could not reach the cedar agent to read its policy set back…` (a
+      warning, once per streak; nothing is refused);
+    - `pushed the policy set to the cedar agent again — answering` (a
+      warning) and `…holds this verifier's policy set again — answering`
+      (info), when answers resume.
+
+  It does not stop someone holding the agent's token: they can lift a refusal
+  themselves — restore the set, or empty the agent so it is pushed again — and
+  change it after the next check. The token remains the boundary, and the
+  engine still does not declare `confirmsRevision`. Verified against
+  `permitio/cedar-agent:0.2.2`, the image the template pins. **What to do:**
+  - A proxy or gateway in front of the agent must pass `GET /v1/policies` with
+    the token, and must pass the agent's answer to `PUT /v1/policies` through
+    unchanged (not a `204`, an empty body or a rewritten one); otherwise the
+    verifier fails to start.
+  - `maxAnswerBytes` (1 MiB by default) now also bounds the agent's copy of the
+    whole set, re-printed by its Cedar and possibly larger than your files. A
+    set that loaded on 0.14.0 and whose copy is past it fails boot with
+    `answered the policy load with more than 1 MiB — refused; set
+    maxAnswerBytes higher…`. Check before upgrading —
+    `curl -sS -H "Authorization: $CEDAR_AUTHENTICATION"
+    "$CEDAR_ENDPOINT/v1/policies" | wc -c` — and raise `maxAnswerBytes` if it
+    is near the bound.
+  - Alert on the new errors above. During an agent outage, once a check
+    finds the agent gone, denials are logged as the read-back refusal rather
+    than as `cedar authorization call failed` — on the fault logger, whatever
+    `logEvaluationErrors` says, so one error line per request. The refusal's
+    first line is `…could not be read back — blocked, or gone down since…`
+    when the connection fails outright after calls were answered, or `…in a
+    way that can be compared…` with `reason: "no answer within 10000 ms"` when
+    the agent stops answering without refusing the connection.
+  - A `fetch` passed to `createCedarHttpEngine` must return the agent's body
+    to the push and answer `GET /v1/policies` (sent with `cache: "no-store"`).
+
+### Added
+
+- **Which policies determined an answer** (`.core`, `.cedar`,
+  [#199](https://github.com/o3co/auth.policy-verifier/issues/199),
+  [#279](https://github.com/o3co/auth.policy-verifier/pull/279),
+  [#280](https://github.com/o3co/auth.policy-verifier/pull/280)). A
+  `completed` `RuleEvaluation` may carry `determiningPolicies` — for an allow
+  the permits that applied, for a deny the forbids — and
+  `determiningPoliciesOmitted`, the count of those beyond the bound. The Cedar
+  collector reports them, sorted and named for their files
+  (`30-forbid-contractors`, `20-rules#2`); `[]` when no policy applied. They
+  are on the `decision` log line always, and in the response only under
+  `verify.evaluationInResponse = "include"`, which now also tells any holder
+  of an accepted token which policies are there. At most
+  `DETERMINING_POLICIES_MAX` (32) ids, each 1 to `POLICY_ID_MAX_LENGTH` (128)
+  UTF-16 units of well-formed text outside `POLICY_ID_FORBIDDEN_RANGES` —
+  about 4 KiB of ASCII per evaluation, at most 12 KiB of UTF-8. A rule names
+  them only through `report.boundDeterminingPolicies(names)`, which applies
+  the bounds of the core that checks the report; a reporter without it — an
+  older core, a wrapped or `.bind()`-ed one — reports the evaluation without
+  them, so `.cedar` can be upgraded ahead of the server. New exports: `.core`
+  `isReportablePolicyId`, `DETERMINING_POLICIES_MAX`, `POLICY_ID_MAX_LENGTH`,
+  `POLICY_ID_FORBIDDEN_RANGES` and the types `BoundDeterminingPolicies`,
+  `DeterminingPolicies`, `EvaluatedRevision`; `.cedar` `namePolicies` and
+  `NamedPolicy`, the one place a policy id is made. `responseEnvelopes.json`
+  states the keys and their bounds for a non-JS client. **What to do:** a
+  decision-log schema or a client parsing `evaluation` must accept the new
+  keys; clients must ignore unknown keys inside `evaluation`.
+
+- **`sharedEntity` in the `CedarPolicyRuleCollector` entry** (`.cedar`,
+  [#282](https://github.com/o3co/auth.policy-verifier/issues/282),
+  [#285](https://github.com/o3co/auth.policy-verifier/pull/285)): `"strict"`
+  (default) or `"merge"`; anything else refuses to start. Its type is
+  exported as `SharedEntity`. See Fixed.
+
+- **`readBackIntervalMs`**, `CEDAR_READ_BACK_INTERVAL_MS`, and the
+  `createCedarHttpEngine` options `now` and `random` (`.cedar`,
+  [#290](https://github.com/o3co/auth.policy-verifier/pull/290)). See
+  Security.
+
+- **`ForeignAnswer` and `CedarDecision.foreign`** (`.cedar`,
+  [#287](https://github.com/o3co/auth.policy-verifier/pull/287),
+  [#290](https://github.com/o3co/auth.policy-verifier/pull/290)): how an
+  engine says an answer did not come from the set it loaded — a fixed label,
+  `"unknown policy"`, `"unreadable policy"`, `"altered policy set"` or
+  `"unverifiable policy set"`, and optionally another load's 16-hex `mark`.
+  The collector fails such an answer and logs only the label and a valid
+  mark. Any value but `undefined` or `null` counts as foreign.
+
+- **Cedar is measured against Cedar** (CI,
+  [#198](https://github.com/o3co/auth.policy-verifier/issues/198),
+  [#281](https://github.com/o3co/auth.policy-verifier/pull/281),
+  [#284](https://github.com/o3co/auth.policy-verifier/issues/284),
+  [#288](https://github.com/o3co/auth.policy-verifier/pull/288)). A fixture
+  corpus runs through the collector over each engine and through the official
+  `cedar` CLI of that engine's Cedar — the wasm engine against
+  cedar-policy-cli 4.13.0, the `http` engine against a real
+  `permitio/cedar-agent:0.2.2` and cedar-policy-cli 2.5.0 — and each must
+  agree on the decision, the determining policies and the erroring policies.
+  Both jobs are required checks. On the corpus the two Cedars agree on all of
+  those; only the wording of error messages differs.
+
+### Changed
+
+- **BREAKING (Cedar wasm engine): policy ids are named for their files**
+  (`.cedar`, `.cedar-wasm`,
+  [#280](https://github.com/o3co/auth.policy-verifier/pull/280)). The engine
+  used to compile one concatenated text, so Cedar answered with positional
+  ids (`policy0`). A one-policy file is now its file name without `.cedar`
+  (`10-permit-eng`) — the id the `http` engine already used — the policies of
+  a file with several are numbered in file order (`20-rules#1`,
+  `20-rules#2`), and the inline set is `policies` (`policies#1`, …). That is
+  what `CedarDecision.reason`, the evaluation-error log lines (`<id>:
+  message`) and compile errors say. A numbered id shifts when a policy is
+  added to, removed from or reordered in its file. Decisions on any set 0.14.0
+  loaded are unchanged. New boot refusals, each naming the files: two
+  policies that would share an id (`a.cedar` holding several, beside
+  `a#1.cedar`), and a policy in a file named only `.cedar`. A file holding a
+  template was already refused, naming the file; the message now says why (a
+  template never applies, since nothing links it). Parse errors lose Cedar's
+  `failed to parse policies from string:` prefix. **What to do:** update log
+  filters and alerts keyed on `policyN`; keep one policy per file where an id
+  must stay stable.
+
+- **BREAKING (custom `CedarEngine` implementations): the port's answer
+  contract is tighter** (`.cedar`,
+  [#280](https://github.com/o3co/auth.policy-verifier/pull/280),
+  [#287](https://github.com/o3co/auth.policy-verifier/pull/287)). An answer
+  that is not an object, or whose `reason` or `errors` is not an array, is a
+  failed call — a logged deny; 0.14.0 let an `allow` with a missing `reason`
+  pass. An `allow` naming no determining policy is refused as not a decision
+  (Cedar allows only on a permit), logged on the fault logger whatever
+  `logEvaluationErrors` says. `reason` is read as policy ids and recorded;
+  name them with `namePolicies`. The `http` engine reads a `{ policyId }`
+  reason item as its id. **What to do:** an engine of your own must answer an
+  object whose `reason` and `errors` are arrays, name its policies with
+  `namePolicies`, and never answer `allow` with an empty `reason`.
+
+- **Types** (`.core`,
+  [#279](https://github.com/o3co/auth.policy-verifier/pull/279)).
+  `ReportRuleEvaluation` is an interface with the optional
+  `boundDeterminingPolicies` rather than a bare function type, and
+  `RuleEvaluation` distinguishes `completed` from `failed`. Code that builds
+  `{ status, revision }` with a `"completed" | "failed"` status still
+  type-checks.
+
+### Fixed
+
+- **A request carries one entity per uid, and an entity two roles name is
+  reconciled, never merged blind** (`.cedar`,
+  [#282](https://github.com/o3co/auth.policy-verifier/issues/282),
+  [#285](https://github.com/o3co/auth.policy-verifier/pull/285)). Through
+  0.14.0 entities were built per role, so a user acting on their own record
+  (principal and resource both `User::"alice"`) was refused by Cedar as a
+  `duplicate entity entry` whenever either mapping described the entity,
+  logged as `cedar authorization call failed`. Entities are now one set keyed
+  by uid, contributed by principal, action and resource in that order, each
+  with the attribute names and parent types its mapping declares. Under
+  `sharedEntity = "strict"`, the default, a later role may repeat what an
+  earlier one said but add nothing, and what both declare must agree;
+  `"merge"` admits what only one declares. A merge is opt-in because
+  resource-side facts can come from the caller: a union would let them answer
+  principal reads. **BREAKING, and what to do:**
+  - **Self-access, deny → allow, with no log line.** A self-access request is
+    now evaluated when the resource mapping adds nothing to the shared entity,
+    and allowed wherever your policies permit it. When the resource mapping
+    would add or contradict something, it is refused as `not_invoked`, the log
+    naming the roles, the type and the attribute, never a value. Review the
+    policies that can permit a user on their own `User` record. Choose
+    `"merge"` only where no caller-supplied attribute feeds the resource
+    mapping.
+  - A config whose `principal.type` equals its `action.type` is refused at
+    boot.
+  - A resource that names the request's own action (`action.type`, the action
+    as its id) with a resource-mapped value is refused as `not_invoked`;
+    0.14.0 evaluated it, and could allow it.
+  - Membership cycles are refused before Cedar, as `not_invoked` rather than
+    `failed`. Duplicate parents collapse. Values compare as Cedar compares
+    them (an array as a set, an entity reference by uid). An attribute,
+    context entry or config key named `__proto__` is now carried; it used to
+    vanish.
+
+- **Docs: cedar-agent 0.2.2 runs cedar-policy 2.5.0**, not 2.4 as the
+  `.cedar` README said ([#284](https://github.com/o3co/auth.policy-verifier/issues/284),
+  [#288](https://github.com/o3co/auth.policy-verifier/pull/288)).
+
 ## [0.14.0] - 2026-09-25
 
 This release has breaking changes. Upgrade every
