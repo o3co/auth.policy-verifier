@@ -69,7 +69,7 @@ const IS_AUTHORIZED_PATH = "/v1/is_authorized";
 export interface CedarHttpEngineOptions {
 	/**
 	 * The `fetch` to call. Defaults to the global one, looked up per call. It
-	 * must honour `init.redirect`: both calls ask for `"manual"` so that a 3xx
+	 * must honour `init.redirect`: every call asks for `"manual"` so that a 3xx
 	 * fails closed (#270), and a `fetch` that follows redirects anyway undoes that.
 	 * It must also reject once `init.signal` aborts, and fail a body still being
 	 * read, as the platform's does: the load tells its deadline apart from other
@@ -78,7 +78,11 @@ export interface CedarHttpEngineOptions {
 	fetch?: typeof fetch;
 	/** Where `CEDAR_ENDPOINT` / `CEDAR_AUTHENTICATION` are read. Defaults to `process.env`. */
 	env?: Readonly<Record<string, string | undefined>>;
-	/** How long `load` keeps retrying an unreachable engine. Defaults to {@link CEDAR_LOAD_TIMEOUT_MS}. */
+	/**
+	 * How long `load` keeps retrying an unreachable engine — and the deadline of
+	 * each read-back of the set, and of a push again into an empty agent (#286).
+	 * Defaults to {@link CEDAR_LOAD_TIMEOUT_MS}.
+	 */
 	loadTimeoutMs?: number;
 	/** The pause between those retries. Defaults to 500 ms. */
 	retryMs?: number;
@@ -658,6 +662,9 @@ async function readAgentSet(
 			signal,
 			// Not followed (#270): the set is read from the configured endpoint.
 			redirect: "manual",
+			// From the agent, not a copy a hop kept: a cached set that matched would
+			// make the read-back pass whatever the agent now holds.
+			cache: "no-store",
 		});
 	} catch (cause) {
 		if (signal.aborted) return { unverifiable: `no answer within ${timeoutMs} ms` };

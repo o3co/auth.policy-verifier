@@ -389,15 +389,20 @@ empty.
   start, naming what it got. This checks, on your own corpus, that the agent
   answers its set the same way twice. It also checks that `GET /v1/policies`
   reaches the agent with the token: a proxy that passes `PUT` and `POST` but
-  not `GET` fails boot here instead of refusing every answer in service. An
-  agent another verifier pushes to fails it too, with the other's set. The
-  read gets a load deadline of its own, so boot can now take up to twice
-  that.
+  not `GET` fails boot here instead of refusing every answer in service. On
+  an agent another verifier also pushes to, the one whose push lands between
+  the other's `PUT` and `GET` makes the other fail boot; otherwise the later
+  boot overwrites the earlier verifier's set, and it is that one which
+  refuses from its next check. The read gets a load deadline of its own, so
+  boot can now take up to twice that.
 - **When.** Behind an answer, never before one: when an answer is asked for
   and `readBackIntervalMs` has passed since the last check, one `GET` starts,
   and the answer goes ahead on what is already known. This is detection with a
-  window, up to an interval plus the check's own time, not proof per answer.
-  A verifier that answers nothing checks nothing, and has nothing to protect.
+  window, up to an interval plus the check's own time, not proof per answer —
+  up to about two intervals when only a read of the set is blocked, since a
+  read that cannot reach the agent counts against it only once a call was
+  answered since the check before. A verifier that answers nothing checks
+  nothing, and has nothing to protect.
   - The default interval is 30 s, exported as `CEDAR_READ_BACK_INTERVAL_MS`.
   - Set it with `readBackIntervalMs` in the collector's entry: a whole number
     of milliseconds from 1000 to 3600000, written as `maxAnswerBytes` is.
@@ -414,33 +419,36 @@ empty.
   ids or policy text. An answer to a call that was out when a check found the
   difference is refused too, even if the set was restored before the answer
   arrived: that set may have answered it.
-- **Pushed again only when the set is plainly a damaged copy of this load's:**
-  nothing in it but this load's own policies, some rewritten or gone, or
-  nothing at all. Answers resume once the push lands. So an agent that
-  restarted or was recreated heals within an interval, where it used to deny
-  everything until the verifier restarted.
-- **Never pushed over anything else:** another load's policies (a replica
-  sharing the agent; two loads would take turns overwriting each other), or a
-  policy this load did not push, whether or not it carries this load's mark,
-  which is public. What was added is for an operator to see. Answers stay
-  refused until the agent holds this load's set again, however it gets there.
+- **Pushed again only into an agent that holds nothing:** one that restarted
+  or was recreated — an accident, and a harmless one, since an empty set
+  denies everything. Answers resume once the push lands, so such an agent
+  heals within an interval, where it used to deny everything until the
+  verifier restarted.
+- **Never pushed over anything else.** A policy of this load's rewritten or
+  deleted, or one added, marked or not (the mark is public), is what an attack
+  looks like. Pushing over it would hand a token holder a fresh window each
+  time they changed it again, so it is left for an operator to see. Another
+  load's set (a replica sharing the agent) would be overwritten back and
+  forth. Answers stay refused until the agent holds this load's set again,
+  however it gets there; restarting the verifier pushes it.
 - **An agent that answers, but not with a set that can be compared** —
   an error, a set larger than `maxAnswerBytes`, something that is not a set,
   an answer broken off or not whole within the load deadline — refuses every
   answer too, as `foreign: "unverifiable policy set"`, and nothing is pushed
   over what it cannot see. Otherwise a token holder could turn the read-back
   off by padding the set past the bound, or a hop that cuts large answers off
-  could. The same goes for an agent that answered an authorization call since
-  the last check but cannot be reached for a read of its set: something is
-  blocking the read. Only an agent that neither answers calls nor can be
-  reached leaves things as they were: its answers fail on their own, saying
-  why, and "altered" would misname the fault. That is logged once, and tried
-  again at the next check.
+  could. So is a read that gets no answer in time. The same goes for an agent
+  that answered an authorization call since the last check, but cannot be
+  connected to for a read of its set: the read is blocked, or the agent went
+  down since the call. Either way its set is not seen. Only a connection that
+  fails outright (refused, reset, not found) while no call is answered either
+  leaves things as they were: the agent is down, its answers fail on their
+  own saying why, and "altered" would misname the fault. That is logged once
+  per streak, and tried again at the next check.
 - **Reading and pushing are two calls,** and cedar-agent has no conditional
-  `PUT`. A replica of another revision that pushes between them is
-  overwritten. The next check then sees the set, and the other replica
-  refuses until it is restarted. This is one more reason to run one agent per
-  replica (below).
+  `PUT`. A replica of another revision that pushes into the empty agent
+  between them is overwritten, and refuses until it is restarted. This is one
+  more reason to run one agent per replica (below).
 
 **`requireConfirmedRevision = true`** is for a deployment whose audit has to
 name the policies behind every decision: an answer nobody vouched for becomes a
@@ -659,10 +667,10 @@ docker compose --profile cedar up --build
     replica sharing the agent denies every request a policy would permit, and
     logs it.
   - **After a rollback:** the survivors keep denying until they restart. The
-    read-back (#286) pushes a set again only over a damaged copy of its own or
-    an empty agent, never over another load's. Its read and its push are two
-    calls, though, so an agent that restarts mid-deploy can be taken back by
-    whichever replica checks first.
+    read-back (#286) pushes a set again only into an empty agent, never over
+    another load's. Its read and its push are two calls, though, so an agent
+    that restarts mid-deploy can be taken back by whichever replica checks
+    first.
 
   Run an agent per replica, as the template's sidecar does, and restart
   replicas after a rollback. Replicas with identical files push identical ids

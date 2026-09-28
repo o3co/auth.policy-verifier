@@ -83,7 +83,7 @@ The source falls into four parts, separated by what changes them:
   copy of the push (`agentReadBack.mts`, #286); boot reads it back once and refuses to start
   unless it is that copy. While it differs, or the agent answers it in a way that cannot be
   compared, every answer is `foreign` without asking the agent. The set is pushed again only
-  over an empty agent or a damaged copy of this load's, nothing added —
+  into an agent that holds nothing (a restart) —
   [`__tests__/agentReadBack.test.mts`](__tests__/agentReadBack.test.mts).
 - The `http` engine follows no redirect (#270). A 3xx to an authorization call is a
   `CedarEngineError` — a deny with a `failed` evaluation — and a 3xx to the policy load fails

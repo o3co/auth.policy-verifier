@@ -169,7 +169,7 @@ describe("createAgentReadBack — when it reads the agent's set back", () => {
 		}
 	});
 
-	it("reads a second after a refusal of another kind begins — the back-off is per refusal", async () => {
+	it("keeps backing off when a refusal changes kind — it is one refusal still", async () => {
 		let answer: AgentSetRead = { unverifiable: "answered 503" };
 		const { check, read, tick } = readBack(() => answer);
 		tick();
@@ -182,7 +182,9 @@ describe("createAgentReadBack — when it reads the agent's set back", () => {
 		await check.poll();
 		expect(check.refusal).toBe("altered policy set");
 		const reads = read.mock.calls.length;
-		tick(1_000);
+		tick(3_999);
+		expect(check.poll()).toBeUndefined();
+		tick(1);
 		await check.poll();
 		expect(read).toHaveBeenCalledTimes(reads + 1);
 	});
@@ -197,19 +199,7 @@ describe("createAgentReadBack — what it makes of the set the agent holds", () 
 		expect(push).not.toHaveBeenCalled();
 	});
 
-	it.each([
-		[
-			"one of its policies rewritten under its own id",
-			new Map([...PUSHED, [`10-permit${MARK}`, "permit(principal, action, resource);"]]),
-			{ changed: 1, missing: 0, added: 0 },
-		],
-		[
-			"one of its policies deleted",
-			new Map([[`10-permit${MARK}`, PUSHED.get(`10-permit${MARK}`) as string]]),
-			{ changed: 0, missing: 1, added: 0 },
-		],
-		["nothing — an agent restarted", new Map(), { changed: 0, missing: 2, added: 0 }],
-	])(
+	it.each([["nothing — an agent restarted", new Map(), { changed: 0, missing: 2, added: 0 }]])(
 		"refuses while the agent holds %s, and pushes this load's set again",
 		async (_label, held, difference) => {
 			const pushing = deferred<AgentPolicySet>();
@@ -228,7 +218,9 @@ describe("createAgentReadBack — what it makes of the set the agent holds", () 
 					...difference,
 					restorable: true,
 				}),
-				expect.stringMatching(/not the one this verifier pushed — denying, and pushing it again/),
+				expect.stringMatching(
+					/holds no policy set — restarted or recreated — denying, and pushing/,
+				),
 			);
 			pushing.resolve(PUSHED);
 			await checking;
@@ -238,6 +230,16 @@ describe("createAgentReadBack — what it makes of the set the agent holds", () 
 	);
 
 	it.each([
+		// Rewritten, deleted, added: what an attack looks like. Pushing over it
+		// would hand a token holder a fresh window each time they changed it again.
+		[
+			"one of its policies rewritten under its own id",
+			new Map([...PUSHED, [`10-permit${MARK}`, "permit(principal, action, resource);"]]),
+		],
+		[
+			"one of its policies deleted",
+			new Map([[`10-permit${MARK}`, PUSHED.get(`10-permit${MARK}`) as string]]),
+		],
 		// Marked or not, the mark being public: what was added is for an operator to see.
 		[
 			"a policy added under this load's mark",
@@ -257,7 +259,9 @@ describe("createAgentReadBack — what it makes of the set the agent holds", () 
 		expect(push).not.toHaveBeenCalled();
 		expect(log.error).toHaveBeenCalledWith(
 			expect.objectContaining({ restorable: false }),
-			expect.stringMatching(/holds policies it did not push/),
+			expect.stringMatching(
+				/not the one this verifier pushed — denying until it holds this verifier's again/,
+			),
 		);
 	});
 
@@ -353,12 +357,11 @@ describe("createAgentReadBack — an agent that will not show its set", () => {
 
 describe("createAgentReadBack — calls that were out across a refusal", () => {
 	it("counts each refusal begun, and refuses a call made before one began — though it was lifted since", async () => {
-		const held: AgentPolicySet = new Map([...PUSHED, [`10-permit${MARK}`, "rewritten"]]);
-		const { check, tick } = readBack(() => holding(held));
+		// An agent that came back empty: pushed again, and lifted, in one check.
+		const { check, tick } = readBack(() => holding(new Map()));
 		const before = check.generation;
 		expect(check.refusedSince(before)).toBeUndefined();
 		tick();
-		// Found rewritten, pushed again, lifted — all in one check.
 		await check.poll();
 		expect(check.refusal).toBeUndefined();
 		expect(check.generation).toBe(before + 1);
@@ -387,9 +390,57 @@ describe("createAgentReadBack — an agent that answers calls but will not be re
 		expect(log.error).toHaveBeenCalledWith(
 			expect.objectContaining({ reason: expect.stringMatching(/ECONNREFUSED/) }),
 			expect.stringMatching(
-				/answers authorization calls but its policy set could not be read back/,
+				/answered authorization calls since the last check but its policy set could not be read back/,
 			),
 		);
+	});
+
+	it("counts a call answered while the read was out — the read that failed is still a read of an agent that answers", async () => {
+		const reading = deferred<AgentSetRead>();
+		const { check, tick } = readBack(() => reading.promise);
+		tick();
+		const checking = check.poll();
+		check.answered();
+		reading.reject(new Error("read ECONNRESET"));
+		await checking;
+		expect(check.refusal).toBe("unverifiable policy set");
+	});
+
+	it("counts each answered call for one check only: refused, restored, then a read that cannot reach it with no call answered changes nothing", async () => {
+		let answer: () => AgentSetRead = () => {
+			throw new Error("connect ECONNREFUSED 127.0.0.1:8180");
+		};
+		const { check, tick } = readBack(() => answer());
+		check.answered();
+		tick();
+		await check.poll();
+		expect(check.refusal).toBe("unverifiable policy set");
+		answer = () => holding(PUSHED);
+		tick(1_000);
+		await check.poll();
+		expect(check.refusal).toBeUndefined();
+		answer = () => {
+			throw new Error("connect ECONNREFUSED 127.0.0.1:8180");
+		};
+		tick();
+		await check.poll();
+		expect(check.refusal).toBeUndefined();
+	});
+
+	it("does not change the kind of a refusal on a read that cannot reach the agent — a call out before it answered after", async () => {
+		let answer: () => AgentSetRead = () => holding(new Map([...PUSHED, ["evil", "p"]]));
+		const { check, tick } = readBack(() => answer());
+		tick();
+		await check.poll();
+		const generation = check.generation;
+		check.answered();
+		answer = () => {
+			throw new Error("connect ECONNREFUSED 127.0.0.1:8180");
+		};
+		tick(1_000);
+		await check.poll();
+		expect(check.refusal).toBe("altered policy set");
+		expect(check.generation).toBe(generation);
 	});
 
 	it("keeps what it knew when neither a call nor a read reaches the agent — each answered call counts once", async () => {
@@ -487,7 +538,7 @@ describe("createAgentReadBack — when a check cannot finish", () => {
 		await check.poll();
 		expect(check.refusal).toBe("altered policy set");
 		expect(messages(log.error)).toEqual([
-			expect.stringMatching(/not the one this verifier pushed/),
+			expect.stringMatching(/holds no policy set/),
 			expect.stringMatching(/could not push .* again/),
 		]);
 	});

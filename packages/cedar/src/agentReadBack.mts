@@ -29,29 +29,31 @@
  * Every answer is refused while the agent was last seen holding a set other
  * than this load's — or answering its set in a way that cannot be compared:
  * an error, a set past the answer bound, something that is not a set, an
- * answer broken off or not whole within the deadline. That the read-back
- * cannot be made to fail quietly is what makes it worth anything: a token
- * holder who pads the set past the bound, or anything in the path that cuts
- * large answers off, would otherwise turn it off. The one read that leaves
- * things as they were is an agent that cannot be reached at all, and only
- * while its authorization calls fail too — its answers then fail on their
- * own, and "altered" would misname the fault. An agent that answers those
- * calls but not a read of its set is refusing to show it. While refusing, the
- * set is read again after a second, then two, doubling up to the interval, so
- * answers resume soon after the set is this load's again.
+ * answer broken off, late, or never begun. That the read-back cannot be made
+ * to fail quietly is what makes it worth anything: a token holder who pads the
+ * set past the bound, or anything in the path that cuts large answers off,
+ * would otherwise turn it off. The one read that leaves things as they were is
+ * a connection that fails outright while the agent answers no authorization
+ * call either — it is down, its answers fail on their own, and "altered" would
+ * misname the fault. An agent that answers those calls but whose set cannot be
+ * read is not showing it: a block on the read, or an agent gone down since the
+ * call; either way the set is not seen, and answers are refused. While
+ * refusing, the set is read again after a second, then two, doubling up to
+ * the interval, so answers resume soon after the set is this load's again.
  *
  * An answer to a call that was out while a refusal began is refused too, even
  * when the set has been restored by the time it arrives: it may have come
  * from the set that was found changed.
  *
- * The set is pushed again only when it is plainly a damaged copy of this
- * load's: nothing in it but this load's own policies, some rewritten or gone —
- * or nothing at all, an agent restarted. A set holding anything this load did
- * not push — another load's, from a replica sharing the agent; a policy a
- * token holder added, marked or not — is not written over: two loads would
- * take turns overwriting each other, and what was added is for an operator to
- * see. It stays refused until the agent holds this load's set again, however
- * it gets there.
+ * The set is pushed again only into an agent that holds nothing — one that
+ * restarted, or was recreated: an accident, and a harmless one, since an
+ * empty set denies everything. A set that holds anything else is not written
+ * over. A policy of this load's rewritten or deleted, one added, marked or
+ * not — that is what an attack looks like, and pushing over it would hand a
+ * token holder a fresh window each time they changed it again; another load's
+ * set, from a replica sharing the agent, would be overwritten back and forth.
+ * It stays refused until the agent holds this load's set again, however it
+ * gets there — a restart of the verifier pushes it.
  */
 
 import type { Logger } from "@o3co/auth.policy-verifier.core";
@@ -61,8 +63,9 @@ export type AgentPolicySet = ReadonlyMap<string, string>;
 
 /**
  * What reading the agent's set came to: the set it holds, or why what it
- * answered cannot be compared. Reading rejects only when no answer began to
- * arrive — the agent, or the connection to it, not there.
+ * answered cannot be compared. Reading rejects only when the connection
+ * failed outright — refused, reset, not found — before any answer began; a
+ * read that timed out is `unverifiable`.
  */
 export type AgentSetRead = { readonly held: AgentPolicySet } | { readonly unverifiable: string };
 
@@ -105,9 +108,9 @@ export interface AgentReadBackOptions {
 	intervalMs: number;
 	/** The clock the interval is measured on: monotonic. */
 	now: () => number;
-	/** Reads the agent's set; rejects only when no answer began to arrive. */
+	/** Reads the agent's set; rejects only when the connection failed outright. */
 	read: () => Promise<AgentSetRead>;
-	/** Pushes this load's set again; resolves with the agent's copy of it. */
+	/** Pushes this load's set again, into an empty agent; resolves with the agent's copy of it. */
 	push: () => Promise<AgentPolicySet>;
 	/** For what an operator must see: a difference found, a push again, a check that failed. */
 	logger: Logger;
@@ -171,18 +174,21 @@ export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBac
 	}
 
 	async function check(): Promise<void> {
-		const answered = answeredSinceCheck;
-		answeredSinceCheck = false;
 		let answer: AgentSetRead;
 		try {
 			answer = await read();
 		} catch (cause) {
+			// Calls answered since the last check, during this read included.
+			const answered = answeredSinceCheck;
+			answeredSinceCheck = false;
+			// Already refusing: a read that cannot reach the agent says nothing
+			// new, and a call that was out before the refusal is no news either.
+			if (refusal !== undefined) return;
 			if (answered) {
-				// Its authorization calls are answered; a read of its set is not.
 				refuse(
 					"unverifiable policy set",
 					{ reason: describe(cause) },
-					"cedar agent answers authorization calls but its policy set could not be read back — denying until it can",
+					"cedar agent answered authorization calls since the last check but its policy set could not be read back — blocked, or gone down since — denying until it can be",
 				);
 				return;
 			}
@@ -197,6 +203,7 @@ export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBac
 			}
 			return;
 		}
+		answeredSinceCheck = false;
 		unreachableStreak = false;
 		if ("unverifiable" in answer) {
 			refuse(
@@ -213,14 +220,14 @@ export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBac
 			}
 			return;
 		}
-		// A damaged copy of this load's set, or none: nothing in it this load did not push.
-		const restorable = [...held.keys()].every((id) => baseline.has(id));
+		// An agent that holds nothing restarted; anything else was changed.
+		const restorable = held.size === 0;
 		refuse(
 			"altered policy set",
 			{ ...difference(baseline, held), restorable },
 			restorable
-				? "cedar agent's policy set is not the one this verifier pushed — denying, and pushing it again"
-				: "cedar agent's policy set is not the one this verifier pushed, and holds policies it did not push — denying until it holds this verifier's again",
+				? "cedar agent holds no policy set — restarted or recreated — denying, and pushing this verifier's again"
+				: "cedar agent's policy set is not the one this verifier pushed — denying until it holds this verifier's again",
 		);
 		if (!restorable) return;
 		try {
@@ -256,7 +263,7 @@ export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBac
 			const due = refusal === undefined ? intervalMs : Math.min(intervalMs, recheckMs);
 			if (now() - lastCheck < due) return undefined;
 			lastCheck = now();
-			const before = { refusal, generation };
+			const refusing = refusal !== undefined;
 			running = check()
 				// Behind an answer nothing awaits it, so nothing may escape it. What
 				// it knew stands; the fault is said if the log still can say it.
@@ -271,10 +278,11 @@ export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBac
 					}
 				})
 				.finally(() => {
-					// Still refused for the same reason: back off, up to the interval, so
-					// a set that stays refused is not read — and parsed — every second.
+					// Still refusing: back off, up to the interval, so a set that stays
+					// refused is not read — and parsed — every second. A refusal that
+					// changes kind is still one refusal; one begun anew starts at a second.
 					recheckMs =
-						refusal !== undefined && refusal === before.refusal && generation === before.generation
+						refusing && refusal !== undefined
 							? Math.min(recheckMs * 2, intervalMs)
 							: RECHECK_WHILE_REFUSING_MS;
 					running = undefined;

@@ -215,8 +215,7 @@ describe("cedarHttpEngine over the wire — what reaches the agent", () => {
 		if (!loaded.async) throw new Error("the http engine answers asynchronously");
 		clock += CEDAR_READ_BACK_INTERVAL_MS;
 		await loaded.isAuthorized(request(), NEVER_ABORTS);
-		// Behind the answer, not before it: the two race to the agent.
-		// The first GET is boot's; the second, behind the answer — the two race to the agent.
+		// The first GET is boot's; the second runs behind the answer, and races it to the agent.
 		await vi.waitFor(() =>
 			expect(agent.received.map(({ method }) => method).sort()).toEqual([
 				"GET",
@@ -891,7 +890,9 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 		const logged = JSON.stringify((logger.error as ReturnType<typeof vi.fn>).mock.calls);
 		expect(logged).toMatch(/answered from a policy set this verifier did not load/);
 		expect(logged).toMatch(/"foreign":"altered policy set"/);
-		expect(logged).toMatch(/holds policies it did not push/);
+		expect(logged).toMatch(
+			/not the one this verifier pushed — denying until it holds this verifier's again/,
+		);
 	});
 
 	it("refuses requireConfirmedRevision at boot, before anything reaches the agent (#244)", async () => {

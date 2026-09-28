@@ -1143,13 +1143,13 @@ describe("cedarHttpEngine — reading the agent's set back (#286)", () => {
 		const agent = holdingAgent();
 		const loaded = await agent.engine();
 		const calls = holdingCalls(agent);
-		// A token holder rewrites this load's policy; the check finds it and pushes it again.
-		agent.hold([{ id: OURS, content: "forbid(principal, action, resource);" }]);
+		// The agent comes back empty; the check finds it and pushes the set again.
+		agent.hold([]);
 		agent.tick();
 		const outstanding = loaded.isAuthorized(request(), NEVER_ABORTS);
 		await vi.waitFor(() => expect(agent.of("PUT")).toHaveLength(2));
 		await vi.waitFor(() => expect(calls.waiting()).toBe(1));
-		// Restored: answering again. The call that was out was evaluated by the rewrite.
+		// Restored: answering again. The call that was out was evaluated by the empty set.
 		calls.release();
 		expect(await outstanding).toMatchObject({ foreign: { why: "altered policy set" } });
 		// A call made after the push is answered as usual.
@@ -1208,13 +1208,44 @@ describe("cedarHttpEngine — reading the agent's set back (#286)", () => {
 		expect(get.url).toBe(`${AGENT}/v1/policies`);
 		expect(headersOf(get).authorization).toBe("agent-token");
 		expect(get.init.redirect).toBe("manual");
+		// From the agent, never a copy a hop kept.
+		expect(get.init.cache).toBe("no-store");
 	});
 
-	it("refuses every answer, without asking the agent, while its set is not the one pushed — and pushes this load's again", async () => {
+	it("refuses every answer, without asking the agent, while its set is not the one pushed — and never pushes over a rewrite", async () => {
 		const agent = holdingAgent();
 		const loaded = await agent.engine();
+		const original = agent.held();
 		// A token holder rewrites this load's policy under its own id.
 		agent.hold([{ id: OURS, content: "forbid(principal, action, resource);" }]);
+		agent.tick();
+		await loaded.isAuthorized(request(), NEVER_ABORTS);
+		await vi.waitFor(async () =>
+			expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toEqual({
+				decision: "deny",
+				reason: [],
+				errors: [],
+				foreign: { why: "altered policy set" },
+			}),
+		);
+		const asked = agent.of("POST").length;
+		await loaded.isAuthorized(request(), NEVER_ABORTS);
+		// Nothing of the request went to an agent holding another set…
+		expect(agent.of("POST")).toHaveLength(asked);
+		// …and nothing was pushed over it: a rewrite is for an operator to see.
+		expect(agent.of("PUT")).toHaveLength(1);
+		// Restored by someone else, it answers again.
+		agent.hold(original);
+		agent.tick();
+		await vi.waitFor(async () =>
+			expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).not.toHaveProperty("foreign"),
+		);
+	});
+
+	it("refuses while it pushes this load's set into an empty agent, and answers once the push lands", async () => {
+		const agent = holdingAgent();
+		const loaded = await agent.engine();
+		agent.hold([]);
 		let pushed!: () => void;
 		agent.putWith(
 			(body) =>
