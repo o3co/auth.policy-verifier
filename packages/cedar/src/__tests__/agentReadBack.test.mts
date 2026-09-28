@@ -554,6 +554,18 @@ describe("createAgentReadBack — an agent that answers calls but will not be re
 });
 
 describe("createAgentReadBack — when a check cannot finish", () => {
+	it("says what a read failed with, whatever was thrown", async () => {
+		const { check, log, tick } = readBack(() => {
+			throw "a plain string";
+		});
+		tick();
+		await check.poll();
+		expect(log.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ reason: "a plain string" }),
+			expect.stringMatching(/could not reach/),
+		);
+	});
+
 	it("says an agent it cannot reach once per streak, not at every check", async () => {
 		let reachable = false;
 		const { check, log, tick } = readBack(() => {

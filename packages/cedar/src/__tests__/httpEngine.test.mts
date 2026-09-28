@@ -1196,6 +1196,41 @@ describe("cedarHttpEngine — reading the agent's set back (#286)", () => {
 		},
 	);
 
+	it("says a push whose answer broke off for what it is", async () => {
+		const agent = holdingAgent();
+		agent.putWith(
+			async () =>
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(new TextEncoder().encode("["));
+							controller.error(new Error("socket hang up"));
+						},
+					}),
+					{ status: 200 },
+				),
+		);
+		await expect(agent.engine()).rejects.toThrow(
+			/broke off its answer to the policy load: socket hang up/,
+		);
+	});
+
+	it("refuses when a read's second try gets no answer within the deadline", async () => {
+		const agent = holdingAgent();
+		const loaded = await agent.engine({}, 50);
+		let tries = 0;
+		agent.getWith(
+			(init) =>
+				new Promise((_resolve, reject) => {
+					tries++;
+					// The first fails outright; the second hangs until the deadline.
+					if (tries === 1) reject(refused());
+					else init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+				}),
+		);
+		await refusedAs(agent, loaded, "unverifiable policy set");
+	});
+
 	it("says a push whose answer did not arrive within the deadline for what it is", async () => {
 		const agent = holdingAgent();
 		// As the platform's fetch does: the body errors once the signal aborts.
