@@ -423,8 +423,9 @@ describe("cedarHttpEngine over the wire — a failed call rejects with CedarEngi
 		await expect(failure).rejects.toThrow(CedarEngineError);
 		await expect(failure).rejects.toThrow(
 			new RegExp(
-				// Refused, or reset: boot's read-back leaves a kept-alive connection the stop cuts.
-				`cedar engine at ${gone.origin}/v1/is_authorized is unreachable: fetch failed: (connect ECONNREFUSED 127\\.0\\.0\\.1:\\d+|read ECONNRESET)$`,
+				// Refused, or cut: boot's read-back leaves a kept-alive connection the
+				// stop cuts, reported by the platform as a reset or a closed socket.
+				`cedar engine at ${gone.origin}/v1/is_authorized is unreachable: fetch failed: (connect ECONNREFUSED 127\\.0\\.0\\.1:\\d+|read ECONNRESET|UND_ERR_SOCKET: other side closed)$`,
 			),
 		);
 	});

@@ -177,7 +177,9 @@ export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBac
 	let generation = 0;
 	/** The refusal the last generation began with. */
 	let begun: ReadBackRefusal | undefined;
-	let answeredSinceCheck = false;
+	/** Authorization calls answered, and how many of them a check has accounted for. */
+	let answeredCalls = 0;
+	let countedCalls = 0;
 	/** One line per streak, not per check: while refusing, checks come every second. */
 	let unreachableStreak = false;
 	let pushFailing = false;
@@ -199,18 +201,19 @@ export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBac
 		refusal = undefined;
 		pushFailing = false;
 		// A call answered during the push is no news of the set it answers from now.
-		answeredSinceCheck = false;
+		countedCalls = answeredCalls;
 		logger[level](fields, message);
 	}
 
 	async function check(): Promise<void> {
+		const answeredBefore = answeredCalls;
 		let answer: AgentSetRead;
 		try {
 			answer = await read();
 		} catch (cause) {
 			// Calls answered since the last check, during this read included.
-			const answered = answeredSinceCheck;
-			answeredSinceCheck = false;
+			const answered = answeredCalls > countedCalls;
+			countedCalls = answeredCalls;
 			// Already refusing: a read that cannot reach the agent says nothing
 			// new, and a call that was out before the refusal is no news either.
 			if (refusal !== undefined) return;
@@ -233,7 +236,9 @@ export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBac
 			}
 			return;
 		}
-		answeredSinceCheck = false;
+		// The read answered for the calls before it began; those answered while
+		// it was out are for the next check to account for.
+		countedCalls = answeredBefore;
 		unreachableStreak = false;
 		if ("unverifiable" in answer) {
 			refuse(
@@ -260,6 +265,9 @@ export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBac
 				: "cedar agent's policy set is not the one this verifier pushed — denying until it holds this verifier's again",
 		);
 		if (!restorable) return;
+		// Read, then push: two calls, and cedar-agent has no conditional PUT. A
+		// verifier that pushes into the empty agent between them is overwritten —
+		// the README says so, and why one agent per verifier.
 		try {
 			baseline = await push();
 		} catch (cause) {
@@ -286,7 +294,7 @@ export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBac
 			return refusal ?? (generation !== since ? begun : undefined);
 		},
 		answered() {
-			answeredSinceCheck = true;
+			answeredCalls++;
 		},
 		poll() {
 			if (running !== undefined) return running;

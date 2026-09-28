@@ -479,6 +479,25 @@ describe("createAgentReadBack — an agent that answers calls but will not be re
 		expect(check.generation).toBe(generation);
 	});
 
+	it("keeps a call answered while a read that succeeded was out for the next check — a later read that cannot connect is refused", async () => {
+		const reading = deferred<AgentSetRead>();
+		let answer: () => AgentSetRead | Promise<AgentSetRead> = () => reading.promise;
+		const { check, tick } = readBack(() => answer());
+		tick();
+		const checking = check.poll();
+		// Answered while the read is out; the read then shows the set as pushed.
+		check.answered();
+		reading.resolve(holding(PUSHED));
+		await checking;
+		expect(check.refusal).toBeUndefined();
+		answer = () => {
+			throw new Error("connect ECONNREFUSED 127.0.0.1:8180");
+		};
+		tick();
+		await check.poll();
+		expect(check.refusal).toBe("unverifiable policy set");
+	});
+
 	it("forgets a call answered while it pushed into an empty agent — no news of the set it answers from after", async () => {
 		const pushing = deferred<AgentPolicySet>();
 		let answer: () => AgentSetRead = () => holding(new Map());
