@@ -211,7 +211,7 @@ HTTP/1.1 403 Forbidden
 `"evaluation": { "status": "completed", "revision": "sha256:…", "determiningPolicies": ["30-forbid-contractors"] }` が載ります。`decision` ログイベントには
 常に `evaluations` として並びます。response に載るのは `verify.evaluationInResponse = "include"` のときだけで、
 既定の `"omit"` では上の response はキー単位でそのままです。evaluation は、受理される token の保持者全員に
-「policy set がいつ変わったか」「deny が engine の失敗だったか」「どんな policy があるか」を伝えるからです。各形の意味と、アプリケーションが
+「policy set がいつ変わったか」「deny が engine の失敗だったか」「各 answer をどの policy が決めたか」を伝えるからです。各形の意味と、アプリケーションが
 保存すべきものは、ルート README の [どの policy revision が決めたかを記録する](../../README.ja.md#どの-policy-revision-が決めたかを記録する) にあります。
 
 **レスポンス — 不正なリクエスト**

@@ -48,10 +48,11 @@ engine: read Security before upgrading a deployment that runs one.
   that share an agent now deny every request a policy would permit, and log
   it, where 0.14.0 answered from whichever set was pushed last: during a
   rolling deploy, and after a rollback until the survivors restart. During the
-  0.14.0 → 0.15.0 rollout itself, a 0.14.0 replica that starts against an agent
-  0.15.0 replicas share pushes unmarked ids, and the 0.15.0 replicas refuse
-  every answer until they restart. If an agent must be shared, upgrade every
-  replica together and restart them after any rollback. A log filter on the
+  0.14.0 → 0.15.0 rollout itself, when a 0.14.0 replica starts against an
+  agent that 0.15.0 replicas share, it pushes unmarked ids, and the 0.15.0
+  replicas refuse every answer until they restart. If an agent must be
+  shared, upgrade every replica together and restart them after any rollback.
+  A log filter on the
   agent's own policy ids needs the marked form.
 
 - **BREAKING (Cedar `http` engine, boot and service): the engine reads the
@@ -155,7 +156,7 @@ engine: read Security before upgrading a deployment that runs one.
   (`30-forbid-contractors`, `20-rules#2`); `[]` when no policy applied. They
   are on the `decision` log line always, and in the response only under
   `verify.evaluationInResponse = "include"`, which now also tells any holder
-  of an accepted token which policies are there. At most
+  of an accepted token which policies determined each answer. At most
   `DETERMINING_POLICIES_MAX` (32) ids, each 1 to `POLICY_ID_MAX_LENGTH` (128)
   UTF-16 units of well-formed text outside `POLICY_ID_FORBIDDEN_RANGES` —
   about 4 KiB of ASCII per evaluation, at most 12 KiB of UTF-8. A rule names
