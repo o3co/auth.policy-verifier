@@ -415,7 +415,7 @@ describe("cedarHttpEngine over the wire — a failed call rejects with CedarEngi
 		await expect(failure).rejects.toThrow(expected);
 	});
 
-	it("an agent that went away after boot — connection refused", async () => {
+	it("an agent that went away after boot — refused, or its kept-alive connection cut", async () => {
 		const gone = await FakeCedarAgent.start();
 		const loaded = await loadedAgainst(gone.origin);
 		await gone.stop();

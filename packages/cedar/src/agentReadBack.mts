@@ -200,7 +200,9 @@ export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBac
 	function lift(message: string, level: "info" | "warn"): void {
 		refusal = undefined;
 		pushFailing = false;
-		// A call answered during the push is no news of the set it answers from now.
+		// No call is made while refusing: every call answered since the refusal
+		// began was made before it, and its answer was refused as late. None is
+		// the next check's to weigh — not even those a read then left counted.
 		countedCalls = answeredCalls;
 		logger[level](fields, message);
 	}

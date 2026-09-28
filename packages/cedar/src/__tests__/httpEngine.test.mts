@@ -1058,12 +1058,36 @@ describe("cedarHttpEngine — reading the agent's set back (#286)", () => {
 	it("keeps answering when the agent cannot be reached on a read-back, and has answered no call since the last — its answers fail on their own, and 'altered' would misname it", async () => {
 		const agent = holdingAgent();
 		const loaded = await agent.engine();
+		// The agent is down: calls fail as reads do.
 		agent.getWith(async () => {
 			throw refused();
 		});
+		agent.postWith(async () => {
+			throw refused();
+		});
+		agent.tick();
+		await expect(loaded.isAuthorized(request(), NEVER_ABORTS)).rejects.toThrow(/is unreachable/);
+		// Boot's read, then this check's two tries: the second on a fresh connection.
+		await vi.waitFor(() => expect(agent.of("GET")).toHaveLength(3));
+		// Not refused as a set it cannot see: the call fails, and says why.
+		await expect(loaded.isAuthorized(request(), NEVER_ABORTS)).rejects.toThrow(/is unreachable/);
+	});
+
+	it("reads once more on a fresh connection when the first fails outright — an idle connection a hop closed is not an agent hiding its set", async () => {
+		const agent = holdingAgent();
+		const loaded = await agent.engine();
+		await loaded.isAuthorized(request(), NEVER_ABORTS);
+		let failed = false;
+		agent.getWith(async () => {
+			if (failed) return json(200, agent.held());
+			failed = true;
+			throw Object.assign(new TypeError("fetch failed"), {
+				cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }),
+			});
+		});
 		agent.tick();
 		await loaded.isAuthorized(request(), NEVER_ABORTS);
-		await vi.waitFor(() => expect(agent.of("GET")).toHaveLength(2));
+		await vi.waitFor(() => expect(agent.of("GET")).toHaveLength(3));
 		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).not.toHaveProperty("foreign");
 	});
 

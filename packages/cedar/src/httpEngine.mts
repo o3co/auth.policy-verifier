@@ -669,9 +669,8 @@ async function readAgentSet(
 	timeoutMs: number,
 ): Promise<AgentSetRead> {
 	const signal = AbortSignal.timeout(timeoutMs);
-	let response: Response;
-	try {
-		response = await doFetch(`${endpoint}${POLICIES_PATH}`, {
+	const get = () =>
+		doFetch(`${endpoint}${POLICIES_PATH}`, {
 			method: "GET",
 			headers,
 			signal,
@@ -681,11 +680,23 @@ async function readAgentSet(
 			// make the read-back pass whatever the agent now holds.
 			cache: "no-store",
 		});
-	} catch (cause) {
+	let response: Response;
+	try {
+		response = await get();
+	} catch {
 		if (signal.aborted) return { unverifiable: `no answer within ${timeoutMs} ms` };
-		throw new CedarEngineError(
-			`cedar engine at ${endpoint} is unreachable: ${describeFailure(cause)}`,
-		);
+		// A kept-alive connection the agent or a hop closed while idle fails the
+		// first write. The read is idempotent — unlike an authorization call, it
+		// carries nothing of a request — so once more, on a fresh connection,
+		// before an agent that answers calls is taken to be hiding its set.
+		try {
+			response = await get();
+		} catch (cause) {
+			if (signal.aborted) return { unverifiable: `no answer within ${timeoutMs} ms` };
+			throw new CedarEngineError(
+				`cedar engine at ${endpoint} is unreachable: ${describeFailure(cause)}`,
+			);
+		}
 	}
 	if (!response.ok) {
 		// The status says the read failed; its body is only what it says about it.

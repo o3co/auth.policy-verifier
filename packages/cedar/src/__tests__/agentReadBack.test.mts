@@ -479,6 +479,22 @@ describe("createAgentReadBack — an agent that answers calls but will not be re
 		expect(check.generation).toBe(generation);
 	});
 
+	it("accounts a call answered before a read that succeeded to that read — a later read that cannot connect, with no call since, is an agent down", async () => {
+		let answer: () => AgentSetRead = () => holding(PUSHED);
+		const { check, log, tick } = readBack(() => answer());
+		check.answered();
+		tick();
+		await check.poll();
+		expect(check.refusal).toBeUndefined();
+		answer = () => {
+			throw new Error("connect ECONNREFUSED 127.0.0.1:8180");
+		};
+		tick();
+		await check.poll();
+		expect(check.refusal).toBeUndefined();
+		expect(messages(log.warn)).toEqual([expect.stringMatching(/could not reach the cedar agent/)]);
+	});
+
 	it("keeps a call answered while a read that succeeded was out for the next check — a later read that cannot connect is refused", async () => {
 		const reading = deferred<AgentSetRead>();
 		let answer: () => AgentSetRead | Promise<AgentSetRead> = () => reading.promise;
