@@ -1395,9 +1395,15 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 				async.answer = () => ({ decision: "deny", reason: [], errors: [], foreign: { why } });
 				const rule = await collectAsync({ policies: PERMIT_ALL }, logger);
 				expect((await askAsync(rule, attrsWith())).passed).toBe(false);
+				// Said as a read-back refusal: no answer of the agent's is used, and an
+				// agent gone down is refused this way too — not an answer from another set.
 				expect(error).toHaveBeenCalledWith(
 					expect.objectContaining({ foreign: why }),
-					"cedar engine answered from a policy set this verifier did not load — denying",
+					"cedar engine's agent does not hold, or does not show, the policy set this verifier loaded — denying without using its answer",
+				);
+				expect(error).not.toHaveBeenCalledWith(
+					expect.anything(),
+					expect.stringMatching(/answered from a policy set/),
 				);
 			},
 		);

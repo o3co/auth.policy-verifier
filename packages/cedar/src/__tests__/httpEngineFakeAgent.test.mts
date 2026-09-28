@@ -857,7 +857,7 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 		},
 	);
 
-	it("denies, and logs as a set this verifier did not load, while the agent holds another's (#286)", async () => {
+	it("denies, and logs a read-back refusal, while the agent holds another's set (#286)", async () => {
 		let clock = 0;
 		// A name of its own each run: the registry is process-wide and refuses a
 		// second engine under a taken name, as a retry would register.
@@ -889,7 +889,7 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 			),
 		);
 		const logged = JSON.stringify((logger.error as ReturnType<typeof vi.fn>).mock.calls);
-		expect(logged).toMatch(/answered from a policy set this verifier did not load/);
+		expect(logged).toMatch(/does not hold, or does not show, the policy set this verifier loaded/);
 		expect(logged).toMatch(/"foreign":"altered policy set"/);
 		expect(logged).toMatch(
 			/not the one this verifier pushed — denying until it holds this verifier's again/,

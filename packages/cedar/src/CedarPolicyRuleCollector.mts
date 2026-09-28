@@ -432,6 +432,17 @@ const FOREIGN_LABELS: Readonly<Record<ForeignAnswer["why"], true>> = {
 };
 
 /**
+ * The labels of an engine's read-back (#286): its agent was found holding
+ * another set, or not showing one — whether or not it had been asked, no
+ * answer of it is used. Logged on a line of their own, so an agent gone down
+ * does not read as an answer from someone else's set.
+ */
+const READ_BACK_REFUSALS: ReadonlySet<string> = new Set<ForeignAnswer["why"]>([
+	"altered policy set",
+	"unverifiable policy set",
+]);
+
+/**
  * What of a `foreign` mark the log carries: the engine's fixed label and a
  * 16-hex mark, each only in that shape — never text the evaluator chose.
  */
@@ -578,9 +589,16 @@ function buildRule(bound: BoundRule): AnyRule {
 			// was not it (#283): the answer names policies it never loaded. The
 			// same fault as a foreign revision, logged the same way — before the
 			// errors are looked at, so it is never an evaluation error to silence.
+			// A refusal from the engine's read-back (#286) is said as that: no
+			// answer of the agent's is used, whether or not it was asked, and an
+			// agent gone down is refused this way too — so it must not read as an
+			// answer from someone else's set.
+			const detail = foreignDetail(answer.foreign);
 			faultLogger.error(
-				{ ...identity, loadedRevision, ...foreignDetail(answer.foreign) },
-				"cedar engine answered from a policy set this verifier did not load — denying",
+				{ ...identity, loadedRevision, ...detail },
+				detail.foreign !== undefined && READ_BACK_REFUSALS.has(detail.foreign)
+					? "cedar engine's agent does not hold, or does not show, the policy set this verifier loaded — denying without using its answer"
+					: "cedar engine answered from a policy set this verifier did not load — denying",
 			);
 			return { passed: false, evaluation: unconfirmed("failed") };
 		}
