@@ -52,8 +52,7 @@ engine: read Security before upgrading a deployment that runs one.
   agent that 0.15.0 replicas share, it pushes unmarked ids, and the 0.15.0
   replicas refuse every answer until they restart. If an agent must be
   shared, upgrade every replica together and restart them after any rollback.
-  A log filter on the
-  agent's own policy ids needs the marked form.
+  A log filter on the agent's own policy ids needs the marked form.
 
 - **BREAKING (Cedar `http` engine, boot and service): the engine reads the
   agent's set back and refuses while it is not the one pushed** (`.cedar`,
