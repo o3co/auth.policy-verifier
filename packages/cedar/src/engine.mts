@@ -67,7 +67,8 @@ export interface CedarDecision {
 	 * the policies that determined it, and in each evaluation error: an id it
 	 * never pushed under this load's mark is somebody else's policy; and one
 	 * that reads the agent's set back finds it changed (#286). The
-	 * collector fails it closed and logs it as it logs a foreign revision.
+	 * collector fails it closed and logs it on the fault logger — an answer's
+	 * label as it logs a foreign revision, a read-back's on a line of its own.
 	 * `reason` is then empty: another set's ids are not this verifier's to
 	 * record. Any value other than `undefined` or `null` is taken as foreign —
 	 * `false` included — so a malformed mark fails closed.

@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.server
 
-最終更新: 2026-09-24
+最終更新: 2026-09-28
 
 auth.policy-verifier 向けの Express HTTP サーバーです。モジュールと設定からアプリケーションを組み立てる `createApp` と、認可判定を行う `POST /verify` / `POST /verify/batch` を提供します。
 
@@ -207,11 +207,11 @@ HTTP/1.1 403 Forbidden
 `code` / `message` は従来どおり最初に失敗したグループから取ります。
 
 **`evaluation`（#244）。** policy evaluator を背後に持つ Rule（`CedarPolicyRuleCollector`）は、answer ごとに
-「evaluator が走ったか」「どの policy revision を評価したか」を報告し、その outcome には `passed` の隣に
-`"evaluation": { "status": "completed", "revision": "sha256:…" }` が載ります。`decision` ログイベントには
+「evaluator が走ったか」「どの policy revision を評価したか」と、完了した answer ではそれを決めた policy (#199) を報告し、その outcome には `passed` の隣に
+`"evaluation": { "status": "completed", "revision": "sha256:…", "determiningPolicies": ["30-forbid-contractors"] }` が載ります。`decision` ログイベントには
 常に `evaluations` として並びます。response に載るのは `verify.evaluationInResponse = "include"` のときだけで、
 既定の `"omit"` では上の response はキー単位でそのままです。evaluation は、受理される token の保持者全員に
-「policy set がいつ変わったか」「deny が engine の失敗だったか」を伝えるからです。各形の意味と、アプリケーションが
+「policy set がいつ変わったか」「deny が engine の失敗だったか」「各 answer をどの policy が決めたか」を伝えるからです。各形の意味と、アプリケーションが
 保存すべきものは、ルート README の [どの policy revision が決めたかを記録する](../../README.ja.md#どの-policy-revision-が決めたかを記録する) にあります。
 
 **レスポンス — 不正なリクエスト**

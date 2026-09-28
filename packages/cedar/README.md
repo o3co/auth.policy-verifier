@@ -279,6 +279,7 @@ tells them apart:
 | Cedar answered with evaluation errors | `failed` | `revision`, when the engine vouches for it |
 | the call itself failed | `failed` | `revision: null` — nothing answered, so nothing vouched |
 | the engine named a revision other than the one loaded, or policies it never loaded (#283) | `failed` | `revision: null` — it answered from a policy set this verifier did not load |
+| the engine's read-back found its agent's set changed, or could not compare it (#286) | `failed` | `revision: null` — no answer of the agent's is used; logged as `…does not hold, or does not show, the policy set this verifier loaded…`, with `foreign` |
 | the engine named no revision, under `requireConfirmedRevision` | `failed` | `revision: null` |
 | the request could not be built from the attributes, so Cedar was not asked | `not_invoked` | no revision key at all |
 
@@ -351,9 +352,9 @@ ways that happens:
 
 Such an answer is failed and logged like a foreign revision, never read. The
 log line carries the reason, `foreign: "unknown policy"` or `"unreadable
-policy"` — or, from the read-back below, `"altered policy set"` or
-`"unverifiable policy set"`. When the id is one of this load's own policies
-under another mark, the line also carries that mark. That is the same corpus loaded from other
+policy"`; the read-back's `"altered policy set"` and `"unverifiable policy
+set"` go on a line of their own (below). When the id is one of this load's
+own policies under another mark, the line also carries that mark. That is the same corpus loaded from other
 files, such as a rolling deploy sharing the agent, and the mark tells an operator
 which revision took it. It is what the other side spelled, unverified. An id
 that merely ends in `@` and 16 hex, as a file may be named, gives no mark;
@@ -417,7 +418,11 @@ empty.
     every second.
 - **While the set differs**, every answer is refused without asking the
   agent, and nothing of the request reaches it. The answer is failed and
-  logged like any foreign one, as `foreign: "altered policy set"`. The engine
+  logged on the fault logger as `cedar engine's agent does not hold, or does
+  not show, the policy set this verifier loaded — denying without using its
+  answer`, with `foreign: "altered policy set"` — its own line, not the one
+  for an answer from another set: no answer of the agent's is used, whether it
+  was asked before the refusal began or not. The engine
   logs the difference once, in counts (`changed`, `missing`, `added`), never
   ids or policy text. An answer to a call that was out when a check found the
   difference is refused too, even if the set was restored before the answer
@@ -711,7 +716,10 @@ docker compose --profile cedar up --build
   non-2xx, breaks off its answer, answers more than `maxAnswerBytes`, or
   answers something that is not a decision
   makes the rule fail and log (`cedar authorization call failed`); the log
-  line's `reason` names the cause, as the boot error does. An agent that is up but has
+  line's `reason` names the cause, as the boot error does. Once a read-back
+  has found an agent that answered calls unreachable for a read of its set,
+  answers are refused without calling it, and logged as a read-back refusal
+  instead (#286). An agent that is up but has
   lost the policy set — restarted, or recreated by `docker compose up` — is
   not a failure an answer shows: it answers "deny, no determining policy" to
   every request, which is why `onNoDeterminingPolicy = "abstain"` is refused

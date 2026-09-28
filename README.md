@@ -1,6 +1,6 @@
 # auth.policy-verifier
 
-Last updated: 2026-09-26
+Last updated: 2026-09-28
 
 [![CI](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth.policy-verifier.core)](https://www.npmjs.com/package/@o3co/auth.policy-verifier.core)
@@ -431,8 +431,9 @@ verify {
   batchConcurrency     = ${?VERIFY_BATCH_CONCURRENCY}
 
   # Whether the decision RESPONSE carries each policy-backed rule's evaluation —
-  # its status and the policy revision it evaluated (#244). The `decision` log
-  # event always does. See "Recording which policy revision decided" below.
+  # its status, the policy revision it evaluated (#244) and, for a completed
+  # answer, the policies that determined it (#199). The `decision` log event
+  # always does. See "Recording which policy revision decided" below.
   evaluationInResponse = "omit" # or "include"
   evaluationInResponse = ${?VERIFY_EVALUATION_IN_RESPONSE}
 }
@@ -609,7 +610,7 @@ One structured event per decision, named `decision`, at `info`:
 
 `satisfiedBy` replaces `deniedBy` on an allow, naming the rule that satisfied each group. A `POST /verify/batch` of N entries emits N lines sharing one `requestId`. `durationMs` is time in the pipelines and the evaluator, not the HTTP round trip.
 
-When a rule reports the evaluation behind its answer (#244) — `packages/cedar` does — the line also carries `evaluations`, one entry per reporting rule in evaluation order: `{"ruleType":"cedar","code":"cedar_deny","passed":false,"evaluation":{"status":"completed","revision":"sha256:9f2c…"}}`. `passed` is there because a group is an OR: a rule that forbade, followed by one that permitted, is an allow whose line lists both, and the first is the revision that *refused*. See [Recording which policy revision decided](#recording-which-policy-revision-decided). A deployment with no policy-backed rule writes the line it always wrote.
+When a rule reports the evaluation behind its answer (#244) — `packages/cedar` does — the line also carries `evaluations`, one entry per reporting rule in evaluation order: `{"ruleType":"cedar","code":"cedar_deny","passed":false,"evaluation":{"status":"completed","revision":"sha256:9f2c…","determiningPolicies":["30-forbid-contractors"]}}` — a completed Cedar answer names the policies that determined it (#199). `passed` is there because a group is an OR: a rule that forbade, followed by one that permitted, is an allow whose line lists both, and the first is the revision that *refused*. See [Recording which policy revision decided](#recording-which-policy-revision-decided). A deployment with no policy-backed rule writes the line it always wrote.
 
 `logging.level` (`LOG_LEVEL`) is the switch — the line is `info`, so `warn` turns the stream off, and there is no second flag. A deny is a normal outcome for a decision point rather than a fault, so it is not routed to `warn`: that would let any caller manufacture warn-level noise. Alert on the metrics, read the log for the "why".
 
@@ -657,7 +658,7 @@ After a policy update or during a rolling deployment, a decision's result and ru
 
 ```json
 "evaluation": { "status": "completed", "revision": "sha256:9f2c…",
-                "determiningPolicies": ["20-forbid-contractors"] }
+                "determiningPolicies": ["30-forbid-contractors"] }
 ```
 
 `determiningPolicies` is a set of policy ids as the rule's producer names them, and an empty list when no policy applied. It holds at most `DETERMINING_POLICIES_MAX` (32) ids, each 1–128 UTF-16 units of well-formed text with none of `POLICY_ID_FORBIDDEN_RANGES` — the controls, and the characters that break, reorder or hide in a line (`POLICY_ID_MAX_LENGTH`). Whatever the evaluator named beyond that — past the bound, or an id outside that shape — is counted in `determiningPoliciesOmitted`, present only when it is not zero. Beside `"revision": null` the ids are as unconfirmed as the revision: they name policies in whatever set the evaluator held. A `failed` or `not_invoked` evaluation carries neither key, because no policy decided that answer; neither does a rule that does not know — **absence means the rule did not say**. A rule names them through its reporter (`report.boundDeterminingPolicies`), which applies the bounds of the core that checks them and is absent on a core that predates them — so a package that reports them can be upgraded ahead of the server: under an older one it reports the rest without them, rather than fail. The deny `code` is unchanged: the ids sit beside it, not instead of it.
@@ -666,7 +667,7 @@ The Cedar rule group reports them, named for the policy files (`30-forbid-contra
 
 The reference sits on the outcome of the rule that reported it, so a decision made under two policy sources carries two revisions, never one standing for both. In a batch every entry carries its own; a batch does not pin a snapshot, and needs none while the policy set is loaded once at boot — each replica reports the snapshot *it* evaluated, which during a rolling deployment is how two answers to the same request are told apart. A deny made without a policy evaluation — the router's `collector_timeout`, `rule_timeout` and `attribute_conflict`, and the evaluator's `no_applicable_rule` — has no groups and so no evaluation, and a request refused before evaluation (`400`, `401`) is not a decision at all: neither is ever recorded as decided by a policy.
 
-**Where it goes.** The `decision` event always carries it, as `evaluations` — the determining policies included. The response carries it only under `verify.evaluationInResponse = "include"` (default `"omit"`, under which the response is key-for-key what it was). The opt-in is the deployment's rather than the caller's — unlike XACML's `ReturnPolicyIdList` or OPA's `?provenance=true` — because it tells any holder of an accepted token when the policy set changed, whether a denial was a policy's or the engine failing, and which policies are there. Pair it with [`http.callerAuth`](#configuration) where that matters.
+**Where it goes.** The `decision` event always carries it, as `evaluations` — the determining policies included. The response carries it only under `verify.evaluationInResponse = "include"` (default `"omit"`, under which the response is key-for-key what it was). The opt-in is the deployment's rather than the caller's — unlike XACML's `ReturnPolicyIdList` or OPA's `?provenance=true` — because it tells any holder of an accepted token when the policy set changed, whether a denial was a policy's or the engine failing, and which policies determined each answer. Pair it with [`http.callerAuth`](#configuration) where that matters.
 
 **What an application stores.** For each operation it authorizes or refuses: the `decision`, the deny `code`, the `reason` (which carries each `evaluation`), and the `x-request-id` it sent. The PDP's `decision` event carries the same `requestId` and the same `evaluations`, so the two records join on the id — and, for a batch, on the id plus the entry's `resource` and `action`. A client that *requires* a revision treats an allow whose satisfying outcomes carry no string `revision` as not established, and decides for itself what to do with it; on the PDP side, `requireConfirmedRevision = true` on the Cedar collector turns such an answer into a deny before it leaves (and refuses at boot an engine that could never satisfy it).
 
