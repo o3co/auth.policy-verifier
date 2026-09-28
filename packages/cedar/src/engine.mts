@@ -90,7 +90,8 @@ export interface ForeignAnswer {
 	 * the one it loaded (#286); it answers so without asking, until it is.
 	 * `"unverifiable policy set"`: the agent answered reading its set back in a
 	 * way that cannot be compared — an error, a set past the answer bound,
-	 * something else, nothing in time (#286); answered so until it can be.
+	 * something else, nothing in time — or answered calls while a read of its
+	 * set could not connect (#286); answered so until it can be read.
 	 */
 	readonly why:
 		| "unknown policy"

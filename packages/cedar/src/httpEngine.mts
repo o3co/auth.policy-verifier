@@ -92,6 +92,12 @@ export interface CedarHttpEngineOptions {
 	 * does not stop the checks.
 	 */
 	now?: () => number;
+	/**
+	 * Draws the wait between read-backs (#286), from half of
+	 * `readBackIntervalMs` to all of it: a number in [0, 1). Defaults to
+	 * `Math.random`.
+	 */
+	random?: () => number;
 }
 
 /** What one authorization call sends: cedar-agent's `AuthorizationCall`, entities inline. */
@@ -180,6 +186,7 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 	const loadTimeoutMs = options.loadTimeoutMs ?? CEDAR_LOAD_TIMEOUT_MS;
 	const retryMs = options.retryMs ?? LOAD_RETRY_MS;
 	const now = options.now ?? (() => performance.now());
+	const random = options.random ?? Math.random;
 	/** Endpoints already holding a policy set from this engine — one collector per agent. */
 	const loaded = new Map<string, string>();
 
@@ -269,6 +276,7 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 				pushed,
 				intervalMs: readBackIntervalMs,
 				now,
+				random,
 				read,
 				push,
 				logger: context.logger,

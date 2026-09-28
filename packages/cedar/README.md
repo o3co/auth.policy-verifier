@@ -396,8 +396,10 @@ empty.
   refuses from its next check. The read gets a load deadline of its own, so
   boot can now take up to twice that.
 - **When.** Behind an answer, never before one: when an answer is asked for
-  and `readBackIntervalMs` has passed since the last check, one `GET` starts,
-  and the answer goes ahead on what is already known. This is detection with a
+  and the wait since the last check has passed, one `GET` starts, and the
+  answer goes ahead on what is already known. The wait is drawn anew after
+  each check, from half of `readBackIntervalMs` to all of it, so when the next
+  check falls cannot be read off the last one. This is detection with a
   window, up to an interval plus the check's own time, not proof per answer —
   up to about two intervals when only a read of the set is blocked, since a
   read that cannot reach the agent counts against it only once a call was
@@ -431,6 +433,13 @@ empty.
   load's set (a replica sharing the agent) would be overwritten back and
   forth. Answers stay refused until the agent holds this load's set again,
   however it gets there; restarting the verifier pushes it.
+- **What it does not do is stop a token holder.** Whoever holds the agent's
+  token can lift a refusal themselves: put the set back as it was, or empty
+  the agent so it is pushed again. They can then change it again after the
+  next check, where the drawn wait makes their timing a guess, not a
+  certainty. The read-back detects, logs and refuses what it sees, and heals
+  a restarted agent. The token is the boundary, as it is for the marks above,
+  and why the engine still does not declare `confirmsRevision`.
 - **An agent that answers, but not with a set that can be compared** —
   an error, a set larger than `maxAnswerBytes`, something that is not a set,
   an answer broken off or not whole within the load deadline — refuses every

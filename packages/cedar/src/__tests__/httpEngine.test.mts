@@ -964,6 +964,8 @@ describe("cedarHttpEngine — reading the agent's set back (#286)", () => {
 						fetch: doFetch,
 						env: AGENT_ENV,
 						now: () => clock,
+						// The whole interval each wait: the checks fall where the tests tick.
+						random: () => 1,
 						loadTimeoutMs,
 					}),
 					source,

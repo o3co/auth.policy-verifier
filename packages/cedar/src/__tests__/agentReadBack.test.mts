@@ -60,6 +60,8 @@ const holding = (held: AgentPolicySet): AgentSetRead => ({ held });
 function readBack(
 	answer: () => AgentSetRead | Promise<AgentSetRead>,
 	push: () => Promise<AgentPolicySet> = async () => PUSHED,
+	// The whole interval, unless a test draws otherwise.
+	random: () => number = () => 1,
 ) {
 	let clock = 1_000_000;
 	const log = logger();
@@ -69,6 +71,7 @@ function readBack(
 		pushed: PUSHED,
 		intervalMs: 30_000,
 		now: () => clock,
+		random,
 		read,
 		push: pushed,
 		logger: log,
@@ -142,6 +145,24 @@ describe("createAgentReadBack — when it reads the agent's set back", () => {
 		expect(check.poll()).toBeUndefined();
 	});
 
+	it("draws each wait anew, from half the interval to all of it — when the next check falls cannot be read off the last", async () => {
+		const draws = [0, 0.5, 0.999];
+		const { check, read, tick } = readBack(
+			() => holding(PUSHED),
+			undefined,
+			() => draws.shift() ?? 1,
+		);
+		// Drawn at boot: 0 — half the interval.
+		for (const wait of [15_000, 22_500, 29_985]) {
+			const reads = read.mock.calls.length;
+			tick(wait - 1);
+			expect(check.poll()).toBeUndefined();
+			tick(1);
+			await check.poll();
+			expect(read).toHaveBeenCalledTimes(reads + 1);
+		}
+	});
+
 	it("runs one check at a time, however many answers ask while it is out", async () => {
 		const reading = deferred<AgentSetRead>();
 		const { check, read, tick } = readBack(() => reading.promise);
@@ -199,35 +220,32 @@ describe("createAgentReadBack — what it makes of the set the agent holds", () 
 		expect(push).not.toHaveBeenCalled();
 	});
 
-	it.each([["nothing — an agent restarted", new Map(), { changed: 0, missing: 2, added: 0 }]])(
-		"refuses while the agent holds %s, and pushes this load's set again",
-		async (_label, held, difference) => {
-			const pushing = deferred<AgentPolicySet>();
-			const { check, push, log, tick } = readBack(
-				() => holding(held),
-				() => pushing.promise,
-			);
-			tick();
-			const checking = check.poll();
-			await vi.waitFor(() => expect(push).toHaveBeenCalledTimes(1));
-			// Refused from the moment the difference is seen until the push lands.
-			expect(check.refusal).toBe("altered policy set");
-			expect(log.error).toHaveBeenCalledWith(
-				expect.objectContaining({
-					endpoint: "http://127.0.0.1:8180",
-					...difference,
-					restorable: true,
-				}),
-				expect.stringMatching(
-					/holds no policy set — restarted or recreated — denying, and pushing/,
-				),
-			);
-			pushing.resolve(PUSHED);
-			await checking;
-			expect(check.refusal).toBeUndefined();
-			expect(messages(log.warn)).toEqual([expect.stringMatching(/pushed .* again — answering/)]);
-		},
-	);
+	it("refuses while the agent holds nothing — restarted — and pushes this load's set into it", async () => {
+		const pushing = deferred<AgentPolicySet>();
+		const { check, push, log, tick } = readBack(
+			() => holding(new Map()),
+			() => pushing.promise,
+		);
+		tick();
+		const checking = check.poll();
+		await vi.waitFor(() => expect(push).toHaveBeenCalledTimes(1));
+		// Refused from the moment the difference is seen until the push lands.
+		expect(check.refusal).toBe("altered policy set");
+		expect(log.error).toHaveBeenCalledWith(
+			expect.objectContaining({
+				endpoint: "http://127.0.0.1:8180",
+				changed: 0,
+				missing: 2,
+				added: 0,
+				restorable: true,
+			}),
+			expect.stringMatching(/holds no policy set — restarted or recreated — denying, and pushing/),
+		);
+		pushing.resolve(PUSHED);
+		await checking;
+		expect(check.refusal).toBeUndefined();
+		expect(messages(log.warn)).toEqual([expect.stringMatching(/pushed .* again — answering/)]);
+	});
 
 	it.each([
 		// Rewritten, deleted, added: what an attack looks like. Pushing over it
@@ -441,6 +459,29 @@ describe("createAgentReadBack — an agent that answers calls but will not be re
 		await check.poll();
 		expect(check.refusal).toBe("altered policy set");
 		expect(check.generation).toBe(generation);
+	});
+
+	it("forgets a call answered while it pushed into an empty agent — no news of the set it answers from after", async () => {
+		const pushing = deferred<AgentPolicySet>();
+		let answer: () => AgentSetRead = () => holding(new Map());
+		const { check, push, tick } = readBack(
+			() => answer(),
+			() => pushing.promise,
+		);
+		tick();
+		const checking = check.poll();
+		await vi.waitFor(() => expect(push).toHaveBeenCalledTimes(1));
+		// A call out before the refusal, answered while the push is out.
+		check.answered();
+		pushing.resolve(PUSHED);
+		await checking;
+		expect(check.refusal).toBeUndefined();
+		answer = () => {
+			throw new Error("connect ECONNREFUSED 127.0.0.1:8180");
+		};
+		tick();
+		await check.poll();
+		expect(check.refusal).toBeUndefined();
 	});
 
 	it("keeps what it knew when neither a call nor a read reaches the agent — each answered call counts once", async () => {

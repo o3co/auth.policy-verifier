@@ -20,11 +20,13 @@
  * agent, is a difference.
  *
  * A check runs behind an answer, never before it: when an answer is asked for
- * and an interval has passed since the last check, one starts, and the answer
- * goes ahead on what is known. So this is detection with a window — up to an
- * interval, and the check's own time — not proof per answer; the engine still
- * does not confirm a revision. A verifier that answers nothing checks nothing,
- * and has nothing to protect.
+ * and the wait since the last check has passed, one starts, and the answer
+ * goes ahead on what is known. The wait is drawn anew after each check, from
+ * half the interval to all of it, so when the next check falls cannot be read
+ * off the last one. So this is detection with a window — up to an interval,
+ * and the check's own time — not proof per answer; the engine still does not
+ * confirm a revision. A verifier that answers nothing checks nothing, and has
+ * nothing to protect.
  *
  * Every answer is refused while the agent was last seen holding a set other
  * than this load's — or answering its set in a way that cannot be compared:
@@ -48,12 +50,18 @@
  * The set is pushed again only into an agent that holds nothing — one that
  * restarted, or was recreated: an accident, and a harmless one, since an
  * empty set denies everything. A set that holds anything else is not written
- * over. A policy of this load's rewritten or deleted, one added, marked or
- * not — that is what an attack looks like, and pushing over it would hand a
- * token holder a fresh window each time they changed it again; another load's
- * set, from a replica sharing the agent, would be overwritten back and forth.
- * It stays refused until the agent holds this load's set again, however it
- * gets there — a restart of the verifier pushes it.
+ * over: a policy of this load's rewritten or deleted, one added, marked or
+ * not, is what tampering looks like, and is left for an operator to see;
+ * another load's set, from a replica sharing the agent, would be overwritten
+ * back and forth. It stays refused until the agent holds this load's set
+ * again, however it gets there — a restart of the verifier pushes it.
+ *
+ * What this does not do is stop someone holding the agent's token. They can
+ * lift a refusal themselves — put the set back as it was, or empty the agent
+ * so it is pushed again — and change it again after the next check, which is
+ * where the drawn wait above makes their timing a guess. The read-back
+ * detects, logs and refuses what it sees, and heals a restarted agent; the
+ * token is the boundary, as it is for #283's marks.
  */
 
 import type { Logger } from "@o3co/auth.policy-verifier.core";
@@ -104,8 +112,10 @@ export function sameAgentSet(a: AgentPolicySet, b: AgentPolicySet): boolean {
 export interface AgentReadBackOptions {
 	/** The agent's copy of this load's set, as it answered the push. */
 	pushed: AgentPolicySet;
-	/** How long after a check the next is due, while answers are not refused. */
+	/** The most a check waits for the next, while answers are not refused; it waits from half this. */
 	intervalMs: number;
+	/** Draws each wait within the interval: a number in [0, 1). */
+	random: () => number;
 	/** The clock the interval is measured on: monotonic. */
 	now: () => number;
 	/** Reads the agent's set; rejects only when the connection failed outright. */
@@ -143,7 +153,10 @@ export interface AgentReadBack {
 }
 
 export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBack {
-	const { intervalMs, now, read, push, logger, fields } = options;
+	const { intervalMs, now, random, read, push, logger, fields } = options;
+	/** From half the interval to all of it, drawn anew after every check. */
+	const drawWait = () => intervalMs * (0.5 + 0.5 * Math.min(Math.max(random(), 0), 1));
+	let wait = drawWait();
 	let baseline = options.pushed;
 	let refusal: ReadBackRefusal | undefined;
 	let generation = 0;
@@ -170,6 +183,8 @@ export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBac
 	function lift(message: string, level: "info" | "warn"): void {
 		refusal = undefined;
 		pushFailing = false;
+		// A call answered during the push is no news of the set it answers from now.
+		answeredSinceCheck = false;
 		logger[level](fields, message);
 	}
 
@@ -260,7 +275,7 @@ export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBac
 		},
 		poll() {
 			if (running !== undefined) return running;
-			const due = refusal === undefined ? intervalMs : Math.min(intervalMs, recheckMs);
+			const due = refusal === undefined ? wait : Math.min(intervalMs, recheckMs);
 			if (now() - lastCheck < due) return undefined;
 			lastCheck = now();
 			const refusing = refusal !== undefined;
@@ -285,6 +300,7 @@ export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBac
 						refusing && refusal !== undefined
 							? Math.min(recheckMs * 2, intervalMs)
 							: RECHECK_WHILE_REFUSING_MS;
+					wait = drawWait();
 					running = undefined;
 				});
 			return running;
