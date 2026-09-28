@@ -1,6 +1,6 @@
 # cedar/src
 
-Last updated: 2026-09-26
+Last updated: 2026-09-28
 
 The source of [`@o3co/auth.policy-verifier.cedar`](../README.md). The package README says
 what the package does and how to configure it; this page says how the source is divided and
@@ -67,7 +67,8 @@ The source falls into four parts, separated by what changes them:
   decision records that name (#199) —
   [`__tests__/policySource.test.mts`](__tests__/policySource.test.mts).
 - The only I/O here is reading the policy set, at boot (`policySource.mts`), and the `http`
-  engine's calls to its agent.
+  engine's calls to its agent — its read-back (`agentReadBack.mts`) included, which runs behind
+  answers and never on a timer.
 - An evaluation error, a failed call, a request that could not be built or an answer from a
   revision other than the one loaded is a logged deny, never an abstention — the answer
   table in `CedarPolicyRuleCollector.mts`,
@@ -78,6 +79,12 @@ The source falls into four parts, separated by what changes them:
 - The `http` engine pushes each policy under its load's mark (`agentPolicyId`), and an answer
   naming any policy it did not push is `foreign`: failed and logged like a foreign revision,
   never read (#283) — [`__tests__/httpEngine.test.mts`](__tests__/httpEngine.test.mts).
+- The `http` engine reads the agent's set back behind answers and compares it with the agent's
+  copy of the push (`agentReadBack.mts`, #286); boot reads it back once and refuses to start
+  unless it is that copy. While it differs, or the agent answers it in a way that cannot be
+  compared, every answer is `foreign` without asking the agent. The set is pushed again only
+  into an agent that holds nothing (a restart) —
+  [`__tests__/agentReadBack.test.mts`](__tests__/agentReadBack.test.mts).
 - The `http` engine follows no redirect (#270). A 3xx to an authorization call is a
   `CedarEngineError` — a deny with a `failed` evaluation — and a 3xx to the policy load fails
   boot, so a decision and a policy set only ever come from the configured endpoint.

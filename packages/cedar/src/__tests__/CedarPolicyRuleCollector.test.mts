@@ -1388,6 +1388,20 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 			);
 		});
 
+		it.each(["altered policy set", "unverifiable policy set"] as const)(
+			"logs the read-back's label %j as the reason (#286)",
+			async (why) => {
+				const { logger, error } = fakeLogger();
+				async.answer = () => ({ decision: "deny", reason: [], errors: [], foreign: { why } });
+				const rule = await collectAsync({ policies: PERMIT_ALL }, logger);
+				expect((await askAsync(rule, attrsWith())).passed).toBe(false);
+				expect(error).toHaveBeenCalledWith(
+					expect.objectContaining({ foreign: why }),
+					"cedar engine answered from a policy set this verifier did not load — denying",
+				);
+			},
+		);
+
 		it("logs only the engine's fixed label and a 16-hex mark — never other text it put there", async () => {
 			const { logger, error } = fakeLogger();
 			async.answer = () =>

@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.cedar
 
-Last updated: 2026-09-26
+Last updated: 2026-09-28
 
 Co-resident [Cedar](https://www.cedarpolicy.com/) policy evaluation for
 [auth.policy-verifier](https://github.com/o3co/auth.policy-verifier), as an
@@ -351,8 +351,9 @@ ways that happens:
 
 Such an answer is failed and logged like a foreign revision, never read. The
 log line carries the reason, `foreign: "unknown policy"` or `"unreadable
-policy"`. When the id is one of this load's own policies under another mark,
-the line also carries that mark. That is the same corpus loaded from other
+policy"` — or, from the read-back below, `"altered policy set"` or
+`"unverifiable policy set"`. When the id is one of this load's own policies
+under another mark, the line also carries that mark. That is the same corpus loaded from other
 files, such as a rolling deploy sharing the agent, and the mark tells an operator
 which revision took it. It is what the other side spelled, unverified. An id
 that merely ends in `@` and 16 hex, as a file may be named, gives no mark;
@@ -371,9 +372,92 @@ policy under its own marked id, or delete one, and the answers still read as
 this load's; or push an id that embeds one of this load's, whose errors then
 read as this load's. No check of an answer can see that. The agent's token is the
 boundary (see [Running out of process](#running-out-of-process)), and that is
-why the engine still does not declare `confirmsRevision`. Reading the agent's
-set back and comparing it with what was pushed would catch it between answers,
-though not within one; that is not done today.
+why the engine still does not declare `confirmsRevision`. What an answer
+cannot show, the agent's own copy of the set does: the engine reads it back
+and compares it with what it pushed (next), which catches a rewrite or a
+deletion between answers, though not within one.
+
+**Reading the set back (#286).** `PUT /v1/policies` answers with the agent's
+own copy of the set: each id, and each policy as the agent's Cedar re-printed
+it. A later `GET /v1/policies` answers the same bytes while nothing has changed
+the set (verified against cedar-agent 0.2.2). The engine keeps the copy the
+push was answered with, and reads the agent's set back to compare it by id. A
+policy rewritten, deleted or added shows, and so does an agent that came back
+empty.
+- **At boot** the set is read back once, right after the push, and must be
+  the copy the push was answered with. Otherwise the verifier refuses to
+  start, naming what it got. This checks, on your own corpus, that the agent
+  answers its set the same way twice. It also checks that `GET /v1/policies`
+  reaches the agent with the token: a proxy that passes `PUT` and `POST` but
+  not `GET` fails boot here instead of refusing every answer in service. On
+  an agent another verifier also pushes to, the one whose push lands between
+  the other's `PUT` and `GET` makes the other fail boot; otherwise the later
+  boot overwrites the earlier verifier's set, and it is that one which
+  refuses from its next check. The read gets a load deadline of its own, so
+  boot can now take up to twice that.
+- **When.** Behind an answer, never before one: when an answer is asked for
+  and the wait since the last check has passed, one `GET` starts, and the
+  answer goes ahead on what is already known. The wait is drawn anew after
+  each check, from half of `readBackIntervalMs` to all of it: the next check
+  falls no sooner than half an interval after the last, and past that, when
+  is a guess. This is detection with a
+  window, up to an interval plus the check's own time, not proof per answer —
+  up to about two intervals when only a read of the set is blocked, since a
+  read that cannot reach the agent counts against it only once a call was
+  answered since the check before. A verifier that answers nothing checks
+  nothing, and has nothing to protect.
+  - The default interval is 30 s, exported as `CEDAR_READ_BACK_INTERVAL_MS`.
+  - Set it with `readBackIntervalMs` in the collector's entry: a whole number
+    of milliseconds from 1000 to 3600000, written as `maxAnswerBytes` is.
+  - Each check costs one `GET` of the whole set, bounded by
+    `maxAnswerBytes`, as the agent's answer to the push is at boot.
+  - While answers are refused, the set is read again after a second, then
+    two, doubling up to the interval, so answers resume soon after the set is
+    this load's again, and a set that stays refused is not read and parsed
+    every second.
+- **While the set differs**, every answer is refused without asking the
+  agent, and nothing of the request reaches it. The answer is failed and
+  logged like any foreign one, as `foreign: "altered policy set"`. The engine
+  logs the difference once, in counts (`changed`, `missing`, `added`), never
+  ids or policy text. An answer to a call that was out when a check found the
+  difference is refused too, even if the set was restored before the answer
+  arrived: that set may have answered it.
+- **Pushed again only into an agent that holds nothing:** one that restarted
+  or was recreated — an accident, and a harmless one, since an empty set
+  denies everything. Answers resume once the push lands, so such an agent
+  heals within an interval, where it used to deny everything until the
+  verifier restarted.
+- **Never pushed over anything else.** A policy of this load's rewritten or
+  deleted, or one added, marked or not (the mark is public), is what
+  tampering looks like, and is left for an operator to see. Another load's
+  set (a replica sharing the agent) would be overwritten back and forth. Answers stay refused until the agent holds this load's set again,
+  however it gets there; restarting the verifier pushes it.
+- **What it does not do is stop a token holder.** Whoever holds the agent's
+  token can lift a refusal themselves: put the set back as it was, or empty
+  the agent so it is pushed again. They can then change it again after the
+  next check. One who sees a check knows the next is at least half an
+  interval away, so a change made and undone within that goes unseen for
+  certain; only past it is their timing a guess. The read-back detects, logs
+  and refuses what it sees, and heals a restarted agent. The token is the boundary, as it is for the marks above,
+  and why the engine still does not declare `confirmsRevision`.
+- **An agent that answers, but not with a set that can be compared** —
+  an error, a set larger than `maxAnswerBytes`, something that is not a set,
+  an answer broken off or not whole within the load deadline — refuses every
+  answer too, as `foreign: "unverifiable policy set"`, and nothing is pushed
+  over what it cannot see. Otherwise a token holder could turn the read-back
+  off by padding the set past the bound, or a hop that cuts large answers off
+  could. So is a read that gets no answer in time. The same goes for an agent
+  that answered an authorization call since the last check, but cannot be
+  connected to for a read of its set: the read is blocked, or the agent went
+  down since the call. Either way its set is not seen. Only a connection that
+  fails outright (refused, reset, not found) while no call is answered either
+  leaves things as they were: the agent is down, its answers fail on their
+  own saying why, and "altered" would misname the fault. That is logged once
+  per streak, and tried again at the next check.
+- **Reading and pushing are two calls,** and cedar-agent has no conditional
+  `PUT`. A replica of another revision that pushes into the empty agent
+  between them is overwritten, and refuses until it is restarted. This is one
+  more reason to run one agent per replica (below).
 
 **`requireConfirmedRevision = true`** is for a deployment whose audit has to
 name the policies behind every decision: an answer nobody vouched for becomes a
@@ -591,8 +675,11 @@ docker compose --profile cedar up --build
   - **During a rolling deploy:** once the first new replica pushes, every old
     replica sharing the agent denies every request a policy would permit, and
     logs it.
-  - **After a rollback:** the survivors keep denying until they restart,
-    because nothing re-pushes after boot.
+  - **After a rollback:** the survivors keep denying until they restart. The
+    read-back (#286) pushes a set again only into an empty agent, never over
+    another load's. Its read and its push are two calls, though, so an agent
+    that restarts mid-deploy can be taken back by whichever replica checks
+    first.
 
   Run an agent per replica, as the template's sidecar does, and restart
   replicas after a rollback. Replicas with identical files push identical ids
@@ -610,7 +697,9 @@ docker compose --profile cedar up --build
   variable for it. A longer answer is refused rather than held for the rule
   deadline, since a process out of memory takes every route down. An answer's
   determining-policy and error lists grow with the policy set, so a large set
-  can answer honestly past 1 MiB: the refusal says so, and the fix is a higher
+  can answer honestly past 1 MiB, and the agent's copy of the whole set, read
+  at boot and at each read-back (#286), grows with it too: the refusal says
+  so, and the fix is a higher
   `maxAnswerBytes` in the collector's entry — a whole number of bytes from
   1 KiB to 256 MiB, written as a number (`maxAnswerBytes = 4194304`) or a
   numeric string, which is what a HOCON env substitution of a variable of your
@@ -624,10 +713,11 @@ docker compose --profile cedar up --build
   makes the rule fail and log (`cedar authorization call failed`); the log
   line's `reason` names the cause, as the boot error does. An agent that is up but has
   lost the policy set — restarted, or recreated by `docker compose up` — is
-  not a failure it can see: it answers "deny, no determining policy" to every
-  request, which is why `onNoDeterminingPolicy = "abstain"` is refused with
-  this engine; under the default it denies everything until the verifier is
-  restarted and pushes the set again. Each call runs under the server's
+  not a failure an answer shows: it answers "deny, no determining policy" to
+  every request, which is why `onNoDeterminingPolicy = "abstain"` is refused
+  with this engine. Under the default it denies until the read-back finds the
+  agent empty and pushes the set again, within `readBackIntervalMs` of the
+  next answer asked for (#286). Each call runs under the server's
   `verify.ruleTimeoutMs` (default 2000 ms), answering `rule_timeout` when the
   agent is slower than that.
 - **Two Cedar versions.** cedar-agent 0.2.2 evaluates with cedar-policy

@@ -26,6 +26,7 @@ import {
 	type CedarDecision,
 	type CedarEngine,
 	CedarEngineError,
+	type ForeignAnswer,
 	type LoadedCedarPolicySet,
 	registeredCedarEngines,
 	resolveCedarEngine,
@@ -72,9 +73,20 @@ export interface CedarPolicyRuleCollectorConfig {
 	 * longer answer is refused — a deny. Absent, 1 MiB
 	 * (`CEDAR_ANSWER_MAX_BYTES`). A whole number of bytes from 1 KiB to
 	 * 256 MiB, as a number or a numeric string (what a HOCON env substitution
-	 * delivers); anything else refuses to start.
+	 * delivers); anything else refuses to start. It bounds the agent's copy of
+	 * the whole policy set too — its answer to the push at boot, and each
+	 * read-back (#286) — so a set the agent re-prints past it fails boot.
 	 */
 	maxAnswerBytes?: number | string;
+	/**
+	 * HTTP engine only (#286): the most one read-back of the agent's policy set
+	 * waits for the next, while answers are not refused — each wait is drawn
+	 * from half of it to all of it. Absent, 30 s
+	 * (`CEDAR_READ_BACK_INTERVAL_MS`). A whole number of milliseconds from 1000
+	 * to 3600000, as a number or a numeric string; anything else refuses to
+	 * start.
+	 */
+	readBackIntervalMs?: number | string;
 	/** Rule group the Cedar decision joins AND-evaluation as. Default `"cedar"`. */
 	ruleType?: string;
 	/**
@@ -408,6 +420,18 @@ interface BoundRule {
 }
 
 /**
+ * The labels an engine may give a foreign answer (`ForeignAnswer.why`) — the
+ * only text of it logged. A record, so a label added to the type and not here
+ * fails to compile rather than going unlogged.
+ */
+const FOREIGN_LABELS: Readonly<Record<ForeignAnswer["why"], true>> = {
+	"unknown policy": true,
+	"unreadable policy": true,
+	"altered policy set": true,
+	"unverifiable policy set": true,
+};
+
+/**
  * What of a `foreign` mark the log carries: the engine's fixed label and a
  * 16-hex mark, each only in that shape — never text the evaluator chose.
  */
@@ -417,7 +441,7 @@ function foreignDetail(foreign: unknown): { foreign?: string; mark?: string } {
 		mark?: unknown;
 	};
 	return {
-		...(why === "unknown policy" || why === "unreadable policy" ? { foreign: why } : {}),
+		...(typeof why === "string" && Object.hasOwn(FOREIGN_LABELS, why) ? { foreign: why } : {}),
 		...(typeof mark === "string" && /^[0-9a-f]{16}$/.test(mark) ? { mark } : {}),
 	};
 }

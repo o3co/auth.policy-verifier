@@ -34,6 +34,7 @@ export {
 	CEDAR_ENDPOINT_ENV,
 	CEDAR_HTTP_ENGINE_NAME,
 	CEDAR_LOAD_TIMEOUT_MS,
+	CEDAR_READ_BACK_INTERVAL_MS,
 	cedarHttpEngine,
 	createCedarHttpEngine,
 	entityUidLiteral,

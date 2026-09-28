@@ -65,7 +65,8 @@ export interface CedarDecision {
 	 * set it loaded, though it cannot vouch for one that did (#283) — the http
 	 * engine, whose agent names no revision but answers with policy ids — of
 	 * the policies that determined it, and in each evaluation error: an id it
-	 * never pushed under this load's mark is somebody else's policy. The
+	 * never pushed under this load's mark is somebody else's policy; and one
+	 * that reads the agent's set back finds it changed (#286). The
 	 * collector fails it closed and logs it as it logs a foreign revision.
 	 * `reason` is then empty: another set's ids are not this verifier's to
 	 * record. Any value other than `undefined` or `null` is taken as foreign —
@@ -85,8 +86,18 @@ export interface ForeignAnswer {
 	 * or one an evaluation error names.
 	 * `"unreadable policy"`: an item that is no policy id at all — an agent
 	 * reporting in a shape this engine does not read, which it cannot attribute.
+	 * `"altered policy set"`: the engine read the set back and found it is not
+	 * the one it loaded (#286); it answers so without asking, until it is.
+	 * `"unverifiable policy set"`: the agent answered reading its set back in a
+	 * way that cannot be compared — an error, a set past the answer bound,
+	 * something else, nothing in time — or answered calls while a read of its
+	 * set could not connect (#286); answered so until it can be read.
 	 */
-	readonly why: "unknown policy" | "unreadable policy";
+	readonly why:
+		| "unknown policy"
+		| "unreadable policy"
+		| "altered policy set"
+		| "unverifiable policy set";
 	/**
 	 * Another load's mark, 16 hex — given only when the id is one of this
 	 * load's own policy ids under a different mark: the same corpus, loaded
