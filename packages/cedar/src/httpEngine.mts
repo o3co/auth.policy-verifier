@@ -251,7 +251,7 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 							: "GET /v1/policies answers another set";
 				if (unlike !== undefined) {
 					throw new CedarEngineError(
-						`cedar engine at ${endpoint} does not read back the policy set from ${source.description} as it accepted it (${unlike}) — the engine reads the set back to tell a changed one (#286), so GET /v1/policies must reach the agent with the token and answer the set it holds`,
+						`cedar engine at ${endpoint} does not read back the policy set from ${source.description} as it accepted it (${unlike}) — the engine reads the set back to tell a changed one (#286), so GET /v1/policies must reach the agent with the token and answer the set it holds; an agent another verifier also pushes to answers that one's set — run one agent per verifier`,
 					);
 				}
 			} catch (cause) {
@@ -287,6 +287,7 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 					// The agent holds a set other than this load's, or would not show it:
 					// nothing it answers is this load's, and nothing of the request goes to it.
 					if (readBack.refusal !== undefined) return refused(readBack.refusal);
+					const generation = readBack.generation;
 					const call: AgentAuthorizationCall = {
 						principal: entityUidLiteral(request.principal),
 						action: entityUidLiteral(request.action),
@@ -315,9 +316,11 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 						parseJson(await answerText(response, signal, endpoint, maxAnswerBytes)),
 						endpoint,
 					);
-					// A check that finished while the call was out found the set is not
-					// this load's: the answer came from it.
-					if (readBack.refusal !== undefined) return refused(readBack.refusal);
+					readBack.answered();
+					// A refusal that began while the call was out — even one lifted since,
+					// the set restored — may have answered it.
+					const late = readBack.refusedSince(generation);
+					if (late !== undefined) return refused(late);
 					return ownDecision(answer, ownIds, ownMark);
 				},
 			};
@@ -632,11 +635,12 @@ async function pushedCopy(
 
 /**
  * The set the agent holds: `GET /v1/policies`, bounded as an answer is, within
- * the load's deadline (#286). What the agent answered and cannot be compared —
- * an error, a set past the bound, something that is not a set, nothing within
- * the deadline — comes back as `unverifiable`, and refuses answers: a token
- * holder who can grow the set could otherwise turn the read-back off. Only an
- * agent that cannot be reached, or that breaks the connection off, rejects.
+ * the load's deadline (#286). Once an answer has begun to arrive, whatever
+ * keeps it from being compared — an error status, a set past the bound,
+ * something that is not a set, a body broken off or not whole in time — comes
+ * back as `unverifiable`, and refuses answers: a token holder who can grow the
+ * set, or a hop that cuts large answers off, could otherwise turn the
+ * read-back off. Only a read that got no answer at all rejects.
  */
 async function readAgentSet(
 	doFetch: typeof fetch,
@@ -662,18 +666,24 @@ async function readAgentSet(
 		);
 	}
 	if (!response.ok) {
-		return {
-			unverifiable: `answered ${response.status}: ${await errorDescription(response, maxAnswerBytes, signal)}`,
-		};
+		// The status says the read failed; its body is only what it says about it.
+		let description: string;
+		try {
+			description = await errorDescription(response, maxAnswerBytes, signal);
+		} catch {
+			description = "its description not whole in time";
+		}
+		return { unverifiable: `answered ${response.status}: ${description}` };
 	}
 	let text: string | typeof OVER_BOUND;
 	try {
 		text = await boundedText(response, maxAnswerBytes);
 	} catch (cause) {
-		if (signal.aborted) return { unverifiable: `no whole answer within ${timeoutMs} ms` };
-		throw new CedarEngineError(
-			`cedar engine at ${endpoint} broke off its policy set: ${describeFailure(cause)}`,
-		);
+		return {
+			unverifiable: signal.aborted
+				? `no whole answer within ${timeoutMs} ms`
+				: `an answer broken off: ${describeFailure(cause)}`,
+		};
 	}
 	if (text === OVER_BOUND) {
 		return { unverifiable: `a policy set of more than ${byteSize(maxAnswerBytes)}` };

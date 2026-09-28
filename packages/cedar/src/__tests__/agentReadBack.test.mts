@@ -154,16 +154,37 @@ describe("createAgentReadBack — when it reads the agent's set back", () => {
 		expect(read).toHaveBeenCalledTimes(1);
 	});
 
-	it("reads again every second while it refuses, not every interval — answers resume as soon as they can", async () => {
+	it("reads again a second after it begins to refuse, then backs off, doubling up to the interval", async () => {
 		const { check, read, tick } = readBack(() => ({ unverifiable: "answered 503" }));
 		tick();
 		await check.poll();
 		expect(check.refusal).toBe("unverifiable policy set");
-		tick(999);
-		expect(check.poll()).toBeUndefined();
-		tick(1);
+		for (const wait of [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000]) {
+			const reads = read.mock.calls.length;
+			tick(wait - 1);
+			expect(check.poll()).toBeUndefined();
+			tick(1);
+			await check.poll();
+			expect(read).toHaveBeenCalledTimes(reads + 1);
+		}
+	});
+
+	it("reads a second after a refusal of another kind begins — the back-off is per refusal", async () => {
+		let answer: AgentSetRead = { unverifiable: "answered 503" };
+		const { check, read, tick } = readBack(() => answer);
+		tick();
 		await check.poll();
-		expect(read).toHaveBeenCalledTimes(2);
+		tick(1_000);
+		await check.poll();
+		// Backed off to 2 s; now the agent shows a set, changed.
+		answer = holding(new Map([...PUSHED, ["evil", "p"]]));
+		tick(2_000);
+		await check.poll();
+		expect(check.refusal).toBe("altered policy set");
+		const reads = read.mock.calls.length;
+		tick(1_000);
+		await check.poll();
+		expect(read).toHaveBeenCalledTimes(reads + 1);
 	});
 });
 
@@ -330,7 +351,99 @@ describe("createAgentReadBack — an agent that will not show its set", () => {
 	});
 });
 
+describe("createAgentReadBack — calls that were out across a refusal", () => {
+	it("counts each refusal begun, and refuses a call made before one began — though it was lifted since", async () => {
+		const held: AgentPolicySet = new Map([...PUSHED, [`10-permit${MARK}`, "rewritten"]]);
+		const { check, tick } = readBack(() => holding(held));
+		const before = check.generation;
+		expect(check.refusedSince(before)).toBeUndefined();
+		tick();
+		// Found rewritten, pushed again, lifted — all in one check.
+		await check.poll();
+		expect(check.refusal).toBeUndefined();
+		expect(check.generation).toBe(before + 1);
+		expect(check.refusedSince(before)).toBe("altered policy set");
+		// A call made after it is not.
+		expect(check.refusedSince(check.generation)).toBeUndefined();
+	});
+
+	it("refuses a call made while refusing, as that refusal", async () => {
+		const { check, tick } = readBack(() => ({ unverifiable: "answered 503" }));
+		tick();
+		await check.poll();
+		expect(check.refusedSince(check.generation)).toBe("unverifiable policy set");
+	});
+});
+
+describe("createAgentReadBack — an agent that answers calls but will not be read", () => {
+	it("refuses when a read cannot reach an agent that answered a call since the last check", async () => {
+		const { check, log, tick } = readBack(() => {
+			throw new Error("connect ECONNREFUSED 127.0.0.1:8180");
+		});
+		check.answered();
+		tick();
+		await check.poll();
+		expect(check.refusal).toBe("unverifiable policy set");
+		expect(log.error).toHaveBeenCalledWith(
+			expect.objectContaining({ reason: expect.stringMatching(/ECONNREFUSED/) }),
+			expect.stringMatching(
+				/answers authorization calls but its policy set could not be read back/,
+			),
+		);
+	});
+
+	it("keeps what it knew when neither a call nor a read reaches the agent — each answered call counts once", async () => {
+		const { check, tick } = readBack(() => {
+			throw new Error("connect ECONNREFUSED 127.0.0.1:8180");
+		});
+		check.answered();
+		tick();
+		await check.poll();
+		expect(check.refusal).toBe("unverifiable policy set");
+		// It is refusing, so no call goes out, and none is answered: a read that
+		// cannot reach it now learns nothing, and the refusal it had stands.
+		tick(1_000);
+		await check.poll();
+		expect(check.refusal).toBe("unverifiable policy set");
+	});
+});
+
 describe("createAgentReadBack — when a check cannot finish", () => {
+	it("says an agent it cannot reach once per streak, not at every check", async () => {
+		let reachable = false;
+		const { check, log, tick } = readBack(() => {
+			if (!reachable) throw new Error("connect ECONNREFUSED 127.0.0.1:8180");
+			return holding(PUSHED);
+		});
+		for (let i = 0; i < 3; i++) {
+			tick();
+			await check.poll();
+		}
+		expect(messages(log.warn)).toHaveLength(1);
+		reachable = true;
+		tick();
+		await check.poll();
+		reachable = false;
+		tick();
+		await check.poll();
+		expect(messages(log.warn)).toHaveLength(2);
+	});
+
+	it("says a push again that keeps failing once, and backs off from it", async () => {
+		const { check, log, push, tick } = readBack(
+			() => holding(new Map()),
+			async () => {
+				throw new Error("the agent refused the policy set");
+			},
+		);
+		for (const wait of [30_000, 1_000, 2_000, 4_000]) {
+			tick(wait);
+			await check.poll();
+		}
+		expect(push).toHaveBeenCalledTimes(4);
+		expect(messages(log.error).filter((line) => /could not push/.test(line))).toHaveLength(1);
+	});
+
 	it("keeps what it knew when the agent cannot be reached, says so, and reads again an interval on", async () => {
 		let reachable = false;
 		const { check, read, log, tick } = readBack(() => {

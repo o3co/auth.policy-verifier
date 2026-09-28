@@ -389,7 +389,10 @@ empty.
   start, naming what it got. This checks, on your own corpus, that the agent
   answers its set the same way twice. It also checks that `GET /v1/policies`
   reaches the agent with the token: a proxy that passes `PUT` and `POST` but
-  not `GET` fails boot here instead of refusing every answer in service.
+  not `GET` fails boot here instead of refusing every answer in service. An
+  agent another verifier pushes to fails it too, with the other's set. The
+  read gets a load deadline of its own, so boot can now take up to twice
+  that.
 - **When.** Behind an answer, never before one: when an answer is asked for
   and `readBackIntervalMs` has passed since the last check, one `GET` starts,
   and the answer goes ahead on what is already known. This is detection with a
@@ -400,14 +403,17 @@ empty.
     of milliseconds from 1000 to 3600000, written as `maxAnswerBytes` is.
   - Each check costs one `GET` of the whole set, bounded by
     `maxAnswerBytes`, as the agent's answer to the push is at boot.
-  - While answers are refused, the set is read again every second instead,
-    so they resume as soon as it is this load's again.
+  - While answers are refused, the set is read again after a second, then
+    two, doubling up to the interval, so answers resume soon after the set is
+    this load's again, and a set that stays refused is not read and parsed
+    every second.
 - **While the set differs**, every answer is refused without asking the
   agent, and nothing of the request reaches it. The answer is failed and
   logged like any foreign one, as `foreign: "altered policy set"`. The engine
   logs the difference once, in counts (`changed`, `missing`, `added`), never
   ids or policy text. An answer to a call that was out when a check found the
-  difference is refused too.
+  difference is refused too, even if the set was restored before the answer
+  arrived: that set may have answered it.
 - **Pushed again only when the set is plainly a damaged copy of this load's:**
   nothing in it but this load's own policies, some rewritten or gone, or
   nothing at all. Answers resume once the push lands. So an agent that
@@ -420,13 +426,16 @@ empty.
   refused until the agent holds this load's set again, however it gets there.
 - **An agent that answers, but not with a set that can be compared** —
   an error, a set larger than `maxAnswerBytes`, something that is not a set,
-  or nothing within the load deadline — refuses every answer too, as
-  `foreign: "unverifiable policy set"`, and nothing is pushed over what it
-  cannot see. Otherwise a token holder could turn the read-back off by padding
-  the set past the bound. Only an agent that cannot be reached at all, or
-  that breaks the connection off, leaves things as they were: its answers
-  fail on their own, saying why, and "altered" would misname the fault. That
-  is logged, and tried again an interval later.
+  an answer broken off or not whole within the load deadline — refuses every
+  answer too, as `foreign: "unverifiable policy set"`, and nothing is pushed
+  over what it cannot see. Otherwise a token holder could turn the read-back
+  off by padding the set past the bound, or a hop that cuts large answers off
+  could. The same goes for an agent that answered an authorization call since
+  the last check but cannot be reached for a read of its set: something is
+  blocking the read. Only an agent that neither answers calls nor can be
+  reached leaves things as they were: its answers fail on their own, saying
+  why, and "altered" would misname the fault. That is logged once, and tried
+  again at the next check.
 - **Reading and pushing are two calls,** and cedar-agent has no conditional
   `PUT`. A replica of another revision that pushes between them is
   overwritten. The next check then sees the set, and the other replica

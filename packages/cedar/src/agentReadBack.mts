@@ -28,13 +28,21 @@
  *
  * Every answer is refused while the agent was last seen holding a set other
  * than this load's — or answering its set in a way that cannot be compared:
- * an error, a set past the answer bound, something that is not a set, nothing
- * within the deadline. That the read-back cannot be made to fail is what makes
- * it worth anything: a token holder who pads the set past the bound would
- * otherwise turn it off. Only an agent that cannot be reached at all leaves
- * things as they were — its answers fail on their own, and "altered" would
- * misname the fault. While refusing, the set is read again every second, not
- * every interval, so answers resume as soon as it is this load's again.
+ * an error, a set past the answer bound, something that is not a set, an
+ * answer broken off or not whole within the deadline. That the read-back
+ * cannot be made to fail quietly is what makes it worth anything: a token
+ * holder who pads the set past the bound, or anything in the path that cuts
+ * large answers off, would otherwise turn it off. The one read that leaves
+ * things as they were is an agent that cannot be reached at all, and only
+ * while its authorization calls fail too — its answers then fail on their
+ * own, and "altered" would misname the fault. An agent that answers those
+ * calls but not a read of its set is refusing to show it. While refusing, the
+ * set is read again after a second, then two, doubling up to the interval, so
+ * answers resume soon after the set is this load's again.
+ *
+ * An answer to a call that was out while a refusal began is refused too, even
+ * when the set has been restored by the time it arrives: it may have come
+ * from the set that was found changed.
  *
  * The set is pushed again only when it is plainly a damaged copy of this
  * load's: nothing in it but this load's own policies, some rewritten or gone —
@@ -53,15 +61,15 @@ export type AgentPolicySet = ReadonlyMap<string, string>;
 
 /**
  * What reading the agent's set came to: the set it holds, or why what it
- * answered cannot be compared. Reading rejects only when the agent could not
- * be reached.
+ * answered cannot be compared. Reading rejects only when no answer began to
+ * arrive — the agent, or the connection to it, not there.
  */
 export type AgentSetRead = { readonly held: AgentPolicySet } | { readonly unverifiable: string };
 
 /** Why answers are refused: the read-back's labels for a foreign answer (`ForeignAnswer`). */
 export type ReadBackRefusal = "altered policy set" | "unverifiable policy set";
 
-/** How soon the set is read again while answers are refused. */
+/** How soon the set is read again once answers begin to be refused; it doubles while they stay refused. */
 const RECHECK_WHILE_REFUSING_MS = 1_000;
 
 /**
@@ -97,7 +105,7 @@ export interface AgentReadBackOptions {
 	intervalMs: number;
 	/** The clock the interval is measured on: monotonic. */
 	now: () => number;
-	/** Reads the agent's set; rejects only when the agent cannot be reached. */
+	/** Reads the agent's set; rejects only when no answer began to arrive. */
 	read: () => Promise<AgentSetRead>;
 	/** Pushes this load's set again; resolves with the agent's copy of it. */
 	push: () => Promise<AgentPolicySet>;
@@ -113,6 +121,16 @@ export interface AgentReadBack {
 	 * holding this load's set as pushed.
 	 */
 	readonly refusal: ReadBackRefusal | undefined;
+	/** Counts the refusals begun: taken before a call, for {@link refusedSince} after it. */
+	readonly generation: number;
+	/**
+	 * Why the answer to a call made at `generation` is refused: the refusal now,
+	 * or one that began while the call was out — lifted since, it still may
+	 * have answered it.
+	 */
+	refusedSince(generation: number): ReadBackRefusal | undefined;
+	/** The agent answered an authorization call: it is there, whatever a read of its set meets. */
+	answered(): void;
 	/**
 	 * Starts a check when one is due, in the background: never waits for it,
 	 * and never rejects. Returns the check running — the one started, or one
@@ -125,75 +143,120 @@ export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBac
 	const { intervalMs, now, read, push, logger, fields } = options;
 	let baseline = options.pushed;
 	let refusal: ReadBackRefusal | undefined;
+	let generation = 0;
+	/** The refusal the last generation began with. */
+	let begun: ReadBackRefusal | undefined;
+	let answeredSinceCheck = false;
+	/** One line per streak, not per check: while refusing, checks come every second. */
+	let unreachableStreak = false;
+	let pushFailing = false;
+	let recheckMs = RECHECK_WHILE_REFUSING_MS;
 	let lastCheck = now();
 	let running: Promise<void> | undefined;
 
+	/** Refuses as `why` from now on; a new refusal is a new generation, said once. */
+	function refuse(why: ReadBackRefusal, detail: Record<string, unknown>, message: string): void {
+		if (refusal === why) return;
+		refusal = why;
+		begun = why;
+		generation++;
+		pushFailing = false;
+		logger.error({ ...fields, ...detail }, message);
+	}
+
+	function lift(message: string, level: "info" | "warn"): void {
+		refusal = undefined;
+		pushFailing = false;
+		logger[level](fields, message);
+	}
+
 	async function check(): Promise<void> {
+		const answered = answeredSinceCheck;
+		answeredSinceCheck = false;
 		let answer: AgentSetRead;
 		try {
 			answer = await read();
 		} catch (cause) {
-			// Not reached at all: nothing learned, and what was known stands. Its
-			// answers fail on their own, saying so; "altered" would misname it.
-			logger.warn(
-				{ ...fields, reason: describe(cause) },
-				"could not reach the cedar agent to read its policy set back — checking again after the interval",
-			);
-			return;
-		}
-		if ("unverifiable" in answer) {
-			if (refusal !== "unverifiable policy set") {
-				refusal = "unverifiable policy set";
-				logger.error(
-					{ ...fields, reason: answer.unverifiable },
-					"cedar agent did not answer its policy set in a way that can be compared with the one this verifier pushed — denying until it does",
+			if (answered) {
+				// Its authorization calls are answered; a read of its set is not.
+				refuse(
+					"unverifiable policy set",
+					{ reason: describe(cause) },
+					"cedar agent answers authorization calls but its policy set could not be read back — denying until it can",
+				);
+				return;
+			}
+			// Not reached at all, and not answering calls either: nothing learned.
+			// Its answers fail on their own, saying so; "altered" would misname it.
+			if (!unreachableStreak) {
+				unreachableStreak = true;
+				logger.warn(
+					{ ...fields, reason: describe(cause) },
+					"could not reach the cedar agent to read its policy set back — checking again",
 				);
 			}
+			return;
+		}
+		unreachableStreak = false;
+		if ("unverifiable" in answer) {
+			refuse(
+				"unverifiable policy set",
+				{ reason: answer.unverifiable },
+				"cedar agent did not answer its policy set in a way that can be compared with the one this verifier pushed — denying until it does",
+			);
 			return;
 		}
 		const { held } = answer;
 		if (sameAgentSet(held, baseline)) {
 			if (refusal !== undefined) {
-				refusal = undefined;
-				logger.info(fields, "cedar agent holds this verifier's policy set again — answering");
+				lift("cedar agent holds this verifier's policy set again — answering", "info");
 			}
 			return;
 		}
 		// A damaged copy of this load's set, or none: nothing in it this load did not push.
 		const restorable = [...held.keys()].every((id) => baseline.has(id));
-		if (refusal !== "altered policy set") {
-			refusal = "altered policy set";
-			logger.error(
-				{ ...fields, ...difference(baseline, held), restorable },
-				restorable
-					? "cedar agent's policy set is not the one this verifier pushed — denying, and pushing it again"
-					: "cedar agent's policy set is not the one this verifier pushed, and holds policies it did not push — denying until it holds this verifier's again",
-			);
-		}
+		refuse(
+			"altered policy set",
+			{ ...difference(baseline, held), restorable },
+			restorable
+				? "cedar agent's policy set is not the one this verifier pushed — denying, and pushing it again"
+				: "cedar agent's policy set is not the one this verifier pushed, and holds policies it did not push — denying until it holds this verifier's again",
+		);
 		if (!restorable) return;
 		try {
 			baseline = await push();
 		} catch (cause) {
-			logger.error(
-				{ ...fields, reason: describe(cause) },
-				"could not push the policy set to the cedar agent again — denying until it holds it",
-			);
+			if (!pushFailing) {
+				pushFailing = true;
+				logger.error(
+					{ ...fields, reason: describe(cause) },
+					"could not push the policy set to the cedar agent again — denying until it holds it",
+				);
+			}
 			return;
 		}
-		refusal = undefined;
-		logger.warn(fields, "pushed the policy set to the cedar agent again — answering");
+		lift("pushed the policy set to the cedar agent again — answering", "warn");
 	}
 
 	return {
 		get refusal() {
 			return refusal;
 		},
+		get generation() {
+			return generation;
+		},
+		refusedSince(since) {
+			return refusal ?? (generation !== since ? begun : undefined);
+		},
+		answered() {
+			answeredSinceCheck = true;
+		},
 		poll() {
 			if (running !== undefined) return running;
-			const due =
-				refusal === undefined ? intervalMs : Math.min(intervalMs, RECHECK_WHILE_REFUSING_MS);
+			const due = refusal === undefined ? intervalMs : Math.min(intervalMs, recheckMs);
 			if (now() - lastCheck < due) return undefined;
 			lastCheck = now();
+			const before = { refusal, generation };
 			running = check()
 				// Behind an answer nothing awaits it, so nothing may escape it. What
 				// it knew stands; the fault is said if the log still can say it.
@@ -208,6 +271,12 @@ export function createAgentReadBack(options: AgentReadBackOptions): AgentReadBac
 					}
 				})
 				.finally(() => {
+					// Still refused for the same reason: back off, up to the interval, so
+					// a set that stays refused is not read — and parsed — every second.
+					recheckMs =
+						refusal !== undefined && refusal === before.refusal && generation === before.generation
+							? Math.min(recheckMs * 2, intervalMs)
+							: RECHECK_WHILE_REFUSING_MS;
 					running = undefined;
 				});
 			return running;

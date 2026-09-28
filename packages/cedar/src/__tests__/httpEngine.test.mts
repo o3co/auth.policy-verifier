@@ -1015,6 +1015,20 @@ describe("cedarHttpEngine — reading the agent's set back (#286)", () => {
 		["an error", () => json(503, { description: "busy" })],
 		["a set past maxAnswerBytes", () => json(200, [{ id: OURS, content: "x".repeat(2048) }])],
 		["something that is not a set", () => json(200, { policies: [] })],
+		// Once an answer has begun, a hop that cuts it off is no excuse either.
+		[
+			"an answer broken off",
+			() =>
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(new TextEncoder().encode("[{"));
+							controller.error(new Error("socket hang up"));
+						},
+					}),
+					{ status: 200 },
+				),
+		],
 	])(
 		"refuses while the agent answers reading its set back with %s — a token holder who pads the set cannot turn it off",
 		async (_label, answer) => {
@@ -1039,57 +1053,107 @@ describe("cedarHttpEngine — reading the agent's set back (#286)", () => {
 		await refusedAs(agent, loaded, "unverifiable policy set");
 	});
 
+	it("keeps answering when the agent cannot be reached on a read-back, and has answered no call since the last — its answers fail on their own, and 'altered' would misname it", async () => {
+		const agent = holdingAgent();
+		const loaded = await agent.engine();
+		agent.getWith(async () => {
+			throw refused();
+		});
+		agent.tick();
+		await loaded.isAuthorized(request(), NEVER_ABORTS);
+		await vi.waitFor(() => expect(agent.of("GET")).toHaveLength(2));
+		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).not.toHaveProperty("foreign");
+	});
+
+	it("refuses when the agent answers calls but a read of its set cannot reach it — a hop that blocks GET cannot turn the read-back off", async () => {
+		const agent = holdingAgent();
+		const loaded = await agent.engine();
+		// A call answered since boot: the agent is there.
+		await loaded.isAuthorized(request(), NEVER_ABORTS);
+		agent.getWith(async () => {
+			throw refused();
+		});
+		await refusedAs(agent, loaded, "unverifiable policy set");
+	});
+
 	it.each([
-		[
-			"cannot be reached",
-			async (): Promise<Response> => {
-				throw refused();
-			},
-		],
-		[
-			"breaks its answer off",
-			async () =>
+		["an error whose description does not arrive", 503],
+		["its set, not whole in time", 200],
+	])("refuses while the agent answers reading its set back with %s", async (_label, status) => {
+		const agent = holdingAgent();
+		const loaded = await agent.engine({}, 50);
+		// As the platform's fetch does: the body errors once the signal aborts.
+		agent.getWith(
+			async (init) =>
 				new Response(
 					new ReadableStream({
 						start(controller) {
-							controller.enqueue(new TextEncoder().encode("[{"));
-							controller.error(new Error("socket hang up"));
+							controller.enqueue(new TextEncoder().encode("["));
+							init.signal?.addEventListener("abort", () => controller.error(init.signal?.reason));
 						},
 					}),
-					{ status: 200 },
+					{ status },
 				),
-		],
-	])(
-		"keeps answering when the agent %s on a read-back — its answers fail on their own, and 'altered' would misname it",
-		async (_label, answer) => {
-			const agent = holdingAgent();
-			const loaded = await agent.engine();
-			agent.getWith(answer);
-			agent.tick();
-			await loaded.isAuthorized(request(), NEVER_ABORTS);
-			await vi.waitFor(() => expect(agent.of("GET")).toHaveLength(2));
-			expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).not.toHaveProperty("foreign");
-		},
-	);
+		);
+		await refusedAs(agent, loaded, "unverifiable policy set");
+	});
+
+	/**
+	 * Holds the next authorization call open until `release` — a call out
+	 * across a check — and answers every other at once.
+	 */
+	function holdingCalls(agent: ReturnType<typeof holdingAgent>) {
+		let hold = true;
+		const waiting: Array<() => void> = [];
+		agent.postWith(async () => {
+			if (!hold) return json(200, ALLOW);
+			hold = false;
+			return new Promise<Response>((resolve) => {
+				waiting.push(() => resolve(json(200, ALLOW)));
+			});
+		});
+		return {
+			release: () => {
+				for (const answer of waiting.splice(0)) answer();
+			},
+			waiting: () => waiting.length,
+		};
+	}
 
 	it("refuses the answer to a call that was out when a read-back found the set changed", async () => {
 		const agent = holdingAgent();
 		const loaded = await agent.engine();
-		let answer!: () => void;
-		agent.postWith(
-			() =>
-				new Promise((resolve) => {
-					answer = () => resolve(json(200, ALLOW));
-				}),
-		);
+		const calls = holdingCalls(agent);
 		agent.hold([{ id: "evil", content: "permit(principal, action, resource);" }]);
 		agent.tick();
 		const outstanding = loaded.isAuthorized(request(), NEVER_ABORTS);
-		await vi.waitFor(() => expect(agent.of("GET")).toHaveLength(2));
-		// The check has seen the set changed; now the agent's answer to the call arrives.
-		await new Promise((resolve) => setTimeout(resolve, 0));
-		answer();
+		await vi.waitFor(() => expect(calls.waiting()).toBe(1));
+		// The check has seen the set changed — a new call is refused without asking…
+		await vi.waitFor(async () =>
+			expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).toMatchObject({
+				foreign: { why: "altered policy set" },
+			}),
+		);
+		// …and so is the answer to the one that was out.
+		calls.release();
 		expect(await outstanding).toMatchObject({ foreign: { why: "altered policy set" } });
+	});
+
+	it("refuses the answer to a call that was out across a refusal, though the set was restored before it arrived", async () => {
+		const agent = holdingAgent();
+		const loaded = await agent.engine();
+		const calls = holdingCalls(agent);
+		// A token holder rewrites this load's policy; the check finds it and pushes it again.
+		agent.hold([{ id: OURS, content: "forbid(principal, action, resource);" }]);
+		agent.tick();
+		const outstanding = loaded.isAuthorized(request(), NEVER_ABORTS);
+		await vi.waitFor(() => expect(agent.of("PUT")).toHaveLength(2));
+		await vi.waitFor(() => expect(calls.waiting()).toBe(1));
+		// Restored: answering again. The call that was out was evaluated by the rewrite.
+		calls.release();
+		expect(await outstanding).toMatchObject({ foreign: { why: "altered policy set" } });
+		// A call made after the push is answered as usual.
+		expect(await loaded.isAuthorized(request(), NEVER_ABORTS)).not.toHaveProperty("foreign");
 	});
 
 	it.each([
@@ -1101,7 +1165,7 @@ describe("cedarHttpEngine — reading the agent's set back (#286)", () => {
 			const agent = holdingAgent();
 			agent.getWith(answer);
 			await expect(agent.engine()).rejects.toThrow(
-				/does not read back the policy set from inline policies as it accepted it .* GET \/v1\/policies must reach the agent with the token/,
+				/does not read back the policy set from inline policies as it accepted it .* GET \/v1\/policies must reach the agent with the token .* run one agent per verifier/,
 			);
 		},
 	);
