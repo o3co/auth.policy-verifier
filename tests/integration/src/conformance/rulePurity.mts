@@ -200,11 +200,16 @@ function isRevokedProxyError(error: unknown): boolean {
  * The rule budgets are lifted as far as a timer goes: this suite checks what a
  * rule answers, not how quickly, and an asynchronous rule is held to the same
  * property as `verify` — the answer must come from `attrs` alone.
+ *
+ * `onEmptyRuleSet: "allow"` so that a restricting rule is asked: alone in a
+ * decision under the default it would be denied without being asked. A
+ * granting rule is asked either way.
  */
 async function ask(rule: AnyRule, attrs: ReadonlyAttributes): Promise<Answer> {
 	const decision = await evaluate(attrs as Attributes, [rule], {
 		ruleTimeoutMs: MAX_TIMER_MS,
 		evaluateDeadlineMs: MAX_TIMER_MS,
+		onEmptyRuleSet: "allow",
 	});
 	const [outcome] = decision.reason.groups[0].evaluated;
 	return outcome.evaluation === undefined
