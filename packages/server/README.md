@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.server
 
-Last updated: 2026-09-28
+Last updated: 2026-09-30
 
 Express HTTP server for auth.policy-verifier. Provides `createApp` to assemble the application from modules and config, and `POST /verify` / `POST /verify/batch` for authorization decisions.
 
@@ -125,7 +125,7 @@ The bearer token on `/verify` establishes the **subject** a decision is about. I
 Two settings bound that exposure:
 
 - **`http.hostname` defaults to `127.0.0.1`.** The deployment this project targets is a sidecar — the enforcement layer runs alongside the verifier and reaches it over loopback. Binding all interfaces is an explicit opt-in (`http.hostname = "0.0.0.0"`), which a containerised deployment must set to be reachable at all.
-- **`http.callerAuth.token` authenticates the calling service.** When set, every request to `/verify` and `/verify/batch` must carry that credential verbatim in `http.callerAuth.header` (default `x-caller-token`, deliberately not `Authorization`). The comparison is constant-time, and it runs before the body is parsed and before any pipeline work, so an unauthenticated peer costs the process nothing. A missing credential and a wrong one get the same `401 { decision: "deny", code: "caller_unauthenticated", message: "Caller authentication failed" }` — the rejection must not tell a prober whether their guess had the right shape. `GET /_healthcheck` is never gated, so orchestrator probes keep working.
+- **`http.callerAuth.token` authenticates the calling service.** When set, every request to `/verify` and `/verify/batch` must carry that credential verbatim in `http.callerAuth.header` (default `x-caller-token`, deliberately not `Authorization`). A value no request can present is refused at boot, rather than booting a gate that refuses every caller: a token that is empty, begins or ends with a space or tab, holds a control character (a secret stored with its trailing newline included), or holds a character above U+00FF (Node reads a header value's bytes as Latin-1), and a header name with anything but RFC 9110 token characters. So is a blank token, which is a mistake rather than a credential. The comparison is constant-time, and it runs before the body is parsed and before any pipeline work, so an unauthenticated peer costs the process nothing. A missing credential and a wrong one get the same `401 { decision: "deny", code: "caller_unauthenticated", message: "Caller authentication failed" }` — the rejection must not tell a prober whether their guess had the right shape. `GET /_healthcheck` is never gated, so orchestrator probes keep working.
 
 Caller authentication is **optional in this release**. When it is not configured and the bind is not loopback, `createApp` logs `unauthenticated_non_loopback_bind` at warn, naming both settings, what is exposed and what to do about it:
 

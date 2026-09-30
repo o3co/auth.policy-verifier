@@ -986,6 +986,82 @@ describe("AppConfigSchema — http.callerAuth", () => {
 		});
 		expect(result.success).toBe(false);
 	});
+
+	// `HTTP_CALLER_AUTH_TOKEN="   "`, a secret stored with its trailing
+	// newline, or one holding a character above U+00FF boots a gate no request
+	// can pass: HTTP strips the whitespace around a header value, refuses a
+	// control character in one, and reads its bytes as Latin-1. A blank token
+	// is refused too, however it is spelled.
+	it.each([
+		["   "],
+		["s3cret "],
+		["s3cret\n"],
+		["s3\u0001cret"],
+		["\u3000"],
+		["\ufeffs3cret"],
+		["\u00a0"],
+	])("rejects the token %j, which no request can present", (token) => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			http: { callerAuth: { token } },
+		});
+		expect(result.success).toBe(false);
+		// The key and the words the runtime guard uses: one shared check.
+		expect(result.error?.issues).toEqual([
+			expect.objectContaining({
+				path: ["http", "callerAuth", "token"],
+				message: expect.stringMatching(/^token must /),
+			}),
+		]);
+	});
+
+	it.each([
+		["   ", "s3cret"],
+		[" x-api-key", "s3cret"],
+		["x api key", "s3cret"],
+		// Checked with the gate off too, as the runtime guard checks it.
+		["x api key", undefined],
+	])("rejects the header name %j, which no request can carry (token %j)", (header, token) => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			http: { callerAuth: { header, token } },
+		});
+		expect(result.success).toBe(false);
+		expect(result.error?.issues).toEqual([
+			expect.objectContaining({
+				path: ["http", "callerAuth", "header"],
+				message: expect.stringMatching(/^header must /),
+			}),
+		]);
+	});
+
+	it.each([
+		["s3 cret", "x-caller-token"],
+		["s3\tcret", "X_Caller"],
+		["s3crét", "x.api~key"],
+	])("accepts the token %j with the header %j, which a request can present", (token, header) => {
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			http: { callerAuth: { header, token } },
+		});
+		expect(result.http.callerAuth).toEqual({ header, token });
+	});
+
+	// Each field is checked on its own, so every issue is reported at once.
+	it("reports a bad header and a bad token together", () => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			http: { callerAuth: { header: 5, token: "   " } },
+		});
+		expect(result.error?.issues.map((issue) => issue.path.join("."))).toEqual([
+			"http.callerAuth.header",
+			"http.callerAuth.token",
+		]);
+	});
 });
 
 describe("AppConfigSchema — HS256 secret rotation", () => {

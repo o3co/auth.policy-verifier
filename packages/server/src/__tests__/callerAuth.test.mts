@@ -45,6 +45,17 @@ describe("resolveCallerAuth", () => {
 		).toBeUndefined();
 	});
 
+	// The schema checks the header whether or not a token is set, so the guard
+	// does too: the same block gets the same verdict at both boundaries.
+	it.each([
+		["empty", ""],
+		["not a field name", "x api key"],
+	])("rejects a tokenless block whose header is %s, as the schema does", (_label, header) => {
+		expect(() => resolveCallerAuth({ callerAuth: { header } }, context)).toThrow(
+			/^createApp: http\.callerAuth\.header /,
+		);
+	});
+
 	it("defaults the header when only a token is supplied", () => {
 		expect(resolveCallerAuth({ callerAuth: { token: "s3cret" } }, context)).toEqual({
 			header: "x-caller-token",
@@ -79,6 +90,66 @@ describe("resolveCallerAuth", () => {
 		expect(() =>
 			resolveCallerAuth({ callerAuth: { header: "", token: "s3cret" } }, context),
 		).toThrow(/^createApp: http\.callerAuth\.header must be a non-empty string/);
+	});
+
+	// HTTP strips the spaces and tabs around a header value, and Node refuses
+	// a request whose header value carries a control character, so no caller
+	// can present such a token and every request would be refused. The
+	// deployment fails at boot instead.
+	it.each([
+		["whitespace only", "   "],
+		["a leading space", " s3cret"],
+		["a trailing space", "s3cret "],
+		["a leading tab", "\ts3cret"],
+		["a trailing newline", "s3cret\n"],
+		["a control character", "s3\u0001cret"],
+		["a DEL", "s3cret\u007f"],
+		// Node reads a header value's bytes as Latin-1, so no request carries a
+		// character above U+00FF.
+		["an ideographic space only", "\u3000"],
+		["a byte-order mark", "\ufeffs3cret"],
+		["a curly quote", "s3cret\u2019"],
+		// Blank however it is spelled. A Latin-1 client could send this one, but
+		// whitespace is a mistake, not a credential.
+		["no-break spaces only", "\u00a0\u00a0"],
+	])("rejects a token with %s, which no request can present", (_label, token) => {
+		expect(() => resolveCallerAuth({ callerAuth: { token } }, context)).toThrow(
+			/^createApp: http\.callerAuth\.token /,
+		);
+	});
+
+	it.each([
+		["an inner space", "s3 cret"],
+		["an inner tab", "s3\tcret"],
+		["a Latin-1 letter", "s3crét"],
+	])("accepts a token with %s, which a request can present", (_label, token) => {
+		expect(resolveCallerAuth({ callerAuth: { token } }, context)).toEqual({
+			header: "x-caller-token",
+			token,
+		});
+	});
+
+	it.each([["X_Caller"], ["x.api~key"], ["x-caller-token"]])(
+		"accepts the header name %j, which is RFC 9110 token characters",
+		(header) => {
+			expect(resolveCallerAuth({ callerAuth: { header, token: "s3cret" } }, context)).toEqual({
+				header,
+				token: "s3cret",
+			});
+		},
+	);
+
+	// A request header's name is an RFC 9110 token, so a configured name
+	// with any other character never matches one.
+	it.each([
+		["whitespace only", "   "],
+		["a leading space", " x-caller-token"],
+		["an inner space", "x caller"],
+		["a colon", "x-caller-token:"],
+	])("rejects a header name with %s, which no request can carry", (_label, header) => {
+		expect(() => resolveCallerAuth({ callerAuth: { header, token: "s3cret" } }, context)).toThrow(
+			/^createApp: http\.callerAuth\.header /,
+		);
 	});
 });
 
@@ -160,6 +231,15 @@ describe("createCallerAuthMiddleware", () => {
 			.send({});
 
 		expect(calls).toEqual([]);
+	});
+
+	it("refuses to be constructed with a credential no request can present", () => {
+		expect(() => createCallerAuthMiddleware({ header: "x-caller-token", token: "   " })).toThrow(
+			/^createCallerAuthMiddleware: config\.token /,
+		);
+		expect(() => createCallerAuthMiddleware({ header: "x caller", token: "s3cret" })).toThrow(
+			/^createCallerAuthMiddleware: config\.header /,
+		);
 	});
 
 	it("refuses to be constructed with an empty credential", () => {

@@ -12,6 +12,11 @@ import { z } from "zod";
 import { checkAudienceClaim, DEFAULT_AUDIENCE_CLAIM } from "./audienceClaim.mjs";
 import { type BoundSpec, NUMERIC_BOUNDS, resolveBound } from "./bounds.mjs";
 import {
+	type CallerAuthFieldCheck,
+	checkCallerAuthHeader,
+	checkCallerAuthToken,
+} from "./callerAuth.mjs";
+import {
 	DEFAULT_BATCH_CONCURRENCY,
 	DEFAULT_CALLER_AUTH_HEADER,
 	DEFAULT_COLLECT_DEADLINE_MS,
@@ -103,6 +108,19 @@ function boundedNumber(spec: BoundSpec, path: string) {
 				return z.NEVER;
 			}
 		});
+}
+
+/**
+ * A caller-auth field's shared check as a zod refinement: its refusal, word
+ * for word, as the issue at that field.
+ */
+function callerAuthField(check: (value: unknown) => CallerAuthFieldCheck) {
+	return (value: string, ctx: z.RefinementCtx) => {
+		const verdict = check(value);
+		if (!verdict.ok) {
+			ctx.addIssue({ code: z.ZodIssueCode.custom, message: verdict.message });
+		}
+	};
 }
 
 const collectorSchema = z
@@ -430,13 +448,19 @@ export const AppConfigSchema = z.object({
 			 * `token` has no default on purpose: a credential must come from the
 			 * deployment, never from this file.
 			 */
+			// `checkCallerAuthToken` refuses an empty token rather than reading it as
+			// "not configured": `HTTP_CALLER_AUTH_TOKEN=` substitutes an empty
+			// string, and booting unauthenticated because a credential was exported
+			// empty would be a silent failure. It and `checkCallerAuthHeader` refuse
+			// a value no request can present too, which would boot a gate that
+			// refuses every caller. Each runs on its own field, so both are reported.
 			callerAuth: z
 				.object({
-					header: z.string().min(1).default(DEFAULT_CALLER_AUTH_HEADER),
-					// `.min(1)` and not `.optional()`-with-empty: `HTTP_CALLER_AUTH_TOKEN=`
-					// substitutes an empty string, and booting unauthenticated because a
-					// credential was exported empty would be a silent failure.
-					token: z.string().min(1).optional(),
+					header: z
+						.string()
+						.superRefine(callerAuthField(checkCallerAuthHeader))
+						.default(DEFAULT_CALLER_AUTH_HEADER),
+					token: z.string().superRefine(callerAuthField(checkCallerAuthToken)).optional(),
 				})
 				.optional(),
 		})
