@@ -33,9 +33,11 @@ export interface DelegationRangeRuleCollectorConfig {
  * refuses an action that is not one action of the grammar, so the rule
  * fails) — when the token carries a range (`entriesOfType`: an entry of the
  * configured type, or the claim in another shape), and none otherwise.
- * The rule is a group of its own, so it is decided together with the
- * policies: a delegated token is allowed only what both allow, and a token
- * without a range is decided as it would be without this collector.
+ * The rule is a group of its own and restricts, so it is decided together
+ * with the policies and never instead of them: a delegated token is allowed
+ * only what both allow, one no policy rule applies to goes to
+ * `onEmptyRuleSet`, and a token without a range is decided as it would be
+ * without this collector.
  *
  * The range itself is read by `DelegationRangeCollector`, which must be
  * configured with the same `type` and `claim`; nothing checks that they agree.

@@ -122,7 +122,7 @@ rule { collectors = [
 ```
 
 - `DelegationRangeCollector` はエントリのパスを `ATTR_DELEGATION_RANGE`（`"delegationRange"`、このパッケージが予約）に書きます。文法外のパスは除外され、range が狭まる方向に働きます。その type のエントリはあるが読めるパスがないトークンは空の range になり、何も含みません。クレームが別の形（リストでない、またはエントリのオブジェクト以外を含むリスト）で存在するトークンも同じです。
-- `DelegationRangeRuleCollector` は、トークンが range を持つとき（その type のエントリがあるか、クレームが別の形で存在するとき）、リクエストのパス（`<resource.raw>.<action>`。`resource: "project:p1.report:r7"` と `action: "run"` なら `project:p1.report:r7.run`）について [`WithinDelegationRange`](#withindelegationrange) ルールを 1 つ生成し、持たないときは何も生成しません。action は文法上の 1 つの action でなければなりません。複数の要素からなる action（`report.delete`）は結合したパスの区切りを変えてしまい、親へのリクエストが range に含まれる子へのリクエストとして読めてしまうので、その場合ルールは fail します。このルールは独立したグループなので、委任トークンは range とポリシーの両方が許すものだけを許され、range のないトークンはこの 2 つがない場合と同じく判定されます。
+- `DelegationRangeRuleCollector` は、トークンが range を持つとき（その type のエントリがあるか、クレームが別の形で存在するとき）、リクエストのパス（`<resource.raw>.<action>`。`resource: "project:p1.report:r7"` と `action: "run"` なら `project:p1.report:r7.run`）について [`WithinDelegationRange`](#withindelegationrange) ルールを 1 つ生成し、持たないときは何も生成しません。action は文法上の 1 つの action でなければなりません。複数の要素からなる action（`report.delete`）は結合したパスの区切りを変えてしまい、親へのリクエストが range に含まれる子へのリクエストとして読めてしまうので、その場合ルールは fail します。このルールは独立したグループで、絞るルール（`restricts: true`）なので、委任トークンは range とポリシーの両方が許すものだけを許されます。ポリシーのルールが 1 つも適用されない委任トークンは、range だけで判定されることはなく、`rule.onEmptyRuleSet`（既定では `no_applicable_rule`）で判定されます。range のないトークンは、この 2 つがない場合と同じく判定されます。
 - 2 つには同じ `type` と `claim`（既定 `authorization_details`）を与えてください。一致しているかを確かめる仕組みはありません。食い違うと、2 通りに壊れます。ルール collector がトークンのエントリを見つけ、属性 collector が見つけない場合は、ルールが range を見つけられず、リクエストは deny されます。逆の場合はルールが生成されず、**range は適用されません**。
 - リクエストのパスは、設定したリソースパーサーにかかわらず、呼び出し元が送ったリソース文字列から作られます。別の文法で書かれたリソース（`projects/p1/reports/r7`）はパスとして読めず、委任されたリクエストはすべて deny されます。
 - リクエストが名指すリソースは、親の連鎖も含めて呼び出し元の主張です。連鎖に依拠するポリシー（包含、`in`）は、その連鎖を保存しているストアを読む独自の collector で、使う前に確かめる必要があります（[docs/extending.md](../../docs/extending.md#writing-a-custom-attributecollector)）。
@@ -173,7 +173,7 @@ new AttrMatchRule({ a: string, b: string, group?: string })
 
 ### WithinDelegationRange
 
-`ATTR_DELEGATION_RANGE` のエントリのどれかが、クレーム契約の包含ルール（[委任トークン](#委任トークン-range-と-actor)）でリクエストのパスを含むとき pass します。range がない場合や、パスを含む文字列が 1 つもない場合は fail し、文法外のリクエストパスも fail します。`ruleType` は `delegation_range`、`code` は `outside_delegation_range` です。`DelegationRangeRuleCollector` が生成します。別の包含ルールが必要なデプロイは、`ATTR_DELEGATION_RANGE` を読む独自のルールと、それを生成するルール collector を書き、`DelegationRangeRuleCollector` の代わりに使います。
+`ATTR_DELEGATION_RANGE` のエントリのどれかが、クレーム契約の包含ルール（[委任トークン](#委任トークン-range-と-actor)）でリクエストのパスを含むとき pass します。range がない場合や、パスを含む文字列が 1 つもない場合は fail し、文法外のリクエストパスも fail します。`ruleType` は `delegation_range`、`code` は `outside_delegation_range` です。絞るルールなので、ほかのルールが許すものを絞るだけで、それ自体は許可の根拠になりません。`DelegationRangeRuleCollector` が生成します。別の包含ルールが必要なデプロイは、`ATTR_DELEGATION_RANGE` を読む独自のルールと、それを生成するルール collector を書き、`DelegationRangeRuleCollector` の代わりに使います。
 
 ## Attribute Comparison Rules
 

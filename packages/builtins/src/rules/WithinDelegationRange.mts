@@ -16,12 +16,14 @@ import { ATTR_DELEGATION_RANGE } from "../keys.mjs";
  * A range that is absent, not a list, or holds no string that contains the
  * path fails, and so does a requested path outside the grammar, or none at
  * all — `null`, a request whose action is not one action of the grammar
- * (`requestedRangePath`). The range decides together with the policies,
- * never instead of them.
+ * (`requestedRangePath`). The rule restricts: it narrows what the policies
+ * allow and is no reason to allow, so a request no policy rule applies to is
+ * decided by `onEmptyRuleSet`, not by the range.
  */
 export class WithinDelegationRange implements Rule {
 	readonly ruleType = "delegation_range";
 	readonly code = "outside_delegation_range";
+	readonly restricts = true;
 	readonly message: string;
 
 	constructor(private readonly path: string | null) {
