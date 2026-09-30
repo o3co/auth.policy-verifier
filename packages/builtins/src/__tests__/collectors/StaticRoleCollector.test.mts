@@ -21,7 +21,7 @@ const stubContext: CollectorContext = {
 };
 
 describe("StaticRoleCollector", () => {
-	it("copies a malformed array entry as an array, keeping its shape (#255)", async () => {
+	it("copies a malformed array entry as an array, keeping its shape", async () => {
 		const malformed = ["admin", "read"] as unknown as Role;
 		const collector = new StaticRoleCollector({ roles: [malformed] });
 		const attrs = await collector.collect(stubContext);
@@ -40,7 +40,7 @@ describe("StaticRoleCollector", () => {
 		["a string", "posts.*"],
 		["a lone wildcard string", "*"],
 	])(
-		"refuses at construction a `roles` that is %s, with a TypeError naming the field (#264)",
+		"refuses at construction a `roles` that is %s, with a TypeError naming the field",
 		(_label, value) => {
 			const construct = () => new StaticRoleCollector({ roles: value } as never);
 			expect(construct).toThrow(TypeError);
@@ -89,7 +89,7 @@ describe("StaticRoleCollector", () => {
 				c.roles[0].permissions = ["*"];
 			},
 		],
-	])("%s after construction changes nothing it collects (#255)", async (_name, mutate) => {
+	])("%s after construction changes nothing it collects", async (_name, mutate) => {
 		const config = { roles: [{ name: "viewer", permissions: ["project:*.perm:read"] }] };
 		const collector = new StaticRoleCollector(config);
 

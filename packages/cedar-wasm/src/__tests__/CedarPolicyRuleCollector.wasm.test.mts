@@ -286,7 +286,7 @@ describe("CedarPolicyRuleCollector on the wasm engine — layered PDP through co
  * the engine refusing the call, Cedar's own diagnostic errors — are each pinned
  * here against Cedar itself rather than a scripted answer.
  */
-describe("CedarPolicyRuleCollector on the wasm engine — the evaluation behind an answer (#244)", () => {
+describe("CedarPolicyRuleCollector on the wasm engine — the evaluation behind an answer", () => {
 	const PERMIT_READ = `permit(principal, action == Action::"read", resource);`;
 	const FORBID_ALL = "forbid(principal, action, resource);";
 	const NEEDS_DEPT = `permit(principal, action, resource) when { principal.dept == "eng" };`;
@@ -386,7 +386,7 @@ describe("CedarPolicyRuleCollector on the wasm engine — the evaluation behind 
 		expect(rule.verify(attrsWith())).toBe(true);
 	});
 
-	describe("a user acting on their own record — the principal and the resource are one entity (#282)", () => {
+	describe("a user acting on their own record — the principal and the resource are one entity", () => {
 		const OWN = attrsWith([
 			["requestResourceType", "User"],
 			["requestResourceId", "alice"],
@@ -452,7 +452,7 @@ describe("CedarPolicyRuleCollector on the wasm engine — the evaluation behind 
 		});
 	});
 
-	it("names the policies that decided for their files, through core evaluate (#199)", async () => {
+	it("names the policies that decided for their files, through core evaluate", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "cedar-determining-"));
 		writeFileSync(join(dir, "10-permit-read.cedar"), PERMIT_READ);
 		writeFileSync(

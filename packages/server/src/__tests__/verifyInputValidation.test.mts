@@ -124,7 +124,7 @@ async function post(body: unknown, target = "/verify") {
 		.send(body as object);
 }
 
-describe("POST /verify — bounded resource and action (#118)", () => {
+describe("POST /verify — bounded resource and action", () => {
 	it("accepts a resource at exactly the limit", async () => {
 		// `a`.repeat(N) is one segment of N type characters — inside the
 		// DotNotation grammar, so only the length bound is under test.
@@ -176,7 +176,7 @@ describe("POST /verify — bounded resource and action (#118)", () => {
 	});
 });
 
-describe("POST /verify — whitespace is refused, not trimmed (#118)", () => {
+describe("POST /verify — whitespace is refused, not trimmed", () => {
 	// The same doctrine `DotNotationResourceParser` applies to `resource`,
 	// applied at the schema layer so it also holds for `action` and for
 	// a deployment that registered its own parser.
@@ -210,7 +210,7 @@ describe("POST /verify — whitespace is refused, not trimmed (#118)", () => {
 	});
 });
 
-describe("POST /verify — bounded context (#118)", () => {
+describe("POST /verify — bounded context", () => {
 	it("accepts a context at exactly the entry limit", async () => {
 		const context = Object.fromEntries(
 			Array.from({ length: DEFAULT_MAX_CONTEXT_ENTRIES }, (_, i) => [`k${i}`, "v"]),
@@ -304,7 +304,7 @@ describe("POST /verify — bounded context (#118)", () => {
 	});
 });
 
-describe("POST /verify — unknown properties are refused (#118)", () => {
+describe("POST /verify — unknown properties are refused", () => {
 	/**
 	 * The rendering bound `describeUnknownKeys` documents: at most 32 characters
 	 * per name, the ellipsis included. Stated here as a literal rather than
@@ -390,7 +390,7 @@ describe("POST /verify — unknown properties are refused (#118)", () => {
 	});
 });
 
-describe("POST /verify — body validation runs before authentication (#118)", () => {
+describe("POST /verify — body validation runs before authentication", () => {
 	/*
 	 * A malformed body is answered 400 whether or not a token was presented.
 	 * Verifying the token first would let an unauthenticated caller drive the
@@ -459,7 +459,7 @@ describe("POST /verify — body validation runs before authentication (#118)", (
 	});
 });
 
-describe("POST /verify — body-parser failures answer the deny envelope (#118, #126 item 6)", () => {
+describe("POST /verify — body-parser failures answer the deny envelope", () => {
 	it("answers 400 invalid_request for malformed JSON, not Express's HTML page", async () => {
 		const token = await signToken();
 		const res = await request(app)
@@ -546,7 +546,7 @@ describe("POST /verify — body-parser failures answer the deny envelope (#118, 
 	});
 });
 
-describe("the documented deny envelope is the one the endpoint emits (#118, #125)", () => {
+describe("the deny envelope and verify defaults the docs print", () => {
 	/*
 	 * The envelope is wire contract, and these three files are what a client
 	 * author implements against. Hand-written copies of a shape drift (an
@@ -604,7 +604,7 @@ describe("the documented deny envelope is the one the endpoint emits (#118, #125
 	});
 });
 
-describe("createVerifyRouter — the input limits at both boundaries (#118, #157)", () => {
+describe("createVerifyRouter — the input limits at both boundaries", () => {
 	// Each limit is a numeric knob, so it goes through `resolveBound` at the
 	// router and through `boundedNumber` in the schema — one reader, one wording.
 	// See AGENTS.md, "Two-Boundary Config Validation".

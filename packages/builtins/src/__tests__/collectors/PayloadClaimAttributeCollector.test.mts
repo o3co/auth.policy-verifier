@@ -36,7 +36,7 @@ const makeContext = (
 		: {}),
 });
 
-describe("PayloadClaimAttributeCollector (#219)", () => {
+describe("PayloadClaimAttributeCollector", () => {
 	it("promotes a declared claim under the operator's own key", async () => {
 		const collector = new PayloadClaimAttributeCollector({
 			attributes: [{ from: "org_id", to: "tenantId" }],

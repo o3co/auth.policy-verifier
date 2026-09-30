@@ -142,7 +142,7 @@ const CORE = "@o3co/auth.policy-verifier.core";
 const METRICS = join(SRC, "observability/metrics.mts");
 const PORT = join(SRC, "observability/decisionMetrics.mts");
 
-describe("the decision's dependency boundary (#251)", () => {
+describe("the decision's dependency boundary", () => {
 	const decision = reach([join(SRC, "decision/decide.mts")]);
 
 	it("reaches core and nothing else outside the package — no express, no prom-client", () => {
@@ -163,7 +163,7 @@ describe("the decision's dependency boundary (#251)", () => {
 	});
 });
 
-describe("the metrics port, apart from its prom-client implementation (#258)", () => {
+describe("the metrics port, apart from its prom-client implementation", () => {
 	it("the port reaches core and nothing else outside the package, not even for a type", () => {
 		const port = reach([PORT], allImports);
 		expect([...port.packages]).toEqual([CORE]);
@@ -214,7 +214,7 @@ function declaringDirectories(name: string): string[] {
 	);
 }
 
-describe("the authentication contract, apart from the JWT implementation (#259)", () => {
+describe("the authentication contract, apart from the JWT implementation", () => {
 	it.each([
 		"TokenAuthenticator",
 		"AuthenticationResult",
@@ -253,7 +253,7 @@ describe("the authentication contract, apart from the JWT implementation (#259)"
 	});
 });
 
-describe("config/ and jwt/ have one direction: jwt/ → config/ (#260)", () => {
+describe("config/ and jwt/ have one direction: jwt/ → config/", () => {
 	it("no file in config/ reaches jwt/ through any import, type-only included", () => {
 		const config = reach(sourcesIn("config"), allImports);
 		expect(within(config.files, "jwt")).toEqual([]);

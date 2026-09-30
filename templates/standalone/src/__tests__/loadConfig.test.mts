@@ -133,7 +133,7 @@ describe("loadAppConfig", () => {
 		});
 	});
 
-	it("enables caller authentication from the environment (#108)", () => {
+	it("enables caller authentication from the environment", () => {
 		setRequiredEnv();
 		process.env.HTTP_CALLER_AUTH_TOKEN = "caller-secret";
 
@@ -161,7 +161,7 @@ describe("loadAppConfig", () => {
 		expect(() => loadAppConfig(configDirPath, "development")).toThrow(/callerAuth[.,\s\S]*token/);
 	});
 
-	it("selects insecure-decode mode via OAUTH_JWT_MODE, requiring no key material (#134)", () => {
+	it("selects insecure-decode mode via OAUTH_JWT_MODE, requiring no key material", () => {
 		// The value is the consent: only the literal string "insecure-decode"
 		// selects the decode-only path, so a stray boolean-ish env value cannot.
 		process.env.OAUTH_JWT_MODE = "insecure-decode";
@@ -171,7 +171,7 @@ describe("loadAppConfig", () => {
 		expect(config.oauth.jwt?.mode).toBe("insecure-decode");
 	});
 
-	it("rejects a boolean-ish OAUTH_JWT_MODE left over from the removed OAUTH_JWT_VALIDATE", () => {
+	it('rejects a boolean-ish OAUTH_JWT_MODE such as "false"', () => {
 		setRequiredEnv();
 		process.env.OAUTH_JWT_MODE = "false";
 
@@ -186,9 +186,9 @@ describe("loadAppConfig", () => {
 
 	it.each([
 		["a one-character OAUTH_JWT_SECRET", "s"],
-		["the README's old example value", "your-secret"],
+		["a placeholder value", "your-secret"],
 		["32 hex characters — 16 decoded bytes", "ab".repeat(16)],
-	])("refuses to load %s (#114)", (_label, secret) => {
+	])("refuses to load %s", (_label, secret) => {
 		// The floor applies to the shipped config as loaded, not only to
 		// hand-built objects: `secret = ${?OAUTH_JWT_SECRET}` is where a weak
 		// value actually enters a deployment.
@@ -205,7 +205,7 @@ describe("loadAppConfig", () => {
 	});
 });
 
-describe("loadAppConfig — RFC 9068 requirements (#105)", () => {
+describe("loadAppConfig — RFC 9068 requirements", () => {
 	it("fails to load when the issuer is not supplied", () => {
 		process.env.OAUTH_JWT_SECRET = TEST_SECRET;
 		process.env.OAUTH_JWT_AUDIENCE = "https://api.test";
@@ -221,7 +221,7 @@ describe("loadAppConfig — RFC 9068 requirements (#105)", () => {
 	});
 });
 
-describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#157)", () => {
+describe("loadAppConfig — numeric knobs through the real 3-tier resolution", () => {
 	// The knobs are read by `resolveBound` at both boundaries, and this is the
 	// path that proves the schema half works where it actually runs: HOCON
 	// substitutes `${?VAR}` as a STRING, and the ts.hocon zod adapter's coercion
@@ -336,7 +336,7 @@ describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#1
 	});
 });
 
-describe("loadAppConfig — a config with no verify block at all (#115, #118)", () => {
+describe("loadAppConfig — a config with no verify block at all", () => {
 	/*
 	 * The shipped `application.conf` writes out every `verify` knob, so loading
 	 * it exercises the schema's per-key defaults and never the block-level one.

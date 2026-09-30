@@ -33,7 +33,7 @@ describe("StaticPermissionCollector", () => {
 		["a string", "posts.*"],
 		["a lone wildcard string", "*"],
 	])(
-		"refuses at construction a `permissions` that is %s, with a TypeError naming the field (#264)",
+		"refuses at construction a `permissions` that is %s, with a TypeError naming the field",
 		(_label, value) => {
 			const construct = () => new StaticPermissionCollector({ permissions: value } as never);
 			expect(construct).toThrow(TypeError);
@@ -41,7 +41,7 @@ describe("StaticPermissionCollector", () => {
 		},
 	);
 
-	it("cannot be configured into granting every permission with a string `permissions` (#264)", async () => {
+	it("cannot be configured into granting every permission with a string `permissions`", async () => {
 		// `[ "posts.*" ]` was meant. Split into characters it would collect a
 		// lone "*", which HasPermission honours as grant-all; refused at
 		// construction, it never reaches a rule.
@@ -78,7 +78,7 @@ describe("StaticPermissionCollector", () => {
 				c.permissions = ["*"];
 			},
 		],
-	])("%s after construction changes nothing it collects (#255)", async (_name, mutate) => {
+	])("%s after construction changes nothing it collects", async (_name, mutate) => {
 		const config = { permissions: ["project:*.perm:read", "document:*.perm:write"] };
 		const collector = new StaticPermissionCollector(config);
 

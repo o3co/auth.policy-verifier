@@ -384,7 +384,7 @@ describe("verify router failure logging: default sink and quiet paths", () => {
 		expect(events).toHaveLength(0);
 	});
 
-	it("logs nothing when the parser refuses the caller's resource string (#117)", async () => {
+	it("logs nothing when the parser refuses the caller's resource string", async () => {
 		// `verify_internal_error` is a page-the-operator event. A resource string
 		// outside the parser's grammar is the caller's mistake, answered 400, and
 		// must not enter that channel — otherwise a client looping on a typo
@@ -422,7 +422,7 @@ describe("verify router failure logging: default sink and quiet paths", () => {
 	});
 });
 
-describe("decode-only path time-claim enforcement (#106)", () => {
+describe("decode-only path time-claim enforcement", () => {
 	// decodeJwt performs no validation at all; the route must enforce exp/nbf
 	// itself with jwtVerify's semantics so a leaked expired token is not a
 	// permanent credential in decode-only deployments.

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 const compose = readFileSync(new URL("../../docker-compose.yml", import.meta.url), "utf8");
 
-describe("docker-compose.yml — the cedar profile's agent is authenticated (v0.10.0 audit)", () => {
+describe("docker-compose.yml — the cedar profile's agent is authenticated", () => {
 	it("starts the agent with the token the app sends", () => {
 		// An unauthenticated cedar-agent is a write oracle over the policy set:
 		// anything that reaches its port can PUT `permit(principal, action,

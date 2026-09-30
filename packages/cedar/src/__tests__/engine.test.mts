@@ -58,7 +58,7 @@ describe("registerCedarEngine", () => {
 	});
 });
 
-describe("the registry is one per process, not one per copy of the package (v0.10.0 audit)", () => {
+describe("the registry is one per process, not one per copy of the package", () => {
 	it("sees an engine another copy of the module registered", async () => {
 		// cedar-wasm registers into whichever copy of `.cedar` it resolves. With
 		// two versions on the graph, a module-scope map would split the registry:

@@ -40,7 +40,7 @@ describe("PayloadScopeCollector", () => {
 	});
 });
 
-describe("PayloadScopeCollector — the claim option (#219)", () => {
+describe("PayloadScopeCollector — the claim option", () => {
 	const ctx = (subject: SubjectAttributes): CollectorContext => ({
 		subject,
 		resource: { raw: "test:1", resourceType: "test", resourceId: "1" },

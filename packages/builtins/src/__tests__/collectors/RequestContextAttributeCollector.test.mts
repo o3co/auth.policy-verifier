@@ -331,7 +331,7 @@ describe("RequestContextAttributeCollector — vocabulary another package reserv
 	});
 });
 
-describe("RequestContextAttributeCollector — an exact key wins over a dot path (#219 release audit)", () => {
+describe("RequestContextAttributeCollector — an exact key wins over a dot path", () => {
 	it("reads a field whose name itself carries a dot", async () => {
 		const collector = new RequestContextAttributeCollector({
 			attributes: [{ from: "tenant.id", to: "tenantId" }],

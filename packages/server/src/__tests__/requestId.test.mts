@@ -112,7 +112,7 @@ function createTestApp() {
 	return { app, events, headers: recording.headers };
 }
 
-describe("acceptRequestId (#200)", () => {
+describe("acceptRequestId", () => {
 	it.each([
 		["a UUID", "3f2c5a9e-6d1b-4c1f-9a7e-2b8d4c6e1f00"],
 		["a ULID", "01J8ZQ4X9V6M3K2N7P5R8T1W0Y"],
@@ -152,7 +152,7 @@ describe("acceptRequestId (#200)", () => {
 	});
 });
 
-describe("x-request-id on the decision endpoints (#200)", () => {
+describe("x-request-id on the decision endpoints", () => {
 	const ID = "3f2c5a9e-6d1b-4c1f-9a7e-2b8d4c6e1f00";
 
 	it.each([

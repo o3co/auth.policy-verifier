@@ -102,7 +102,7 @@ describe("AppConfigSchema — JWT algorithm validation", () => {
 	});
 });
 
-describe("AppConfigSchema — HS256 secret entropy floor (#114)", () => {
+describe("AppConfigSchema — HS256 secret entropy floor", () => {
 	const FUTURE = "2999-01-01T00:00:00Z";
 
 	/** Parses an `oauth.jwt` HS256 block with the RFC 9068 fields in place. */
@@ -114,7 +114,7 @@ describe("AppConfigSchema — HS256 secret entropy floor (#114)", () => {
 
 	it.each([
 		["a one-character secret", "x"],
-		["the README's old example value", "your-secret"],
+		["a placeholder value", "your-secret"],
 		["a 32-character hex secret — 16 decoded bytes", "ab".repeat(16)],
 		["32 alphanumerics — a base64 body carrying 24 bytes", "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"],
 	])("refuses %s at config-parse time", (_label, secret) => {
@@ -143,7 +143,7 @@ describe("AppConfigSchema — HS256 secret entropy floor (#114)", () => {
 		expect(parseJwt({ secret }).success).toBe(true);
 	});
 
-	it("holds every previousSecrets entry to the same floor (#112 rotation)", () => {
+	it("holds a previousSecrets entry to the same floor", () => {
 		const result = parseJwt({
 			secret: SECRET,
 			kid: "v1",
@@ -166,7 +166,7 @@ describe("AppConfigSchema — HS256 secret entropy floor (#114)", () => {
 	});
 });
 
-describe("AppConfigSchema — JWKS transport security (#109)", () => {
+describe("AppConfigSchema — JWKS transport security", () => {
 	const httpsUri = "https://auth-provider.test/.well-known/jwks.json";
 	const rs256 = { algorithm: "RS256", mode: "verify", jwksUri: httpsUri, ...rfc9068 };
 
@@ -284,7 +284,7 @@ describe("AppConfigSchema — empty rule set policy", () => {
 	});
 });
 
-describe("AppConfigSchema — RFC 9068 token validation (#105)", () => {
+describe("AppConfigSchema — RFC 9068 token validation", () => {
 	const hs256 = { algorithm: "HS256", secret: SECRET };
 
 	it('rejects mode="verify" without an issuer', () => {
@@ -349,7 +349,7 @@ describe("AppConfigSchema — RFC 9068 token validation (#105)", () => {
 	});
 });
 
-describe("AppConfigSchema — batch decisions (#124)", () => {
+describe("AppConfigSchema — batch decisions", () => {
 	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
 
 	it("defaults verify.maxBatchSize to 50", () => {
@@ -385,7 +385,7 @@ describe("AppConfigSchema — batch decisions (#124)", () => {
 	});
 });
 
-describe("AppConfigSchema — collector bounds (#115)", () => {
+describe("AppConfigSchema — collector bounds", () => {
 	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
 
 	const parseVerify = (verify: Record<string, unknown>) =>
@@ -442,7 +442,7 @@ describe("AppConfigSchema — collector bounds (#115)", () => {
 	});
 });
 
-describe("AppConfigSchema — token lifetime bounds (#110)", () => {
+describe("AppConfigSchema — token lifetime bounds", () => {
 	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
 
 	/** Parses a valid verify config whose lifetime bounds the case under test overrides. */
@@ -503,7 +503,7 @@ describe("AppConfigSchema — token lifetime bounds (#110)", () => {
 	});
 });
 
-describe("AppConfigSchema — one numeric reader at both boundaries (#157)", () => {
+describe("AppConfigSchema — one numeric reader at both boundaries", () => {
 	// As with `checkJwksUri` and `checkHs256Rotation`, the invariant is stated
 	// once and spent twice: the schema reads each numeric knob through
 	// `resolveBound`, the runtime guard's reader, so a hand-built config cannot
@@ -604,13 +604,13 @@ describe("AppConfigSchema — one numeric reader at both boundaries (#157)", () 
 
 	// `false` must not read as a zero cooldown, nor `true` as a one-millisecond
 	// timeout: the runtime guard refuses to boot on either.
-	it("refuses jwksCooldownMs = false, which used to parse to 0", () => {
+	it("refuses jwksCooldownMs = false rather than read it as a zero cooldown", () => {
 		expect(schemaRefusal({ jwksCooldownMs: false }, "jwksCooldownMs")).toBe(
 			"oauth.jwt.jwksCooldownMs must be a non-negative integer number of milliseconds, got false",
 		);
 	});
 
-	it("refuses jwksTimeoutMs = true, which used to become a 1 ms timeout", () => {
+	it("refuses jwksTimeoutMs = true rather than read it as a 1 ms timeout", () => {
 		expect(schemaRefusal({ jwksTimeoutMs: true }, "jwksTimeoutMs")).toBe(
 			"oauth.jwt.jwksTimeoutMs must be an integer between 1 and 2147483647 milliseconds, got true",
 		);
@@ -686,7 +686,7 @@ describe("AppConfigSchema — one numeric reader at both boundaries (#157)", () 
 	});
 });
 
-describe("AppConfigSchema — http.port (#157)", () => {
+describe("AppConfigSchema — http.port", () => {
 	// `http.port` goes through the same numeric reader: an integer from 1 to
 	// 65535.
 	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
@@ -752,7 +752,7 @@ describe("AppConfigSchema — http.port (#157)", () => {
 	});
 });
 
-describe("AppConfigSchema — multiple acceptable issuers (#105)", () => {
+describe("AppConfigSchema — multiple acceptable issuers", () => {
 	const hs256 = { algorithm: "HS256", secret: SECRET };
 
 	it("accepts an issuer list, matching the router's issuer type", () => {
@@ -794,7 +794,7 @@ describe("AppConfigSchema — multiple acceptable issuers (#105)", () => {
 	});
 });
 
-describe("AppConfigSchema — logging (#107)", () => {
+describe("AppConfigSchema — logging", () => {
 	const validBody = {
 		oauth: { jwt: { mode: "insecure-decode" } },
 		...baseBody,
@@ -821,7 +821,7 @@ describe("AppConfigSchema — logging (#107)", () => {
 	});
 });
 
-describe("AppConfigSchema — oauth.jwt.mode (#134)", () => {
+describe("AppConfigSchema — oauth.jwt.mode", () => {
 	// Assert against the exported constant, not a copy of the string: the
 	// operator-facing migration text is the contract, and a test that restates
 	// it can drift from what the schema actually emits.
@@ -886,7 +886,7 @@ describe("AppConfigSchema — oauth.jwt.mode (#134)", () => {
 		},
 	);
 
-	it("rejects the old decode-only pair as stale keys, not as a valid decode config", () => {
+	it("rejects validate / allowInsecureDecode as stale keys, not as a valid decode config", () => {
 		const result = AppConfigSchema.safeParse({
 			oauth: { jwt: { validate: false, allowInsecureDecode: true } },
 			...baseBody,
@@ -898,7 +898,7 @@ describe("AppConfigSchema — oauth.jwt.mode (#134)", () => {
 	});
 });
 
-describe("AppConfigSchema — http bind address (#108)", () => {
+describe("AppConfigSchema — http bind address", () => {
 	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
 
 	it("defaults http.hostname to loopback when the http section is absent", () => {
@@ -928,7 +928,7 @@ describe("AppConfigSchema — http bind address (#108)", () => {
 	});
 });
 
-describe("AppConfigSchema — http.callerAuth (#108)", () => {
+describe("AppConfigSchema — http.callerAuth", () => {
 	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
 
 	it("leaves http.callerAuth absent when nothing configures it", () => {
@@ -988,7 +988,7 @@ describe("AppConfigSchema — http.callerAuth (#108)", () => {
 	});
 });
 
-describe("AppConfigSchema — HS256 secret rotation (#112)", () => {
+describe("AppConfigSchema — HS256 secret rotation", () => {
 	const FUTURE = "2999-01-01T00:00:00Z";
 
 	/** Parses an `oauth.jwt` block with the RFC 9068 fields already in place. */
@@ -1238,7 +1238,7 @@ describe("AppConfigSchema — the verify block's default names every knob", () =
 	});
 });
 
-describe("AppConfigSchema — millisecond knobs are bounded above (#181)", () => {
+describe("AppConfigSchema — millisecond knobs are bounded above", () => {
 	// Node clamps a `setTimeout` delay above 2^31 - 1 to ~1 ms. Without the
 	// ceiling, a collectorTimeoutMs of 3_000_000_000 would pass validation and
 	// become a ~1 ms timer: every decision denied with collector_timeout, and
@@ -1280,7 +1280,7 @@ describe("AppConfigSchema — millisecond knobs are bounded above (#181)", () =>
 	});
 });
 
-describe("AppConfigSchema — batch decision concurrency (#183)", () => {
+describe("AppConfigSchema — batch decision concurrency", () => {
 	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
 
 	const parseVerify = (verify: Record<string, unknown>) =>
@@ -1310,7 +1310,7 @@ describe("AppConfigSchema — batch decision concurrency (#183)", () => {
 	});
 });
 
-describe("AppConfigSchema — token authenticator selection (#219)", () => {
+describe("AppConfigSchema — token authenticator selection", () => {
 	const jwt = { secret: SECRET, mode: "verify", ...rfc9068 };
 
 	it("defaults oauth.authenticator to jwt", () => {
@@ -1377,7 +1377,7 @@ describe("AppConfigSchema — token authenticator selection (#219)", () => {
 	});
 });
 
-describe("AppConfigSchema — audienceClaim and an unpinned typ (#219)", () => {
+describe("AppConfigSchema — audienceClaim and an unpinned typ", () => {
 	const jwt = { secret: SECRET, mode: "verify", ...rfc9068 };
 
 	it("defaults oauth.jwt.audienceClaim to aud", () => {
@@ -1420,7 +1420,7 @@ describe("AppConfigSchema — audienceClaim and an unpinned typ (#219)", () => {
 	});
 });
 
-describe("AppConfigSchema — oauth.jwt is validated only for the built-in authenticator (#219 release audit)", () => {
+describe("AppConfigSchema — oauth.jwt under another authenticator, and in insecure-decode mode", () => {
 	it("refuses a jwt block when another authenticator is selected, at oauth.jwt", () => {
 		// The block would be carried unread — a leftover, or a mistake — and a
 		// parsed type that says otherwise would lie about it. Refused by name,
@@ -1453,7 +1453,7 @@ describe("AppConfigSchema — oauth.jwt is validated only for the built-in authe
 	});
 });
 
-describe("AppConfigSchema — verify.evaluateDeadlineMs (v0.10.0 audit)", () => {
+describe("AppConfigSchema — verify.evaluateDeadlineMs", () => {
 	const jwt = { secret: SECRET, mode: "verify", ...rfc9068 };
 
 	it("defaults to the collect deadline's value", () => {
@@ -1482,7 +1482,7 @@ describe("AppConfigSchema — verify.evaluateDeadlineMs (v0.10.0 audit)", () => 
 	});
 });
 
-describe("AppConfigSchema — verify.ruleTimeoutMs (#225)", () => {
+describe("AppConfigSchema — verify.ruleTimeoutMs", () => {
 	const jwt = { secret: SECRET, mode: "verify", ...rfc9068 };
 
 	it("defaults to the collector timeout's value", () => {

@@ -218,7 +218,7 @@ describe("installGracefulShutdown", () => {
 		}
 	});
 
-	it("defers the real exit a turn so pino's buffered destination can flush (#210 review)", async () => {
+	it("defers the real exit a turn so pino's buffered destination can flush", async () => {
 		// `createAppLogger` uses pino's default (non-synchronous) destination, so
 		// exiting in the same tick as the last `logger.error` can drop exactly the
 		// `cleanup failed` line an operator would go looking for.

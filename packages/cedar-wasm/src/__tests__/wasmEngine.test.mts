@@ -108,7 +108,7 @@ describe("cedarWasmEngine — isAuthorized answers Cedar's own response", () => 
 		expect(answer).toMatchObject({ decision: "deny", reason: [], errors: [] });
 	});
 
-	it("reports evaluation errors naming the policy by its file (#199) — the missing-attribute case", () => {
+	it("reports evaluation errors naming the policy by its file — the missing-attribute case", () => {
 		const loaded = load(`permit(principal, action, resource) when { principal.dept == "eng" };`);
 		const answer = loaded.isAuthorized(request());
 		expect(answer.decision).toBe("deny");
@@ -221,7 +221,7 @@ describe("cedarWasmEngine — vouches for the revision it evaluated", () => {
  * policy, which is also the id the http engine pushes, so a corpus laid out
  * one policy per file reads the same under both.
  */
-describe("cedarWasmEngine — names each policy for its file (#199)", () => {
+describe("cedarWasmEngine — names each policy for its file", () => {
 	function dir(entries: Array<[string, string]>): PolicySource {
 		const files = entries.map(([name, text]) => ({ name, source: `/policies/${name}`, text }));
 		return {
@@ -260,7 +260,7 @@ describe("cedarWasmEngine — names each policy for its file (#199)", () => {
 		]);
 	});
 
-	it("decides as the concatenated set did — naming changes, the answers do not", () => {
+	it("decides as its policies say, and names the inline set's second policy `policies#2`", () => {
 		const text = `permit(principal, action, resource);
 			forbid(principal, action, resource) when { context.suspended == true };`;
 		const loaded = load(text);

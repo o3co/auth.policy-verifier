@@ -80,7 +80,7 @@ describe("AttrLiteralIn", () => {
 	// Evaluation-time safe-deny: NaN attr
 	// ---------------------------------------------------------------------------
 
-	it("returns false when the attribute is NaN, against a numeric set (#254)", () => {
+	it("returns false when the attribute is NaN, against a numeric set", () => {
 		const rule = new AttrLiteralIn({ a: "level", values: [1, 2, 3] });
 		const attrs: Attributes = new Map<string, unknown>([["level", Number.NaN]]);
 		expect(rule.verify(attrs)).toBe(false);

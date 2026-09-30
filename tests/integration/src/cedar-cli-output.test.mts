@@ -72,7 +72,7 @@ describe("parseAuthorizeOutput — cedar authorize --verbose, read back", () => 
 		});
 	});
 
-	it("reads cedar-policy-cli 2.5's evaluation errors too — the Cedar cedar-agent 0.2.2 runs (#284)", () => {
+	it("reads cedar-policy-cli 2.5's evaluation errors too — the Cedar cedar-agent 0.2.2 runs", () => {
 		const out = [
 			"",
 			"ALLOW",

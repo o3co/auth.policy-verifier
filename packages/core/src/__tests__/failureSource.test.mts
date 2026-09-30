@@ -51,7 +51,7 @@ const cancellable = (): AttributeCollector => ({
 		}),
 });
 
-describe("FailureRecord — collectors (#200)", () => {
+describe("FailureRecord — collectors", () => {
 	it("names the collector a rejection came from, and leaves the error itself untouched", async () => {
 		class EntitlementStoreCollector implements AttributeCollector {
 			async collect(): Promise<Attributes> {
@@ -190,7 +190,7 @@ describe("FailureRecord — collectors (#200)", () => {
 	});
 });
 
-describe("FailureRecord — rules (#200)", () => {
+describe("FailureRecord — rules", () => {
 	const attrs: Attributes = new Map();
 
 	it("names the synchronous rule whose verify threw, and rethrows the error unchanged", async () => {
@@ -272,7 +272,7 @@ describe("FailureRecord — rules (#200)", () => {
 	});
 });
 
-describe("FailureRecord — one shared rejection, several failures (#200 review)", () => {
+describe("FailureRecord — one shared rejection, several failures", () => {
 	/** A rejection several collectors await: rejected once, after all are waiting. */
 	function shared() {
 		const error = new Error("shared downstream call failed");
@@ -344,7 +344,7 @@ function quietRules(): RuleCollector {
 	return { collect: async () => [] };
 }
 
-describe("FailureRecord — timeouts are recorded by what raised them (#200 review)", () => {
+describe("FailureRecord — timeouts are recorded by what raised them", () => {
 	it("records a collector's own timeout against that collector", async () => {
 		class SlowStoreCollector implements AttributeCollector {
 			collect(): Promise<Attributes> {
@@ -435,7 +435,7 @@ describe("FailureRecord — timeouts are recorded by what raised them (#200 revi
 	});
 });
 
-describe("describing a collector (#200 review)", () => {
+describe("describing a collector", () => {
 	it.each([
 		["a name that is not an identifier", "Bearer eyJhbGciOiJIUzI1NiJ9"],
 		["a name longer than any class name", `C${"x".repeat(64)}`],

@@ -111,7 +111,7 @@ describe("evaluate", () => {
 	});
 });
 
-describe("evaluate — structured decision reason (#124)", () => {
+describe("evaluate — structured decision reason", () => {
 	it("reports every group on an allow, naming the rule that satisfied each", async () => {
 		const attrs: Attributes = new Map();
 		const result = await evaluate(attrs, [
@@ -182,7 +182,7 @@ describe("evaluate — structured decision reason (#124)", () => {
 	});
 });
 
-describe("evaluate — RuleGroupOutcome.evaluated means what ran (#135)", () => {
+describe("evaluate — RuleGroupOutcome.evaluated means what ran", () => {
 	it("on a pass, evaluated lists the tried-and-failed alternatives before the passing rule", async () => {
 		// The old `rules` field held only the passing rule here, so a consumer
 		// aggregating "rules evaluated" undercounted the two failed attempts.

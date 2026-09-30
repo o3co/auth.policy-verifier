@@ -100,24 +100,21 @@ describe("builtinCollectorsModule", () => {
 	it.each([
 		["StaticPermissionCollector", { permissions: "posts.*" }, /permissions must be an array/],
 		["StaticRoleCollector", { roles: "admin" }, /roles must be an array/],
-	])(
-		"refuses a %s config entry whose list field is a string (#264)",
-		async (name, fields, message) => {
-			const attributeCollectorRegistry = new Registry<AttributeCollectorFactory>();
-			const ruleCollectorRegistry = new Registry<RuleCollectorFactory>();
-			const resourceParserRegistry = new Registry<ResourceParserFactory>();
+	])("refuses a %s config entry whose list field is a string", async (name, fields, message) => {
+		const attributeCollectorRegistry = new Registry<AttributeCollectorFactory>();
+		const ruleCollectorRegistry = new Registry<RuleCollectorFactory>();
+		const resourceParserRegistry = new Registry<ResourceParserFactory>();
 
-			await builtinCollectorsModule.init({
-				pathResolver: (s: string) => s,
-				config: {},
-				attributeCollectorRegistry,
-				ruleCollectorRegistry,
-				resourceParserRegistry,
-			});
+		await builtinCollectorsModule.init({
+			pathResolver: (s: string) => s,
+			config: {},
+			attributeCollectorRegistry,
+			ruleCollectorRegistry,
+			resourceParserRegistry,
+		});
 
-			const factory = attributeCollectorRegistry.get(name);
-			expect(() => factory({ collector: name, ...fields })).toThrow(TypeError);
-			expect(() => factory({ collector: name, ...fields })).toThrow(message);
-		},
-	);
+		const factory = attributeCollectorRegistry.get(name);
+		expect(() => factory({ collector: name, ...fields })).toThrow(TypeError);
+		expect(() => factory({ collector: name, ...fields })).toThrow(message);
+	});
 });

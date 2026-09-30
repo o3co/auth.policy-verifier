@@ -133,7 +133,7 @@ describe("per-decision audit log", () => {
 		});
 	});
 
-	it("names the rule that satisfied each group on an allow (#135 satisfiedBy)", async () => {
+	it("names the rule that satisfied each group on an allow, in satisfiedBy", async () => {
 		const { events, logger } = captureEvents();
 		const token = await signToken({ sub: "user-1", scope: "read:project" });
 

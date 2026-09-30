@@ -205,7 +205,7 @@ describe("evaluate — what a rule reports about one invocation", () => {
 		expect(Object.isFrozen(outcome.evaluation)).toBe(true);
 	});
 
-	it("keeps a frozen copy of the determining policies too, so the rule cannot rewrite them afterwards (#199)", async () => {
+	it("keeps a frozen copy of the determining policies too, so the rule cannot rewrite them afterwards", async () => {
 		const determining = ["10-permit-eng", "20-permit-ops"];
 		const { outcome } = await outcomeOf(
 			sync(
@@ -667,7 +667,7 @@ describe("evaluate — what a rule may report", () => {
 		["a fraction", 1.5],
 		["a negative length", -1],
 	])(
-		"refuses a list whose length is %s, however it came to say so (#199)",
+		"refuses a determining-policies list whose length is %s, however it came to say so",
 		async (_label, length) => {
 			const lying = new Proxy(["10-permit-eng"], {
 				get: (target, key, receiver) =>
@@ -682,7 +682,7 @@ describe("evaluate — what a rule may report", () => {
 		},
 	);
 
-	it("reads the list's length and each entry once, and keeps what that reading said (#199)", async () => {
+	it("reads the list's length and each entry once, and keeps what that reading said", async () => {
 		const reads = new Map<PropertyKey, number>();
 		let turn = 0;
 		const drifting = new Proxy(["10-permit-eng", "20-permit-ops"], {
@@ -714,7 +714,7 @@ describe("evaluate — what a rule may report", () => {
 		expect(reads.get("1")).toBe(1);
 	});
 
-	it("carries the determining policies an asynchronous rule reports (#199)", async () => {
+	it("carries the determining policies an asynchronous rule reports", async () => {
 		const { outcome } = await outcomeOf(
 			async(
 				"cedar",
@@ -733,7 +733,7 @@ describe("evaluate — what a rule may report", () => {
 		});
 	});
 
-	it("does not repeat a refused determining policy id in the error either (#199)", async () => {
+	it("does not repeat a refused determining policy id in the error either", async () => {
 		const secret = "tenant-acme-internal\nlevel=info msg=forged";
 		const rule = sync(
 			"cedar",
@@ -833,7 +833,7 @@ describe("a rule asked by an evaluator that passes no reporter", () => {
  * package imports. So the reporter carries the bounding itself: present, a
  * rule names the policies through it; absent, it names none.
  */
-describe("a reporter bounds determining policies to its own core's contract (#199)", () => {
+describe("a reporter bounds determining policies to its own core's contract", () => {
 	/** The reporter `evaluate()` hands a rule, kept for the test to inspect. */
 	async function handed(kind: "sync" | "async"): Promise<ReportRuleEvaluation> {
 		let kept: ReportRuleEvaluation | undefined;
@@ -918,7 +918,7 @@ describe("a reporter bounds determining policies to its own core's contract (#19
 	});
 });
 
-describe("a reporter's boundDeterminingPolicies — what a rule reports, made to fit (#199)", () => {
+describe("a reporter's boundDeterminingPolicies — what a rule reports, made to fit", () => {
 	/** The one a fresh reporter carries: the bounds that apply are the checking core's. */
 	const boundDeterminingPolicies = (names: Iterable<unknown> & object) => {
 		const bound = beginRuleInvocation().report.boundDeterminingPolicies;
@@ -977,7 +977,7 @@ describe("a reporter's boundDeterminingPolicies — what a rule reports, made to
 	});
 });
 
-describe("isReportablePolicyId (#199)", () => {
+describe("isReportablePolicyId", () => {
 	it.each([
 		["a file name", true, "10-permit-eng"],
 		["spaces and non-ASCII letters", true, "team policies ポリシー"],

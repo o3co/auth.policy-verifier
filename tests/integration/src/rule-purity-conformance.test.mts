@@ -107,7 +107,7 @@ describe("rule purity conformance — the check itself", () => {
 		);
 	});
 
-	it("accepts a rule that reports an equal evaluation each time, in a fresh object (#244)", async () => {
+	it("accepts a rule that reports an equal evaluation each time, in a fresh object", async () => {
 		// A report is compared by what it says, not by which object says it: a
 		// policy-backed rule builds one per call.
 		const collect = async (): Promise<Rule[]> => [
@@ -126,7 +126,7 @@ describe("rule purity conformance — the check itself", () => {
 		]);
 	});
 
-	it("rejects a report that moves while the pass/fail does not (#244)", async () => {
+	it("rejects a report that moves while the pass/fail does not", async () => {
 		// The evaluation is part of the answer. A rule reporting whichever
 		// revision it saw last is reading state the engine cannot see — exactly
 		// the shared "last decision" slot the provenance contract rules out.
@@ -150,7 +150,7 @@ describe("rule purity conformance — the check itself", () => {
 		);
 	});
 
-	it("rejects it when the rule rewrites ONE evaluation object and reports it again (#244)", async () => {
+	it("rejects it when the rule rewrites ONE evaluation object and reports it again", async () => {
 		// The shape a by-reference comparison cannot see: the rule keeps one
 		// object, mutates it on every call and hands the same object over each
 		// time. Compared by reference, the first report is overwritten by the
@@ -185,7 +185,7 @@ describe("rule purity conformance — the check itself", () => {
 	 * and never runs an accessor on the prototype — so a class-backed report
 	 * snapshots as `{}`, while core destructures it and runs every getter.
 	 */
-	it("rejects a getter-backed report whose revision moves (#244)", async () => {
+	it("rejects a getter-backed report whose revision moves", async () => {
 		let calls = 0;
 		class MovingEvaluation {
 			get status(): "completed" {
@@ -211,7 +211,7 @@ describe("rule purity conformance — the check itself", () => {
 		);
 	});
 
-	it("rejects a getter-backed report that reads the collector's context (#244)", async () => {
+	it("rejects a getter-backed report that reads the collector's context", async () => {
 		// The request, reached not from `verify` but from an accessor on what
 		// `verify` reports — read by core after the context is gone.
 		const collect = async (ctx: CollectorContext): Promise<Rule[]> => {
@@ -574,7 +574,7 @@ describeRulePurityConformance({
 	],
 });
 
-describe("rule purity conformance — an asynchronous rule that keeps the request is caught too (#225)", () => {
+describe("rule purity conformance — an asynchronous rule that keeps the request is caught too", () => {
 	it("reports a decide that reads the collector's context after it is gone", async () => {
 		const collect = async (context: CollectorContext) => [
 			{

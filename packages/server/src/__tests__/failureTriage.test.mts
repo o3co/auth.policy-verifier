@@ -152,7 +152,7 @@ const render = (event: CapturedEvent): string =>
 			: value,
 	);
 
-describe("the failure category set (#200)", () => {
+describe("the failure category set", () => {
 	it("is closed, and every value is one an operator can filter on exactly", () => {
 		expect([...FAILURE_CATEGORIES]).toEqual([
 			"collector_timeout",
@@ -379,7 +379,7 @@ describe("the failure category set (#200)", () => {
 	});
 });
 
-describe("verify_internal_error names what failed (#200)", () => {
+describe("verify_internal_error names what failed", () => {
 	it("names the attribute collector that threw, on POST /verify", async () => {
 		const { app, events } = createTestApp({
 			attributeCollectors: [new PayloadScopeCollector(), new EntitlementStoreCollector()],
@@ -560,7 +560,7 @@ describe("verify_internal_error names what failed (#200)", () => {
 	});
 });
 
-describe("the deny events carry the category too (#200)", () => {
+describe("the deny events carry the category too", () => {
 	it("names the collector that overran its budget on the collector_timeout line", async () => {
 		const { app, events } = createTestApp({
 			attributeCollectors: [new PayloadScopeCollector(), new StalledStoreCollector()],
@@ -613,7 +613,7 @@ describe("the deny events carry the category too (#200)", () => {
 	});
 });
 
-describe("auth_collector_failures_total{collector,category} (#200)", () => {
+describe("auth_collector_failures_total{collector,category}", () => {
 	it("is published before any collector has failed", async () => {
 		const { app } = createTestApp();
 
@@ -703,7 +703,7 @@ describe("auth_collector_failures_total{collector,category} (#200)", () => {
 	});
 });
 
-describe("attribution is per decision, not per error object (#200 review)", () => {
+describe("attribution is per decision, not per error object", () => {
 	/**
 	 * One rejection shared by every collector that awaits it — the shape a
 	 * memoised downstream call or a circuit breaker's cached failure takes.
@@ -807,8 +807,8 @@ describe("attribution is per decision, not per error object (#200 review)", () =
 	});
 });
 
-describe("redaction: nothing request-derived reaches a failure line or a label (#200)", () => {
-	it("keeps request-derived rule metadata out of the failure fields (#200 review)", async () => {
+describe("redaction: nothing request-derived reaches a failure line or a label", () => {
+	it("keeps request-derived rule metadata out of the failure fields", async () => {
 		// A rule collector may build its rules per request, and nothing stops
 		// one deriving `ruleType` or `code` from the claims or the context.
 		const perRequest: RuleCollector = {

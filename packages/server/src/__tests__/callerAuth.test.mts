@@ -33,7 +33,7 @@ function appWith(header: string, token: string, logger: EventLogger = captureLog
 describe("resolveCallerAuth", () => {
 	const context = { caller: "createApp", path: "http.callerAuth" };
 
-	it("returns undefined when the block is absent — caller auth is optional (#108)", () => {
+	it("returns undefined when the block is absent — caller auth is optional", () => {
 		expect(resolveCallerAuth({ hostname: "127.0.0.1" }, context)).toBeUndefined();
 	});
 

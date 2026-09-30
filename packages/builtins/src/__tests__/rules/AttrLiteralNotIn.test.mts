@@ -86,7 +86,7 @@ describe("AttrLiteralNotIn", () => {
 	// Evaluation-time safe-deny: NaN attr
 	// ---------------------------------------------------------------------------
 
-	it("returns false when the attribute is NaN — it is in no set, and not a number either (#254)", () => {
+	it("returns false when the attribute is NaN — it is in no set, and not a number either", () => {
 		// A NaN attribute is in no numeric set (`Set` finds NaN only when it holds
 		// NaN, and construction refuses that), so a plain set test would pass it:
 		// a restriction that allows.

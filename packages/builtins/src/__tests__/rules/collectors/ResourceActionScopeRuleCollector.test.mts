@@ -134,7 +134,7 @@ describe("ResourceActionScopeRuleCollector", () => {
 	});
 });
 
-describe("ResourceActionScopeRuleCollector — the claim option (#219)", () => {
+describe("ResourceActionScopeRuleCollector — the claim option", () => {
 	const withSubject = (subject: SubjectAttributes): CollectorContext => ({
 		subject,
 		resource: { raw: "document:1", resourceType: "document", resourceId: "1" },

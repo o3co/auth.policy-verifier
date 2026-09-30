@@ -139,7 +139,7 @@ describe("CedarPolicyRuleCollector — config validation", () => {
 		).rejects.toThrow(/onNoDeterminingPolicy must be one of abstain, deny/);
 	});
 
-	it("refuses abstain over an asynchronous policy set, at boot (v0.10.0 audit)", async () => {
+	it("refuses abstain over an asynchronous policy set, at boot", async () => {
 		// An out-of-process engine that restarted empty answers every request
 		// "deny, no determining policy" — byte-identical to a request the set
 		// covers and nothing matched. Under abstain every `forbid` then stops
@@ -173,7 +173,7 @@ describe("CedarPolicyRuleCollector — config validation", () => {
 		).resolves.toBeDefined();
 	});
 
-	it("warns when no engine is named — which evaluator decides belongs in config (v0.10.0 audit)", async () => {
+	it("warns when no engine is named — which evaluator decides belongs in config", async () => {
 		// With `engine` absent the choice is made by what happens to be imported:
 		// a transitive dependency pulling in cedar-wasm silently flips a
 		// deployment from out-of-process to in-process.
@@ -303,7 +303,7 @@ describe("CedarPolicyRuleCollector — engine selection and what the engine rece
  * resource's may repeat but not add; under `"merge"` what only one declares is
  * added. What cannot be reconciled is refused, never settled by picking a side.
  */
-describe("CedarPolicyRuleCollector — one entity per uid (#282)", () => {
+describe("CedarPolicyRuleCollector — one entity per uid", () => {
 	const SELF: ReadonlyArray<[string, unknown]> = [
 		["requestResourceType", "User"],
 		["requestResourceId", "alice"],
@@ -819,7 +819,7 @@ describe("CedarPolicyRuleCollector — an asynchronous engine yields an AsyncRul
 		expect(JSON.stringify(error.mock.calls[0])).toMatch(/"engine":"fake-async"/);
 	});
 
-	it("rejects with the signal's reason when the call was aborted, rather than denying (review)", async () => {
+	it("rejects with the signal's reason when the call was aborted, rather than denying", async () => {
 		// The evaluator's timeout and the caller's abort both arrive as the
 		// signal's reason. Folded into a logged deny, a timeout read as
 		// `cedar_deny` and a caller that left read as an engine outage.
@@ -892,7 +892,7 @@ describe("CedarPolicyRuleCollector — layered PDP through core evaluate", () =>
  * | the call itself failed | failed | null — nothing answered, so nothing vouched |
  * | the request could not be built | not_invoked | no key at all |
  */
-describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", () => {
+describe("CedarPolicyRuleCollector — the evaluation behind an answer", () => {
 	const REVISION = computePolicyRevision([{ name: "policies", text: PERMIT_ALL }]);
 	const OTHER_POLICIES = "forbid(principal, action, resource);";
 	const OTHER_REVISION = computePolicyRevision([{ name: "policies", text: OTHER_POLICIES }]);
@@ -1008,7 +1008,7 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 	 * sorted (Cedar keeps them in a set, whose order is not the attributes'),
 	 * at most DETERMINING_POLICIES_MAX, and what does not fit counted.
 	 */
-	describe("which policies determined a completed answer (#199)", () => {
+	describe("which policies determined a completed answer", () => {
 		/**
 		 * A reporter that records, and bounds determining policies the way this
 		 * release's core does — its own `boundDeterminingPolicies`, taken from a
@@ -1126,7 +1126,7 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 			});
 		});
 
-		it("names none to a reporter that does not bound them — a core older than #199 would refuse the keys", async () => {
+		it("names none to a reporter that does not bound them", async () => {
 			sync.answer = () => ({ decision: "deny", reason: ["30-forbid-contractors"], errors: [] });
 			const rule = await collectSync({ policies: PERMIT_ALL });
 			expect(ask(rule, attrsWith())).toEqual({
@@ -1351,7 +1351,7 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 			expect(error).toHaveBeenCalledOnce();
 		});
 
-		it("fails closed and logs an answer the engine can tell came from another set — unvouched as it is (#283)", async () => {
+		it("fails closed and logs an answer the engine can tell came from another set — unvouched as it is", async () => {
 			// The http engine cannot vouch for a revision, but it can tell when an
 			// answer names policies it never pushed. That is the same fault as a
 			// foreign revision, and just as never silent.
@@ -1372,7 +1372,7 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 			);
 		});
 
-		it("says so before it looks at errors — a foreign answer with errors is no evaluation error to silence (#283)", async () => {
+		it("says so before it looks at errors — a foreign answer with errors is no evaluation error to silence", async () => {
 			const { logger, error } = fakeLogger();
 			async.answer = () => ({
 				...ALLOW,
@@ -1388,7 +1388,7 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 		});
 
 		it.each(["altered policy set", "unverifiable policy set"] as const)(
-			"logs the read-back's label %j as the reason (#286)",
+			"logs the read-back's label %j as the reason",
 			async (why) => {
 				const { logger, error } = fakeLogger();
 				async.answer = () => ({ decision: "deny", reason: [], errors: [], foreign: { why } });

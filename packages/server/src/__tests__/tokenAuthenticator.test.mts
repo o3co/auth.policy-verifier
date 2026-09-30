@@ -140,7 +140,7 @@ describe("assertVerifyRouterJwtConfig — verifying configs (RFC 9068 §4 presen
 	);
 });
 
-describe("assertVerifyRouterJwtConfig — decode-only configs (double opt-in, #106)", () => {
+describe("assertVerifyRouterJwtConfig — decode-only configs (double opt-in)", () => {
 	it("accepts validate=false with the explicit acknowledgment", () => {
 		expect(() =>
 			assertVerifyRouterJwtConfig({ validate: false, allowInsecureDecode: true }),
@@ -257,7 +257,7 @@ describe("createTokenAuthenticator — construction and bearer parsing", () => {
 	// The verifier writes no `tokenType` slot, so a claim of that name reaches
 	// the subject bag like any other custom claim: `subject.tokenType` is the
 	// token's, not the verifier's.
-	it("no longer shadows a `tokenType` claim the token itself carries", async () => {
+	it("keeps a `tokenType` claim the token itself carries on the subject, beside `authScheme`", async () => {
 		const authenticator = createTokenAuthenticator(SIGNING_CONFIG, silentLogger);
 		const token = await signToken({ tokenType: "from-the-token" });
 		const result = await authenticator.authenticate(`Bearer ${token}`);
@@ -419,7 +419,7 @@ describe("assertTimeClaims — decode-path parity with jwtVerify", () => {
 	});
 });
 
-describe("createTokenAuthenticator — audienceClaim (#219)", () => {
+describe("createTokenAuthenticator — audienceClaim", () => {
 	const silentLogger = { info() {}, warn() {}, error() {} };
 	const APP = "https://app.test";
 
@@ -529,7 +529,7 @@ describe("createTokenAuthenticator — audienceClaim (#219)", () => {
 	});
 });
 
-describe('createTokenAuthenticator — tokenType "*" (#219)', () => {
+describe('createTokenAuthenticator — tokenType "*"', () => {
 	const silentLogger = { info() {}, warn() {}, error() {} };
 
 	async function sign(

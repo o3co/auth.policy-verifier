@@ -86,7 +86,7 @@ describe("AttrLiteralNotEqual", () => {
 	// Evaluation-time safe-deny: NaN attr
 	// ---------------------------------------------------------------------------
 
-	it("returns false when the attribute is NaN — not a number is not an unequal number (#254)", () => {
+	it("returns false when the attribute is NaN — not a number is not an unequal number", () => {
 		// `NaN !== v` holds for every v, so a plain `!==` would pass a NaN
 		// attribute: a restriction that allows. JSON carries no NaN; a collector
 		// that computes a number can produce one.

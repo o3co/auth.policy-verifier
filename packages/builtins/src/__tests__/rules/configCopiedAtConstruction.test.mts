@@ -282,7 +282,7 @@ const rows: Row[] = [
 	),
 ];
 
-describe("comparison rules copy their config at construction (#255)", () => {
+describe("comparison rules copy their config at construction", () => {
 	it.each(rows)("$name after construction changes nothing", ({ build, answers }) => {
 		const { rule, mutate } = build();
 		const ask = (attrs: Record<string, unknown>) => rule.verify(new Map(Object.entries(attrs)));

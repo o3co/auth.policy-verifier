@@ -33,7 +33,7 @@ const REST_OF_CONFIG = {
 	rule: { collectors: [] },
 };
 
-describe("checkTokenAuthenticatorSelection (#219)", () => {
+describe("checkTokenAuthenticatorSelection", () => {
 	it("names the built-in authenticator jwt", () => {
 		expect(JWT_TOKEN_AUTHENTICATOR).toBe("jwt");
 	});
@@ -94,7 +94,7 @@ describe("checkTokenAuthenticatorSelection (#219)", () => {
 	});
 });
 
-describe("token authenticator selection — one reader at both boundaries (#219)", () => {
+describe("token authenticator selection — one reader at both boundaries", () => {
 	interface Verdict {
 		accepted: boolean;
 		key: string | null;

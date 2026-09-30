@@ -7,7 +7,7 @@ import { MIN_SECRET_ENTROPY_BYTES } from "#/config/defaults.mjs";
 import { describeWeakSecret, measureSecretEntropyBytes } from "#/config/secretEntropy.mjs";
 
 describe("MIN_SECRET_ENTROPY_BYTES", () => {
-	it("is 32 bytes (256 bits) — the same floor auth.provider#282 set", () => {
+	it("is 32 bytes (256 bits)", () => {
 		expect(MIN_SECRET_ENTROPY_BYTES).toBe(32);
 	});
 });

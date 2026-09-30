@@ -9,7 +9,7 @@ import {
 } from "#/config/defaults.mjs";
 import { checkJwksUri, parseJwksUri, resolveJwksFetchBounds } from "#/config/jwks.mjs";
 
-describe("checkJwksUri — transport security (#109)", () => {
+describe("checkJwksUri — transport security", () => {
 	it("accepts an https URI", () => {
 		expect(checkJwksUri("https://auth-provider.test/.well-known/jwks.json").ok).toBe(true);
 	});
@@ -91,7 +91,7 @@ describe("parseJwksUri", () => {
 	});
 });
 
-describe("resolveJwksFetchBounds — bounded fetches on the decision path (#109)", () => {
+describe("resolveJwksFetchBounds — bounded fetches on the decision path", () => {
 	it("defaults every bound when the config sets none", () => {
 		expect(resolveJwksFetchBounds({})).toEqual({
 			timeoutDuration: DEFAULT_JWKS_TIMEOUT_MS,
@@ -135,7 +135,7 @@ describe("resolveJwksFetchBounds — bounded fetches on the decision path (#109)
 	});
 
 	it.each([Number.NaN, Number.POSITIVE_INFINITY, 1.5, 0, -1])(
-		"rejects %o as a timeout — an unbounded or nonsensical fetch is the bug",
+		"rejects %o as a timeout — the fetch would be unbounded or make no sense",
 		(value) => {
 			expect(() => resolveJwksFetchBounds({ jwksTimeoutMs: value })).toThrow(
 				/oauth\.jwt\.jwksTimeoutMs must be an integer between 1 and 2147483647 milliseconds/,

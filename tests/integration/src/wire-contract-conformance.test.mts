@@ -398,7 +398,7 @@ describe("the fixture's evaluation table is core's own", () => {
 		expect(evaluation.revision.maxLength).toBe(POLICY_REVISION_MAX_LENGTH);
 	});
 
-	it("states the determining-policy bounds and id shape core enforces (#199)", () => {
+	it("states the determining-policy bounds and id shape core enforces", () => {
 		expect(evaluation.determiningPolicies.maxItems).toBe(DETERMINING_POLICIES_MAX);
 		expect(evaluation.determiningPolicies.idMaxLength).toBe(POLICY_ID_MAX_LENGTH);
 		// The unit is what core counts in: an id of astral characters at the bound
@@ -415,7 +415,7 @@ describe("the fixture's evaluation table is core's own", () => {
 		).toEqual(POLICY_ID_FORBIDDEN_RANGES.map(([low, high]) => [low, high]));
 	});
 
-	it("names as completed-only exactly the keys core takes on a completed report and refuses on a failed one (#199)", async () => {
+	it("names as completed-only exactly the keys core takes on a completed report and refuses on a failed one", async () => {
 		const accepts = async (report: Record<string, unknown>): Promise<boolean> =>
 			evaluate(new Map(), [
 				{
@@ -446,7 +446,7 @@ describe("the fixture's evaluation table is core's own", () => {
 		expect([...evaluation.evaluated.onlyWhenCompleted].sort()).toEqual(Object.keys(keys).sort());
 	});
 
-	it("states the omitted count's rules and id well-formedness as core holds them (#199)", async () => {
+	it("states the omitted count's rules and id well-formedness as core holds them", async () => {
 		const accepts = async (report: Record<string, unknown>): Promise<boolean> =>
 			evaluate(new Map(), [
 				{

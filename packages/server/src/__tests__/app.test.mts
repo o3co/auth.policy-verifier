@@ -140,7 +140,7 @@ describe("createApp", () => {
 		expect(res.body.decision).toBe("deny");
 	});
 
-	it("hands verify.evaluateDeadlineMs to the router: rules that overrun it together deny with rule_timeout (review)", async () => {
+	it("hands verify.evaluateDeadlineMs to the router: rules that overrun it together deny with rule_timeout", async () => {
 		const collectors = {
 			attribute: { collectors: [{ collector: "TestScopeCollector" }] },
 			rule: { collectors: [{ collector: "SlowAsyncRuleCollector" }] },
@@ -234,7 +234,7 @@ describe("createApp", () => {
 		).rejects.toThrow(/createApp: oauth\.jwt\.tokenType is required/);
 	});
 
-	it("refuses to boot a hand-built config with a plaintext JWKS URI (#109)", async () => {
+	it("refuses to boot a hand-built config with a plaintext JWKS URI", async () => {
 		// AppConfigSchema rejects this at config-parse time, but a library consumer
 		// can hand-build the config; boot is then the last place to catch a key
 		// source anyone on the network path can substitute. It must fail here and
@@ -483,7 +483,7 @@ describe("createApp", () => {
 	});
 });
 
-describe("createApp — the default bearer-JWT authenticator is built here, not in the router (#259)", () => {
+describe("createApp — the default bearer-JWT authenticator", () => {
 	it("authenticates verify requests with oauth.jwt when oauth.authenticator is not set", async () => {
 		const app = await createApp({
 			pathResolver: (s: string) => s,
@@ -517,7 +517,7 @@ describe("createApp — the default bearer-JWT authenticator is built here, not 
 	});
 });
 
-describe("createApp logging (#107)", () => {
+describe("createApp logging", () => {
 	interface CapturedCall {
 		level: "trace" | "debug" | "info" | "warn" | "error" | "fatal";
 		obj: Record<string, unknown> | string;
@@ -643,7 +643,7 @@ describe("createApp logging (#107)", () => {
 	});
 });
 
-describe("createApp insecure decode mode (#106, #134)", () => {
+describe("createApp insecure decode mode", () => {
 	const ackConfig = AppConfigSchema.parse({
 		oauth: { jwt: { mode: "insecure-decode" } },
 		attribute: { collectors: [{ collector: "TestScopeCollector" }] },
@@ -801,7 +801,7 @@ describe("createApp insecure decode mode (#106, #134)", () => {
 	});
 });
 
-describe("createApp caller authentication (#108)", () => {
+describe("createApp caller authentication", () => {
 	interface Captured {
 		level: "trace" | "debug" | "info" | "warn" | "error" | "fatal";
 		obj: Record<string, unknown> | string;
@@ -1041,7 +1041,7 @@ describe("createApp caller authentication (#108)", () => {
 	});
 });
 
-describe("createApp — HS256 secret rotation (#112)", () => {
+describe("createApp — HS256 secret rotation", () => {
 	/** 64 hex characters — 32 decoded bytes, the HS256 secret's entropy floor. */
 	const CURRENT_SECRET = "11".repeat(32);
 	const RETIRED_SECRET = "22".repeat(32);
@@ -1213,7 +1213,7 @@ describe("createApp — HS256 secret rotation (#112)", () => {
 			/^oauth\.jwt\.previousSecrets\[0\]\.secret must carry at least/,
 		],
 	])(
-		"refuses to boot on a hand-built config whose %s is under the entropy floor (#114)",
+		"refuses to boot on a hand-built config whose %s is under the entropy floor",
 		async (_label, override, message) => {
 			const handBuilt = {
 				...rotatedConfig,
@@ -1244,7 +1244,7 @@ const stallingModule: Module = {
 	},
 };
 
-describe("createApp — a stalled collector denies (#115)", () => {
+describe("createApp — a stalled collector denies", () => {
 	/** Bounds low enough that the stall is answered well inside the test's own timeout. */
 	const bounds = { collectorTimeoutMs: 20, collectorDeadlineMs: 50 };
 
@@ -1314,7 +1314,7 @@ describe("createApp — a stalled collector denies (#115)", () => {
 	});
 });
 
-describe("createApp — collector bounds, one reader at both boundaries (#115)", () => {
+describe("createApp — collector bounds, one reader at both boundaries", () => {
 	// `createApp` constructs both pipelines, so it is the runtime guard for the
 	// bounds they run under: a library consumer reaches it with a hand-built
 	// config the schema never saw. It must refuse what `AppConfigSchema` refuses,
@@ -1384,7 +1384,7 @@ describe("createApp — collector bounds, one reader at both boundaries (#115)",
 	});
 });
 
-describe("createApp — token authenticator registry (#219)", () => {
+describe("createApp — token authenticator registry", () => {
 	const decideConfig = {
 		attribute: { collectors: [{ collector: "TestScopeCollector" }] },
 		rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
@@ -1565,7 +1565,7 @@ describe("createApp — token authenticator registry (#219)", () => {
 	});
 });
 
-describe("createApp — tokens shaped by external IdPs (#219)", () => {
+describe("createApp — tokens shaped by external IdPs", () => {
 	const decideConfig = {
 		attribute: { collectors: [{ collector: "TestScopeCollector" }] },
 		rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },
@@ -1625,7 +1625,7 @@ describe("createApp — tokens shaped by external IdPs (#219)", () => {
 		expect(res.body.subject).toBe("user_2abc");
 	});
 
-	it("still refuses that token for another app — the audience check moved, it did not go away", async () => {
+	it("still refuses that token for another app", async () => {
 		const config = AppConfigSchema.parse({
 			oauth: {
 				jwt: {
@@ -1693,7 +1693,7 @@ describe("createApp — tokens shaped by external IdPs (#219)", () => {
 	});
 });
 
-describe("createApp — the audit's two-boundary rows (#219 release audit)", () => {
+describe("createApp — a malformed audienceClaim in decode mode, and a jwt block under another authenticator", () => {
 	const decideConfig = {
 		attribute: { collectors: [{ collector: "TestScopeCollector" }] },
 		rule: { collectors: [{ collector: "TestScopeRuleCollector" }] },

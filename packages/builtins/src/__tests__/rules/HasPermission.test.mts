@@ -117,7 +117,7 @@ describe("HasPermission", () => {
 	// permission. `startsWith(prefix) && endsWith(suffix)` alone would let
 	// "posts.*.read" match "posts.read", counting the one "." as the prefix's
 	// trailing "." and the suffix's leading "." at once: an over-grant.
-	describe("wildcard halves must not overlap (#180)", () => {
+	describe("wildcard halves must not overlap", () => {
 		it("does NOT match when one character would satisfy both halves: posts.*.read vs posts.read", () => {
 			const rule = new HasPermission("posts.read");
 			const attrs: Attributes = new Map([["permissions", ["posts.*.read"]]]);
@@ -150,7 +150,7 @@ describe("HasPermission", () => {
 	// produces. Malformed entries never match and never throw, as HasScope
 	// treats non-string scope values: a throw would turn one bad row in a role
 	// store into a 500 deny.
-	describe("malformed role data never matches and never throws (#180)", () => {
+	describe("malformed role data never matches and never throws", () => {
 		it("ignores a role whose permissions is missing", () => {
 			const rule = new HasPermission("posts.read");
 			const attrs: Attributes = new Map([["roles", [{ name: "broken" }]]]);

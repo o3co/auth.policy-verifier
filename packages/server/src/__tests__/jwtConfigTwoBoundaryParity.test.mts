@@ -298,7 +298,7 @@ const PARITY_CASES: ParityCase[] = [
 	},
 ];
 
-describe("Two-boundary parity — AppConfigSchema vs assertVerifyRouterJwtConfig (#164)", () => {
+describe("Two-boundary parity — AppConfigSchema vs assertVerifyRouterJwtConfig", () => {
 	it.each(PARITY_CASES)("$name", (parityCase) => {
 		const schema = schemaVerdict(parityCase.wire);
 		const guard = guardVerdict(parityCase.guard);

@@ -357,7 +357,7 @@ describe("label bounding: method and route", () => {
 	});
 });
 
-describe("/metrics and caller authentication (#108)", () => {
+describe("/metrics and caller authentication", () => {
 	const gated = {
 		http: { hostname: "127.0.0.1", port: 3000, pathPrefix: "", callerAuth: { token: "s3cret" } },
 	};
