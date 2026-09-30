@@ -77,7 +77,7 @@ describe("AttrLiteralIn", () => {
 	});
 
 	// ---------------------------------------------------------------------------
-	// Evaluation-time safe-deny: NaN attr (#254)
+	// Evaluation-time safe-deny: NaN attr
 	// ---------------------------------------------------------------------------
 
 	it("returns false when the attribute is NaN, against a numeric set (#254)", () => {

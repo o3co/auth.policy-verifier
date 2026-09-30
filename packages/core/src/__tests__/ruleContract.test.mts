@@ -6,8 +6,7 @@ import { evaluate } from "../evaluate.mjs";
 import type { Attributes, ReadonlyAttributes, Rule } from "../types.mjs";
 
 /*
- * The `Rule.verify` half of the Collector/Rule/Attribute contract
- * (o3co/auth.policy-verifier#152).
+ * The `Rule.verify` half of the Collector/Rule/Attribute contract.
  *
  * AGENTS.md requires `verify` to be a deterministic, side-effect-free function
  * of `attrs`. Two of those words are checkable here, at the type level and at
@@ -78,7 +77,7 @@ describe("Rule.verify contract", () => {
 
 	it("leaves the attributes it was judged against untouched", async () => {
 		// The evaluator hands the same live map to every rule in every group
-		// (`evaluate.mts` Phase 3). A rule that wrote into it would change the
+		// (`evaluate.mts`). A rule that wrote into it would change the
 		// inputs of every group after it, which is what the read-only view above
 		// makes a compile error rather than a debugging session.
 		const rule = requiresScope("read:project");

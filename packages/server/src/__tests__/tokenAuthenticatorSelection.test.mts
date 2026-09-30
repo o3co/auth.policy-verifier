@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * #219: which token authenticator a deployment runs is a config decision,
+ * Which token authenticator a deployment runs is a config decision,
  * `oauth.authenticator`, read at both boundaries through one function — the
  * shape AGENTS.md "Two-Boundary Config Validation" asks for. The rows below
  * pin what that function decides and that `AppConfigSchema` reports the same
@@ -16,7 +16,7 @@ import {
 	JWT_TOKEN_AUTHENTICATOR,
 } from "#/config/tokenAuthenticatorSelection.mjs";
 
-/** 64 hex characters — clears the #114 entropy floor, so no row fails on its secret. */
+/** 64 hex characters — clears the HS256 entropy floor, so no row fails on its secret. */
 const SECRET = "11".repeat(32);
 
 /** A complete verifying `oauth.jwt` block, so only the selection can decide a verdict. */

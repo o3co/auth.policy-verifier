@@ -2,14 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * The CLI-equivalence suite (#198, #284): for the same `.cedar` files and the
- * same request, `CedarPolicyRuleCollector` over each engine and the official
- * `cedar` CLI of that engine's Cedar must agree — on the decision, on the
- * policies that determined it, and on which policies raised evaluation errors.
- * It is the proof #185 called the migration criterion: that the entity
- * synthesis, the context allowlist and the answer interpretation here do not
- * drift from what Cedar computes, so a corpus can move to another Cedar
- * evaluator unchanged.
+ * The CLI-equivalence suite: for the same `.cedar` files and the same request,
+ * `CedarPolicyRuleCollector` over each engine and the official `cedar` CLI of
+ * that engine's Cedar must agree — on the decision, on the policies that
+ * determined it, and on which policies raised evaluation errors. That is what
+ * shows the entity synthesis, the context allowlist and the answer
+ * interpretation here do not drift from what Cedar computes, so a corpus can
+ * move to another Cedar evaluator unchanged.
  *
  * Two engines, two Cedars:
  * - **wasm** evaluates in-process with `@cedar-policy/cedar-wasm`, held to the
@@ -17,15 +16,13 @@
  * - **http** hands the request to a real cedar-agent, which evaluates with the
  *   cedar-policy compiled into its image (2.5 in `permitio/cedar-agent:0.2.2`),
  *   held to the CLI of that version. Each case's boot also reads the agent's
- *   set back and requires the copy the push was answered with (#286): the
- *   engine's read-back rests on that, and it is checked here, against the
- *   real agent, on every case of the corpus.
+ *   set back and requires the copy the push was answered with: the engine's
+ *   read-back rests on that, and it is checked here against the real agent.
  *
  * Every case is measured under both Cedars, since what a case means is its
  * CLIs' answer, not an engine's: each half holds its CLI to the case's stated
  * answers, so a case that meant one thing under 4.x and another under 2.5
- * fails on one side. What an engine cannot load is declared, and the
- * declaration is checked:
+ * fails on one side. What an engine cannot load is declared, and checked:
  * - A case whose set cedar-agent refuses states why (`agentRefuses` — a file
  *   holding several policies, where the agent stores one per id). The http
  *   half checks that the agent does refuse it at boot, and still holds the
@@ -37,46 +34,38 @@
  *   collector's reading of it under `"abstain"` is the wasm half's to check.
  *
  * Each case under `conformance/fixtures/cedarCli/` holds `policies/*.cedar`
- * and a `case.json` of the collector's mapping config and the requests: the
- * attributes the collector sees, and what must come of them. Three things are
- * checked per request, and each catches what the others cannot:
- *
+ * and a `case.json` of the collector's mapping config and the requests. Three
+ * things are checked per request, and each catches what the others cannot:
  * - The CLI is asked exactly the request the collector built — captured from
- *   the engine it passed it to — and must answer as the engine did. That
- *   measures Cedar's semantics and the policy naming, not the synthesis: both
- *   sides see the same request.
- * - So the synthesis is measured against the case: the request the collector
- *   built must be the one the case records (`expect.request`, principal to
- *   entities), and the answer the one it states. A change to how requests are
- *   built shows as a diff to review, whether or not it flips an answer.
+ *   the engine — and must answer as the engine did. That measures Cedar's
+ *   semantics and the policy naming, not the synthesis.
+ * - The synthesis, against the case: the request the collector built must be
+ *   the one the case records (`expect.request`), and the answer the one it
+ *   states. A change to how requests are built shows as a diff to review,
+ *   whether or not it flips an answer; the recorded requests were read one by
+ *   one, and regenerating them unread would make this check say nothing.
  * - The collector's own reading of the answer: its answer table, over Cedar's.
- *
- * The recorded requests were generated from the collector and then read, one
- * by one. A diff in them after a change to the synthesis is for review, the
- * same way: regenerating them unread would make the check say nothing, while
- * the stated answers (`decision`, `determiningPolicies`, `errorsIn`) still
- * hold the meaning.
  *
  * Policy ids. The engines name each policy for its file (`namePolicies`) and
  * ignore `@id`; the CLI names a policy by its `@id` annotation, else by its
  * position in the set. Every fixture policy carries `@id` with the id its file
- * gives it, so both answer in the same names, and a policy an engine named
- * differently is a mismatch. The agent holds each id under the load's mark
- * (#283), and its error strings carry it: this load's mark is set aside to
- * compare, and an error naming a policy under any other mark is a mismatch.
+ * gives it, so both answer in the same names. The agent holds each id under
+ * the load's mark, and its error strings carry it: this load's mark is set
+ * aside to compare, and an error naming a policy under any other mark is a
+ * mismatch.
  *
- * What each engine needs, and without it the engine's half is skipped with a
- * notice (its `…_REQUIRED=1` — set by the CI job that provides it — turns the
+ * What each engine needs; without it the engine's half is skipped with a
+ * notice. Its `…_REQUIRED=1` (set by the CI job that provides it) turns the
  * absence into a failure, and so does a half configured in part; an empty
- * variable counts as unset):
+ * variable counts as unset.
  * - wasm: the CLI as `CEDAR_CLI`, else `cedar` on the PATH, at the version
  *   `@cedar-policy/cedar-wasm` is pinned to. `CEDAR_CLI_REQUIRED`.
  * - http: an agent at `CEDAR_AGENT_ENDPOINT`, the CLI of its Cedar as
- *   `CEDAR_AGENT_CLI`, and that version as `CEDAR_AGENT_CEDAR_VERSION` — all
- *   three or none — the version read from the agent image by the CI job,
- *   since the agent does not say. Its token, if it has one, as
- *   `CEDAR_AGENT_AUTHENTICATION`, not one of the three. Only these are read:
- *   `CEDAR_ENDPOINT` and `CEDAR_AUTHENTICATION` are not. `CEDAR_AGENT_REQUIRED`.
+ *   `CEDAR_AGENT_CLI`, and that version as `CEDAR_AGENT_CEDAR_VERSION` (read
+ *   from the agent image by the CI job, since the agent does not say) — all
+ *   three or none. Its token, if any, as `CEDAR_AGENT_AUTHENTICATION`.
+ *   `CEDAR_ENDPOINT` and `CEDAR_AUTHENTICATION` are not read.
+ *   `CEDAR_AGENT_REQUIRED`.
  */
 
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -310,7 +299,7 @@ const HTTP: Evaluator = {
 					changed: 'run under onNoDeterminingPolicy = "deny"',
 				}
 			: { config: testCase.config },
-	// The agent's own strings, each policy id under the load's mark (#283): read
+	// The agent's own strings, each policy id under the load's mark: read
 	// with the CLI's parser, and only this load's mark set aside — an id under
 	// another stays as it is, and fails to match.
 	errors: (answer, source) =>
@@ -322,7 +311,7 @@ const HTTP: Evaluator = {
 			const stem = at === -1 ? id : id.slice(0, at);
 			return `${agentPolicyId(stem, source.revision) === id ? stem : id}: ${message}`;
 		}),
-	// The agent cannot vouch for what it ran (#244).
+	// The agent cannot vouch for what it ran.
 	revision: (source) => ({ revision: null, loadedRevision: source.revision }),
 };
 

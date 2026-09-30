@@ -2,11 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * What kind of failure kept a decision from being made, and where (#200).
- *
- * `verify_internal_error` used to carry the error and the endpoint, nothing
- * else — so "which fact source is failing?" was a regex over `err.message`, and
- * a dashboard could not point at one misbehaving collector at all. This module
+ * What kind of failure kept a decision from being made, and where. This module
  * is the one place a failure is sorted: every failure line the verify router
  * emits for a decision it could not make carries the category it returns, and
  * the collector counter is labelled with it.
@@ -41,13 +37,12 @@ import type { NamedRule } from "./decisionEvent.mjs";
  *   or evaluation: a resource parser or authenticator that threw, whatever
  *   class it threw.
  *
- * What the caller is answered for each is the router's to say, and it says it
- * on `createVerifyRouter` (`routes/verify.mts`); this set only sorts.
+ * What the caller is answered for each is documented on `createVerifyRouter`
+ * (`routes/verify.mts`); this set only sorts.
  *
- * **Not a category: an unreachable JWKS.** The built-in authenticator answers
- * it `401 invalid_token` and logs `jwt_verification_unavailable` at error; it
- * never reaches a line this set labels, and a value no line can carry would
- * be a filter that never matches.
+ * An unreachable JWKS is not a category: the built-in authenticator answers it
+ * `401 invalid_token` and logs `jwt_verification_unavailable` at error, so it
+ * never reaches a line this set labels.
  */
 export const FAILURE_CATEGORIES = [
 	"collector_timeout",
@@ -80,13 +75,9 @@ export const REDACTED = "redacted";
 
 /**
  * The shape a rule's `ruleType` and `code` — and an attribute key — must have to
- * be logged: a letter, then letters, digits, `_`, `.` or `-`, at most 64
- * characters in all. Codes are documented as short stable identifiers
- * (`invalid_scope`, `cedar_deny`) and keys as the deployment's own constants,
- * but a collector builds rules and attribute maps per request and may derive
- * either from the claims or the context; anything carrying whitespace, `@`,
- * `:`, a line break, or the length of a token is not an identifier an operator
- * wrote.
+ * be logged. A collector builds rules and attribute maps per request and may
+ * derive either from the claims or the context, so a value outside this shape
+ * is not taken for an identifier an operator wrote.
  */
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
 
@@ -95,13 +86,10 @@ const identifier = (value: unknown): string =>
 
 /**
  * A failure, sorted. The collector or rule is named exactly when the category
- * has one to name, which the union states rather than leaving to optional
- * fields.
- *
- * Nothing here is read off the error or from the request: the category is from
- * the set above, the collector or rule is what the runner or the evaluator
- * recorded — or {@link UNATTRIBUTED} — and a rule's identity passes the
- * identifier shape or is {@link REDACTED}.
+ * has one to name. Nothing is read off the error or the request: the collector
+ * or rule is what the runner or the evaluator recorded, or
+ * {@link UNATTRIBUTED}, and a rule's identity passes the identifier shape or is
+ * {@link REDACTED}.
  */
 export type ClassifiedFailure =
 	| {
@@ -118,17 +106,15 @@ export type ClassifiedFailure =
 
 /**
  * Sorts what one decision's collect or evaluation failed with, reading where
- * it came from out of that decision's own `failures`.
+ * it came from out of that decision's own `failures`. Only for failures out of
+ * a decision: a fault anywhere else is `internal`, and `body_rejected` is the
+ * router's terminal handler's to decide.
  *
- * The three deny errors are recognised by class first, exactly as the router
- * recognises them to answer a deny: a collector that rethrows a nested
- * pipeline's `CollectorTimeoutError` is still a timeout. What the class does
- * **not** decide is the name — that is always the record's, so a collector
- * cannot log or label itself as anything but its own position by throwing a
- * timeout it built.
- *
- * Only for failures out of a decision: a fault anywhere else is `internal`,
- * and `body_rejected` is the router's terminal handler's to decide.
+ * The three deny errors are recognised by class first, as the router
+ * recognises them to answer a deny, so a collector that rethrows a nested
+ * pipeline's `CollectorTimeoutError` is still a timeout. The name is always the
+ * record's, never the error's: a collector cannot log or label itself as
+ * anything but its own position by throwing a timeout it built.
  */
 export function classifyFailure(cause: unknown, failures?: FailureRecord): ClassifiedFailure {
 	const source = failures?.sourceOf(cause);
@@ -154,20 +140,19 @@ export function classifyFailure(cause: unknown, failures?: FailureRecord): Class
  * The error to log as `err` for a failure: the one thrown, except for the three
  * deny errors core defines, which are rebuilt from safe parts.
  *
- * Those three name what they are about in their message **and** in their own
- * fields — `RuleTimeoutError.ruleType` / `.code`, `CollectorTimeoutError.collector`,
- * `AttributeConflictError.key` — and a JSON logger serialises both (pino's `err`
- * serializer copies every enumerable property). Each is text a collector can
- * derive from the claims or the context, or put into an instance it built
- * itself. So what is logged is a fresh instance of the same class: the rule or
- * collector the classification named (never the error's), an attribute key
- * held to the identifier shape, and the numeric and enum fields only when they
- * are what their types say. Its `stack` is the header line alone: the original
- * stack begins with the original message, and the frames of the rebuilt one
- * would be the log site's.
+ * Those three name what they are about in their message and in their own
+ * fields (`RuleTimeoutError.ruleType` / `.code`, `CollectorTimeoutError.collector`,
+ * `AttributeConflictError.key`), a JSON logger serialises both (pino's `err`
+ * serializer copies every enumerable property), and a collector can derive
+ * that text from the claims or the context, or build the instance itself. The
+ * logged one is a fresh instance of the same class: the rule or collector the
+ * classification named (never the error's), an attribute key held to the
+ * identifier shape, and the numeric and enum fields only when they are what
+ * their types say. Its `stack` is the header line alone: the original stack
+ * begins with the original message, and the rebuilt one's frames would be the
+ * log site's.
  *
- * Logging only — what was thrown, and what `instanceof` routed on, is untouched.
- * Every other error is handed back as thrown: its message is its author's.
+ * Logging only: what was thrown, and what `instanceof` routed on, is untouched.
  */
 export function loggableError(cause: unknown, failure: ClassifiedFailure): unknown {
 	if (cause instanceof RuleTimeoutError) {

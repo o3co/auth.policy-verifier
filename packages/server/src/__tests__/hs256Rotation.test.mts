@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { MAX_PREVIOUS_SECRETS, MIN_SECRET_ENTROPY_BYTES } from "#/config/defaults.mjs";
 import { checkHs256Rotation, parseHs256Rotation } from "#/config/hs256Rotation.mjs";
 
-/** 64 hex characters — 32 decoded bytes, the floor auth.provider#282 set. */
+/** 64 hex characters — 32 decoded bytes, the HS256 secret's entropy floor. */
 const SECRET = "11".repeat(32);
 const OLD_SECRET = "22".repeat(32);
 

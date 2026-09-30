@@ -23,13 +23,11 @@ export interface RulePurityCase {
 	/** Case name, used in test titles. */
 	name: string;
 	/**
-	 * The request the rules are collected from.
-	 *
-	 * A `CollectorRequest`, so a case states only facts about the request: the
-	 * per-collector `signal` is the fan-out's to supply (#115), and here the
-	 * harness *is* the fan-out. Supplying one anyway is how a case checks what
-	 * its collector does when the request is cancelled — it is linked into the
-	 * view the collector sees.
+	 * The request the rules are collected from. A `CollectorRequest`, so a case
+	 * states only facts about the request: the per-collector `signal` is the
+	 * fan-out's to supply, and here the harness *is* the fan-out. Supplying one
+	 * anyway is how a case checks what its collector does when the request is
+	 * cancelled — it is linked into the view the collector sees.
 	 */
 	context: CollectorRequest;
 	/** Attributes to run the collected rules against. */
@@ -53,23 +51,20 @@ export interface RulePurityAdapter {
 /**
  * Wraps `context` so every object reachable through it can be revoked at once.
  *
- * A shallow `Proxy.revocable(context)` would only catch a rule that kept the
- * context object itself. The mistake is just as easily made one indirection in —
- * `const resource = ctx.resource` at collect time, `resource.resourceType`
- * inside `verify` — so each object read through the proxy is wrapped in its own
- * revocable proxy and registered here. Primitives are handed back as-is, which
- * is exactly the distinction the contract draws: copying a value out at collect
- * time is legal, holding a live reference into the request is not.
+ * A rule can keep the context one indirection in — `const resource =
+ * ctx.resource` at collect time, `resource.resourceType` inside `verify` — so
+ * each object read through the proxy is wrapped in its own revocable proxy and
+ * registered here. Primitives are handed back as-is, which is the distinction
+ * the contract draws: copying a value out at collect time is legal, holding a
+ * live reference into the request is not.
  *
  * Each target is wrapped **once**, memoized in a `WeakMap`, so the proxy has the
- * same object identity every time it is read. Wrapping per access would make
+ * same identity every time it is read: wrapping per access would make
  * `ctx.resource === ctx.resource` false inside `collect`, and an honest
- * collector that compares or caches a sub-object would fail this suite for a
- * reason that exists only inside the harness — a gate that reports its own
- * artifacts as violations is one people learn to disbelieve. Memoizing does not
- * weaken the revoke: one proxy per target still means every proxy ever handed
- * out is registered, so revocation reaches a rule that kept `ctx.resource` just
- * as it reaches one that kept `ctx`.
+ * collector that compares or caches a sub-object would fail for a reason that
+ * exists only in the harness. Every proxy handed out is still registered, so
+ * revocation reaches a rule that kept `ctx.resource` as it reaches one that
+ * kept `ctx`.
  */
 function revocableContext(request: CollectorRequest): {
 	proxy: CollectorContext;
@@ -121,29 +116,23 @@ function revocableContext(request: CollectorRequest): {
 }
 
 /**
- * The `AbortSignal` case, which is the one field of the context a collector is
- * *meant* to hold live — and the one that cannot be wrapped in a `Proxy`.
- *
- * Both halves of that matter, and they pull in opposite directions.
+ * The `AbortSignal` case: the one field of the context a collector is *meant*
+ * to hold live, and the one that cannot be wrapped in a `Proxy`.
  *
  * **It cannot be a `Proxy`.** `AbortSignal`'s members are brand-checked against
- * the receiver's internal slots, and a proxy is not the signal. `signal.aborted`
- * happens to read through, but `addEventListener`, `AbortSignal.any([signal])`
- * and `fetch(url, { signal })` all throw `Method Map.prototype.get called on
- * incompatible receiver` — so wrapping it the way every other object is wrapped
- * would fail every collector that uses its signal for the thing it is for. That
- * is the harness reporting its own artifact as a violation, the mistake the
- * memoization above already exists to avoid.
+ * the receiver's internal slots, and a proxy is not the signal: `signal.aborted`
+ * reads through, but `addEventListener`, `AbortSignal.any([signal])` and
+ * `fetch(url, { signal })` all throw `Method Map.prototype.get called on
+ * incompatible receiver`, so every collector that uses its signal would fail.
  *
  * **It still has to be revocable.** A signal is a live view of request state:
  * `aborted` changes under a rule's feet, so a rule that kept one and read it
- * inside `verify` is exactly the violation this suite catches, and exempting the
- * field would have quietly opened a hole in the check the week it was added.
+ * inside `verify` is exactly the violation this suite catches.
  *
  * So the view is a genuine `AbortSignal` — `AbortSignal.any` mints one linked to
- * the original, which keeps every brand check and the cancellation semantics
- * intact — and revoking shadows each of its members with an own accessor that
- * throws the same `TypeError` a revoked proxy throws. `isRevokedProxyError` then
+ * the original, keeping every brand check and the cancellation semantics — and
+ * revoking shadows each of its members with an own accessor that throws the
+ * same `TypeError` a revoked proxy throws. `isRevokedProxyError` then
  * recognises it, and the violation is reported against the rule that committed
  * it, in the same words as every other one.
  */
@@ -189,26 +178,24 @@ function isRevokedProxyError(error: unknown): boolean {
 }
 
 /**
- * Asks one rule, whichever kind it is (#225) — **through `evaluate()`**, as the
- * only rule of a decision, and reads its one outcome.
+ * Asks one rule, whichever kind it is — **through `evaluate()`**, as the only
+ * rule of a decision, and reads its one outcome.
  *
  * Not by calling `verify` / `decide` here. What a rule answers includes what it
- * reports about the evaluation behind the answer (#244): a rule that reported
+ * reports about the evaluation behind the answer — a rule that reported
  * whichever policy revision it saw last would pass a pass/fail comparison while
- * reading state the engine cannot see. And what a report *says* is whatever the
- * evaluator reads out of it. A reading of this suite's own is a second opinion,
- * and the two it has had were both wrong in the rule's favour: holding the
- * reported object let a rule that rewrites one object and reports it again
- * compare equal to itself, and `structuredClone` copies own data properties
- * without ever running an accessor, so a class-backed report snapshotted as
- * `{}` — hiding a getter that moves, or one that reads the collector's context
- * and would have thrown once it was revoked. Through `evaluate()` there is one
- * reading: core's, taken when the report is made, copied and frozen.
+ * reading state the engine cannot see — and what a report *says* is whatever
+ * the evaluator reads out of it. A reading of this suite's own would be a
+ * second opinion that can err in the rule's favour: holding the reported object
+ * lets a rule that rewrites and re-reports one object compare equal to itself,
+ * and `structuredClone` never runs an accessor, so a class-backed report
+ * snapshots as `{}`. Through `evaluate()` there is one reading: core's, taken
+ * when the report is made, copied and frozen.
  *
- * It follows that a rule core refuses fails here too — an answer that is not a
- * boolean, a report that does not read, a pass reporting its evaluator
- * `failed` — and whatever the rule throws comes back unchanged, which is how
- * a read of the revoked context is recognised below.
+ * So a rule core refuses fails here too — an answer that is not a boolean, a
+ * report that does not read, a pass reporting its evaluator `failed` — and
+ * whatever the rule throws comes back unchanged, which is how a read of the
+ * revoked context is recognised below.
  *
  * The rule budgets are lifted as far as a timer goes: this suite checks what a
  * rule answers, not how quickly, and an asynchronous rule is held to the same
@@ -260,10 +247,8 @@ function describeRule(rule: AnyRule, index: number): string {
  * live inside it — throws on the access, which is the violation, reported
  * against the rule that committed it.
  *
- * Determinism and non-mutation are checked in the same pass, because they are
- * the other two clauses of the same sentence in AGENTS.md and they are free
- * here: the first verify already gives an answer to compare against, and the
- * attributes are already in hand to snapshot.
+ * Determinism and non-mutation, the other two clauses of the same sentence in
+ * AGENTS.md, are checked in the same pass.
  *
  * @returns each rule's answer, in collection order, so a caller can assert the
  *   collector decides something rather than passing vacuously.
@@ -333,20 +318,14 @@ export async function assertRuleIndependentOfContext(
 }
 
 /**
- * Conformance suite pinning rule purity
- * (o3co/auth.policy-verifier#152).
+ * Conformance suite pinning rule purity.
  *
  * `evaluate()` runs every rule group rather than stopping at the first failure,
- * and justifies it in a comment: "Rules are pure predicates over attributes by
- * contract, so running them all is safe." This suite is what turns that "by
- * contract" into something that fails a build. The same property is what makes
- * a rule testable in isolation and a decision cacheable, and what lets an engine
- * that only ever receives a decision document sit behind the same contract — a
- * rule that reads the live request is not portable to one.
- *
- * The check is behavioural rather than textual, so it cannot be satisfied by
- * renaming a variable: the request is genuinely taken away and the rule is
- * genuinely asked again.
+ * which is safe because rules are pure predicates over attributes by contract;
+ * this suite makes that contract fail a build. The same property makes a rule
+ * testable in isolation and a decision cacheable, and lets an engine that only
+ * ever receives a decision document sit behind the same contract. The check is
+ * behavioural: the request is taken away and the rule is asked again.
  */
 export function describeRulePurityConformance(adapter: RulePurityAdapter): void {
 	describe(`rule purity conformance — ${adapter.name}`, () => {

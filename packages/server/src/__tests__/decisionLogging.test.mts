@@ -2,25 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Per-decision audit logging for the verify router (#111).
+ * Per-decision audit logging for the verify router: one `decision` event per
+ * decision, at info, carrying who / what / which rule / how long, and the
+ * `x-request-id` that correlates it with the caller's trace. The level is the
+ * switch: `logging.level` above info turns the stream off wholesale.
  *
- * #107 gave the router failure events. Nothing was emitted on the path that
- * actually decides, so the one question an authorization service exists to
- * answer after the fact — "why was this request denied?" — had no answer in
- * the service's own output. `x-request-id` was read and handed to collectors
- * but never emitted, so a decision could not even be correlated with the
- * caller's trace.
- *
- * The router now emits one `decision` event per decision, at info, carrying
- * who / what / which rule / how long. The level is the switch: `logging.level`
- * above info turns the stream off wholesale.
- *
- * The other half of these tests is what the line must NOT carry. A decision
- * log is written on every request, including the successful ones, and shipped
- * to an aggregator that is not the security boundary the token is — so the
- * raw bearer token and the full claim set stay out of it, and the caller's
- * `context` object (free-form, caller-supplied, and the natural place for
- * request payloads to end up) stays out with them.
+ * The other half of these tests is what the line must NOT carry. It is written
+ * on every request and shipped to an aggregator that is not the security
+ * boundary the token is, so the raw bearer token, the full claim set and the
+ * caller's free-form `context` stay out of it.
  */
 import {
 	DotNotationResourceParser,
@@ -49,7 +39,7 @@ import {
 import { decisionEvent } from "#/observability/decisionEvent.mjs";
 import { createVerifyRouter } from "#/routes/verify.mjs";
 
-/** 64 hex characters — 32 decoded bytes, the entropy floor #114 enforces. */
+/** 64 hex characters — 32 decoded bytes, the HS256 secret's entropy floor. */
 const JWT_SECRET = "11".repeat(32);
 const hs256Key = await HS256KeyResolverFactory({ secret: JWT_SECRET });
 const ISSUER = "https://issuer.test";

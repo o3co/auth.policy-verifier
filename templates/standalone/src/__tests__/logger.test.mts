@@ -2,14 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * The composition root's logger (#107).
- *
- * The template previously created its logger through `@o3co/auth.utils`, whose
- * shape cannot satisfy the `Logger` port `createApp` accepts — so nothing the
- * template configured ever reached the server's failure events. `createAppLogger`
- * returns a pino instance (newline-delimited JSON on stdout, the shape every
- * log aggregator ingests without a parser), which satisfies the port
- * structurally and honours `logging.level` from the application config.
+ * The composition root's logger. `createAppLogger` returns a pino instance
+ * (newline-delimited JSON on stdout, which log aggregators ingest without a
+ * parser) that satisfies the `Logger` port `createApp` accepts structurally,
+ * so the server's failure events reach it, and that honours `logging.level`
+ * from the application config.
  */
 import type { Logger } from "@o3co/auth.policy-verifier.core";
 import { AppConfigSchema } from "@o3co/auth.policy-verifier.server";

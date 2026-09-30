@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Request validation on the decision endpoints (#118).
- *
- * Three things are pinned here:
+ * Request validation on the decision endpoints. Three things are pinned here:
  *
  * 1. Every input a caller controls is bounded by a stated limit — body bytes,
  *    `resource` and `action` length, and the shape of `context` — and each
@@ -13,14 +11,12 @@
  *    unauthenticated request is answered 400 rather than 401.
  * 3. A body-parser failure answers the deny envelope, not Express's HTML page.
  *
- * Points 2 and 3 are wire-visible, and #125 now pins them from outside this
- * package too, in `tests/integration/src/conformance/wireContract.mts`. The two
- * suites are not copies of one another: this one holds the limits to their
- * *configured numbers* and to the two-boundary agreement, which is
- * package-internal; the conformance suite holds the *answers* to the shape an
- * enforcement layer implements against. Where they would otherwise have stated
- * the same literal — the deny envelope the READMEs print — this file reads the
- * conformance fixture rather than keeping a second copy of it.
+ * Points 2 and 3 are also pinned from outside this package, in
+ * `tests/integration/src/conformance/wireContract.mts`. This suite holds the
+ * limits to their *configured numbers* and to the two-boundary agreement; the
+ * conformance suite holds the *answers* to the shape an enforcement layer
+ * implements against. The deny envelope the READMEs print is read from the
+ * conformance fixture rather than copied here.
  */
 
 import { readFileSync } from "node:fs";
@@ -60,12 +56,10 @@ const repoRoot = new URL("../../../../", import.meta.url);
  * print it for a body the parser refuses, checked against the route's own
  * answer and against all three files — see the last describe.
  *
- * **Read from the #125 conformance fixture, not restated here.** That file is
- * the contract an enforcement layer implements against, and a literal here
- * would have been a fourth copy of a shape whose three existing copies are the
- * reason this describe exists. It is read as bytes rather than imported because
- * the fixture is a data file another repository consumes by path — see
- * `tests/integration/src/conformance/wireContract.mts`.
+ * **Read from the conformance fixture, not restated here.** That file is the
+ * contract an enforcement layer implements against. It is read as bytes rather
+ * than imported because the fixture is a data file another repository consumes
+ * by path — see `tests/integration/src/conformance/wireContract.mts`.
  */
 const DOCUMENTED_DENY_ENVELOPE = (
 	JSON.parse(
@@ -79,7 +73,7 @@ const DOCUMENTED_DENY_ENVELOPE = (
 	) as { error: { documentedExample: string } }
 ).error.documentedExample;
 
-/** 64 hex characters — 32 decoded bytes, the entropy floor #114 enforces. */
+/** 64 hex characters — 32 decoded bytes, the HS256 secret's entropy floor. */
 const JWT_SECRET = "11".repeat(32);
 const hs256Key = await HS256KeyResolverFactory({ secret: JWT_SECRET });
 
@@ -183,8 +177,8 @@ describe("POST /verify — bounded resource and action (#118)", () => {
 });
 
 describe("POST /verify — whitespace is refused, not trimmed (#118)", () => {
-	// The same doctrine `DotNotationResourceParser` applies to `resource`
-	// (#117), applied at the schema layer so it also holds for `action` and for
+	// The same doctrine `DotNotationResourceParser` applies to `resource`,
+	// applied at the schema layer so it also holds for `action` and for
 	// a deployment that registered its own parser.
 	const whitespace = ["   ", " project:1", "project:1 ", "project\t:1", "project\n:1"];
 
@@ -319,8 +313,8 @@ describe("POST /verify — unknown properties are refused (#118)", () => {
 	const MAX_RENDERED_KEY_LENGTH = 32;
 
 	it("truncates a long property name to exactly the documented length", async () => {
-		// The error path of a change about explicit limits must not overrun its
-		// own stated limit: `slice(0, 32)` plus an ellipsis rendered 33.
+		// The error path must not overrun its own stated limit: `slice(0, 32)`
+		// plus an ellipsis would render 33.
 		const expected = `${"a".repeat(MAX_RENDERED_KEY_LENGTH - 1)}…`;
 		expect(expected).toHaveLength(MAX_RENDERED_KEY_LENGTH);
 
@@ -360,8 +354,8 @@ describe("POST /verify — unknown properties are refused (#118)", () => {
 	});
 
 	it("returns 400 rather than silently ignoring a body-supplied subject", async () => {
-		// Ignoring it left a caller believing it had been honoured. The subject
-		// still comes only from the token; refusing is how the caller finds out.
+		// Ignoring it would leave a caller believing it had been honoured. The
+		// subject comes only from the token; refusing is how the caller finds out.
 		const res = await post({ resource: "project:1", action: "read", subject: "admin" });
 
 		expect(res.status).toBe(400);
@@ -398,12 +392,12 @@ describe("POST /verify — unknown properties are refused (#118)", () => {
 
 describe("POST /verify — body validation runs before authentication (#118)", () => {
 	/*
-	 * BREAKING, and the point of the change: a malformed body is answered 400
-	 * whether or not a token was presented. Verifying the token first let an
-	 * unauthenticated caller drive the expensive half of the request — an
-	 * attacker-chosen `kid` can send the RS256 path to the network, and an
-	 * HS256 rotation tries every configured secret — on a body that was never
-	 * usable. What runs first now is bounded by the limits above.
+	 * A malformed body is answered 400 whether or not a token was presented.
+	 * Verifying the token first would let an unauthenticated caller drive the
+	 * expensive half of the request — an attacker-chosen `kid` can send the
+	 * RS256 path to the network, and an HS256 rotation tries every configured
+	 * secret — on a body that was never usable. What runs first is bounded by
+	 * the limits above.
 	 */
 
 	it("answers 400 for a malformed body with no token at all", async () => {
@@ -554,17 +548,13 @@ describe("POST /verify — body-parser failures answer the deny envelope (#118, 
 
 describe("the documented deny envelope is the one the endpoint emits (#118, #125)", () => {
 	/*
-	 * The envelope is a BREAKING wire-contract change, and these three files are
-	 * what a client author implements against — the first version of this prose
-	 * carried `{"decision": "deny", "code", "message"}`, which is not JSON at
-	 * all. Three hand-written copies of a shape is the drift this repo has been
-	 * bitten by before, so the copies are pinned here rather than trusted: one
-	 * literal, asserted to be valid JSON, to equal what the route actually
-	 * answers, and to appear verbatim in every file that documents it.
-	 *
-	 * #125 pins the same contract from outside the repo, and `DOCUMENTED_DENY_
-	 * ENVELOPE` above is now read from its fixture: there is one object, and
-	 * both suites describe it.
+	 * The envelope is wire contract, and these three files are what a client
+	 * author implements against. Hand-written copies of a shape drift (an
+	 * elided `{"decision": "deny", "code", "message"}` is not JSON at all), so
+	 * they are pinned rather than trusted: one literal, asserted to be valid
+	 * JSON, to equal what the route actually answers, and to appear verbatim in
+	 * every file that documents it. `DOCUMENTED_DENY_ENVELOPE` is read from the
+	 * conformance fixture, so both suites describe one object.
 	 */
 	const documentedIn = ["README.md", "README.ja.md", "CHANGELOG.md"] as const;
 
@@ -590,16 +580,13 @@ describe("the documented deny envelope is the one the endpoint emits (#118, #125
 	});
 
 	/*
-	 * The other half of the same drift: the READMEs print a `verify { … }` HOCON
-	 * block, and a default stated there that the code does not apply is a
-	 * config example that lies. The shipped `templates/standalone/config/
-	 * application.conf` is already parsed and asserted by that package's
-	 * `loadConfig` tests, so pinning the READMEs here closes the chain
-	 * docs → shipped config → code.
-	 *
-	 * A regex rather than a HOCON parse: `packages/server` has no HOCON
-	 * dependency and should not grow one to check prose, and the shape at risk
-	 * is the number, not the syntax.
+	 * The READMEs also print a `verify { … }` HOCON block, and a default stated
+	 * there that the code does not apply is a config example that lies. The
+	 * shipped `templates/standalone/config/application.conf` is parsed and
+	 * asserted by that package's `loadConfig` tests, so pinning the READMEs
+	 * here closes the chain docs → shipped config → code. A regex rather than a
+	 * HOCON parse: `packages/server` has no HOCON dependency and should not grow
+	 * one to check prose, and the shape at risk is the number, not the syntax.
 	 */
 	const documentedDefaults = [
 		["maxBodyBytes", DEFAULT_MAX_BODY_BYTES],
@@ -618,7 +605,7 @@ describe("the documented deny envelope is the one the endpoint emits (#118, #125
 });
 
 describe("createVerifyRouter — the input limits at both boundaries (#118, #157)", () => {
-	// Each new limit is a numeric knob, so it goes through `resolveBound` at the
+	// Each limit is a numeric knob, so it goes through `resolveBound` at the
 	// router and through `boundedNumber` in the schema — one reader, one wording.
 	// See AGENTS.md, "Two-Boundary Config Validation".
 	const knobs = [

@@ -26,8 +26,8 @@ export interface AttrLiteralNotEqualConfig {
  * is performed. If the attribute is missing, null, of the wrong type, or
  * `NaN` the rule returns false (safe-deny). `NaN` is unequal to every number,
  * so `!==` alone would pass it: a restriction that allows on an attribute
- * that is not a number at all (#254). Construction refuses a `NaN` literal
- * for the mirror reason.
+ * that is not a number at all. Construction refuses a `NaN` literal for the
+ * mirror reason.
  *
  * ## Grouping and the default ruleType
  *
@@ -39,17 +39,15 @@ export interface AttrLiteralNotEqualConfig {
  * The `typeof v` segment prevents silent `ruleType` collisions between
  * different-type literals that stringify the same way (e.g. `1` vs `"1"`),
  * which would otherwise be OR-combined by the evaluator against the intent
- * of two independent constraints. See AttrLiteralEqual for the same rationale.
+ * of two independent constraints.
  *
  * Pass a shared `group` string to two instances to opt into OR semantics.
  *
  * ## Configuration is copied at construction
  *
- * The constructor reads each field of `config` once, validates it, and keeps
- * the validated value in a field of its own; the object is not retained (#255).
- * A caller that mutates the config afterwards changes nothing: the rule answers
- * from the values it validated, and `ruleType` and `message` keep describing
- * them.
+ * The constructor validates each field of `config` once and keeps the
+ * validated value; the object is not retained, so mutating it afterwards
+ * changes neither the rule's answers nor its `ruleType` and `message`.
  */
 export class AttrLiteralNotEqual implements Rule {
 	readonly ruleType: string;

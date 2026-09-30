@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * The token-authenticator port (#219): what the verify router runs to turn an
+ * The token-authenticator port: what the verify router runs to turn an
  * `Authorization` header into a subject, and what a module registers to supply
  * one. The built-in bearer-JWT authenticator in `jwt/` implements it; a
  * deployment that authenticates another way implements it without loading
- * `jwt/` or jose (#259).
+ * `jwt/` or jose.
  */
 
 import type { EventLogger, Registry, SubjectAttributes } from "@o3co/auth.policy-verifier.core";
@@ -15,14 +15,13 @@ import type { KeyResolverFactory } from "./keyResolver.mjs";
 /**
  * Outcome of authenticating a caller. On failure the authenticator names the
  * machine-readable code and the caller-safe message; what HTTP status that
- * maps to (401 for all of them today) is the route's concern, not the
+ * maps to (401 for all of them) is the route's concern, not the
  * authenticator's.
  *
  * `subject` is core's neutral `SubjectAttributes` bag, and the authenticator
- * is the one edge that populates it (#170) — the built-in one spreads the
- * verified JWT's claims into it. `credential` is the raw credential, carried
- * beside the bag rather than in it (#175): the route decides whether a
- * collector ever sees it.
+ * is the one edge that populates it — the built-in one spreads the verified
+ * JWT's claims into it. `credential` is the raw credential, carried beside the
+ * bag rather than in it: the route decides whether a collector ever sees it.
  */
 export type AuthenticationResult =
 	| { ok: true; subject: SubjectAttributes; credential: string }
@@ -46,7 +45,7 @@ export interface TokenAuthenticatorDependencies {
 }
 
 /**
- * Builds the authenticator `oauth.authenticator` selects (#219). Receives the
+ * Builds the authenticator `oauth.authenticator` selects. Receives the
  * whole `oauth` block — the built-in one reads `oauth.jwt`, and a factory
  * registered under another name reads whatever sub-block it documents for
  * itself — and returns the {@link TokenAuthenticator} the verify router runs,

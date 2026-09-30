@@ -4,21 +4,17 @@
 /**
  * Structured logger port for the policy verifier.
  *
- * Pino-compatible for the call shapes in use here, and deliberately the same
- * shape as the `Logger` port in `@o3co/auth-provider-core` so one host logger
- * serves the whole stack. A pino instance satisfies this interface without an
- * adapter; consumers may inject any object exposing these six methods +
- * `child()`. Not full pino parity — pino additionally supports `Error` as the
- * first argument and printf-style interpolation via the trailing `...args`
- * (covered by the `unknown[]` rest below for assignment compatibility, but not
- * interpreted by the default `consoleLogger`).
+ * The same shape as the `Logger` port in `@o3co/auth-provider-core`, so one
+ * host logger serves the whole stack; a pino instance satisfies it without an
+ * adapter. Not full pino parity: pino also takes an `Error` first argument and
+ * printf-style interpolation through the trailing `...args`, which the
+ * `unknown[]` rest admits for assignment compatibility but the default
+ * `consoleLogger` does not interpret.
  *
- * The first argument may be either a structured object or a plain string.
- * When an object is passed, structured fields are propagated by the
- * implementation; the optional second `msg` becomes the human-readable
- * summary. Object-first is preferred at security-relevant call sites: it makes
- * field-path-based redaction (PII, credentials) tractable, since the keys are
- * directly inspectable rather than embedded inside a format string.
+ * The first argument is a structured object (the optional `msg` is then the
+ * summary) or a plain string. Prefer object-first at security-relevant call
+ * sites: the keys stay inspectable, which keeps field-path redaction (PII,
+ * credentials) tractable.
  */
 
 /**
@@ -57,27 +53,16 @@ export interface Logger {
  * The narrow logger shape that injection seams accept.
  *
  * `Logger` is the interface this project logs *through*; `EventLogger` is the
- * one it is willing to *demand* of a caller. The difference matters at seams a
- * composition root wires by hand — a host logger that omits `trace` / `fatal`
- * / `child`, or whose methods require a message argument, cannot satisfy
- * `Logger`. Neither can it satisfy `Pick<Logger, "error">`: narrowing to one
- * method keeps that method's full two-overload shape, which is the part such a
- * logger fails.
+ * one it *demands* of a caller. A host logger that omits `trace` / `fatal` /
+ * `child`, or whose methods require a message argument, satisfies neither
+ * `Logger` nor `Pick<Logger, "error">` (a picked method keeps its
+ * two-overload shape). Seams that only emit a named structured event take
+ * this instead; use `Logger` where the full surface is used.
  *
- * So seams that only ever emit a named structured event — `logger.error({ err },
- * "jwt_verification_unavailable")` — take this instead. `Logger` satisfies it,
- * and so does a leaner host logger. Use `Logger` where the full surface is
- * genuinely used; use this where the alternative is a caller who cannot pass
- * anything at all.
- *
- * `info` is here because not every event worth emitting is a failure: an
- * authorization service's per-decision audit line (#111) is written on the
- * successful path and is the only record of what was decided and why. A port
- * with no non-failure level would have forced that line to `warn`, which makes
- * "warn" stop meaning "something is wrong" the moment a caller sends a request
- * that is correctly denied. Three levels is still narrow — every logger that
- * has `warn` and `error` has `info` — so nothing this port previously admitted
- * is excluded by asking for it.
+ * `info` is here because the per-decision audit line is written on the
+ * successful path; without a non-failure level it would have to be `warn`,
+ * and `warn` would stop meaning "something is wrong". Every logger that has
+ * `warn` and `error` has `info`, so the port stays narrow.
  */
 export interface EventLogger {
 	info(obj: Record<string, unknown>, msg: string): void;

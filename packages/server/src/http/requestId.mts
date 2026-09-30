@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * The caller's request id, and what it takes for this server to carry one
- * (#200).
+ * The caller's request id, and what it takes for this server to carry one.
  *
  * The decision endpoints read `x-request-id` so a decision can be matched to
  * the enforcing service's own log: it is echoed on the response, put on every
@@ -12,24 +11,22 @@
  * one of them a response header, so it is accepted only in a shape that cannot
  * reshape any of them.
  *
- * The shape is deliberately a TOKEN, not "printable ASCII". An enforcement
- * layer forwards whatever id it was handed — protobuf.interceptors passes the
- * incoming `x-request-id` through unchanged and only mints its own,
- * `YYYYMMDDHHmmss_<16 hex>`, when there is none — so the constraint cannot be
- * left to the caller. What the charset admits is what real ids are made of:
- * UUIDs and ULIDs, hex trace ids and W3C `traceparent`, base64 and base64url,
- * Kong's `uuid#counter`. What it refuses is everything that means something to
- * a log line or a header: whitespace and line breaks (a forged second line),
- * quotes and braces (a forged JSON field), commas (Node folds two `x-request-id`
- * headers into one comma-joined value, which is two ids, not one), semicolons,
- * `%`, and anything outside ASCII.
+ * The shape is a TOKEN, not "printable ASCII", and the constraint cannot be
+ * left to the caller: an enforcement layer forwards whatever id it was handed
+ * (protobuf.interceptors passes the incoming `x-request-id` through unchanged
+ * and mints its own, `YYYYMMDDHHmmss_<16 hex>`, only when there is none). The
+ * charset admits what real ids are made of: UUIDs and ULIDs, hex trace ids and
+ * W3C `traceparent`, base64 and base64url, Kong's `uuid#counter`. It refuses
+ * everything that means something to a log line or a header: whitespace and
+ * line breaks (a forged second line), quotes and braces (a forged JSON field),
+ * commas (Node folds two `x-request-id` headers into one comma-joined value,
+ * which is two ids, not one), semicolons, `%`, and anything outside ASCII.
  *
  * **Refused means absent.** An id outside the shape is not trimmed, escaped or
- * truncated into something the caller did not send — a correlation key that is
- * not the caller's key correlates with nothing. It is treated exactly as a
- * request that sent none: not echoed, not logged, not forwarded. And the server
- * never mints one in its place, because an id nobody returned to the caller
- * joins nothing either.
+ * truncated: a correlation key that is not the caller's correlates with
+ * nothing. It is treated exactly as a request that sent none (not echoed, not
+ * logged, not forwarded), and the server never mints one in its place, because
+ * an id nobody returned to the caller joins nothing either.
  */
 
 /** The header the id is read from and echoed on. */

@@ -19,11 +19,10 @@ export interface AttrPairEqualConfig {
  * strings, and are strictly equal. No type coercion is performed: both
  * attribute values must be non-empty strings.
  *
- * ## Backward compatibility
+ * ## String-only
  *
- * AttrPairEqual deliberately retains the string-only semantic of the legacy
- * AttrMatchRule. Do not widen verify() to accept numbers or booleans — the
- * Phase 4 AttrMatchRule alias depends on this invariant.
+ * The deprecated `AttrMatchRule` inherits verify() from this rule and must stay
+ * string-only: do not widen verify() to accept numbers or booleans.
  *
  * ## Grouping and the default ruleType
  *
@@ -36,11 +35,9 @@ export interface AttrPairEqualConfig {
  *
  * ## Configuration is copied at construction
  *
- * The constructor reads each field of `config` once, validates it, and keeps
- * the validated value in a field of its own; the object is not retained (#255).
- * A caller that mutates the config afterwards changes nothing: the rule answers
- * from the values it validated, and `ruleType` and `message` keep describing
- * them.
+ * The constructor validates each field of `config` once and keeps the
+ * validated value; the object is not retained, so mutating it afterwards
+ * changes neither the rule's answers nor its `ruleType` and `message`.
  */
 export class AttrPairEqual implements Rule {
 	readonly ruleType: string;

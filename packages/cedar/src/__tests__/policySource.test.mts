@@ -82,7 +82,7 @@ describe("loadPolicySource", () => {
 });
 
 /*
- * #244: the revision identifies the policy CONTENTS that were loaded — not
+ * The revision identifies the policy CONTENTS that were loaded — not
  * where they were loaded from, and not when. It is what a decision's
  * provenance names, so two replicas holding the same files must agree on it
  * and an edit that keeps every policy id must change it.

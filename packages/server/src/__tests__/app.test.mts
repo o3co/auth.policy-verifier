@@ -19,7 +19,7 @@ import {
 	type TokenAuthenticatorDependencies,
 } from "#/index.mjs";
 
-/** 64 hex characters — 32 decoded bytes, the entropy floor #114 enforces. */
+/** 64 hex characters — 32 decoded bytes, the HS256 secret's entropy floor. */
 const JWT_SECRET = "11".repeat(32);
 const secretKey = new TextEncoder().encode(JWT_SECRET);
 const ISSUER = "https://issuer.test";
@@ -30,7 +30,7 @@ async function signToken(payload: Record<string, unknown>): Promise<string> {
 		new SignJWT(payload)
 			.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
 			.setIssuedAt()
-			// iat and exp are both mandatory now (#110).
+			// iat and exp are both mandatory.
 			.setExpirationTime("1h")
 			.setIssuer(ISSUER)
 			.setAudience(AUDIENCE)
@@ -51,19 +51,12 @@ const testModule: Module = {
 		context.ruleCollectorRegistry.register("TestScopeRuleCollector", () => ({
 			async collect(ctx) {
 				// The required scope is fixed HERE, at collect time, and copied into
-				// the rule as a plain string — the same shape the real
+				// the rule as a plain string — the shape the real
 				// `ResourceActionScopeRuleCollector` uses to build its `HasScope`.
-				//
-				// The contract (AGENTS.md, Collector / Rule / Attribute) draws its line
-				// between the two things that look alike: fixing *what the rule looks
-				// for* while the request is in hand is fine, because `verify` stays a
-				// function of `attrs` alone. Keeping `ctx` and reading it inside
-				// `verify` is not — the answer would then depend on request state the
-				// evaluator cannot see, which is what breaks isolation testing,
-				// caching, and `evaluate()`'s licence to run every rule group.
-				//
-				// This file is where the violating copy in `metrics.test.mts` was
-				// copied from (#150, #152), so it is written to be copied again.
+				// Fixing *what the rule looks for* is fine; keeping `ctx` and reading
+				// it inside `verify` is not, because `verify` must stay a function of
+				// `attrs` alone (AGENTS.md, Collector / Rule / Attribute Contract).
+				// It is written to be copied into other tests.
 				const requiredScope = `${ctx.action}:${ctx.resource.resourceType}`;
 				return [
 					{
@@ -208,10 +201,9 @@ describe("createApp", () => {
 		).rejects.toThrow(/createApp: oauth\.jwt\.issuer is required/);
 	});
 
-	// The next two shapes slipped past the pre-#132 createApp check (a bare falsy
-	// test that accepted empty arrays and never looked at tokenType) and only
-	// failed one call later, inside the router. The shared guard now rejects
-	// them at this boundary, naming the oauth.jwt.* key the operator wrote.
+	// The next two shapes (an empty issuer array, a missing tokenType) are
+	// refused at this boundary, naming the oauth.jwt.* key the operator wrote,
+	// rather than one call later inside the router.
 	it("throws when a hand-built config pins issuer to an empty array", async () => {
 		const handBuilt = {
 			...testConfig,
@@ -271,8 +263,8 @@ describe("createApp", () => {
 	it('defaults a hand-built config with no mode to verify, and its errors name oauth.jwt.mode = "verify"', async () => {
 		// A consumer that omits `mode` gets the schema's default (verify) at this
 		// boundary too, and the guard's message names the wire key the operator
-		// would have to write — not the internal `validate` discriminant (#134).
-		// `oauth.jwt` is optional on the parsed type since #219; this fixture has it.
+		// would have to write — not the internal `validate` discriminant.
+		// `oauth.jwt` is optional on the parsed type; this fixture has it.
 		const { mode: _mode, ...noMode } = testConfig.oauth.jwt as NonNullable<
 			typeof testConfig.oauth.jwt
 		>;
@@ -317,7 +309,7 @@ describe("createApp", () => {
 	});
 
 	it("serves the liveness probe at /_healthcheck", async () => {
-		// The path every component of the stack answers on (o3co/auth.provider#293).
+		// The path every component of the stack answers on.
 		const app = await createApp({
 			pathResolver: (s: string) => s,
 			config: testConfig,
@@ -330,9 +322,8 @@ describe("createApp", () => {
 	});
 
 	it("keeps /healthcheck answering identically as a compatibility alias", async () => {
-		// The path this server answered on before the stack settled on
-		// `/_healthcheck`. An orchestrator probe config that was not updated must
-		// not start failing on upgrade, so the alias gives the canonical answer.
+		// An orchestrator probe config that still names `/healthcheck` must not
+		// start failing on upgrade, so the alias gives the canonical answer.
 		const app = await createApp({
 			pathResolver: (s: string) => s,
 			config: testConfig,
@@ -389,7 +380,7 @@ describe("createApp", () => {
 	});
 
 	it("names the rule.collectors entry whose factory failed to start", async () => {
-		// A factory may be asynchronous (#225) and may refuse at boot — a policy
+		// A factory may be asynchronous and may refuse at boot — a policy
 		// set an out-of-process engine would not take. The refusal must say
 		// which entry, because the factory's own message need not.
 		const bootFailingModule: Module = {
@@ -663,8 +654,9 @@ describe("createApp insecure decode mode (#106, #134)", () => {
 	it("refuses to boot a hand-built config still carrying the removed wire keys", async () => {
 		// AppConfigSchema rejects this shape, so reach createApp with an object
 		// that never went through it — the same path a library consumer can take.
-		// The old pair must not be silently reinterpreted (defaulted mode would
-		// mean verify, and the operator asked for decode): fail with migration help.
+		// The removed pair must not be silently reinterpreted (a defaulted mode
+		// would mean verify, and the operator asked for decode): fail with
+		// migration help.
 		const handBuilt = {
 			...ackConfig,
 			oauth: { jwt: { validate: false, allowInsecureDecode: true } },
@@ -679,7 +671,7 @@ describe("createApp insecure decode mode (#106, #134)", () => {
 		).rejects.toThrow(JWT_MODE_MIGRATION_MESSAGE);
 	});
 
-	// Driven off the same exported list the schema is checked against (#158), so
+	// Driven off the same exported list the schema is checked against, so
 	// the two boundaries cannot end up refusing different sets of removed keys:
 	// a key added to the constant is asserted here and in the schema suite alike.
 	it.each([...JWT_MODE_REMOVED_KEYS])(
@@ -706,9 +698,9 @@ describe("createApp insecure decode mode (#106, #134)", () => {
 	// reported like every other boundary error, naming the config path.
 	it.each([
 		["null", null],
-		// An absent block is no longer a malformed one: with `oauth.authenticator`
-		// defaulting to "jwt" it is a required key, refused by the selection check
-		// (#219) — pinned under "token authenticator registry" below.
+		// An absent block is not a malformed one: with `oauth.authenticator`
+		// defaulting to "jwt" it is a missing required key, refused by the
+		// selection check — pinned under "token authenticator registry" below.
 		["a string", "verify"],
 		["a number", 1],
 		["a boolean", true],
@@ -741,8 +733,8 @@ describe("createApp insecure decode mode (#106, #134)", () => {
 	});
 
 	it("does not report a TypeError for a malformed oauth.jwt", async () => {
-		// The regression this guards: `"validate" in jwtWire` throws
-		// "Cannot use 'in' operator..." before any of our validation runs.
+		// Unguarded, `"validate" in jwtWire` throws "Cannot use 'in' operator..."
+		// before any of our validation runs.
 		const handBuilt = { ...ackConfig, oauth: { jwt: null } } as unknown as typeof ackConfig;
 
 		await expect(
@@ -922,7 +914,7 @@ describe("createApp caller authentication (#108)", () => {
 	);
 
 	it("serves decisions with no caller credential configured — the gate is opt-in", async () => {
-		// Deliberately optional in this pass: container deployments and the
+		// Deliberately optional: container deployments and the
 		// cross-repo E2E must keep working without one.
 		const app = await createApp({
 			pathResolver: (s: string) => s,
@@ -1050,7 +1042,7 @@ describe("createApp caller authentication (#108)", () => {
 });
 
 describe("createApp — HS256 secret rotation (#112)", () => {
-	/** 64 hex characters — 32 decoded bytes, the floor auth.provider#282 set. */
+	/** 64 hex characters — 32 decoded bytes, the HS256 secret's entropy floor. */
 	const CURRENT_SECRET = "11".repeat(32);
 	const RETIRED_SECRET = "22".repeat(32);
 
@@ -1098,9 +1090,9 @@ describe("createApp — HS256 secret rotation (#112)", () => {
 		["the new secret with no kid header", CURRENT_SECRET, undefined],
 		["the retired secret with no kid header", RETIRED_SECRET, undefined],
 	])("decides on a token signed with %s", async (_label, secret, kid) => {
-		// This is the outage #112 is about: before rotation support, a token
-		// signed with anything but the single configured secret was 401 from the
-		// instant the provider cut over, until both services restarted together.
+		// Mid-rotation, a token signed with the current or a still-honoured
+		// retired secret decides, kid or not, so the provider can cut over
+		// without both services restarting together.
 		const res = await request(await rotatedApp())
 			.post("/verify")
 			.set("Authorization", `Bearer ${await signWith(secret, kid)}`)
@@ -1130,7 +1122,7 @@ describe("createApp — HS256 secret rotation (#112)", () => {
 	});
 
 	it("logs a rotation mismatch at warn, not error — kid is attacker-controlled", async () => {
-		// #107's distinction: an operator alerting on error must see a provider
+		// An operator alerting on error must see a provider
 		// outage, not a stream of invented kids from anyone who can reach the port.
 		const logger: Logger = {
 			trace: vi.fn(),
@@ -1165,7 +1157,7 @@ describe("createApp — HS256 secret rotation (#112)", () => {
 	it("keeps a single-secret deployment working untouched", async () => {
 		// The umbrella E2E shape: one shared OAUTH_JWT_SECRET, no kid, no
 		// previousSecrets — and the provider stamps a kid the verifier has never
-		// been told about. That must keep deciding exactly as it did.
+		// been told about. That must still decide.
 		const config = AppConfigSchema.parse({
 			oauth: {
 				jwt: { secret: CURRENT_SECRET, mode: "verify", issuer: ISSUER, audience: AUDIENCE },
@@ -1239,7 +1231,7 @@ describe("createApp — HS256 secret rotation (#112)", () => {
 	);
 });
 
-/** A module whose collectors never answer — the stalled dependency #115 is about. */
+/** A module whose collectors never answer: a stalled dependency. */
 const stallingModule: Module = {
 	name: "stalling-module",
 	async init(context) {
@@ -1546,8 +1538,8 @@ describe("createApp — token authenticator registry (#219)", () => {
 	});
 
 	it("still refuses the removed wire keys and an unknown mode through the built-in jwt factory", async () => {
-		// The step that mapped `oauth.jwt` onto the router moved behind the
-		// factory; its refusals must read exactly as before (#134).
+		// The built-in jwt factory maps `oauth.jwt` onto the router; its
+		// refusals read as createApp's own.
 		await expect(
 			createApp({
 				pathResolver: (s: string) => s,
@@ -1709,10 +1701,9 @@ describe("createApp — the audit's two-boundary rows (#219 release audit)", () 
 	};
 
 	it("refuses a malformed audienceClaim in insecure-decode mode through the factory, as the schema does", async () => {
-		// The schema checks `audienceClaim` in every mode; the factory used to
-		// reach the guard only on the verify branch, so a decode-only config the
-		// schema refused booted through createApp — a second, undocumented
-		// carve-out of "Two-Boundary Config Validation".
+		// The schema checks `audienceClaim` in every mode, so the factory does
+		// too: otherwise a decode-only config the schema refuses would boot
+		// through createApp.
 		const wire = { mode: "insecure-decode", audienceClaim: "" };
 		expect(AppConfigSchema.safeParse({ oauth: { jwt: wire }, ...decideConfig }).success).toBe(
 			false,

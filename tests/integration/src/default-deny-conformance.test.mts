@@ -20,7 +20,7 @@ function toCollectorContext(request: AuthorizationRequest): CollectorContext {
 		// an HTTP body's — an adapter marks it on the way in, exactly as the verify
 		// route does.
 		requestContext: request.context ? markUntrustedRequestContext(request.context) : undefined,
-		// The pipelines supply one per collector (#115); an adapter calling a
+		// The pipelines supply one per collector; an adapter calling a
 		// collector directly supplies its own. Nothing here cancels.
 		signal: new AbortController().signal,
 	};

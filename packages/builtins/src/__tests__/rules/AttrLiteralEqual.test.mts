@@ -61,7 +61,7 @@ describe("AttrLiteralEqual", () => {
 	});
 
 	// ---------------------------------------------------------------------------
-	// Evaluation-time safe-deny: NaN attr (#254)
+	// Evaluation-time safe-deny: NaN attr
 	// ---------------------------------------------------------------------------
 
 	it("returns false when the attribute is NaN, against a numeric literal (#254)", () => {
@@ -163,10 +163,9 @@ describe("AttrLiteralEqual", () => {
 	});
 
 	it("distinguishes literals by type in ruleType (e.g. boolean true vs string 'true')", () => {
-		// Regression guard: without the typeof-segment in ruleType, these two
-		// rules would share the same default ruleType and the evaluator would
-		// silently OR them together, weakening authorization. The type tag
-		// keeps them AND-combined as intended.
+		// Without the typeof segment in ruleType, these two rules would share
+		// one default ruleType and the evaluator would silently OR them
+		// together, weakening authorization. The type tag keeps them AND-combined.
 		const r1 = new AttrLiteralEqual({ a: "status", v: true });
 		const r2 = new AttrLiteralEqual({ a: "status", v: "true" });
 		expect(r1.ruleType).not.toBe(r2.ruleType);

@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { StaticRoleCollector } from "#/collectors/StaticRoleCollector.mjs";
 
 /**
- * `CollectorContext.signal` is required (#115): a pipeline supplies one per
+ * `CollectorContext.signal` is required: a pipeline supplies one per
  * collector, so a hand-built context carries one too. These fixtures are not
  * about cancellation, so it is a signal that never aborts.
  */
@@ -30,7 +30,7 @@ describe("StaticRoleCollector", () => {
 		expect(entry).toEqual(["admin", "read"]);
 	});
 
-	// #264: only an array is accepted. A string is iterable, so a copy by
+	// Only an array is accepted. A string is iterable, so a copy by
 	// spread would split it into characters rather than refuse it.
 	it.each([
 		["missing", undefined],
@@ -64,7 +64,7 @@ describe("StaticRoleCollector", () => {
 		expect(attrs.get(ATTR_ROLES)).toEqual([]);
 	});
 
-	// #255: the collector answers from what it was given at construction — the
+	// The collector answers from what it was given at construction — the
 	// list and every role in it. A host that keeps the config and changes it
 	// afterwards changes nothing.
 	it.each<[string, (config: { roles: Role[] }) => void]>([

@@ -2,24 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Failure triage for the verify router (#200, item 8 of #126).
+ * Failure triage for the verify router. Every failure line the router emits
+ * for a decision it could not make — `verify_internal_error` and the three
+ * deny events `collector_timeout`, `rule_timeout`, `attribute_conflict` —
+ * carries a `category` from one closed set, and names the collector or rule
+ * when there is one to name; `auth_collector_failures_total{collector,category}`
+ * counts the collector failures among them.
  *
- * #107 gave every failure path a structured event and #111 gave decisions their
- * counters, but a decision that could not be made still arrived as
- * `verify_internal_error { err, endpoint }`: no word on WHICH collector failed,
- * no category an operator could filter on without a regex over `err.message`,
- * and nothing on a dashboard that pointed at one misbehaving fact source.
- *
- * So every failure line the router emits for a decision it could not make —
- * `verify_internal_error` and the three deny events `collector_timeout`,
- * `rule_timeout`, `attribute_conflict` — now carries a `category` from one
- * closed set, and names the collector or rule when there is one to name; and
- * `auth_collector_failures_total{collector,category}` counts the collector
- * failures among them.
- *
- * What must stay true is tested as hard as what is new: the wire answers are
- * unchanged, the labels are bounded by configuration, and neither the
- * credential, the claims nor the caller's context reaches a line or a label.
+ * Tested as hard: the triage is for the operator, not the wire answers; the
+ * labels are bounded by configuration; and neither the credential, the claims
+ * nor the caller's context reaches a line or a label.
  */
 import {
 	DotNotationResourceParser,
@@ -51,7 +43,7 @@ import { classifyFailure, FAILURE_CATEGORIES, loggableError } from "#/observabil
 import { createMetrics, MAX_COLLECTOR_LABELS } from "#/observability/metrics.mjs";
 import { createVerifyRouter, type VerifyRouterConfig } from "#/routes/verify.mjs";
 
-/** 64 hex characters — 32 decoded bytes, the entropy floor #114 enforces. */
+/** 64 hex characters — 32 decoded bytes, the HS256 secret's entropy floor. */
 const JWT_SECRET = "11".repeat(32);
 const hs256Key = await HS256KeyResolverFactory({ secret: JWT_SECRET });
 const ISSUER = "https://issuer.test";
@@ -395,7 +387,7 @@ describe("verify_internal_error names what failed (#200)", () => {
 
 		const res = await decide(app);
 
-		// The wire answer is exactly what it was: the category is for the operator.
+		// The wire answer stays generic: the category is for the operator.
 		expect(res.status).toBe(500);
 		expect(res.body).toEqual({
 			decision: "deny",

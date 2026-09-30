@@ -32,7 +32,7 @@ const REQUEST: AuthorizationRequest = {
 };
 
 /**
- * Conformance suite pinning the default-deny guarantee (o3co/auth.policy-verifier#104).
+ * Conformance suite pinning the default-deny guarantee.
  *
  * A request that no policy speaks to is unauthorized, not unrestricted. Every
  * engine that can sit behind the verifier's decision contract must agree on

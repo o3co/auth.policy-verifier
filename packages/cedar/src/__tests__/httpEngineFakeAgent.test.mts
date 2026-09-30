@@ -4,16 +4,15 @@
 /*
  * The HTTP engine through Node's real `fetch`, against a fake cedar-agent
  * (`fakeCedarAgent.mts`): a local `node:http` server started per suite,
- * programmed per test, recording what it received (#269). Nothing here stubs
- * `fetch` or the engine. `httpEngine.test.mts` pins what the engine makes of
- * answers a scripted `fetch` hands it; this file pins what actually crosses
- * the wire, and how each way the wire can fail comes out — as a
- * `CedarEngineError` from the engine, and as a logged deny with a `failed`
- * evaluation from the rule.
+ * programmed per test, recording what it received. Nothing here stubs `fetch`
+ * or the engine. `httpEngine.test.mts` pins what the engine makes of answers a
+ * scripted `fetch` hands it; this file pins what actually crosses the wire,
+ * and how each way the wire can fail comes out — as a `CedarEngineError` from
+ * the engine, and as a logged deny with a `failed` evaluation from the rule.
  *
- * A case marked `it.fails` is the documented contract, which the engine does
- * not meet over the real `fetch`: a finding, named in the comment above it.
- * It turns red when the engine is fixed, and is then made an ordinary `it`.
+ * A documented contract the engine does not meet over the real `fetch` is
+ * pinned as `it.fails`, the finding named in the comment above it, and made an
+ * ordinary `it` once the engine meets it.
  */
 
 import { randomUUID } from "node:crypto";
@@ -72,8 +71,8 @@ function loadContext(config: Record<string, unknown>): CedarEngineLoadContext {
 
 /**
  * The id a policy of {@link policySet} — and of the collector cases' `policyDir`,
- * the same two files — is pushed under: its file id, under the load's mark
- * (#283). An agent holding the pushed set answers with these.
+ * the same two files — is pushed under: its file id, under the load's mark.
+ * An agent holding the pushed set answers with these.
  */
 const pushed = (id: string) => agentPolicyId(id, policySet().revision);
 
@@ -132,9 +131,7 @@ async function loadedAgainst(
  * `Response` to an authorization call — its status and headers are in, and
  * the body is what the engine reads next. The `fetch` is the real one, called
  * with the engine's own arguments and returning its own result: this only
- * observes when it resolves, which every Node's `fetch` does. (The body-chunk
- * diagnostics channel this used to wait on is not published by the undici
- * that Node 22 ships, so the case it served was skipped there.)
+ * observes when it resolves, which every Node's `fetch` does.
  */
 async function loadedObservingAnswers(endpoint: string) {
 	let answered!: () => void;
@@ -170,7 +167,7 @@ describe("cedarHttpEngine over the wire — what reaches the agent", () => {
 	it("PUTs the policy set to <base>/v1/policies: one { id, content } per file, JSON, the token verbatim", async () => {
 		await loadedAgainst(`${agent.origin}/cedar/`, { authentication: "agent-token" });
 
-		// The push, then the set read back as the agent accepted it (#286).
+		// The push, then the set read back as the agent accepted it.
 		expect(agent.received.map(({ method }) => method)).toEqual(["PUT", "GET"]);
 		const [put] = agent.received;
 		expect(put.method).toBe("PUT");
@@ -361,12 +358,12 @@ describe("cedarHttpEngine over the wire — a failed call rejects with CedarEngi
 				response.write('{"decision":"Allow","diagnostics":{"reason":[');
 				setImmediate(() => response.socket?.destroy());
 			},
-			// Not "answered something that is not a decision" (#271): the agent
-			// never finished answering.
+			// Not "answered something that is not a decision": the agent never
+			// finished answering.
 			/broke off its answer to an authorization call: terminated/,
 		],
 		[
-			// Refused once past the bound, not read to the end and parsed (#271).
+			// Refused once past the bound, not read to the end and parsed.
 			"a 200 larger than CEDAR_ANSWER_MAX_BYTES",
 			(_request, response) => {
 				response.writeHead(200, { "content-type": "application/json" });
@@ -392,12 +389,12 @@ describe("cedarHttpEngine over the wire — a failed call rejects with CedarEngi
 		[
 			"a connection dropped before any answer",
 			(_request, response) => response.socket?.destroy(),
-			// The cause undici keeps on the error is named (#271).
+			// The cause undici keeps on the error is named.
 			/cedar engine at .*\/v1\/is_authorized is unreachable: fetch failed: .+$/,
 		],
 		[
-			// Before #270 `fetch` followed this until it gave up ("fetch failed").
-			// Now the first 3xx is answered as the non-2xx it is.
+			// The first 3xx is answered as the non-2xx it is, not followed until
+			// `fetch` gives up ("fetch failed").
 			"a redirect loop — refused at the first hop",
 			(request, response) => {
 				response.writeHead(307, { location: request.path });
@@ -445,13 +442,11 @@ describe("cedarHttpEngine over the wire — the deadline", () => {
 		await expect(failure).rejects.toBe(reason);
 	});
 
-	// Found by #269, fixed in #271: with the real `fetch` the headers can
-	// arrive first, and an abort then fails the body read rather than `fetch`
-	// itself. The engine used to read that as "answered something that is not
-	// a decision", telling a direct caller of the port the agent answered
-	// garbage when it timed out. Aborted once `fetch` has resolved and a task
-	// has passed, so the engine is reading a body the agent holds open; on
-	// every Node, since nothing here depends on what undici publishes.
+	// With the real `fetch` the headers can arrive first, and an abort then
+	// fails the body read rather than `fetch` itself; that is still a timeout,
+	// not "answered something that is not a decision". Aborted once `fetch` has
+	// resolved and a task has passed, so the engine is reading a body the agent
+	// holds open.
 	it("rejects with the signal's reason when the deadline passes mid-body, too", async () => {
 		const { loaded, headersIn } = await loadedObservingAnswers(agent.origin);
 		agent.answer(
@@ -475,14 +470,12 @@ describe("cedarHttpEngine over the wire — the deadline", () => {
 });
 
 describe("cedarHttpEngine over the wire — redirects", () => {
-	// The engine documents that an agent answering non-2xx rejects with
-	// CedarEngineError (header "Failure is loud and closed"; README "Failure
-	// after boot is a deny"), and it is pointed at one base URL. Until #270 both
-	// calls ran with `fetch`'s default `redirect: "follow"`, so a 3xx was never
-	// seen: the engine re-POSTed the request's attributes to wherever `Location`
-	// named and took that server's answer as the decision — a forbid could come
-	// back as an allow. These cases, found by #269 and pinned as `it.fails`
-	// until the fix, hold that no redirect is followed.
+	// An agent answering non-2xx rejects with CedarEngineError (the engine's
+	// doc comment; README "Failure after boot is a deny"), and the engine is
+	// pointed at one base URL, so no redirect is followed. A followed one would
+	// re-send the request's attributes to wherever `Location` names and take
+	// that server's answer as the decision — a forbid could come back as an
+	// allow.
 
 	it("does not follow a same-origin redirect: a 307 is non-2xx and rejects", async () => {
 		const loaded = await loadedAgainst(agent.origin);
@@ -584,13 +577,11 @@ describe("cedarHttpEngine over the wire — boot", () => {
 	it("never calls a refused agent reachable, wherever the deadline falls on its last attempt (#271)", async () => {
 		// With room for retries, the last attempt runs under whatever is left of
 		// the deadline — a millisecond, when a timer overshoots — and can time
-		// out before its refusal arrives. Found by #269: 48 of 200 such loads
-		// said "reachable, but the request timed out". It is a race, so this is
-		// the check on the real wire, not the pin: before the fix about one load
-		// in ten lost it, so twenty in a row caught it about nine runs in ten.
-		// `httpEngine.test.mts` pins the same case deterministically. A load
-		// whose first attempt times out — a worker stalled past the deadline
-		// before the refusal was read — says no answer came, which is also true.
+		// out before its refusal arrives. It is a race, so this is the check on
+		// the real wire, over twenty loads; `httpEngine.test.mts` pins the same
+		// case deterministically. A load whose first attempt times out — a
+		// worker stalled past the deadline before the refusal was read — says no
+		// answer came, which is also true.
 		const gone = await FakeCedarAgent.start();
 		await gone.stop();
 		const failures: unknown[] = [];
@@ -618,7 +609,7 @@ describe("cedarHttpEngine over the wire — boot", () => {
 	it("says no answer came before the deadline when the agent holds the load open", async () => {
 		// The agent never answers, so the outcome does not depend on how long
 		// the deadline is. A timeout is not evidence the agent is reachable, so
-		// the message does not say it is (#271).
+		// the message does not say it is.
 		agent.answer((_request, response) => agent.hold(response));
 		const load = createCedarHttpEngine({ env: {}, loadTimeoutMs: 100, retryMs: 20 }).load(
 			policySet(),
@@ -735,7 +726,7 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 			code: "cedar_deny",
 			message: "Denied by Cedar policy",
 			passed: true,
-			// The agent's reason, as unconfirmed as the revision (#199).
+			// The agent's reason, as unconfirmed as the revision.
 			evaluation: { ...unconfirmed("completed"), determiningPolicies: ["10-permit"] },
 		});
 		// What was pushed is what the revision was computed over.
@@ -835,8 +826,9 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 	it.each([true, false])(
 		"denies, and logs as a foreign answer, errors alone naming a policy this load never pushed — logEvaluationErrors = %s (#283)",
 		async (logEvaluationErrors) => {
-			// A set this verifier did not load, answering with errors only: before,
-			// logged as this load's evaluation errors — and silenced with them.
+			// A set this verifier did not load, answering with errors only: a
+			// foreign answer, not this load's evaluation errors, so
+			// `logEvaluationErrors` does not silence it.
 			const { rule: permit, logger } = await rule({ logEvaluationErrors });
 			agent.answer(
 				cedarAgent({
@@ -970,9 +962,9 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 		);
 	});
 
-	// See "redirects" above (#269, fixed in #270). Before the fix, through the
-	// rule this was a pass: an Allow from a server the deployment never
-	// configured decided the request, reported as a completed evaluation.
+	// See "redirects" above. Through the rule, a followed redirect would let an
+	// Allow from a server the deployment never configured decide the request,
+	// reported as a completed evaluation.
 	it("denies when the agent redirects the call to another origin", async () => {
 		const { rule: redirected } = await rule();
 		stranger.answer(cedarAgent(decision("Allow", ["stranger"])));

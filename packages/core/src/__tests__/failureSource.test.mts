@@ -2,16 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * #200: which collector — or which rule — a failure came from.
+ * Which collector — or which rule — a failure came from.
  *
  * A collector that rejects fails the decision, and the transport answers it as
- * a 500 logged `verify_internal_error`. Before this, that line carried the error
- * and nothing else: the operator paged at 3 a.m. had to read `err.message` and
- * guess which of the configured fact sources wrote it. The runner is the one
- * place that knows, so it records the attribution — and records it BESIDE the
- * error rather than wrapping it, because `pipeline.collect` is documented to
- * reject with whatever the collector rejected with, and a transport tells a
- * deny from a fault by that error's class.
+ * a 500 logged `verify_internal_error`, which must say which of the configured
+ * fact sources failed. The runner is the one place that knows, so it records
+ * the attribution — BESIDE the error rather than wrapping it, because
+ * `pipeline.collect` is documented to reject with whatever the collector
+ * rejected with, and a transport tells a deny from a fault by that error's
+ * class.
  *
  * Beside it in a `FailureRecord` the caller owns — one per decision — and not
  * in anything process-wide: an error object is not a request, and two
@@ -286,9 +285,9 @@ describe("FailureRecord — one shared rejection, several failures (#200 review)
 	}
 
 	it("gives each concurrent decision its own answer", async () => {
-		// The defect a process-wide association had: the rule pipeline's record
-		// landed after the attribute pipeline's and before either caller caught,
-		// so both decisions named the rule collector.
+		// A process-wide association fails this: the rule pipeline's record lands
+		// after the attribute pipeline's and before either caller catches, so
+		// both decisions would name the rule collector.
 		const downstream = shared();
 		class SharedClientCollector implements AttributeCollector {
 			async collect(): Promise<Attributes> {

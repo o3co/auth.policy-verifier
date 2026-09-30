@@ -5,27 +5,13 @@ import type { Server } from "node:http";
 import type { Logger } from "@o3co/auth.policy-verifier.core";
 
 /**
- * Graceful shutdown for the scaffolded server.
+ * Graceful shutdown for the scaffolded server. It lives in the template rather
+ * than a dependency so that "does SIGTERM wait for in-flight decisions, and for
+ * how long?" is answerable from the code an operator deploys. auth.provider's
+ * standalone template carries the same; keeping the two composition roots
+ * symmetric lets one aggregator pipeline serve the whole stack.
  *
- * ## Why this is in the template rather than a dependency
- *
- * It used to be `gracefulShutdown` from `@o3co/auth.utils@0.0.4`. For a
- * component every protected call waits on, "does SIGTERM wait for in-flight
- * decisions, and for how long?" has to be answerable from the code an operator
- * deploys — and it was answerable only by reading a pre-1.0 package no
- * contract here pinned. Reading it answered the question, and the answer was
- * the reason to move it: **there was no deadline**. `server.close()` waits
- * indefinitely, so one stuck decision meant the process never exited on its
- * own and the orchestrator's SIGKILL took it down mid-flight — the opposite of
- * a graceful shutdown, arriving only under the load that produces a stuck
- * request. The cleanup-failure path also wrote to `console.error`, one bare
- * line in a composition root that went to the trouble of wiring NDJSON (#107).
- *
- * `auth.provider`'s standalone template made the same move for the same
- * reasons (o3co/auth.provider#290); keeping the two composition roots
- * symmetric is what lets one aggregator pipeline serve the whole stack.
- *
- * ## The guarantees, stated
+ * The guarantees:
  *
  * 1. **SIGTERM and SIGINT** both start it; a second signal is ignored rather
  *    than starting a second cleanup over the first one's work.
@@ -33,21 +19,20 @@ import type { Logger } from "@o3co/auth.policy-verifier.core";
  *    sockets are released (`closeIdleConnections`) — they hold the server open
  *    with no request behind them, so a quiet server would otherwise wait out
  *    the whole deadline for nothing.
- * 3. **In-flight requests get `drainTimeoutMs`** (default 10s) to finish.
+ * 3. **In-flight requests get `drainTimeoutMs`** (default 10s) to finish;
+ *    `server.close()` alone waits indefinitely.
  * 4. **Past the deadline, remaining connections are cut**
- *    (`closeAllConnections`) and the process exits **non-zero** — an
- *    orchestrator that only ever sees `0` cannot tell a clean drain from one
- *    that ran out of time.
+ *    (`closeAllConnections`) and the process exits **non-zero**, so an
+ *    orchestrator can tell a clean drain from one that ran out of time.
  * 5. **`cleanup` runs after draining, before exit**, logged through the app
  *    logger and reflected in the exit code. It is bounded by
  *    `cleanupTimeoutMs`, so a dispose that never settles cannot wedge the
- *    process the way an unbounded `await` did.
+ *    process.
  * 6. **A `close` that fails is not reported as a clean drain.**
  *
  * Size `drainTimeoutMs` **below** the orchestrator's own kill grace period
  * (Kubernetes `terminationGracePeriodSeconds`, compose `stop_grace_period`,
- * both 30s by default) — the point is to close on our terms before SIGKILL
- * arrives on someone else's.
+ * both 30s by default), so the process closes on its own terms before SIGKILL.
  */
 export interface GracefulShutdownOptions {
 	readonly logger: Logger;

@@ -45,33 +45,26 @@ export interface CollectorContext {
 	/**
 	 * The raw, replayable credential the request arrived under — present ONLY
 	 * when the composition opted in (`verify.credentialToCollectors =
-	 * "expose"`, #175). Absent by default: collectors get verified claims, not
-	 * the credential, because a collector that logs its context would otherwise
-	 * leak a live token. The one legitimate use is a project-side collector
-	 * calling a downstream API *as the subject* (token forwarding/exchange);
-	 * that deployment states the exposure in config, where it is greppable.
-	 * NEVER log this field.
+	 * "expose"`). Absent by default, so a collector that logs its context
+	 * cannot leak a live token. The one legitimate use is a project-side
+	 * collector calling a downstream API *as the subject* (token forwarding or
+	 * exchange). NEVER log this field.
 	 */
 	credential?: string;
 	/**
 	 * Cancellation for this collect, and the one field that is not a fact about
-	 * the request (#115).
+	 * the request. Always present: the pipeline supplies one per collector per
+	 * decision.
 	 *
 	 * It aborts when this collector overruns its budget, when the pipeline
 	 * overruns its end-to-end deadline, when a sibling collector has already
 	 * failed the decision, or when the caller went away. Pass it to whatever
-	 * this collector waits on — `fetch(url, { signal: context.signal })`, a
-	 * driver's cancellation option — so the work stops rather than being merely
-	 * stopped waiting for.
+	 * this collector waits on (`fetch(url, { signal: context.signal })`, a
+	 * driver's cancellation option). The pipeline abandons a collector that
+	 * ignores it, but that collector's outbound call keeps running after the
+	 * decision it belonged to is gone.
 	 *
-	 * Always present: the pipeline supplies one per collector per decision, so
-	 * there is no `?.` and no "unbounded if nobody wired it" case. Honouring it
-	 * is not what makes the deadline hold — the pipeline abandons a collector
-	 * that ignores it — but a collector that ignores it leaves its outbound call
-	 * running after the decision it belonged to is gone.
-	 *
-	 * It is a live handle on the request, so the rule contract applies to it
-	 * exactly as to the rest of the context: a **collector** may hold it for the
+	 * It is a live handle on the request: a **collector** may hold it for the
 	 * duration of `collect`; a **rule** must not carry it into `verify`. See
 	 * AGENTS.md, "Collector / Rule / Attribute Contract".
 	 */
@@ -80,14 +73,11 @@ export interface CollectorContext {
 
 /**
  * What a pipeline is handed: the request, without the per-collector `signal`
- * the pipeline itself supplies.
- *
- * The two shapes are deliberately different types. A transport builds facts
- * about a request and has no per-collector signal to give — that one belongs to
- * the fan-out, is different for every collector, and aborts on bounds the
- * transport knows nothing about. `signal` here is the optional *caller-side*
- * cancellation (a client that hung up, an outer deadline); the pipeline links
- * it into its own, so aborting it cancels every collector in flight.
+ * the pipeline itself supplies. That one belongs to the fan-out and aborts on
+ * bounds a transport knows nothing about. `signal` here is the optional
+ * *caller-side* cancellation (a client that hung up, an outer deadline); the
+ * pipeline links it into its own, so aborting it cancels every collector in
+ * flight.
  */
 export type CollectorRequest = Omit<CollectorContext, "signal"> & {
 	/** Optional caller-side cancellation, linked into the pipeline's own. */
@@ -146,14 +136,13 @@ export interface Rule {
 }
 
 /**
- * How one invocation of the policy evaluator behind a rule went (#244).
+ * How one invocation of the policy evaluator behind a rule went.
  *
- * A rule that fronts an evaluator — a Cedar policy set, an OPA bundle — denies
- * for reasons that are not a policy's: the request could not be built, the
- * engine did not answer, the evaluation raised errors. All of them are a
- * failing rule, and have to be, because the rule fails closed; but an audit
- * record that attributed each of them to the policy would name a policy that
- * never ran. XACML keeps the same two things apart as `Decision` and `Status`.
+ * A rule that fronts an evaluator (a Cedar policy set, an OPA bundle) fails
+ * closed for reasons that are not a policy's: the request could not be built,
+ * the engine did not answer, the evaluation raised errors. The status keeps an
+ * audit record from naming a policy that never ran. XACML keeps the same two
+ * things apart as `Decision` and `Status`.
  *
  * | status | the evaluator | the answer is |
  * | --- | --- | --- |
@@ -166,42 +155,36 @@ export type RuleEvaluationStatus = "completed" | "failed" | "not_invoked";
 /**
  * What a rule reports about the evaluation behind one answer: its
  * {@link RuleEvaluationStatus}, which policy snapshot it concerned, and —
- * for a completed one — which policies determined the answer.
+ * for a completed one — which policies determined the answer. See
+ * docs/extending.md, "Reporting the evaluation behind an answer".
  *
- * `revision` is a claim about what was **evaluated**, so it is a string only
- * when the evaluator vouches for it. `null` is the explicit unknown — the
- * evaluator ran, and what it evaluated cannot be established, which is every
- * answer of a remote engine that does not say. What the deployment *loaded*
- * is then carried apart, as `loadedRevision`: worth recording, and not proof
- * of what ran. The two never share a name, so a consumer reading `revision`
- * cannot take a snapshot nobody confirmed for one that was evaluated.
+ * `revision` is a string only when the evaluator vouches for what it
+ * **evaluated**. `null` is the explicit unknown: the evaluator ran, and what
+ * it evaluated cannot be established. What the deployment *loaded* is then
+ * carried apart, as `loadedRevision`, so a consumer reading `revision` cannot
+ * take a snapshot nobody confirmed for one that was evaluated.
  *
- * `not_invoked` has no revision key of either kind, and no determining
- * policies, by type and by the check in `evaluate()` — which refuses them
- * however the value is reached, inherited or through a getter included: an
- * evaluator that was never asked evaluated nothing.
+ * A reference matches {@link POLICY_REVISION_PATTERN}: `sha256:<64 hex>` for a
+ * content digest, the engine's own scheme otherwise. What it covers is its
+ * producer's to document, and it is never a promise of replay: attributes,
+ * mapping and evaluator version decide an answer too.
  *
- * A reference is `scheme:encoded` — {@link POLICY_REVISION_PATTERN}, the OCI
- * digest grammar — so `sha256:<64 hex>` for a content digest, and an engine
- * whose versions are not digests names its own scheme. What the reference
- * covers is its producer's to document: for `packages/cedar`, the policy files
- * and nothing else. It is never a promise of replay — attributes, mapping and
- * evaluator version decide an answer too.
+ * `determiningPolicies` names the policies that determined a **completed**
+ * answer: for an allow, the permits that applied; for a deny, the forbids that
+ * did; an empty list when no policy applied. It is a set, in the order the
+ * rule reports it, and absent when the rule does not know. An id is the
+ * policy's name as its producer documents it, never an index the engine made
+ * up; beside `revision: null` it is as unconfirmed as the revision. Each id
+ * satisfies {@link isReportablePolicyId}, and at most
+ * {@link DETERMINING_POLICIES_MAX} are listed; the reporter's
+ * {@link ReportRuleEvaluation.boundDeterminingPolicies} builds both keys to
+ * fit, counting the rest in `determiningPoliciesOmitted` (present only when it
+ * is not zero), so a rule that uses it cannot trip the check.
  *
- * `determiningPolicies` (#199) names the policies that determined a
- * **completed** answer — for an allow, the permits that applied; for a deny,
- * the forbids that did; an empty list when no policy applied to the request.
- * It is a set, in the order the rule reports it, and absent when the rule does
- * not know (a rule that fronts no evaluator reports nothing at all). A
- * `failed` evaluation carries none, checked the same way: its answer is the
- * rule failing closed, not the policies'. Beside `revision: null` the ids are as unconfirmed as the
- * revision — they name policies in whatever set the evaluator held. An id is
- * the policy's name as its producer documents it, never an index the engine
- * made up. The shape is {@link isReportablePolicyId}'s and the bound
- * {@link DETERMINING_POLICIES_MAX}; a rule builds the two keys with its
- * reporter's {@link ReportRuleEvaluation.boundDeterminingPolicies}, which
- * counts whatever does not fit in `determiningPoliciesOmitted` — present only
- * when it is not zero — so a rule that uses it cannot trip the check.
+ * `not_invoked` carries no revision key of either kind and no determining
+ * policies, and `failed` no determining policies, by type and by the check in
+ * `evaluate()`, which refuses them however the value is reached (inherited or
+ * through a getter included).
  */
 export type RuleEvaluation =
 	| { readonly status: "not_invoked" }
@@ -214,12 +197,11 @@ export type EvaluatedRevision =
 	| { readonly revision: null; readonly loadedRevision?: string };
 
 /**
- * The determining policies a completed {@link RuleEvaluation} may name (#199).
+ * The determining policies a completed {@link RuleEvaluation} may name.
  * `determiningPoliciesOmitted` only ever stands beside `determiningPolicies`;
  * `evaluate()` refuses it alone. The type leaves both optional rather than
- * saying so, because the stricter union stops `{ status, revision }` with a
- * `"completed" | "failed"` status from type-checking — code that compiled
- * against the #244 type. A reporter's
+ * saying so, because the stricter union would stop `{ status, revision }` with
+ * a `"completed" | "failed"` status from type-checking. A reporter's
  * {@link ReportRuleEvaluation.boundDeterminingPolicies} returns the pair in
  * the shape the check wants ({@link BoundDeterminingPolicies}).
  */
@@ -229,9 +211,9 @@ export interface DeterminingPolicies {
 }
 
 /**
- * Determining policies made to fit the contract of the core that checks them
- * (#199) — what {@link ReportRuleEvaluation.boundDeterminingPolicies} returns,
- * ready to spread into a completed report.
+ * Determining policies made to fit the contract of the core that checks them —
+ * what {@link ReportRuleEvaluation.boundDeterminingPolicies} returns, ready to
+ * spread into a completed report.
  */
 export interface BoundDeterminingPolicies {
 	readonly determiningPolicies: readonly string[];
@@ -251,21 +233,18 @@ export const POLICY_REVISION_PATTERN = /^[a-z0-9]+(?:[+._-][a-z0-9]+)*:[A-Za-z0-
 export const POLICY_REVISION_MAX_LENGTH = 256;
 
 /**
- * Most determining policies one evaluation lists (#199). Every decision's
- * audit line carries them, and so may its response: a handful answers "which
- * policy decided", and the rest are counted, not dropped. With
- * {@link POLICY_ID_MAX_LENGTH} this bounds one evaluation's ids at 4,096
+ * Most determining policies one evaluation lists; the rest are counted, not
+ * dropped. Every decision's audit line carries them, and so may its response.
+ * With {@link POLICY_ID_MAX_LENGTH} this bounds one evaluation's ids at 4,096
  * UTF-16 units — about 4 KiB of ASCII, at most 12 KiB of UTF-8 — under the
- * 16 KiB a line-splitting log driver cuts at. That is one evaluation's; a
- * decision line carries one per reporting rule.
+ * 16 KiB a line-splitting log driver cuts at. A decision line carries one such
+ * list per reporting rule.
  *
- * The bounds on determining policies — this, {@link POLICY_ID_MAX_LENGTH},
- * {@link POLICY_ID_FORBIDDEN_RANGES} — are the checking core's. A rule does
- * not apply them from the copy of core its package imports, which in a mixed
- * install is not the one that checks: it applies them through its reporter's
- * {@link ReportRuleEvaluation.boundDeterminingPolicies}, which carries the
- * checking core's own. They are published to be read, not to be enforced by
- * a rule.
+ * This, {@link POLICY_ID_MAX_LENGTH} and {@link POLICY_ID_FORBIDDEN_RANGES} are
+ * the checking core's bounds, published to be read, not to be enforced by a
+ * rule. A rule applies them through its reporter's
+ * {@link ReportRuleEvaluation.boundDeterminingPolicies}, because in a mixed
+ * install the copy of core its package imports is not the one that checks.
  */
 export const DETERMINING_POLICIES_MAX = 32;
 
@@ -303,35 +282,30 @@ export const POLICY_ID_FORBIDDEN_RANGES: ReadonlyArray<readonly [number, number]
 ]);
 
 /**
- * How a rule reports the {@link RuleEvaluation} behind one answer (#244).
+ * How a rule reports the {@link RuleEvaluation} behind one answer. See
+ * docs/extending.md, "Reporting the evaluation behind an answer".
  *
  * The evaluator makes one of these for **each invocation** of a rule and hands
- * it to `verify` / `decide`. The rule calls it at most once, before it
- * answers; `evaluate()` checks what was reported, freezes a copy and puts it on
- * that invocation's {@link RuleOutcome}.
+ * it to `verify` / `decide`: one rule object answers concurrent decisions, so
+ * nothing may be kept on the rule between them. The rule calls it at most
+ * once, before it answers; `evaluate()` checks what was reported, freezes a
+ * copy and puts it on that invocation's {@link RuleOutcome}.
  *
- * **Why a reporter, and not a richer answer.** An evaluation is a fact about
- * one invocation — one rule object answers concurrent decisions, so nothing
- * may be kept on the rule between them — which leaves two places for it: what
- * the rule returns, or something the evaluator hands in for that one call. A
- * richer return value (`{ passed, evaluation }`) fails **open** wherever the
- * evaluator does not know about it: an object is truthy, so an older copy of
- * core in a mixed install, or a composite rule calling `verify` itself, reads
- * every deny as a pass. A reporter fails the other way. An evaluator that
- * passes none gets the boolean it always got and merely records no evaluation
- * — which is what an absent `evaluation` already means: unknown.
+ * A reporter rather than a richer return value: `{ passed, evaluation }` is
+ * truthy, so an older core in a mixed install, or a composite rule calling
+ * `verify` itself, would read every deny as a pass. An evaluator that passes
+ * no reporter still gets the boolean, and records no evaluation: unknown.
  *
- * **What it is to the purity contract.** Not the side effect the contract
- * forbids. The reporter is the evaluator's own, made for this call and dead
- * after it; nothing reaches another invocation through it. What is reported is
- * part of the answer and is held to the same rule — equal attributes, equal
- * report — and the purity conformance suite compares it.
+ * The reporter is made for this call and dead after it, so it is not the side
+ * effect the purity contract forbids; what is reported is part of the answer
+ * (equal attributes, equal report), and the purity conformance suite compares
+ * it.
  *
  * Reporting twice in one invocation, or reporting something that does not
  * read, is a `TypeError` — thrown to the rule, and thrown again by `evaluate()`
  * after the rule answers, so a rule that swallows it still cannot produce a
  * decision that looks as if nothing had been reported. A report that arrives
- * after the answer is ignored: the decision is made.
+ * after the answer is ignored.
  *
  * Optional in the signatures because a rule may be asked without one; a rule
  * that reports calls `report?.(…)`.
@@ -340,7 +314,7 @@ export interface ReportRuleEvaluation {
 	(evaluation: RuleEvaluation): void;
 	/**
 	 * Makes the policies an evaluator named fit the contract of the core that
-	 * checks this report (#199): each name once, in the order given, those
+	 * checks this report: each name once, in the order given, those
 	 * {@link isReportablePolicyId} accepts, at most
 	 * {@link DETERMINING_POLICIES_MAX} of them — and every other distinct name
 	 * counted in `determiningPoliciesOmitted`, left out when there was none.
@@ -348,26 +322,16 @@ export interface ReportRuleEvaluation {
 	 * order is the caller's, so sort names whose order the engine does not
 	 * keep stable, or two replicas record one decision two ways.
 	 *
-	 * On the reporter, and not imported, for two reasons. The bounds that
-	 * count are the checking core's — the server's — and not those of the
-	 * copy of core a rule's package depends on; in a mixed install they can
-	 * differ. And it is absent on a reporter from a core older than #199, which
-	 * refuses the keys as unknown and would fail every completed answer as the
-	 * rule's fault — and on one made of a plain function, a test's or a
-	 * composite rule's own, which cannot say what the core behind it reads. So a rule
-	 * names determining policies only through it, and reports the rest of the
-	 * evaluation either way (`...undefined` spreads nothing):
-	 *
-	 * ```ts
-	 * report?.({
-	 *   status: "completed",
-	 *   revision,
-	 *   ...report?.boundDeterminingPolicies?.(names),
-	 * });
-	 * ```
-	 *
-	 * That is what lets a package that reports them be upgraded ahead of the
-	 * server it runs under, or behind it.
+	 * On the reporter, and not imported, because the bounds that count are the
+	 * checking core's (the server's), which in a mixed install can differ from
+	 * the copy of core a rule's package depends on. It is absent on a reporter
+	 * from a core that predates determining policies (which refuses the keys as
+	 * unknown, failing every completed answer as the rule's fault) and on a
+	 * plain-function reporter (a test's, or a composite rule's own). So a rule
+	 * names determining policies only through it and reports the rest of the
+	 * evaluation either way, spreading `...report?.boundDeterminingPolicies?.(names)`
+	 * into the report (`...undefined` spreads nothing). A reporting package can
+	 * then be upgraded ahead of the server it runs under, or behind it.
 	 *
 	 * @throws {TypeError} for one name passed bare — a string iterates by
 	 *   character, and would come back as a list of letters.
@@ -379,19 +343,17 @@ export interface ReportRuleEvaluation {
 
 /**
  * A rule whose answer comes from I/O — an out-of-process policy engine such as
- * Cedar over HTTP (#225). It cannot be a {@link Rule}: `verify` is synchronous
- * and, by contract, does no I/O. This is the additive form: the same
- * `ruleType` grouping, the same `code` / `message` on deny, the same reporting
- * in the decision's `reason`, and the same rule that the answer be a function
- * of `attrs` alone — a `CollectorContext` retained from collect time may no more
- * be read here than in `verify`, and the purity conformance suite checks
- * `decide` exactly as it checks `verify`.
+ * Cedar over HTTP. It cannot be a {@link Rule}: `verify` is synchronous and,
+ * by contract, does no I/O. Otherwise it is held to the same contract: the
+ * same `ruleType` grouping, `code` / `message` on deny and reporting in the
+ * decision's `reason`, and an answer that is a function of `attrs` alone (the
+ * purity conformance suite checks `decide` exactly as it checks `verify`).
  *
- * What differs is permitted cost: `decide` may do I/O, so it runs under a
- * deadline (`evaluate()`'s `ruleTimeoutMs`) and is handed a `signal` that aborts
- * when that budget — or the caller — ends. Pass the signal to `fetch`. A rule
- * that does not answer in time fails the decision as a deny of its own,
- * `RuleTimeoutError`, never as a pass.
+ * `decide` runs under a deadline (`evaluate()`'s `ruleTimeoutMs`) and is
+ * handed a `signal` that aborts when that budget — or the caller — ends; pass
+ * it to `fetch`. A rule that does not answer in time fails the decision as a
+ * deny of its own, `RuleTimeoutError`, never as a pass. See docs/extending.md,
+ * "Writing an asynchronous rule".
  */
 export interface AsyncRule {
 	ruleType: string;
@@ -400,8 +362,8 @@ export interface AsyncRule {
 	/**
 	 * The discriminant: what makes this an asynchronous rule. Explicit, as the
 	 * policy-set union in cedar is, rather than read off the presence of
-	 * `decide` — a synchronous rule that happens to carry an unrelated `decide`
-	 * method must not be sent down the asynchronous path (v0.10.0 audit).
+	 * `decide`, so a synchronous rule that happens to carry an unrelated
+	 * `decide` method is not sent down the asynchronous path.
 	 */
 	readonly async: true;
 	/** `report` as on `Rule.verify` — see `ReportRuleEvaluation`. */
@@ -434,8 +396,8 @@ export interface RuleOutcome {
 	message: string;
 	passed: boolean;
 	/**
-	 * What the rule reported about the evaluation behind this answer (#244) —
-	 * checked and frozen by `evaluate()`. Absent when the rule reported none,
+	 * What the rule reported about the evaluation behind this answer, checked
+	 * and frozen by `evaluate()`. Absent when the rule reported none,
 	 * which is every rule that has no policy source to identify: what decides
 	 * for a TypeScript rule is the deployed code and its config.
 	 */
@@ -446,17 +408,11 @@ export interface RuleOutcome {
  * How one rule group (`ruleType`) came out. Groups are the unit of
  * AND-evaluation, so this is the granularity at which "why" is answerable.
  *
- * `evaluated` always means the same thing: every rule that actually ran, in
- * evaluation order. The group is an OR, so a passing group stops at its first
- * passing rule — `evaluated` then ends with that rule, preceded by any
- * alternatives that were tried and failed before it; alternatives after it
+ * `evaluated` is every rule that actually ran, in evaluation order. The group
+ * is an OR, so a passing group stops at its first passing rule: `evaluated`
+ * ends with that rule, which is also `satisfiedBy`, and alternatives after it
  * never ran and are not reported. A failing group ran every alternative, so
  * `evaluated` lists them all.
- *
- * `satisfiedBy` marks the pass case explicitly: the rule that satisfied the
- * group, always the last element of `evaluated`. "What ran" is `evaluated`;
- * "what decided" is `satisfiedBy` on a pass, and on a fail the whole of
- * `evaluated` (every alternative refused).
  */
 export type RuleGroupOutcome =
 	| { ruleType: string; passed: true; evaluated: RuleOutcome[]; satisfiedBy: RuleOutcome }
@@ -493,14 +449,11 @@ export interface Role {
  * first element of the `(subject, resource, action, context)` quadruple every
  * engine behind the decision contract consumes.
  *
- * A bag, not a claim set: core names no field, reads no field, and does not
- * know what credential the transport verified. The transport that admitted the
- * request populates it — this repo's server spreads a signature-verified JWT's
- * claims into it, so under that server the keys are the token's claims (`sub`,
- * `azp`, `scope`, …) — and collectors narrow the values they promote, which is
- * where claim vocabulary belongs (see the builtins). Read-only because it is
- * shared across every collector of a decision: a collector writes attributes
- * into its own result, never into its input.
+ * A bag, not a claim set: core names no field and reads no field. The
+ * transport that admitted the request populates it (this repo's server
+ * spreads a signature-verified JWT's claims into it), and collectors narrow
+ * the values they promote, which is where claim vocabulary belongs. Read-only
+ * because it is shared across every collector of a decision.
  */
 export interface SubjectAttributes {
 	readonly [key: string]: unknown;

@@ -3,15 +3,14 @@
 
 /*
  * This package's attribute keys — the parsed request, written by
- * `RequestFactsCollector`; three of them (action, resource type, resource id)
- * are read by default by `CedarPolicyRuleCollector`, the raw resource is not —
- * and their reservation in core's key registry, made when this module is
- * imported. They exist because a rule is a function of the merged attributes
- * alone, so the request facts a Cedar policy set decides over (action, resource
- * type, resource id) must be promoted into attributes by a collector first.
- * They are this package's vocabulary, not core's: core's `ATTR_*` constants are
- * reserved for OAuth/OIDC/RBAC concepts (AGENTS.md "Core Vocabulary Scope"),
- * and "the parsed request" is not one.
+ * `RequestFactsCollector` — and their reservation in core's key registry, made
+ * when this module is imported. A rule is a function of the merged attributes
+ * alone, so the request facts a Cedar policy set decides over (action,
+ * resource type, resource id) must be promoted into attributes by a collector
+ * first; `CedarPolicyRuleCollector` reads those three by default, not the raw
+ * resource. They are this package's vocabulary, not core's: core's `ATTR_*`
+ * constants are reserved for OAuth/OIDC/RBAC concepts (AGENTS.md "Core
+ * Vocabulary Scope").
  */
 
 import { reserveAttributeKeys } from "@o3co/auth.policy-verifier.core";
@@ -35,26 +34,20 @@ export const CEDAR_ATTRIBUTE_KEYS = [
 /*
  * Reserved here, at module scope, beside the constants — so that adding an
  * `ATTR_*` above reserves it in the same edit, and so that the reservation is
- * in place before any collector of any package can be constructed. A
- * composition can only name `RequestFactsCollector` or
- * `CedarPolicyRuleCollector` in config by importing this package, and an import
- * runs this module body to completion first; `createApp` then initializes every
- * module before it builds a single collector from config. Reserving inside
- * `cedarPolicyModule.init` would also be early enough for that one path, and
+ * in place before any collector of any package can be constructed: naming
+ * either collector in config needs this package imported, and an import runs
+ * this module body first. Reserving inside `cedarPolicyModule.init` would be
  * too late for a library consumer that never calls `createApp`.
  *
- * What it buys: `RequestContextAttributeCollector` (builtins) refuses a mapping
- * whose `to` lands on one of these. That guard used to consult a set core
- * enumerated by hand, which could not see this package at all — and
- * `requestResourceId` is the sharp end of the gap, because
- * `RequestFactsCollector` writes it only when the parsed resource carried an
- * id. For an id-less resource such as `"document"` nothing else writes the key,
- * so a mapping `{ from = "rid", to = "requestResourceId" }` was unopposed and
- * `mapping.mts` built the Cedar resource entity out of the caller's own request
- * body: `{"resource":"document","action":"read","context":{"rid":"x"}}` decided
- * as `document::"x"`. Where the resource *does* carry an id the two writers
- * collide and `AttributeConflictError` denies — fail-closed, but an
- * unannounced denial rather than a refusal at boot.
+ * With the keys reserved, `RequestContextAttributeCollector` (builtins)
+ * refuses a mapping whose `to` lands on one of them. `requestResourceId`
+ * needs it most: `RequestFactsCollector` writes it only when the parsed
+ * resource carried an id, so for an id-less resource such as `"document"` a
+ * mapping `{ from = "rid", to = "requestResourceId" }` would let the caller's
+ * own request body name the Cedar resource entity
+ * (`{"resource":"document","action":"read","context":{"rid":"x"}}` decided as
+ * `document::"x"`). Where the resource does carry an id, the two writers would
+ * collide and deny at request time rather than refuse at boot.
  */
 reserveAttributeKeys({
 	owner: CEDAR_ATTRIBUTE_KEY_OWNER,

@@ -18,14 +18,13 @@ import type { AnyRule, CollectorRequest, RuleCollector } from "./types.mjs";
 
 /**
  * Fan-out aggregator that runs every `RuleCollector` concurrently — up to
- * `CollectorLimits.concurrency` at a time — and flattens their results into a
- * single `Rule[]`. Unlike `AttributePipeline`, rules do not merge — each
- * collector's rules are simply concatenated.
+ * `CollectorLimits.concurrency` at a time — and concatenates their rules into
+ * a single list; unlike attributes, rules do not merge.
  *
- * The fan-out is bounded exactly as the attribute one is (#115), and failing
- * closed matters more here: a short rule list is a *weaker policy*, and an empty
- * one is an allow wherever a deployment set `onEmptyRuleSet: "allow"`. A bound
- * that trips fails the collect rather than returning the rules that arrived in
+ * The fan-out is bounded as the attribute one is, and failing closed matters
+ * more here: a short rule list is a *weaker policy*, and an empty one is an
+ * allow wherever a deployment set `onEmptyRuleSet: "allow"`. A bound that
+ * trips fails the collect rather than returning the rules that arrived in
  * time.
  */
 export class RulePipeline {
@@ -40,7 +39,7 @@ export class RulePipeline {
 
 	/**
 	 * Runs every collector under the pipeline's bounds and returns the flattened
-	 * rule list. `options.failures` records where a failure came from (#200).
+	 * rule list. `options.failures` records where a failure came from.
 	 */
 	async collect(request: CollectorRequest, options?: CollectOptions): Promise<AnyRule[]> {
 		return (

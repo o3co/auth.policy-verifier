@@ -23,10 +23,10 @@ export type PathResolver = (specifier: string) => string;
 // biome-ignore lint/suspicious/noExplicitAny: collector constructors accept varied config shapes
 export type AttributeCollectorFactory = (config: any) => AttributeCollector;
 /**
- * Produces a `RuleCollector` from its HOCON config entry. May be asynchronous
- * (#225): a collector whose boot needs I/O — a policy set handed to an
- * out-of-process engine — refuses to start from inside the factory, which is
- * where two-boundary validation puts it; `createApp` awaits every factory.
+ * Produces a `RuleCollector` from its HOCON config entry. May be asynchronous:
+ * a collector whose boot needs I/O — a policy set handed to an out-of-process
+ * engine — refuses to start from inside the factory, which is where
+ * two-boundary validation puts it; `createApp` awaits every factory.
  */
 // biome-ignore lint/suspicious/noExplicitAny: rule collector constructors accept varied config shapes
 export type RuleCollectorFactory = (config: any) => RuleCollector | Promise<RuleCollector>;
@@ -35,14 +35,13 @@ export type RuleCollectorFactory = (config: any) => RuleCollector | Promise<Rule
 export type ResourceParserFactory = (config: any) => ResourceParser;
 
 /**
- * Context provided to each Module during initialization. Carries the registries
- * for the concepts core itself defines — collectors, rules, resource parsers.
+ * Context provided to each Module during initialization: the registries for
+ * the concepts core defines (collectors, rules, resource parsers).
  *
- * A host may carry more: the server extends this with its own registries (its
- * `ServerModuleContext` adds the JWT key-resolver registry) and initializes its
- * modules with the extended shape. A module written against the wider context
- * declares it via {@link Module}'s type parameter; one written against this
- * base shape runs under any host.
+ * A host may extend it with its own registries (the server's
+ * `ServerModuleContext` adds the JWT key-resolver registry). A module written
+ * against the wider context declares it via {@link Module}'s type parameter;
+ * one written against this base shape runs under any host.
  */
 export interface ModuleContext {
 	pathResolver: PathResolver;
@@ -56,12 +55,11 @@ export interface ModuleContext {
  * A composable unit that registers collectors, rules, and parsers.
  * Modules are initialized asynchronously to allow dynamic imports via pathResolver.
  *
- * `C` is the context the module needs at `init`. The default is the base
- * {@link ModuleContext}; a module that registers into a host-specific registry
- * names that host's context instead (e.g. the server's
- * `builtinKeyResolversModule` is a `Module<ServerModuleContext>`), and can then
- * only be initialized by a host that supplies it. A `Module<ModuleContext>`
- * remains assignable wherever a wider context is provided.
+ * `C` is the context the module needs at `init`. A module that registers into
+ * a host-specific registry names that host's context (the server's
+ * `builtinKeyResolversModule` is a `Module<ServerModuleContext>`) and can only
+ * be initialized by a host that supplies it. A `Module<ModuleContext>` is
+ * assignable wherever a wider context is provided.
  */
 export interface Module<C extends ModuleContext = ModuleContext> {
 	name: string;

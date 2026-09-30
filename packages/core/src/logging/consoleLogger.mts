@@ -32,24 +32,13 @@ export interface ConsoleLoggerOptions {
 }
 
 /**
- * Level routing (6 logger levels → 4 available `console.*` methods):
- *   trace → console.debug
- *   debug → console.debug
- *   info  → console.info
- *   warn  → console.warn
- *   error → console.error
- *   fatal → console.error
+ * Routes the six logger levels onto four `console.*` methods (trace and debug
+ * to `console.debug`, fatal to `console.error`).
  *
- * The merged object (child bindings + per-call obj) is passed verbatim to the
- * underlying `console.*` method, which renders it with `util.inspect` — i.e.
- * human-readable text on stdout/stderr, not JSON. This logger is the
- * never-silent fallback for deployments that wire nothing; an aggregator-ready
- * NDJSON stream comes from injecting a structured logger instead (the
- * standalone template injects pino). Tests should spy on `console.*` and
- * assert on the call arguments rather than on string output.
- *
- * Per-call obj wins over child bindings on key collision (pino-compatible
- * last-write-wins).
+ * The merged object (child bindings + per-call obj, the per-call obj winning a
+ * key collision as in pino) goes verbatim to `console.*`, which renders it with
+ * `util.inspect`: human-readable text, not JSON. For an NDJSON stream, inject a
+ * structured logger (the standalone template injects pino).
  */
 function emit(
 	method: "debug" | "info" | "warn" | "error",
@@ -58,13 +47,12 @@ function emit(
 	msg: string | undefined,
 	args: unknown[],
 ): void {
-	// console.* IS the sink here (this is the console-backed Logger
-	// implementation); biome's recommended preset in this repo does not
-	// enable `noConsole`, so no suppression is needed.
+	// console.* is the sink here; biome's recommended preset does not enable
+	// `noConsole`, so no suppression is needed.
 	if (typeof obj === "string") {
 		// String-first has no per-call obj, so only the bindings could fill the
-		// leading object — when they are empty too, prepending would render the
-		// line as `{} message` (#133).
+		// leading object; when they are empty too, prepending would render the
+		// line as `{} message`.
 		const prefix = Object.keys(bindings).length > 0 ? [{ ...bindings }] : [];
 		console[method](...prefix, obj, ...(msg !== undefined ? [msg] : []), ...args);
 	} else {

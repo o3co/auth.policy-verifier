@@ -81,8 +81,7 @@ describe("measureSecretEntropyBytes — base64 padding must be well-formed", () 
 	 * for it. Trimming any run of '=' would turn a passphrase that merely ends in
 	 * equals signs into a "valid" base64 body and score it at three-quarters of
 	 * its real length — fail-closed, but a usability trap with no security to
-	 * show for it. auth.provider#282 shipped that bug and then fixed it; this
-	 * port must not reintroduce it.
+	 * show for it.
 	 */
 
 	it("accepts one '=' after a 3-character final group", () => {

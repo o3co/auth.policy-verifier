@@ -5,11 +5,10 @@
  * One definition of "loopback" for the whole package.
  *
  * Two seams ask the question, for opposite reasons, and they must not drift
- * apart: the JWKS URI check (#109) exempts loopback from the https requirement
- * because there is no network path to attack, and the bind-address check (#108)
- * treats loopback as the safe default because there is no network path to reach
- * it from. A host either is local by definition or it is not — so the answer
- * lives here, and only the input spelling differs.
+ * apart: the JWKS URI check exempts loopback from the https requirement because
+ * there is no network path to attack, and the bind-address check treats
+ * loopback as the safe default because there is no network path to reach it
+ * from. Only the input spelling differs.
  */
 
 /** The whole 127.0.0.0/8 block, not just 127.0.0.1, octets range-checked. */

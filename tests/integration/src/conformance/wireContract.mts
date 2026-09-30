@@ -6,36 +6,28 @@
  *
  * The other suites in this directory are deliberately ENGINE-agnostic: they take
  * an adapter that decides a request somehow, and say nothing about how the
- * request arrived. `decisionContract.mts` would be satisfied by an in-process
- * OPA, a Cedar adapter, or a function call — that is the point, because the
- * thing it pins is the migration seam *underneath* the endpoint.
+ * request arrived, because what they pin is the migration seam *underneath*
+ * the endpoint.
  *
  * This one pins the seam ABOVE it: the HTTP surface itself. Status codes, the
  * exact key set of each response body, which refusal wins when a request is
  * wrong in two ways at once. `VerifierEndpoint` — the interface an enforcement
- * layer codes against — lives in o3co/protobuf.interceptors, so nothing in this
- * repository was checking that the wire shape it publishes is the wire shape
- * that repository implements (#125). An engine swap is invisible to a caller;
- * a field rename here breaks every caller at once, silently, at runtime.
+ * layer codes against — lives in o3co/protobuf.interceptors, and this suite
+ * checks that the wire shape this repository publishes is the one that
+ * repository implements. An engine swap is invisible to a caller; a field
+ * rename here breaks every caller at once, silently, at runtime.
  *
  * So the adapter here is a TRANSPORT, not an engine: it puts bytes on the wire
  * and reports the raw answer. An adapter for the OPA or Cedar deployment of
  * this same service satisfies this suite by answering identically over HTTP,
- * which is exactly the "drop-in replaceable behind `VerifierEndpoint`" claim
- * the README makes.
+ * which is the "drop-in replaceable behind `VerifierEndpoint`" claim the
+ * README makes.
  *
  * **The fixtures are JSON files, not literals in this module** — see
  * `fixtures/wireContract/`. The enforcement layer is a different repository
- * (and need not be TypeScript); a table it can read is the only version of this
- * contract that can be shared rather than re-typed, and re-typing is the drift
- * #125 was filed about. This module is the runner; the contract is the data.
- *
- * **The table is the post-#118 contract.** #118 moved body validation ahead of
- * authentication and gave the body parser's own failures the deny envelope,
- * which changed six answers on the wire: three that were 401 and are now 400,
- * and three that were Express's HTML error page and are now this envelope. Those
- * rows carry `"issue": "#118"` and say so in their `pins`, so a reader who finds
- * this suite disagreeing with an older client knows which side moved and when.
+ * (and need not be TypeScript), and a table it can read is the only version of
+ * this contract that can be shared rather than re-typed. This module is the
+ * runner; the contract is the data.
  */
 
 import { readFileSync } from "node:fs";
@@ -53,7 +45,7 @@ export type WireEndpoint = "/verify" | "/verify/batch";
 export type WireCredential =
 	/** A token this deployment verifies, carrying `fixtures.subject` as its `sub`. */
 	| "valid"
-	/** The same, but with no `sub` claim at all — the #158 case. */
+	/** The same, but with no `sub` claim at all. */
 	| "validWithoutSubject"
 	/** No `Authorization` header. */
 	| "none"
@@ -80,7 +72,7 @@ export interface WireExchange {
 	credential: WireCredential;
 	/** Explicit `Content-Type`; omitted means `application/json`. */
 	contentType?: string;
-	/** Sent verbatim as the `x-request-id` request header (#200); omitted means no header. */
+	/** Sent verbatim as the `x-request-id` request header; omitted means no header. */
 	requestId?: string;
 	payload: WirePayload;
 }
@@ -111,7 +103,7 @@ export interface WireResponse {
 	body: unknown;
 	/** The body as bytes-as-text, for the assertions about what is *not* in it. */
 	text: string;
-	/** The `x-request-id` response header as received (#200); `undefined` when there is none. */
+	/** The `x-request-id` response header as received; `undefined` when there is none. */
 	requestId?: string;
 }
 
@@ -137,30 +129,29 @@ export interface WireFixtures {
 	/**
 	 * Optional: a request that denies with at least one rule group still
 	 * passing, so `satisfiedBy`'s "on a passing group only" half is checked
-	 * against a response that carries both kinds of group at once (#135).
+	 * against a response that carries both kinds of group at once.
 	 */
 	partiallySatisfied?: WireDecisionRequest;
 	/**
 	 * Optional: a request whose collector fan-out runs out of time, for the
-	 * `collector_timeout` deny (#115). A deployment with no stallable collector
+	 * `collector_timeout` deny. A deployment with no stallable collector
 	 * omits it and the two cases that need it do not run.
 	 */
 	stalling?: WireDecisionRequest;
 	/**
 	 * Optional: a request two attribute collectors answer with different scalar
-	 * values for one key, for the `attribute_conflict` deny (#174, shipped in
-	 * v0.4.0 and missing from this table until #182). Omitted by a deployment
-	 * that cannot stage a conflict.
+	 * values for one key, for the `attribute_conflict` deny. Omitted by a
+	 * deployment that cannot stage a conflict.
 	 */
 	conflicting?: WireDecisionRequest;
 	/**
 	 * Optional: a request whose collector fails outright — not a timeout — for
-	 * the terminal `internal_error` envelope (#182). Omitted by a deployment
+	 * the terminal `internal_error` envelope. Omitted by a deployment
 	 * with no failable collector.
 	 */
 	failing?: WireDecisionRequest;
 	/**
-	 * Optional (#244): requests decided with a rule that reports an evaluation,
+	 * Optional: requests decided with a rule that reports an evaluation,
 	 * on a deployment whose responses include it (`verify.evaluationInResponse =
 	 * "include"`). Omitted by a deployment that does not opt in or has no
 	 * policy-backed rule — the cases that need it do not run, and every other
@@ -174,7 +165,7 @@ export interface WireFixtures {
 		unconfirmed?: WireDecisionRequest;
 		/** A request the rule denied before its evaluator was asked. */
 		notInvoked?: WireDecisionRequest;
-		/** A request whose evaluator completed and named the policies that determined it (#199). */
+		/** A request whose evaluator completed and named the policies that determined it. */
 		determining?: WireDecisionRequest;
 	};
 }
@@ -262,10 +253,8 @@ const keysOf = (body: unknown): string[] => Object.keys(body as Record<string, u
 const batchOf = (requests: WireDecisionRequest[]) => ({ decisions: requests });
 
 /**
- * Conformance suite pinning the `VerifierEndpoint` wire contract
- * (o3co/auth.policy-verifier#125).
- *
- * See the header of this file for which layer this pins and why it is not
+ * Conformance suite pinning the `VerifierEndpoint` wire contract. See the
+ * header of this file for which layer this pins and why it is not
  * engine-agnostic like its neighbours.
  */
 export function describeWireContractConformance(adapter: WireContractAdapter): void {
@@ -291,7 +280,7 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 
 	/**
 	 * Asserts one revision reference is the bounded `scheme:encoded` shape the
-	 * contract carries (#244) — which is what keeps a path, a label or policy
+	 * contract carries — which is what keeps a path, a label or policy
 	 * text from ever being one.
 	 */
 	const expectRevision = (value: unknown): void => {
@@ -302,7 +291,7 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 
 	/**
 	 * Asserts one outcome's `evaluation` is one of the three shapes the contract
-	 * allows (#244), exhaustively: a status from the table; no revision key of
+	 * allows, exhaustively: a status from the table; no revision key of
 	 * either kind on an evaluator that was never invoked; otherwise a `revision`
 	 * that is a reference or an explicit `null`, with `loadedRevision` beside it
 	 * only in the `null` case — so the digest of a snapshot nobody confirmed can
@@ -347,7 +336,7 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 	};
 
 	/**
-	 * Asserts a completed evaluation's determining policies (#199) are the
+	 * Asserts a completed evaluation's determining policies are the
 	 * bounded set the contract carries: a list, no longer than `maxItems`, of
 	 * distinct ids, each well-formed, 1 to `idMaxLength` UTF-16 units long, and
 	 * free of every code point in `idForbiddenRanges` — which is what keeps an
@@ -423,7 +412,7 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 			for (const outcome of group.evaluated as Record<string, unknown>[]) {
 				for (const key of ruleOutcome.required) expect(Object.keys(outcome)).toContain(key);
 				expect(Object.keys(outcome).filter((key) => !permittedOutcomeKeys.has(key))).toEqual([]);
-				// #244: optional, and held to its own envelope wherever it appears.
+				// Optional, and held to its own envelope wherever it appears.
 				if ("evaluation" in outcome) expectEvaluation(outcome.evaluation);
 			}
 		}
@@ -633,11 +622,11 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 			);
 		});
 
-		// #182: three codes a deployed instance can legally answer were missing
-		// from the table, so the contract an enforcement layer reads was narrower
-		// than the surface it meets. Two are exercised on the wire below; the
-		// third — the optional caller-auth gate's — cannot be, and the case says
-		// why.
+		// Three codes a deployed instance can legally answer beyond the request
+		// cases, which the table names so the contract an enforcement layer
+		// reads is not narrower than the surface it meets. Two are exercised on
+		// the wire below; the third — the optional caller-auth gate's — cannot
+		// be, and the case says why.
 		describe("a scalar attribute conflict (#174, table row #182)", () => {
 			it.runIf(adapter.fixtures.conflicting)("denies with 403 and an empty reason", async () => {
 				const conflicting = adapter.fixtures.conflicting;

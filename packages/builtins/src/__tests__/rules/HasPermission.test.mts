@@ -36,11 +36,10 @@ describe("HasPermission", () => {
 		expect(rule.verify(attrs)).toBe(true);
 	});
 
-	// #155: matching is exact and case-sensitive, the discipline #116 (HasScope)
-	// and #117 (DotNotationResourceParser) argued for every identifier
-	// vocabulary. The parser preserves case, so `Project:1` and `project:1` are
-	// two resources — a permission rule collapsing them was the exact
-	// "one resource on one side, two on the other" split #117 closed.
+	// Matching is exact and case-sensitive, as for every identifier vocabulary
+	// (HasScope, DotNotationResourceParser). The parser preserves case, so
+	// `Project:1` and `project:1` are two resources, and a permission rule must
+	// not collapse them into one.
 	it("does not match across case: required Project:1 vs granted project:1", () => {
 		const rule = new HasPermission("Project:1.Perm:Read");
 		const attrs: Attributes = new Map([["permissions", ["project:1.perm:read"]]]);
@@ -91,41 +90,33 @@ describe("HasPermission", () => {
 
 	describe("multi-star wildcard rejection", () => {
 		it("does NOT match when granted permission has 2+ wildcards — over-granting via dropped suffix", () => {
-			// Bug: "resource*action*required" split("*") → ["resource","action","required"]
-			// Destructuring const [prefix, suffix] = ... takes only "resource" and "action",
-			// silently dropping "required". The check becomes endsWith("action") instead of
-			// endsWith("required"), so "resourceXaction" incorrectly matches even though
-			// the granted permission requires a "required" segment after the second wildcard.
-			// Fix: reject any granted permission containing 2+ wildcards (return false).
+			// A grant with two or more wildcards never matches. Split into
+			// [prefix, suffix], "resource*action*required" would drop "required"
+			// and match "resourceXaction".
 			const rule = new HasPermission("resourceXaction");
 			const attrs: Attributes = new Map([["permissions", ["resource*action*required"]]]);
-			// "resourceXaction" does NOT satisfy "resource*action*required" (missing "required")
-			// but the buggy code returns true because "required" is dropped from suffix
 			expect(rule.verify(attrs)).toBe(false);
 		});
 
 		it("does NOT match when granted permission has 2+ wildcards (posts.*.write.* vs posts.123.read.all)", () => {
-			// Additional case: wildcard in the middle — cross-action access must not be granted
+			// A wildcard in the middle: cross-action access must not be granted.
 			const rule = new HasPermission("posts.123.read.all");
 			const attrs: Attributes = new Map([["permissions", ["posts.*.write.*"]]]);
 			expect(rule.verify(attrs)).toBe(false);
 		});
 
 		it("does NOT match when granted permission has 3 wildcards", () => {
-			// "a*b*c*d" split → ["a","b","c","d"]; prefix="a", suffix="b"; "c","d" dropped.
-			// "aXb" incorrectly matches when "a*b*c*d" should require segments c and d.
+			// Split into [prefix, suffix], "a*b*c*d" would drop "c" and "d" and match "aXb".
 			const rule = new HasPermission("aXb");
 			const attrs: Attributes = new Map([["permissions", ["a*b*c*d"]]]);
 			expect(rule.verify(attrs)).toBe(false);
 		});
 	});
 
-	// #180: the halves around the wildcard must not overlap in the required
-	// permission. `startsWith(prefix) && endsWith(suffix)` alone lets one
-	// character satisfy both halves — "posts.*.read" matched "posts.read",
-	// where the single "." was counted as the prefix's trailing "." and the
-	// suffix's leading "." at once. An over-grant, the failure direction that
-	// matters in an authorization service.
+	// The halves around the wildcard must not overlap in the required
+	// permission. `startsWith(prefix) && endsWith(suffix)` alone would let
+	// "posts.*.read" match "posts.read", counting the one "." as the prefix's
+	// trailing "." and the suffix's leading "." at once: an over-grant.
 	describe("wildcard halves must not overlap (#180)", () => {
 		it("does NOT match when one character would satisfy both halves: posts.*.read vs posts.read", () => {
 			const rule = new HasPermission("posts.read");
@@ -154,12 +145,11 @@ describe("HasPermission", () => {
 		});
 	});
 
-	// #180 (related): roles reach this rule from collectors, so a store-backed
-	// role collector can hand back shapes the operator-config
-	// StaticRoleCollector never produces. Malformed entries never match and
-	// never throw — the discipline HasScope already applies to non-string
-	// scope values. Before the guard, an undefined `permissions` reached
-	// `match` and threw, turning one bad row in a role store into a 500 deny.
+	// Roles reach this rule from collectors, so a store-backed role collector
+	// can hand back shapes the operator-config StaticRoleCollector never
+	// produces. Malformed entries never match and never throw, as HasScope
+	// treats non-string scope values: a throw would turn one bad row in a role
+	// store into a 500 deny.
 	describe("malformed role data never matches and never throws (#180)", () => {
 		it("ignores a role whose permissions is missing", () => {
 			const rule = new HasPermission("posts.read");

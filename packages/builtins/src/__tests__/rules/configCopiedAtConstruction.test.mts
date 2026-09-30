@@ -14,16 +14,15 @@ import { AttrPairEqual } from "#/rules/AttrPairEqual.mjs";
 import { AttrPairNotEqual } from "#/rules/AttrPairNotEqual.mjs";
 
 /**
- * A comparison rule is built from a config object the caller keeps (#255).
- * Whatever the caller does to that object afterwards — replacing a field,
- * pushing to or splicing an array — must not reach the rule: it answers from
- * the values it validated at construction, and its `ruleType` and `message`
- * keep describing them.
+ * A comparison rule answers from the values it validated at construction.
+ * Whatever the caller then does to the config object it keeps — replacing a
+ * field, pushing to or splicing an array — reaches neither its answers nor its
+ * `ruleType` and `message`.
  *
- * Each row names one mutation and the answers the rule gave at construction,
- * on attributes chosen so that a rule reading the mutated config would answer
- * differently. A mutation to a value the constructor refuses (`NaN`) is among
- * them: construction-time validation must hold for the rule's whole life.
+ * Each row names one mutation and the construction-time answers, on
+ * attributes where a rule reading the mutated config would answer differently.
+ * One row mutates to a value the constructor refuses (`NaN`): construction-time
+ * validation must hold for the rule's whole life.
  */
 interface Row {
 	name: string;

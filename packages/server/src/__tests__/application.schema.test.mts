@@ -36,8 +36,8 @@ const baseBody = {
 };
 
 /**
- * 64 hex characters — 32 decoded bytes, the entropy floor #114 enforces on
- * every HS256 secret. Every HS256 fixture in this file has to clear it, so the
+ * 64 hex characters — 32 decoded bytes, the entropy floor enforced on every
+ * HS256 secret. Every HS256 fixture in this file has to clear it, so the
  * cases about other keys are not silently testing a rejected secret instead.
  */
 const SECRET = "11".repeat(32);
@@ -504,13 +504,12 @@ describe("AppConfigSchema — token lifetime bounds (#110)", () => {
 });
 
 describe("AppConfigSchema — one numeric reader at both boundaries (#157)", () => {
-	// The doctrine `checkJwksUri` and `checkHs256Rotation` follow: an invariant is
-	// stated once and spent twice, so a hand-built config cannot get a different
-	// answer from a parsed one. The numeric knobs were the exception — the schema
-	// re-implemented each as a `z.coerce.number()` chain and shared only the
-	// constants with `resolveBound`, which is how the two rows below came to
-	// disagree. Every case here asserts the two boundaries character for
-	// character, because a message that drifts is a check that has drifted.
+	// As with `checkJwksUri` and `checkHs256Rotation`, the invariant is stated
+	// once and spent twice: the schema reads each numeric knob through
+	// `resolveBound`, the runtime guard's reader, so a hand-built config cannot
+	// get a different answer from a parsed one. Every case here asserts the two
+	// boundaries character for character, because a message that drifts is a
+	// check that has drifted.
 	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
 
 	/** Parses a valid verify config whose `oauth.jwt` knobs the case under test overrides. */
@@ -603,9 +602,8 @@ describe("AppConfigSchema — one numeric reader at both boundaries (#157)", () 
 		});
 	}
 
-	// The two rows of #157's table, named so the regression is recognisable: the
-	// schema read `false` as a zero cooldown and `true` as a one-millisecond
-	// timeout, each of which the runtime guard refused to boot on.
+	// `false` must not read as a zero cooldown, nor `true` as a one-millisecond
+	// timeout: the runtime guard refuses to boot on either.
 	it("refuses jwksCooldownMs = false, which used to parse to 0", () => {
 		expect(schemaRefusal({ jwksCooldownMs: false }, "jwksCooldownMs")).toBe(
 			"oauth.jwt.jwksCooldownMs must be a non-negative integer number of milliseconds, got false",
@@ -689,8 +687,8 @@ describe("AppConfigSchema — one numeric reader at both boundaries (#157)", () 
 });
 
 describe("AppConfigSchema — http.port (#157)", () => {
-	// The one numeric knob that predates the campaign and was never bounded
-	// (noted in #158): `z.coerce.number()` with no `.int().positive()` at all.
+	// `http.port` goes through the same numeric reader: an integer from 1 to
+	// 65535.
 	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
 
 	const parsePort = (port: unknown) =>
@@ -721,7 +719,7 @@ describe("AppConfigSchema — http.port (#157)", () => {
 	it.each([
 		// 0 is a real hazard, not a formality: listen(0) binds an arbitrary free
 		// port, so the enforcement layer's configured address stops resolving to
-		// this process — and 0 is what `Number(false)` and `Number(null)` produced.
+		// this process — and 0 is what `Number(false)` and `Number(null)` produce.
 		["zero", 0],
 		["a negative port", -1],
 		["a port above the 16-bit range", 65_536],
@@ -871,10 +869,9 @@ describe("AppConfigSchema — oauth.jwt.mode (#134)", () => {
 		expect(result.success).toBe(false);
 	});
 
-	// Driven off the exported list, not a copy of it (#158): the removed keys are
-	// half of the same contract the migration message is, and a fourth key added
-	// to the constant must be covered here without anyone remembering to widen a
-	// literal in a test.
+	// Driven off the exported list, not a copy of it: the removed keys are half
+	// of the same contract the migration message is, and a key added to the
+	// constant is covered here without anyone widening a literal in a test.
 	it.each([...JWT_MODE_REMOVED_KEYS])(
 		"hard-errors on the removed key %s with the migration message",
 		(staleKey) => {
@@ -921,7 +918,7 @@ describe("AppConfigSchema — http bind address (#108)", () => {
 	});
 
 	it("accepts an explicit all-interfaces bind", () => {
-		// Container deployments need it; it is now an opt-in rather than the default.
+		// Container deployments need it; it is an opt-in, not the default.
 		const result = AppConfigSchema.parse({
 			oauth: { jwt: validJwt },
 			...baseBody,
@@ -970,9 +967,9 @@ describe("AppConfigSchema — http.callerAuth (#108)", () => {
 	});
 
 	it("rejects an empty token rather than treating it as disabled", () => {
-		// `HTTP_CALLER_AUTH_TOKEN=` substitutes an empty string. Booting
-		// unauthenticated because a credential was exported empty is exactly the
-		// silent failure this issue is about.
+		// `HTTP_CALLER_AUTH_TOKEN=` substitutes an empty string, and booting
+		// unauthenticated because a credential was exported empty would be a
+		// silent failure.
 		const result = AppConfigSchema.safeParse({
 			oauth: { jwt: validJwt },
 			...baseBody,
@@ -1171,25 +1168,19 @@ describe("AppConfigSchema — HS256 secret rotation (#112)", () => {
 
 describe("AppConfigSchema — the verify block's default names every knob", () => {
 	/*
-	 * The `verify` block has two ways of being produced, and they are two
-	 * different pieces of code:
+	 * The `verify` block is produced by two different pieces of code:
 	 *
 	 *   - the block is PRESENT (`verify {}`) → each key's own `boundedNumber`
 	 *     runs, and `resolveBound(undefined, spec)` returns that spec's fallback;
 	 *   - the block is ABSENT → zod takes the `.default(() => ({…}))` object
-	 *     VERBATIM. It never parses it back through the shape, so a key missing
+	 *     VERBATIM, without parsing it back through the shape, so a key missing
 	 *     from that literal is `undefined` rather than defaulted.
 	 *
-	 * A knob added to the shape but not to the literal therefore works in every
-	 * test that writes `verify: {…}` and silently disappears for the deployment
-	 * shape that omits the block entirely — which is the common one, since an
-	 * overlay config only repeats the sections it changes. This nearly happened
-	 * when #115 and #118 both added knobs here and landed a day apart.
-	 *
-	 * Comparing the two productions is what makes that unmissable, and it is why
-	 * this is written as an equality rather than as a list of keys: a tenth knob
-	 * added to the shape alone fails here without anyone remembering to come
-	 * back and extend an assertion.
+	 * A knob added to the shape but not to the literal would work in every test
+	 * that writes `verify: {…}` and silently disappear for a deployment that
+	 * omits the block, the common case since an overlay config only repeats the
+	 * sections it changes. Comparing the two productions as an equality, not as
+	 * a list of keys, catches a knob added to the shape alone.
 	 */
 	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
 
@@ -1229,15 +1220,12 @@ describe("AppConfigSchema — the verify block's default names every knob", () =
 
 	it("names each knob in the block whose keys came from the shape", () => {
 		// Keyed off the EMPTY-block production, whose keys come from the shape
-		// rather than from the literal — so a knob the literal omits shows up
-		// here as a missing key rather than as a present `undefined`. (Iterating
-		// the absent-block production instead would skip it silently, which is
-		// the shape of the bug and not a check for it.)
+		// rather than from the literal, so a knob the literal omits is caught;
+		// iterating the absent-block production would skip it silently.
 		//
-		// `toBeDefined`, not `toBeTypeOf("number")`: the guard's job is catching
-		// a knob the literal omits, and since #175 the block carries a
-		// non-numeric knob (`credentialToCollectors`). The value-level agreement
-		// is the equality test above.
+		// `toBeDefined`, not `toBeTypeOf("number")`: the block carries
+		// non-numeric knobs (`credentialToCollectors`, `evaluationInResponse`).
+		// The value-level agreement is the equality test above.
 		const fromShape = parseWith({}).verify as Record<string, unknown>;
 		const fromDefault = parseWith(undefined).verify as Record<string, unknown>;
 
@@ -1251,11 +1239,11 @@ describe("AppConfigSchema — the verify block's default names every knob", () =
 });
 
 describe("AppConfigSchema — millisecond knobs are bounded above (#181)", () => {
-	// Node clamps a `setTimeout` delay above 2^31 - 1 to ~1 ms. Before the
-	// ceiling, a collectorTimeoutMs of 3_000_000_000 passed validation and
-	// became a ~1 ms timer: every decision denied with collector_timeout, and
+	// Node clamps a `setTimeout` delay above 2^31 - 1 to ~1 ms. Without the
+	// ceiling, a collectorTimeoutMs of 3_000_000_000 would pass validation and
+	// become a ~1 ms timer: every decision denied with collector_timeout, and
 	// every JWKS fetch aborted — a validated configuration producing a total
-	// outage, the failure class this module's own header forbids.
+	// outage.
 	const MAX_TIMER = 2_147_483_647;
 	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
 	const rs256 = {

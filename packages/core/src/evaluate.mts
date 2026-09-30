@@ -46,7 +46,7 @@ export interface EvaluateOptions {
 	 */
 	onEmptyRuleSet?: "deny" | "allow";
 	/**
-	 * Milliseconds one asynchronous rule may take to answer (#225). Defaults to
+	 * Milliseconds one asynchronous rule may take to answer. Defaults to
 	 * `DEFAULT_RULE_TIMEOUT_MS`; refused when not a positive whole number a
 	 * timer can hold, before any rule runs. A synchronous rule is not timed.
 	 */
@@ -61,7 +61,7 @@ export interface EvaluateOptions {
 	/** The caller's signal; when it aborts, the asynchronous rule in flight is aborted with its reason. */
 	signal?: AbortSignal;
 	/**
-	 * Where this decision's failures are recorded (#200) — which rule threw,
+	 * Where this decision's failures are recorded — which rule threw,
 	 * rejected or overran a rule budget. The same record the decision's two
 	 * collects were handed; see `FailureRecord`. Omitted, nothing is recorded.
 	 */
@@ -72,29 +72,25 @@ export interface EvaluateOptions {
  * Evaluates collected rules against attributes and returns an allow/deny decision.
  *
  * Semantics: rules are grouped by `ruleType`; each group is evaluated as OR
- * (any rule passing satisfies the group), and all groups must pass (AND across groups)
- * for an allow decision. On deny, the first rule of the failing group supplies
- * the `code` and `message`.
+ * (any rule passing satisfies the group), and all groups must pass (AND across
+ * groups) for an allow decision. On deny, the first rule of the failing group
+ * supplies the `code` and `message`. Every decision carries a structured
+ * `reason` naming each rule group and how it came out.
  *
- * Every decision carries a structured `reason` naming each rule group and how it
- * came out, so a caller can answer "why" without re-running the pipeline.
+ * An empty rule set is **denied by default**: "no rule applied" means the
+ * request was never authorized, not that it needs no authorization — the
+ * implicit-deny semantics of OPA / OpenFGA / Cedar, so an engine swapped in
+ * behind the same decision contract does not change the outcome.
+ * `onEmptyRuleSet: "allow"` opts a deployment out of it.
  *
- * An empty rule set is **denied by default**: "no rule applied" means the request
- * was never authorized, not that it needs no authorization. This matches the
- * implicit-deny semantics of OPA / OpenFGA / Cedar, so an engine swapped in behind
- * the same decision contract does not change the outcome. `onEmptyRuleSet: "allow"`
- * opts a deployment out of it.
- *
- * A rule list may carry either kind of rule (#225). A synchronous `Rule` is
- * asked through `verify`; an `AsyncRule` is awaited through `decide`, under
+ * A rule list may carry either kind of rule. A synchronous `Rule` is asked
+ * through `verify`; an `AsyncRule` is awaited through `decide`, under
  * `ruleTimeoutMs`. Both are asked one at a time, in collection order, and the
  * alternatives after a group's first pass never run, whichever kind they are.
  * The evaluator is asynchronous for that reason alone — a list of synchronous
  * rules answers in the same turn, with nothing awaited but the promise itself.
- *
- * Called only once both collects have finished: the merged attributes are in
- * hand, and this is the position at which an out-of-process engine can be
- * consulted without changing when anything else happens.
+ * Called only once both collects have finished, with the merged attributes in
+ * hand.
  *
  * @param attrs - Attributes collected for the request (subject, resource, environment).
  * @param rules - Flat list of rules collected from all rule collectors.
@@ -105,10 +101,10 @@ export interface EvaluateOptions {
  * @throws whatever a rule threw or rejected with, or the caller's abort reason,
  *   unchanged: a rule that owns its engine's outage answers `false` and logs;
  *   one that throws is reporting a fault. Which rule threw is recorded in
- *   `failures` beside the error rather than wrapped around it (#200).
+ *   `failures` beside the error rather than wrapped around it.
  * @throws {TypeError} when a rule answers something other than a boolean, or
- *   reports an evaluation that does not read — see `beginRuleInvocation`
- *   (#244). Attributed to the rule in `failures`, like a throw.
+ *   reports an evaluation that does not read — see `beginRuleInvocation`.
+ *   Attributed to the rule in `failures`, like a throw.
  * @throws {RangeError} for an unusable `ruleTimeoutMs` or `evaluateDeadlineMs`,
  *   before any rule runs.
  */
@@ -127,17 +123,16 @@ export async function evaluate(
 		deadlineAt: performance.now() + deadlineMs,
 	};
 
-	// Phase 1: group rules by ruleType — rules within a group are alternatives (OR).
+	// Group rules by ruleType — rules within a group are alternatives (OR).
 	const groups = Map.groupBy(rules, (rule) => rule.ruleType);
 
-	// Phase 2: nothing to evaluate → default-deny unless the deployment opted out.
+	// Nothing to evaluate → default-deny unless the deployment opted out.
 	if (groups.size === 0) return emptyDecision(options);
 
-	// Phase 3: each group must have at least one passing rule (AND across groups).
-	// Every group is evaluated, including groups after the first failing one:
-	// stopping early cannot report which of the remaining groups would also have
-	// failed, which is the question a deny explanation exists to answer. Rules are
-	// pure predicates over attributes by contract, so running them all is safe.
+	// Each group must have at least one passing rule (AND across groups). Every
+	// group is evaluated, including groups after the first failing one, so a
+	// deny can report every group that failed. Rules are pure predicates over
+	// attributes by contract, so running them all is safe.
 	const outcomes: RuleGroupOutcome[] = [];
 	for (const [ruleType, groupRules] of groups) {
 		outcomes.push(
@@ -145,11 +140,11 @@ export async function evaluate(
 		);
 	}
 
-	// Phase 4: deny names the FIRST failing group, as before; reason carries all.
+	// A deny names the FIRST failing group; reason carries all.
 	return conclude(outcomes);
 }
 
-/** Phase 2: an empty rule set is a deny unless the deployment opted out. */
+/** An empty rule set is a deny unless the deployment opted out. */
 function emptyDecision(options?: EvaluateOptions): Decision {
 	const reason = { groups: [] };
 	return options?.onEmptyRuleSet === "allow"
@@ -157,7 +152,7 @@ function emptyDecision(options?: EvaluateOptions): Decision {
 		: { ...NO_APPLICABLE_RULE, reason };
 }
 
-/** Phase 4: a deny names the FIRST failing group; reason carries all. */
+/** A deny names the FIRST failing group; reason carries all. */
 function conclude(outcomes: RuleGroupOutcome[]): Decision {
 	const reason = { groups: outcomes };
 	const firstFailure = outcomes.find((group) => !group.passed);
@@ -173,12 +168,6 @@ function conclude(outcomes: RuleGroupOutcome[]): Decision {
 	return { decision: "allow", reason };
 }
 
-/**
- * Evaluates one `ruleType` group. The group is an OR, so evaluation stops at
- * the first passing rule. `evaluated` reports exactly the rules that ran, in
- * order — on a pass that is every tried-and-failed alternative followed by the
- * passing rule (named again as `satisfiedBy`); on a fail, every alternative.
- */
 /** The two bounds an asynchronous rule runs under: its own, and the phase's. */
 interface RuleBudget {
 	readonly ruleTimeoutMs: number;
@@ -187,6 +176,12 @@ interface RuleBudget {
 	readonly deadlineAt: number;
 }
 
+/**
+ * Evaluates one `ruleType` group. The group is an OR, so evaluation stops at
+ * the first passing rule. `evaluated` reports exactly the rules that ran, in
+ * order — on a pass that is every tried-and-failed alternative followed by the
+ * passing rule (named again as `satisfiedBy`); on a fail, every alternative.
+ */
 async function evaluateGroup(
 	ruleType: string,
 	rules: AnyRule[],
@@ -200,10 +195,10 @@ async function evaluateGroup(
 		const { passed, evaluation } = isAsyncRule(rule)
 			? await runAsyncRule(rule, attrs, budget, caller, failures)
 			: verifyRule(rule, attrs, failures);
-		// #244: the evaluation is this invocation's, reported through the reporter
-		// made for this one call — the outcome is the only place it is ever kept.
+		// The evaluation is this invocation's, reported through the reporter made
+		// for this one call — the outcome is the only place it is ever kept.
 		// Absent rather than `undefined` for a rule that reported none, so such a
-		// rule's outcome is key-for-key what it was.
+		// rule's outcome has no `evaluation` key.
 		const outcome: RuleOutcome = {
 			code: rule.code,
 			message: rule.message,
@@ -223,15 +218,15 @@ function ruleSource(rule: AnyRule): FailureSource {
 
 /**
  * Asks a synchronous rule, recording it as the source of anything it throws
- * (#200) — an answer or a report that does not read (#244) included, which is
- * as much the rule's fault as a throw is.
+ * — an answer or a report that does not read included, which is as much the
+ * rule's fault as a throw is.
  */
 function verifyRule(
 	rule: Rule,
 	attrs: Attributes,
 	failures: FailureRecord | undefined,
 ): RuleResult {
-	// One invocation, one reporter (#244): nothing the rule reports can reach
+	// One invocation, one reporter: nothing the rule reports can reach
 	// any outcome but this one.
 	const invocation = beginRuleInvocation();
 	try {
@@ -290,7 +285,7 @@ async function runAsyncRule(
 		phaseBinds ? remaining : budget.ruleTimeoutMs,
 	);
 	const cancelled = rejectOnAbort(own.signal);
-	// #244: this invocation's reporter. Closed in `finally`, so a rule that
+	// This invocation's reporter. Closed in `finally`, so a rule that
 	// reports after its budget is spent — or after the caller left — writes
 	// to nothing.
 	const invocation = beginRuleInvocation();
@@ -303,11 +298,11 @@ async function runAsyncRule(
 			//
 			// Constructed rather than `Promise.resolve(rule.decide(...))`, so a
 			// `decide` that throws before returning a promise is attributed
-			// exactly as one that rejects (#200). A rejection after the abort is
-			// the abort's, and is attributed to nobody.
+			// exactly as one that rejects. A rejection after the abort is the
+			// abort's, and is attributed to nobody.
 			//
-			// The answer is read inside the same chain (#244), so one that does
-			// not read is attributed to the rule by the same `catch`.
+			// The answer is read inside the same chain, so one that does not
+			// read is attributed to the rule by the same `catch`.
 			new Promise<unknown>((resolve) => resolve(rule.decide(attrs, own.signal, invocation.report)))
 				.then((answer) => invocation.conclude(answer))
 				.catch((error: unknown) => {

@@ -6,18 +6,12 @@
  *
  * These tests boot the app from `config/application.conf` — the file the image
  * ships and an operator deploys — read through `loadAppConfig`, the same
- * function `main.mts` calls. Nothing here restates the policy: the thing under
- * test is the thing that ships.
- *
- * That is the point of #113. The suite used to assemble its own config, minus
- * the one collector that made the shipped file deny every request, and stayed
- * green while the product was non-functional. A config the tests hand-write can
- * agree with `application.conf` only by vigilance, and it stopped agreeing.
+ * function `main.mts` calls. Nothing here restates the policy: a config the
+ * tests hand-wrote could disagree with the shipped file and stay green.
  *
  * The three values the file deliberately does not carry — the HS256 secret, the
  * issuer and the audience — come from the environment here exactly as they do
- * in a deployment. A credential must never be written in a config file, so
- * supplying them is loading the shipped config, not editing it.
+ * in a deployment: a credential is never written in a config file.
  */
 import { fileURLToPath } from "node:url";
 import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
@@ -29,7 +23,7 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { loadAppConfig } from "../loadConfig.js";
 
-/** 64 hex characters — 32 decoded bytes, the entropy floor #114 enforces. */
+/** 64 hex characters — 32 decoded bytes, the entropy floor the config schema enforces. */
 const JWT_SECRET = "11".repeat(32);
 const secretKey = new TextEncoder().encode(JWT_SECRET);
 const ISSUER = "https://issuer.test";
@@ -42,7 +36,7 @@ async function signToken(payload: Record<string, unknown>): Promise<string> {
 		new SignJWT(payload)
 			.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
 			.setIssuedAt()
-			// iat and exp are both mandatory now (#110).
+			// iat and exp are both mandatory.
 			.setExpirationTime("1h")
 			.setIssuer(ISSUER)
 			.setAudience(AUDIENCE)
@@ -62,17 +56,12 @@ const DEPLOYMENT_ENV = {
  * overlay resolved against `config/application.conf`, with the deployment's
  * three values in the environment.
  *
- * `process.env` is process-wide, and a test file does not own it. So each
- * variable's prior value is **restored**, not deleted — and "was absent" is
- * restored as absent rather than as `""`, which is a different state this very
- * config distinguishes (an exported-empty credential is refused rather than read
- * as "unset"). Deleting unconditionally would hand any file sharing the worker a
- * value this one happened to clear.
- *
- * The window is nil as well as tidy: every step here is synchronous —
- * `loadAppConfig` parses and validates without awaiting — and this runs at module
- * scope, so no other file's code can be scheduled between the assignment and the
- * restore.
+ * `process.env` is process-wide, so each variable's prior value is
+ * **restored**, not deleted — and "was absent" is restored as absent rather
+ * than as `""`, a different state this config distinguishes (an exported-empty
+ * credential is refused rather than read as "unset"). Every step is synchronous
+ * and this runs at module scope, so no other file's code can run between the
+ * assignment and the restore.
  */
 function loadShippedConfig(): AppConfig {
 	const saved: Array<[key: string, previous: string | undefined]> = Object.keys(DEPLOYMENT_ENV).map(
@@ -103,7 +92,7 @@ function createShippedApp(config: AppConfig = shippedConfig) {
 describe("standalone smoke", () => {
 	it("GET /_healthcheck returns 200", async () => {
 		// The liveness path the Dockerfile's HEALTHCHECK probes, and the one every
-		// component of the stack answers on (o3co/auth.provider#293).
+		// component of the stack answers on.
 		const app = await createShippedApp();
 
 		const res = await request(app).get("/_healthcheck");
@@ -111,8 +100,7 @@ describe("standalone smoke", () => {
 	});
 
 	it("GET /healthcheck returns 200 as a compatibility alias", async () => {
-		// The path this image probed before; a probe config that still names it
-		// must keep working.
+		// A probe config that names this path must keep working.
 		const app = await createShippedApp();
 
 		const res = await request(app).get("/healthcheck");
@@ -225,9 +213,9 @@ describe("standalone smoke", () => {
 	it("POST /verify allows a bare scope once allowBareScopeRewrite is configured", async () => {
 		// The one config in this file that is deliberately NOT the shipped one:
 		// it exercises the opt-in application.conf documents in a comment beside
-		// the collector, which is the only path a deployment has to re-enable the
-		// old rewrite. It is derived from the shipped config rather than written
-		// out, so the single key under test is the single thing that differs.
+		// the collector, the only path a deployment has to enable the bare-scope
+		// rewrite. It is derived from the shipped config rather than written out,
+		// so the single key under test is the single thing that differs.
 		const rewritingConfig: AppConfig = {
 			...shippedConfig,
 			rule: {
@@ -265,8 +253,8 @@ describe("standalone smoke", () => {
 });
 
 /*
- * #111. The template is the deployable shape, so these assert what an operator
- * of *this* composition actually gets — not what the library can be wired to do.
+ * The template is the deployable shape, so these assert what an operator of
+ * *this* composition actually gets — not what the library can be wired to do.
  */
 describe("standalone observability", () => {
 	it("GET /metrics serves the Prometheus text format with the decision counters", async () => {

@@ -7,14 +7,13 @@
  * at boot, and builds the request from it per call as a pure function of the
  * attributes.
  *
- * The request's entities are a set keyed by uid, not a list of roles (#282).
- * A role — principal, resource — is a reference to an entity, and what its
- * mapping says of that entity is a contribution to it. Cedar holds one
- * description per entity, and refuses a request that gives one uid two
- * different ones. So when two roles name one entity — a user acting on their
- * own record — their contributions are reconciled here, and how is the
- * deployment's `sharedEntity` (see {@link SharedEntity}): by default the
- * principal's describes it and the resource's may add nothing.
+ * The request's entities are a set keyed by uid, not a list of roles. A role —
+ * principal, resource — is a reference to an entity, and what its mapping says
+ * of that entity is a contribution to it. Cedar holds one description per
+ * entity, and refuses a request that gives one uid two different ones. So when
+ * two roles name one entity — a user acting on their own record — their
+ * contributions are reconciled here under the deployment's `sharedEntity`
+ * ({@link SharedEntity}).
  */
 
 import type { ReadonlyAttributes } from "@o3co/auth.policy-verifier.core";
@@ -54,7 +53,7 @@ export interface EntityMappingConfig {
 
 /**
  * How the request's entity is described when the principal and the resource
- * are one entity (#282) — a user acting on their own record. Cedar holds one
+ * are one entity — a user acting on their own record. Cedar holds one
  * description per entity, and what either role's mapping contributes to it is
  * read through both `principal` and `resource`.
  *
@@ -156,19 +155,18 @@ export function resolveMapping(config: Record<string, unknown>): ResolvedMapping
  * same contract. Throws {@link CedarInputError} when the attributes cannot
  * supply the request; the caller turns that into a deny.
  *
- * Two deliberate asymmetries in how malformed input is treated:
+ * Malformed input is treated two ways:
  *
  * - A mapped **attribute** whose value is absent or unmappable is *omitted*
  *   from the synthesized entity. That is fail-closed on its own: any policy
  *   that reads the missing attribute raises a Cedar evaluation error, and the
  *   rule denies on evaluation errors regardless of the abstain knob.
- * - A mapped **parent** whose value is present but malformed *throws*. Parent
- *   omission is not an error to Cedar — membership is simply absent — so a
- *   typo'd `groups` attribute would silently un-member the principal, and a
- *   `forbid (principal in Group::"banned")` policy would silently stop
- *   forbidding. That is the one place omission fails open, so it is the one
- *   place malformed input refuses instead. An *absent* parents attribute stays
- *   legitimate (a principal in no groups).
+ * - A mapped **parent** whose value is present but malformed *throws*. To
+ *   Cedar an omitted parent is only an absent membership, so a typo'd `groups`
+ *   attribute would silently un-member the principal, and a
+ *   `forbid (principal in Group::"banned")` policy would stop forbidding:
+ *   omission fails open there. An *absent* parents attribute stays legitimate
+ *   (a principal in no groups).
  *
  * When the principal and the resource are one entity, an omission is kept a
  * statement: under either `sharedEntity`, a name both mappings declare must be
@@ -244,7 +242,7 @@ function contribution(
 }
 
 /**
- * A request's entities, one per uid (#282) — see the header. `contributions`
+ * A request's entities, one per uid (see the header). `contributions`
  * come in authority order: the first role to name an entity describes it, and
  * a later role naming it is reconciled with that description under the
  * deployment's {@link SharedEntity}. What cannot be reconciled is refused with
@@ -473,16 +471,14 @@ function sharedEntity(value: unknown): SharedEntity {
 }
 
 /**
- * Converts one attribute value to a Cedar value. `undefined` means "cannot be
- * represented": `null` (Cedar has no null, and its JSON formats fail the whole
- * request on one — see `CedarValue`), non-integer numbers (Cedar `long` is
- * integral), functions, objects, arrays with an unrepresentable element.
- * Callers omit such values — see `buildCedarRequest` for why omission is the
- * safe direction for attributes.
+ * Converts one attribute value to a Cedar value, or `undefined` when it cannot
+ * be represented: `null` (see `CedarValue`), non-integer numbers (Cedar `long`
+ * is integral), functions, objects, arrays with an unrepresentable element.
+ * Callers omit such values (see `buildCedarRequest`).
  *
- * Objects are refused on purpose, although `CedarValue` can carry a record: in
- * Cedar's JSON form an object is also where the `__entity` and `__extn`
- * escapes live, so an attribute that arrived as an object — a caller-supplied
+ * Objects are refused although `CedarValue` can carry a record: in Cedar's
+ * JSON form an object is also where the `__entity` and `__extn` escapes live,
+ * so an attribute that arrived as an object — a caller-supplied
  * `requestContext` field promoted by a collector — could name an entity
  * reference the deployment never mapped, and `principal in Group::"admins"`
  * would then be decided by the request body. Entity references are built by

@@ -75,11 +75,11 @@ export interface CedarPolicyRuleCollectorConfig {
 	 * 256 MiB, as a number or a numeric string (what a HOCON env substitution
 	 * delivers); anything else refuses to start. It bounds the agent's copy of
 	 * the whole policy set too — its answer to the push at boot, and each
-	 * read-back (#286) — so a set the agent re-prints past it fails boot.
+	 * read-back — so a set the agent re-prints past it fails boot.
 	 */
 	maxAnswerBytes?: number | string;
 	/**
-	 * HTTP engine only (#286): the most one read-back of the agent's policy set
+	 * HTTP engine only: the most one read-back of the agent's policy set
 	 * waits for the next, while answers are not refused — each wait is drawn
 	 * from half of it to all of it. Absent, 30 s
 	 * (`CEDAR_READ_BACK_INTERVAL_MS`). A whole number of milliseconds from 1000
@@ -98,28 +98,16 @@ export interface CedarPolicyRuleCollectorConfig {
 	 * | `"deny"` (**default**) | fails | Cedar is authoritative over the surface it is asked about — including the common case where it is the only rule group |
 	 * | `"abstain"` | passes | Cedar is one group beside TypeScript rules that own the rest of the surface, and abstaining is the intent |
 	 *
-	 * `"deny"` is Cedar's own implicit deny, and it is the default because the
-	 * default is what a first deployment gets: with Cedar as the only rule
-	 * group, `"abstain"` meant a request no policy matched passed the group and
-	 * therefore passed. That is the one composition where an abstention is
-	 * indistinguishable from an allow, and it is also the simplest one to
-	 * assemble. The surrounding engine composes rule groups with default-deny;
-	 * this now matches it.
-	 *
-	 * `"abstain"` stays selectable and is the right answer during a migration:
-	 * the policy set covers part of the surface, the TypeScript rules still hold
-	 * the rest, and the Cedar group is meant to have no opinion outside its own
-	 * coverage. Choosing it is a statement that another group will decide.
-	 *
-	 * Neither value affects an evaluation error, which always denies — see the
-	 * class doc comment's answer table.
+	 * `"deny"` is Cedar's own implicit deny and matches the engine's
+	 * default-deny across groups. With Cedar as the only rule group,
+	 * `"abstain"` would pass every request no policy matched. Neither value
+	 * affects an evaluation error, which always denies.
 	 *
 	 * `"abstain"` is refused at boot over an asynchronous (out-of-process)
-	 * engine. A remote engine that lost the policy set — a restarted agent comes
-	 * back empty — answers every request "no determining policy", exactly what
-	 * a covered request that matched nothing answers, and the port has no way
-	 * to tell the two apart. Under `"abstain"` that is every `forbid` silently
-	 * no longer applying (v0.10.0 audit).
+	 * engine: a remote engine that lost the policy set — a restarted agent comes
+	 * back empty — answers every request "no determining policy", which the port
+	 * cannot tell from a covered request that matched nothing, so every `forbid`
+	 * would silently stop applying.
 	 */
 	onNoDeterminingPolicy?: NoDeterminingPolicy;
 	/**
@@ -133,24 +121,23 @@ export interface CedarPolicyRuleCollectorConfig {
 	logEvaluationErrors?: boolean;
 	/**
 	 * Whether every decision must be able to say which policy revision was
-	 * evaluated (#244). Default `false`.
+	 * evaluated. Default `false`.
 	 *
 	 * Each answer's `evaluation` names the revision only when the engine vouches
 	 * for it (`CedarDecision.revision`); otherwise it reads `revision: null`,
-	 * with what this collector loaded beside it as `loadedRevision`. That is an
-	 * honest record and, for a deployment whose audit has to name the policies
-	 * behind every decision, not an acceptable one: set this, and an answer
-	 * nobody vouched for is a logged deny instead of a permit of unknown origin.
+	 * with what this collector loaded beside it as `loadedRevision`. Set this
+	 * when the audit has to name the policies behind every decision: an answer
+	 * nobody vouched for is then a logged deny instead of a permit of unknown
+	 * origin.
 	 *
 	 * Refused at boot over an engine that does not declare `confirmsRevision` —
 	 * the http engine, since cedar-agent does not report what it evaluated —
-	 * because there every answer would be that deny. Evaluate in-process, or
-	 * leave it off and record `loadedRevision` for what it is.
+	 * because there every answer would be that deny.
 	 */
 	requireConfirmedRevision?: boolean;
 	/**
 	 * How the principal and the resource are described when they are one
-	 * entity — a user acting on their own record (#282). `"strict"` (default):
+	 * entity — a user acting on their own record. `"strict"` (default):
 	 * the principal's mapping describes it and the resource's may repeat but
 	 * not add; else the request is refused. `"merge"`: the resource mapping is
 	 * trusted as the principal's, and what only one declares is added — see
@@ -172,7 +159,8 @@ export interface CedarPolicyRuleCollectorOptions {
 
 /**
  * Evaluates a Cedar policy set as one core rule, through whichever
- * `CedarEngine` the deployment registered.
+ * `CedarEngine` the deployment registered. The package README (Semantics;
+ * Policy revision) describes the same behaviour for an operator.
  *
  * ## Why one rule, not a translation
  *
@@ -180,35 +168,30 @@ export interface CedarPolicyRuleCollectorOptions {
  * override; Cedar's forbid-overrides-permit is inexpressible in that algebra.
  * So the policy set is never translated into core rules — the real Cedar
  * evaluator runs, and its whole verdict enters AND-evaluation as a single
- * group. Layered PDP: Cedar semantics inside the group, core semantics across
- * groups, composing only toward strictness.
+ * group: Cedar semantics inside the group, core semantics across groups,
+ * composing only toward strictness.
  *
  * ## Why evaluation happens in the rule, not in `collect`
  *
- * The attribute and rule *collectors* run concurrently, so `collect` never
- * sees the merged attributes — and the point of the design is that Cedar
- * policies decide over what the attribute collectors gathered. The rule runs
- * after both pipelines, with that map. Cedar evaluation is a deterministic
- * function of `(loaded policy set, request)` with the request built from
- * `attrs` alone, so the rule satisfies the purity contract exactly: the policy
- * set and mapping are fixed at boot, nothing of `CollectorContext` is
- * retained, and equal attributes give equal answers. The rule object is built
- * once, in `create` — the hoisted form `metrics.test.mts` documents as the
- * strongest compliance shape.
+ * The attribute and rule collectors run concurrently, so `collect` never sees
+ * the merged attributes the policies decide over; the rule runs after both
+ * pipelines, with that map. The request is built from `attrs` alone, and the
+ * policy set and mapping are fixed at boot with nothing of `CollectorContext`
+ * retained, so equal attributes give equal answers. The rule object is built
+ * once, in `create`.
+ *
+ * The one deliberate softening: on the error branch the rule emits a log line
+ * (`logEvaluationErrors`, default on). The decision itself remains a pure
+ * function of `attrs`.
  *
  * ## Which kind of rule
  *
  * The engine decides. A synchronous policy set (in-process wasm) becomes a
  * `Rule` and is asked through `verify`; an asynchronous one (an out-of-process
- * evaluator, #225) becomes an `AsyncRule` and is asked through `decide`, under
- * the server's rule deadline. Everything else — config, mapping, the answer
- * table below, the `ruleType` / `code` / `message` the decision reports — is
- * the same, so switching engines is a dependency change, not a config change.
- *
- * The one deliberate softening: on the *error* branch the rule emits a log
- * line (config `logEvaluationErrors`, default on). The decision itself remains
- * a pure function of `attrs`; see the config doc for why silence there would
- * cost more than the letter of "no side effects" buys.
+ * evaluator) becomes an `AsyncRule` and is asked through `decide`, under the
+ * server's rule deadline. Everything else — config, mapping, the answer table
+ * below, the `ruleType` / `code` / `message` the decision reports — is the
+ * same, so switching engines is a dependency change, not a config change.
  *
  * ## Answer interpretation
  *
@@ -220,39 +203,37 @@ export interface CedarPolicyRuleCollectorOptions {
  * | anything | evaluation errors | **fail, and log** | `failed` |
  * | — | the call itself failed, or answered something that is not a decision (an `allow` naming no policy included) | **fail, and log** | `failed` |
  * | — | the request could not be built, so Cedar was not asked | **fail, and log** | `not_invoked` |
- * | anything | a revision other than the one loaded, or policies it never loaded (#283) | **fail, and log** | `failed` |
+ * | anything | a revision other than the one loaded, or policies it never loaded | **fail, and log** | `failed` |
  *
  * The errors row is unconditional — an evaluation error is never an
  * abstention. Cedar treats a policy that errors as not satisfied, so a
  * `forbid` that errors stops forbidding and the top-level decision can read
- * `allow`; the errors check runs first precisely so that a broken input fails
- * closed. The call-failed row is the engine not answering at all
- * (`CedarEngineError`, a rejected call): also a deny, also logged, never an
- * abstention.
+ * `allow`; the errors check runs first so that a broken input fails closed.
+ * The call-failed row is the engine not answering at all (`CedarEngineError`,
+ * a rejected call): also a deny, also logged, never an abstention.
  *
- * ## What the rule reports about each answer (#244)
+ * ## What the rule reports about each answer
  *
- * Every failing row is the same `cedar_deny` to the evaluator, and must be —
- * the rule fails closed. But only the first three are a policy's answer, and
- * an audit record that attributed the rest to the policy set would name
- * policies that did not decide, or never ran. So the rule **reports** the last
- * column, and beside it the revision of the policy set: as `revision` when the
- * engine vouched for this answer, as `revision: null` with `loadedRevision`
- * when it did not, and not at all for `not_invoked`. It goes to the reporter
- * core hands `verify` / `decide` for that one call (`ReportRuleEvaluation`) —
- * built from this call's own values, with nothing kept on the rule, which
- * answers concurrent decisions.
+ * Every failing row is the same `cedar_deny` to the evaluator, and must be.
+ * But only the first three are a policy's answer, and an audit record that
+ * attributed the rest to the policy set would name policies that did not
+ * decide, or never ran. So the rule **reports** the last column, and beside it
+ * the revision of the policy set: as `revision` when the engine vouched for
+ * this answer, as `revision: null` with `loadedRevision` when it did not, and
+ * not at all for `not_invoked`. It goes to the reporter core hands `verify` /
+ * `decide` for that one call (`ReportRuleEvaluation`) — built from this call's
+ * own values, with nothing kept on the rule, which answers concurrent
+ * decisions.
  *
- * A completed answer also names the policies Cedar says determined it (#199),
+ * A completed answer also names the policies Cedar says determined it,
  * sorted, through the reporter's own `boundDeterminingPolicies` — the bounds
  * of the core that checks the report. A reporter without it, from a core that
  * predates the keys, is told the evaluation without them.
  *
- * The rule still **answers a boolean**, and that is deliberate. An evaluator
- * that passes no reporter — a copy of core one release older, in a mixed
- * install — reads the boolean it always read and records no evaluation. Had
- * the evaluation ridden in the answer, that evaluator would have read an
- * object, by truthiness, and every deny on this page as an allow.
+ * The rule still **answers a boolean**: an evaluator that passes no reporter —
+ * a copy of core one release older, in a mixed install — reads the boolean
+ * and records no evaluation. Returned in the answer, the evaluation would be
+ * an object that evaluator reads by truthiness, every deny as an allow.
  */
 export class CedarPolicyRuleCollector implements RuleCollector {
 	private constructor(private readonly rule: AnyRule) {}
@@ -307,18 +288,18 @@ export class CedarPolicyRuleCollector implements RuleCollector {
 		const engine = selectEngine(raw.engine);
 		const mapping: ResolvedMapping = resolveMapping(raw);
 		const source = loadPolicySource(raw);
-		// #244: read here, once, before an engine is handed `source`. What this
+		// Read here, once, before an engine is handed `source`. What this
 		// collector reports as loaded is its own reading of what it loaded — not
 		// a property an engine could have rewritten by the time `load` returns.
 		const loadedRevision = source.revision;
 		const logger =
 			options?.logger ?? createConsoleLogger({ collector: "CedarPolicyRuleCollector" });
 
-		// Said out loud, once, at boot. Named in config, it is information. Left
+		// Said once, at boot. Named in config, the engine is information. Left
 		// to the default, which evaluator decides is settled by what happens to
 		// be imported — a transitive dependency pulling in cedar-wasm flips a
 		// deployment from out-of-process to in-process — and an operator reading
-		// the config cannot see it, so it is a warning (v0.10.0 audit).
+		// the config cannot see it, so it is a warning.
 		const selection = {
 			engine: engine.name,
 			policySet: source.description,
@@ -404,7 +385,7 @@ interface BoundRule {
 	engine: CedarEngine;
 	policySet: LoadedCedarPolicySet;
 	policySource: string;
-	/** `PolicySource.revision`, read before the set was handed to `engine.load` (#244). */
+	/** `PolicySource.revision`, read before the set was handed to `engine.load`. */
 	loadedRevision: string;
 	requireConfirmedRevision: boolean;
 	mapping: ResolvedMapping;
@@ -432,7 +413,7 @@ const FOREIGN_LABELS: Readonly<Record<ForeignAnswer["why"], true>> = {
 };
 
 /**
- * The labels of an engine's read-back (#286): its agent was found holding
+ * The labels of an engine's read-back: its agent was found holding
  * another set, or not showing one — whether or not it had been asked, no
  * answer of it is used. Logged on a line of their own, so an agent gone down
  * does not read as an answer from someone else's set.
@@ -457,7 +438,7 @@ function foreignDetail(foreign: unknown): { foreign?: string; mark?: string } {
 	};
 }
 
-/** How a reporter bounds determining policies — the checking core's own (#199). */
+/** How a reporter bounds determining policies — the checking core's own. */
 type DeterminingPolicyBounder = NonNullable<ReportRuleEvaluation["boundDeterminingPolicies"]>;
 
 /** One answer of the rule, before it is split into the boolean and the report. */
@@ -466,8 +447,8 @@ interface Answered {
 	/** What an evaluator is told. */
 	readonly evaluation: RuleEvaluation;
 	/**
-	 * What a reporter that bounds determining policies is told instead
-	 * (#199): the same completed evaluation, naming the policies that
+	 * What a reporter that bounds determining policies is told instead: the
+	 * same completed evaluation, naming the policies that
 	 * determined it under that reporter's bounds. Present only when Cedar ran
 	 * to an answer.
 	 */
@@ -505,7 +486,7 @@ function buildRule(bound: BoundRule): AnyRule {
 			return undefined;
 		}
 	};
-	// #244: the ways an answer accounts for the revision. Constants of the
+	// The ways an answer accounts for the revision. Constants of the
 	// rule — the loaded revision is fixed at boot — so equal attributes give
 	// an equal report, which is what the purity contract asks of it.
 	const NOT_INVOKED: Answered = Object.freeze({
@@ -529,7 +510,7 @@ function buildRule(bound: BoundRule): AnyRule {
 			warnUnreported();
 			return answered.passed;
 		}
-		// #199: determining policies are named only through the reporter's own
+		// Determining policies are named only through the reporter's own
 		// bounding. A core that predates them has none — it would refuse the keys
 		// and fail the decision — and is told the evaluation without them.
 		const bound = report.boundDeterminingPolicies;
@@ -586,10 +567,10 @@ function buildRule(bound: BoundRule): AnyRule {
 		}
 		if (answer.foreign !== undefined && answer.foreign !== null) {
 			// The engine cannot vouch for what it evaluated, but it can tell this
-			// was not it (#283): the answer names policies it never loaded. The
-			// same fault as a foreign revision, logged the same way — before the
-			// errors are looked at, so it is never an evaluation error to silence.
-			// A refusal from the engine's read-back (#286) is said as that: no
+			// was not it: the answer names policies it never loaded. The same
+			// fault as a foreign revision, logged the same way — before the errors
+			// are looked at, so it is never an evaluation error to silence.
+			// A refusal from the engine's read-back is said as that: no
 			// answer of the agent's is used, whether or not it was asked, and an
 			// agent gone down is refused this way too — so it must not read as an
 			// answer from someone else's set.

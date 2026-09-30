@@ -24,23 +24,12 @@ const UNTRUSTED_REQUEST_CONTEXT: unique symbol = Symbol.for(
  * Caller-supplied request context, sealed so it cannot be read by accident.
  *
  * The request body's `context` is attacker-controlled: whoever holds a token can
- * put anything in it. It reaches every collector alongside claims that a
- * signature vouches for, and nothing about a plain `Record<string, unknown>`
- * told the two apart — a collector promoting `requestContext.role` into an
- * attribute reads exactly like one promoting `subject.sub`, and the caller has
- * then written its own authorization input.
- *
- * So the type does the telling. The record hangs off a private symbol, which
- * makes `context.requestContext.role` a compile error: an author who wants the
+ * put anything in it, and it reaches every collector beside claims a signature
+ * vouches for. The record hangs off a private symbol, so
+ * `context.requestContext.role` is a compile error: an author who wants the
  * value calls {@link readUntrustedRequestContext} and names the trust level at
- * the point of use. That is the whole guarantee — the framework cannot know
- * which fields a deployment may trust, but it can refuse to let one be consumed
- * without saying so out loud.
- *
- * Verified input stays where it was: `subject` (attributes the transport
- * vouches for), `resource` and `action` (validated by the route), `headers`
- * (set by the transport). Only this one field is marked, because only this one
- * is the caller's to fill.
+ * the point of use. Only this field is marked, because only this one is the
+ * caller's to fill. See docs/extending.md, "The trust boundary".
  */
 export interface UntrustedRequestContext {
 	readonly [UNTRUSTED_REQUEST_CONTEXT]: Record<string, unknown>;
@@ -58,7 +47,7 @@ export function markUntrustedRequestContext(raw: Record<string, unknown>): Untru
 /**
  * Unwraps a marked request context, acknowledging that everything inside it is
  * caller-supplied and unvalidated. Returns `undefined` when the request carried
- * no context, so a collector's `?.` chain reads the same as before.
+ * no context, so a collector can chain `?.` on the result.
  *
  * Validate every field you read: check its type, check its shape, and promote
  * only what your policy is prepared to have an attacker choose. A value taken

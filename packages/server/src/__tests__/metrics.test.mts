@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * `/metrics` and the decision counters (#111).
- *
- * Two things are under test here and the second matters as much as the first.
+ * `/metrics` and the decision counters. Two things are under test here and
+ * the second matters as much as the first.
  *
  * 1. The series exist and say what they should: allow/deny rate, which rule
  *    denied, decision latency, request latency, Node process defaults.
@@ -16,8 +15,8 @@
  *    endpoint takes down the monitoring meant to watch it — and none of these
  *    requires access to `/metrics` to reach.
  *
- * The shape mirrors auth.provider's metrics (39767d52) so one Prometheus job
- * and one dashboard convention serve the whole stack.
+ * The shape mirrors auth.provider's metrics so one Prometheus job and one
+ * dashboard convention serve the whole stack.
  */
 import { request as httpRequest } from "node:http";
 import type { Module, Rule } from "@o3co/auth.policy-verifier.core";
@@ -28,7 +27,7 @@ import { describe, expect, it } from "vitest";
 import { AppConfigSchema, builtinKeyResolversModule, createApp } from "#/index.mjs";
 import { createMetrics, MAX_DENY_CODE_LABELS } from "#/observability/metrics.mjs";
 
-/** 64 hex characters — 32 decoded bytes, the entropy floor #114 enforces. */
+/** 64 hex characters — 32 decoded bytes, the HS256 secret's entropy floor. */
 const JWT_SECRET = "11".repeat(32);
 const secretKey = new TextEncoder().encode(JWT_SECRET);
 const ISSUER = "https://issuer.test";
@@ -50,25 +49,16 @@ const ATTR_REQUIRED_SCOPE = "requiredScope";
 /**
  * The scope rule, as a single module-level value shared by every request.
  *
- * Deliberately not built per request inside the rule collector. AGENTS.md's
- * Collector/Rule/Attribute contract makes collectors the only layer that reads
- * `CollectorContext`; a rule's `verify` must be a deterministic function of
- * `attrs`. A `verify` that kept the collector's `ctx` and read
- * `${ctx.action}:${ctx.resource.resourceType}` out of it at verify time would be
- * the violation — not because the value is request-derived, which is fine, but
- * because the read happens where the evaluator cannot see it.
- *
- * Hoisting it to a constant is the strongest form of compliance available:
- * this object is created once, before any request exists, so it *cannot* carry
- * request state at all. Everything it compares comes from `attrs`, promoted
- * there by the attribute collector below. `code` is a constant too, as every
- * builtin rule's is — which is what keeps it a bounded metric label.
- *
- * The weaker-but-legal form is what the builtins do: fix the comparand at
- * collect time and hold it as a plain value (see `app.test.mts`). #152 added
- * the check that tells the two apart from the violation —
- * `tests/integration/src/conformance/rulePurity.mts` collects a rule, revokes
- * the request, and asks it again.
+ * Created once, before any request exists, so it *cannot* carry request
+ * state: everything it compares comes from `attrs`, promoted there by the
+ * attribute collector below, and `code` is a constant, as every builtin
+ * rule's is, which keeps it a bounded metric label. A `verify` that kept the
+ * collector's `ctx` and read the required scope out of it at verify time would
+ * violate AGENTS.md's Collector/Rule/Attribute contract. The builtins' form
+ * (fix the comparand at collect time, hold it as a plain value; see
+ * `app.test.mts`) is legal too, and
+ * `tests/integration/src/conformance/rulePurity.mts` tells both apart from the
+ * violation by collecting a rule, revoking the request, and asking it again.
  */
 const SCOPE_RULE: Rule = {
 	ruleType: "scope",

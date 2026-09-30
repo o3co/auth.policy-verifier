@@ -21,7 +21,7 @@ import type { TokenAuthenticatorFactory } from "./tokenAuthenticator.mjs";
 export interface ServerModuleContext extends ModuleContext {
 	keyResolverRegistry: Registry<KeyResolverFactory>;
 	/**
-	 * Token authenticators by name (#219). `createApp` registers the built-in
+	 * Token authenticators by name. `createApp` registers the built-in
 	 * `"jwt"` entry before any module runs; a module contributes an alternative
 	 * under its own name, and `oauth.authenticator` selects one.
 	 */

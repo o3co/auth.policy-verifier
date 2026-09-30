@@ -35,10 +35,10 @@ describe("Logger interface contract", () => {
 	});
 
 	it("EventLogger demands info as well as warn and error (compile-time check)", () => {
-		// #111: the per-decision audit line is emitted on the SUCCESS path, so the
-		// narrow port a seam is willing to demand of a caller needs a non-failure
-		// level. Excess-property checking on this literal is what enforces the
-		// method set — remove `info` from the interface and this stops compiling.
+		// The per-decision audit line is emitted on the success path, so the
+		// narrow port a seam demands of a caller needs a non-failure level.
+		// Excess-property checking on this literal enforces the method set —
+		// remove `info` from the interface and this stops compiling.
 		const candidate: EventLogger = {
 			info: () => {},
 			warn: () => {},

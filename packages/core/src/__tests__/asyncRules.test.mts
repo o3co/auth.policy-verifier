@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * #225: a rule whose answer comes from I/O — an out-of-process policy engine —
+ * A rule whose answer comes from I/O — an out-of-process policy engine —
  * cannot be a `Rule`, whose `verify` is synchronous and, by contract, does no
  * I/O. `AsyncRule.decide(attrs, signal)` is the additive form: same grouping,
  * same reporting, same "a function of attrs and nothing else", with a deadline.
@@ -55,9 +55,9 @@ describe("isAsyncRule", () => {
 	});
 
 	it("does not treat a synchronous rule that happens to carry a decide method as asynchronous (v0.10.0 audit)", async () => {
-		// Duck-typing on `decide` sent such a rule down the asynchronous path;
-		// the policy-set union beside it in cedar discriminates on an explicit
-		// `async` flag, which is the safer house style.
+		// Duck-typing on `decide` would send such a rule down the asynchronous
+		// path; the explicit `async` flag decides, as it does for the policy-set
+		// union in cedar.
 		const incidental = { ...sync("scope", "a", true), decide: async () => false };
 		expect(isAsyncRule(incidental)).toBe(false);
 		expect((await evaluate(attrs, [incidental])).decision).toBe("allow");

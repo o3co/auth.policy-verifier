@@ -3,16 +3,15 @@
 
 /*
  * The official `cedar` CLI (cedar-policy-cli), driven as the reference
- * evaluator for the CLI-equivalence suite (#198, #284): locating the binary, reading
- * its version, running `cedar authorize --verbose`, and reading its answer back.
+ * evaluator for the CLI-equivalence suite: locating the binary, reading its
+ * version, running `cedar authorize --verbose`, and reading its answer back.
  *
  * The CLI has no machine-readable answer — `--error-format json` covers its
- * own failures, not the decision — so its text is parsed, strictly: a line the
+ * own failures, not the decision — so its text is parsed strictly: a line the
  * parser has not seen is an error, never skipped, because a misread answer
  * would make two evaluators look equivalent when they are not. The format is
  * pinned by `cedar-cli-output.test.mts` against the literal output of
- * cedar-policy-cli 4.13.0 and 2.5.0; a CLI that prints differently fails
- * there first.
+ * cedar-policy-cli 4.13.0 and 2.5.0.
  */
 
 import { spawnSync } from "node:child_process";
@@ -102,7 +101,7 @@ const NONE_APPLIED = "note: no policies applied to this request";
 /**
  * An evaluation error: `error while evaluating policy` in cedar-policy-cli 4.x,
  * `error occurred while evaluating policy` in 2.5 — and in cedar-agent 0.2.2's
- * own error strings, which carry its Cedar's wording (#284).
+ * own error strings, which carry its Cedar's wording.
  */
 export const EVALUATION_ERROR = /^error (?:occurred )?while evaluating policy `([^`]+)`: (.*)$/;
 

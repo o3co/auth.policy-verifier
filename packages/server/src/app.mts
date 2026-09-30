@@ -66,11 +66,10 @@ export interface CreateAppOptions {
  * Where the liveness probe answers, under `config.http.pathPrefix`.
  *
  * `/_healthcheck` is the canonical path: the one every component of the stack
- * serves (auth.provider and auth.proxy already did — o3co/auth.provider#293
- * item 14) and the one the standalone image's `HEALTHCHECK` probes. This server
- * answered on `/healthcheck` before the stack settled on one spelling; it is
- * kept as a compatibility alias so an orchestrator probe config that was not
- * updated does not start failing on upgrade. Both paths give the same answer.
+ * serves and the one the standalone image's `HEALTHCHECK` probes.
+ * `/healthcheck` is a compatibility alias, so an orchestrator probe config that
+ * still names it does not start failing on upgrade. Both paths give the same
+ * answer.
  */
 const LIVENESS_PATHS = ["/_healthcheck", "/healthcheck"] as const;
 
@@ -79,26 +78,26 @@ const LIVENESS_PATHS = ["/_healthcheck", "/healthcheck"] as const;
  *
  * Flow: (1) create registries, (2) run `mod.init` sequentially so later modules
  * can see earlier ones' registrations, (3) resolve concrete collectors /
- * resource parser / token authenticator from config, (4) mount the liveness probe
- * (`LIVENESS_PATHS`), the optional caller-auth gate and the `/verify` router
- * under the configured path prefix.
+ * resource parser / token authenticator from config, (4) mount the metrics
+ * middleware and then, under the configured path prefix, the liveness probe
+ * (`LIVENESS_PATHS`), `/metrics`, the optional caller-auth gate and the
+ * `/verify` router.
  *
  * `config.http.callerAuth.token` authenticates the *calling service* before any
- * decision work runs (#108). It is optional in this release; the liveness probe
- * is never gated. See `CALLER_AUTH_REQUIRED` in `config/defaults` for the
- * one-line change that makes it mandatory.
+ * decision work runs. It is optional; the liveness probe is never gated. See
+ * `CALLER_AUTH_REQUIRED` in `config/defaults` for the one-line change that
+ * makes it mandatory.
  *
- * `config.oauth.authenticator` selects how the subject is authenticated (#219):
+ * `config.oauth.authenticator` selects how the subject is authenticated:
  * `"jwt"` (the default) is the built-in bearer-JWT path below; any other name
  * must have been registered by a module on `tokenAuthenticatorRegistry`.
  *
  * `config.oauth.jwt.mode = "insecure-decode"` disables signature verification
  * and only decodes the token (the time claims are still enforced in full —
  * `exp` and `iat` required, `nbf` honoured, `maxTokenAgeSeconds` applied). It is
- * test-only; the mode string itself is the explicit consent (#134) — an
- * accidental env-var flip can produce a stray boolean but never that literal
- * string, which preserves the intent of #106's double opt-in in one knob.
- * Booting in that mode is logged at error level (#106).
+ * test-only, and the mode string itself is the explicit consent: an accidental
+ * env-var flip can produce a stray boolean but never that literal string.
+ * Booting in that mode is logged at error level.
  */
 export async function createApp(options: CreateAppOptions): Promise<express.Express> {
 	const { pathResolver, config, modules } = options;
@@ -110,7 +109,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	const resourceParserRegistry = new Registry<ResourceParserFactory>();
 	const keyResolverRegistry = new Registry<KeyResolverFactory>();
 	const tokenAuthenticatorRegistry = new Registry<TokenAuthenticatorFactory>();
-	// The built-in authenticator is the host's, not a module's (#219): registered
+	// The built-in authenticator is the host's, not a module's: registered
 	// before any module runs, so it is always selectable, and — the registry
 	// refusing a second registration — never silently replaced. A deployment
 	// that authenticates another way registers under another name and selects
@@ -134,7 +133,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 
 	// 3. Resolve attribute collectors from config — call factory with config entry
 	//
-	// The bounds both pipelines run their collectors under (#115) are resolved
+	// The bounds both pipelines run their collectors under are resolved
 	// here because this is where the pipelines are built, which makes `createApp`
 	// their runtime guard: a hand-built config reaches it with `AppConfigSchema`
 	// never having run. Read through `resolveBound` with the same specs the
@@ -170,7 +169,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	if (config.rule.collectors.length === 0) {
 		throw new Error("createApp: at least one rule collector must be configured (rule.collectors)");
 	}
-	// A rule collector factory may be asynchronous (#225): a collector whose
+	// A rule collector factory may be asynchronous: a collector whose
 	// boot needs I/O — a policy set handed to an out-of-process engine —
 	// refuses to start here rather than deny every request. One at a time, in
 	// config order, so a boot failure names the entry that caused it.
@@ -194,7 +193,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	const resourceParserFactory = resourceParserRegistry.get(config.resource.parser);
 	const resourceParser = resourceParserFactory(config.resource);
 
-	// 6. Resolve the token authenticator (#219). `oauth.authenticator` names an
+	// 6. Resolve the token authenticator. `oauth.authenticator` names an
 	// entry in the registry the modules just filled — the built-in `"jwt"` was
 	// registered ahead of them in step 1 — and the selected factory is handed
 	// the whole `oauth` block plus the host's plumbing. Selection is read
@@ -218,7 +217,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 		keyResolverRegistry,
 	});
 
-	// 7. Resolve caller authentication (#108). The bearer token establishes the
+	// 7. Resolve caller authentication. The bearer token establishes the
 	// subject a decision is about; it never establishes which service supplied
 	// `resource` / `action` / `context`. Without this gate the endpoint is a
 	// decision oracle for anyone who can route to the port.
@@ -243,15 +242,13 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 			//
 			// WARN, NOT REFUSE, and deliberately so. The network may legitimately
 			// be the control — a private subnet, a pod-local service, a mesh
-			// policy — and this process cannot see any of it; all it knows is the
-			// address it was told to bind. A refusal would therefore break every
-			// existing containerised deployment on upgrade (the shipped
-			// `templates/standalone/docker-compose.yml` sets `HTTP_HOSTNAME=0.0.0.0`
-			// precisely because loopback inside a container publishes nothing) in
-			// exchange for a verdict it is not equipped to reach. `CALLER_AUTH_REQUIRED`
-			// in `config/defaults` is where that judgement gets made, once, for
-			// everyone — flipping it is the deliberate breaking change; this line
-			// is the notice in the meantime.
+			// policy — and this process sees only the address it was told to
+			// bind. A refusal would break every containerised deployment on
+			// upgrade (the shipped `templates/standalone/docker-compose.yml` sets
+			// `HTTP_HOSTNAME=0.0.0.0` because loopback inside a container
+			// publishes nothing). `CALLER_AUTH_REQUIRED` in `config/defaults` is
+			// where that judgement is made, for everyone; while it is off, this
+			// line is the notice.
 			//
 			// Both settings are named because neither one alone is the problem:
 			// a non-loopback bind behind caller auth is fine, and no caller auth
@@ -286,14 +283,14 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 	for (const path of LIVENESS_PATHS) {
 		app.use(prefix, createHealthcheckRouter(path));
 	}
-	// `/metrics` is ungated for the same reason, and one more (#111). Prometheus
+	// `/metrics` is ungated for the same reason, and one more. Prometheus
 	// scrape configs carry `authorization`, `basic_auth` and `oauth2` — not an
 	// arbitrary header — so gating it behind `http.callerAuth`'s `x-caller-token`
 	// would make it unscrapable by a stock scraper, and the workaround would be
 	// to hand the credential that authorizes DECISIONS to the monitoring system.
 	// What it publishes is counts and latencies over bounded labels: no subject,
 	// no resource, no action, nothing about any individual decision. The boundary
-	// that protects it is the bind address, which is loopback by default (#108) —
+	// that protects it is the bind address, which is loopback by default —
 	// see the README on reaching it from a scraper.
 	app.use(prefix, metrics.router);
 	if (callerAuth) {
@@ -313,7 +310,7 @@ export async function createApp(options: CreateAppOptions): Promise<express.Expr
 			evaluateOptions: { onEmptyRuleSet: config.rule.onEmptyRuleSet },
 			maxBatchSize: config.verify.maxBatchSize,
 			batchConcurrency: config.verify.batchConcurrency,
-			// Forwarded rather than defaulted here (#118): the router resolves each
+			// Forwarded rather than defaulted here: the router resolves each
 			// through the same `resolveBound` the schema used, so a hand-built config
 			// reaching `createApp` gets the schema's verdict either way.
 			maxBodyBytes: config.verify.maxBodyBytes,

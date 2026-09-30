@@ -20,10 +20,9 @@ export interface CedarEntityUid {
  * One Cedar value in JSON form, including the `__entity` and `__extn` escapes.
  *
  * No `null`: Cedar has no null value, and its JSON formats refuse the token
- * outright ("JSON `null`s are not allowed in Cedar" — the whole request
- * fails, not the one attribute). An attribute that is `null` on our side is
- * therefore unrepresentable and is omitted by the mapping, like a function or
- * a fractional number; see `buildCedarRequest` for why omission is the safe
+ * outright, failing the whole request, not the one attribute. An attribute
+ * that is `null` on our side is omitted by the mapping, like a function or a
+ * fractional number; `buildCedarRequest` says why omission is the safe
  * direction.
  */
 export type CedarValue =

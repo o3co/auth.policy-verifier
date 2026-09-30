@@ -3,37 +3,31 @@
 
 /*
  * The HS256 signing-secret contract: the config shape a deployment writes to
- * hold a retired secret alongside the current one (#112), and the checks that
- * shape must pass before any of it becomes key material — the entropy floor
- * every one of those secrets clears (#114) included.
+ * hold a retired secret alongside the current one, and the checks that shape
+ * must pass before any of it becomes key material, the entropy floor every one
+ * of those secrets clears included.
  *
- * Why this exists at all: with exactly one secret, rotating means the provider
- * starts signing with a new value and every token minted under the old one is
- * refused from that instant — the two services have to restart in lockstep, and
- * everything in flight is denied in between. That is a coordinated outage in
- * the algorithm this stack ships as its default.
+ * With exactly one secret, rotating means every token minted under the old one
+ * is refused the instant the provider switches: the two services restart in
+ * lockstep, and everything in flight is denied in between.
  *
- * The contract is auth.provider's, not a new one. That project rotates through
- * `previousSecrets` — `kid` + `secret` + `expiresAt` per entry, current secret
- * named by its own `kid` — in `packages/core/src/keys/factory.mts`. The wire
- * shape here is the same, so an operator rotating the pair writes the same
- * three fields on both sides and moves the same pair of values. The entropy
- * floor is ported from the same place (auth.provider#282) for the same reason —
- * see `MIN_SECRET_ENTROPY_BYTES` in `config/defaults.mts`, which states it.
+ * The wire shape is auth.provider's (`previousSecrets`, each entry `kid` +
+ * `secret` + `expiresAt`, the current secret named by its own `kid`, in its
+ * `packages/core/src/keys/factory.mts`), so an operator rotating the pair
+ * writes the same fields on both sides. So is the entropy floor;
+ * `MIN_SECRET_ENTROPY_BYTES` in `config/defaults.mts` states why.
  *
- * Why the floor lives here rather than in either boundary: `oauth.jwt.secret`
- * and every entry of `previousSecrets` are the same kind of value — a retired
- * secret verifies for its whole overlap window, so it can mint tokens exactly as
- * the current one can. One rule over both is what keeps either of them from
+ * The floor covers `oauth.jwt.secret` and every `previousSecrets` entry alike:
+ * a retired secret verifies for its whole overlap window, so it can mint tokens
+ * exactly as the current one can, and one rule over both keeps either from
  * quietly becoming the laxer half.
  *
- * Deliberately dependency-free, like `jwks.mts` next to it: `AppConfigSchema`
- * imports it so a malformed rotation block fails at config-parse time (at boot,
- * where an operator sees it) rather than at the first request, and config-only
- * consumers of the schema must not pull jose or express in behind it. The HS256
- * `KeyResolverFactory` in `jwt/` re-checks at construction, through this same
- * function — see AGENTS.md, "Two-Boundary Config Validation". It lives in
- * `config/` so that the dependency runs one way, `jwt/` → `config/` (#260).
+ * Dependency-free: `AppConfigSchema` imports it so a malformed rotation block
+ * fails at config-parse time (at boot) rather than at the first request, and
+ * config-only consumers of the schema must not pull jose or express in behind
+ * it. The HS256 `KeyResolverFactory` in `jwt/` re-checks at construction through
+ * this same function (AGENTS.md, "Two-Boundary Config Validation"). It lives in
+ * `config/` so the dependency runs one way, `jwt/` → `config/`.
  */
 
 import { MAX_PREVIOUS_SECRETS, MIN_SECRET_ENTROPY_BYTES } from "./defaults.mjs";
@@ -55,15 +49,12 @@ export interface Hs256PreviousSecret {
 }
 
 /*
- * A note on the name, which is auth.provider's and is kept on purpose: on a
- * verifier this list is "every secret accepted besides the current one", not
- * strictly the retired ones. An outage-free rotation needs the verifier to span
- * the cutover from both sides, so the operator stages the INCOMING secret here
- * before the provider has ever signed with it, and only afterwards demotes the
- * outgoing one into the same list. Both directions are the same mechanism —
- * accept a secret that is not the one currently named by `kid` — and giving the
- * verifier a second, differently-named field for the first half would make the
- * two sides of one rotation look like two unrelated features.
+ * The name `previousSecrets` is auth.provider's, kept on purpose. On a verifier
+ * the list is "every secret accepted besides the current one", not strictly the
+ * retired ones: an outage-free rotation stages the INCOMING secret here before
+ * the provider has signed with it, and only afterwards demotes the outgoing one
+ * into the same list. Both halves are one mechanism, accepting a secret that is
+ * not the one named by `kid`, so they share one field.
  */
 
 /**
@@ -74,16 +65,16 @@ export interface Hs256PreviousSecret {
  */
 export interface Hs256RotationConfig {
 	/**
-	 * The secret the deployment verifies with today. Read here only to hold it to
-	 * the entropy floor (#114) — an absent one is reported by each boundary's own
-	 * "secret is required for HS256", which is where that check already lives.
+	 * The current secret. Read here only to hold it to the entropy floor; an
+	 * absent one is reported by each boundary's own "secret is required for
+	 * HS256".
 	 */
 	secret?: string;
 	/**
-	 * Names the secret the issuer currently signs with. Optional, and the
-	 * absent case is the pre-#112 shape: no `kid` configured means the header is
-	 * not consulted at all. Required once `previousSecrets` is non-empty, since
-	 * nothing else tells the current secret apart from the retired ones.
+	 * Names the secret the issuer currently signs with. Optional: with no `kid`
+	 * configured the header is not consulted at all. Required once
+	 * `previousSecrets` is non-empty, since nothing else tells the current secret
+	 * apart from the retired ones.
 	 */
 	kid?: string;
 	previousSecrets?: unknown;
@@ -119,9 +110,9 @@ function isNonEmptyString(value: unknown): value is string {
 }
 
 /**
- * Holds one secret to the entropy floor (#114), collecting an issue at the path
- * the operator wrote when it falls short. True when the secret may go on to
- * become key material.
+ * Holds one secret to the entropy floor, collecting an issue at the path the
+ * operator wrote when it falls short. True when the secret may go on to become
+ * key material.
  *
  * Applied identically to `oauth.jwt.secret` and to every `previousSecrets[].secret`
  * — see the note at the top of this file on why that is one rule and not two.
@@ -206,37 +197,29 @@ function checkEntry(
 
 /**
  * Applies the HS256 secret contract to an `oauth.jwt` block: the rotation shape,
- * and the entropy floor over `secret` and every `previousSecrets[].secret`
- * (#114). A config with no rotation at all still passes through the floor —
- * that is the whole point of the check living in one place.
+ * and the entropy floor over `secret` and every `previousSecrets[].secret`. A
+ * config with no rotation at all still passes through the floor.
  *
- * An *absent* `previousSecrets` means "no rotation configured": a deployment
- * that has never rotated writes nothing, and an operator closing a window
- * deletes the block rather than having to remember an empty-list anchor. `[]`
- * says the same thing explicitly. Anything else that is not a list — `null`
- * included — is refused rather than ignored: silently dropping it would take
- * the verifier back to holding one secret while the config visibly says
- * otherwise, which is the failure this closes.
+ * An *absent* `previousSecrets` means "no rotation configured", so an operator
+ * closing a window deletes the block; `[]` says the same explicitly. Anything
+ * else that is not a list is refused rather than ignored: dropping it would
+ * leave the verifier holding one secret while the config visibly says
+ * otherwise.
  *
- * `null` is deliberately NOT a second spelling for absent, and this is the one
- * place the port diverges from auth.provider's `narrowPreviousSecretsArray`
- * (which reads it as an explicit opt-out). Three reasons, none of them about
- * the wire contract — the `{ kid, secret, expiresAt }` triple and the
- * kid-overlap semantics are ported unchanged:
+ * `null` is NOT a second spelling for absent, unlike in auth.provider's
+ * `narrowPreviousSecretsArray` (which reads it as an explicit opt-out). That is
+ * the one place the port differs; the `{ kid, secret, expiresAt }` triple and
+ * the kid-overlap semantics are the same. Why:
  *
  * 1. `AppConfigSchema` types the field `z.array(...).optional()`, which rejects
- *    `null` before this function is ever reached. Accepting it here would give
- *    a hand-built config a different answer than a parsed one — the exact
- *    invariant this guard exists to hold (see `resolveJwksFetchBounds`).
- * 2. No other optional key in the `oauth.jwt` block has a `null` spelling:
- *    `secret`, `kid`, `jwksUri`, `publicKey` and `publicKeyPath` are all
- *    absent-or-a-value. One field with a private third spelling is a trap.
- * 3. A `null` that reached a config was almost certainly produced, not
- *    written — an unrendered template value, a missing env var, a JSON
- *    serializer emitting the key anyway. Reading that as "nothing is being
- *    rotated" boots a verifier that will deny every token signed with the
- *    retired secret the moment the provider cuts over, which is #112 again.
- *    Failing at boot names the key instead.
+ *    `null` before this function is reached. Accepting it here would give a
+ *    hand-built config a different answer than a parsed one.
+ * 2. No other optional key in the `oauth.jwt` block has a `null` spelling.
+ * 3. A `null` in a config was almost certainly produced, not written (an
+ *    unrendered template value, a missing env var, a serializer emitting the
+ *    key anyway). Reading it as "nothing is being rotated" boots a verifier that
+ *    denies every token signed with the retired secret the moment the provider
+ *    cuts over. Failing at boot names the key instead.
  */
 export function checkHs256Rotation(config: Hs256RotationConfig): Hs256RotationCheck {
 	const issues: Hs256RotationIssue[] = [];
@@ -246,7 +229,7 @@ export function checkHs256Rotation(config: Hs256RotationConfig): Hs256RotationCh
 		issues.push({ path: ["kid"], message: "kid must be a non-empty string" });
 	}
 
-	// The current secret clears the same floor as the retired ones (#114).
+	// The current secret clears the same floor as the retired ones.
 	// Absent or empty is somebody else's issue — `AppConfigSchema` and the HS256
 	// `KeyResolverFactory` each say `secret is required for HS256` — so this adds
 	// nothing there rather than reporting one missing key twice.

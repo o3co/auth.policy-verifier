@@ -35,9 +35,9 @@ interface JwtFactoryInput extends JwksFetchConfig, Hs256RotationConfig {
  * Shared resolver for RS256/ES256/EdDSA. Accepts JWKS URI, inline PEM, or PEM
  * file path (in that priority). Throws if no key source is configured.
  *
- * A JWKS URI must be https, or http on a loopback host — see the trust
- * assumption and the carve-out in `config/jwks.mts` (#109). Checked here as well as
- * in `AppConfigSchema`, through the one shared function — see AGENTS.md,
+ * A JWKS URI must be https, or http on a loopback host (see the trust
+ * assumption and the carve-out in `config/jwks.mts`). Checked here as well as in
+ * `AppConfigSchema`, through the one shared function; see AGENTS.md,
  * "Two-Boundary Config Validation".
  */
 async function resolveAsymmetric(algorithm: string, config: JwtFactoryInput): Promise<KeyResolver> {
@@ -75,12 +75,12 @@ function toSecretKey(secret: string): KeyObject {
  *
  * The trial runs through jose's own flattened verification rather than a
  * hand-rolled HMAC comparison: `jwtVerify` hands the key resolver the very
- * `{ protected, payload, signature }` triple `flattenedVerify` consumes, so the
- * check is the same code path jose is about to run, with no second opinion
- * about base64url decoding or constant-time comparison living here.
+ * `{ protected, payload, signature }` triple `flattenedVerify` consumes, so no
+ * second opinion about base64url decoding or constant-time comparison lives
+ * here.
  *
- * `algorithms` is pinned even though `jwtVerify` has already refused anything
- * but HS256 before calling the resolver — this function must not become the one
+ * `algorithms` is pinned although `jwtVerify` has already refused anything but
+ * HS256 before calling the resolver, so this function cannot become the one
  * place where a token talks its way into a different algorithm.
  */
 async function signedWith(token: FlattenedJWSInput, candidate: KeyObject): Promise<boolean> {
@@ -94,23 +94,18 @@ async function signedWith(token: FlattenedJWSInput, candidate: KeyObject): Promi
 
 /**
  * Builds the `kid`-aware key resolution used once a deployment configures more
- * than a bare secret (#112).
+ * than a bare secret. Two paths, because a token may or may not name its key:
  *
- * Two paths, because a token may or may not name the key it was signed with:
- *
- * - **`kid` present** — direct lookup, and an unrecognised one is refused
- *   outright. This is auth.provider's own model: it stamps the signing `kid`
- *   into every token it mints and resolves by that `kid` alone, never trial-
- *   verifying. Matching that here keeps the cost of a forged header at one map
- *   lookup.
- * - **`kid` absent** — every live secret is tried in turn. RFC 7515 §4.1.4
- *   makes `kid` optional, and an HS256 token really can arrive without one:
- *   there is nothing in a symmetric token that has to identify the key, no JWKS
- *   to look it up in, and any issuer or fixture minting with a bare
- *   `{ alg: "HS256" }` header produces exactly that. Refusing those would make
- *   rotation trade one outage for another, so they cost one signature check per
- *   configured secret instead — which is the whole reason `MAX_PREVIOUS_SECRETS`
- *   caps the list.
+ * - **`kid` present**: direct lookup, and an unrecognised one is refused
+ *   outright. This is auth.provider's own model (it stamps the signing `kid`
+ *   into every token it mints and resolves by that `kid` alone), and it keeps
+ *   the cost of a forged header at one map lookup.
+ * - **`kid` absent**: every live secret is tried in turn. RFC 7515 §4.1.4 makes
+ *   `kid` optional, and an HS256 token really can arrive without one: any
+ *   issuer or fixture minting with a bare `{ alg: "HS256" }` header produces
+ *   exactly that. Refusing those would make rotation trade one outage for
+ *   another, so they cost one signature check per configured secret, which is
+ *   why `MAX_PREVIOUS_SECRETS` caps the list.
  *
  * `expiresAt` is applied on both paths, per request rather than at boot: the
  * overlap window has to close on its own in a long-running verifier, and a
@@ -120,7 +115,7 @@ async function signedWith(token: FlattenedJWSInput, candidate: KeyObject): Promi
  * attacker-controlled, and `isVerificationUnavailable` judges that class
  * token-side, so a stream of invented `kid`s is answered with warn-level
  * `jwt_token_rejected` lines instead of an error-level channel that drowns the
- * signal a real provider outage would produce (#107).
+ * signal a real provider outage would produce.
  */
 function createRotatingKeyResolver(keys: Hs256Key[], current: KeyObject): JWTVerifyGetKey {
 	const byKid = new Map(keys.map((entry) => [entry.kid, entry]));
@@ -148,22 +143,21 @@ function createRotatingKeyResolver(keys: Hs256Key[], current: KeyObject): JWTVer
 			}
 		}
 		// Nothing matched. Hand back the current key rather than throwing, so the
-		// rejection jose reports is the ordinary JWSSignatureVerificationFailed a
-		// wrong secret has always produced — a token signed with a secret this
-		// deployment does not hold is not a key-resolution problem.
+		// rejection jose reports is the ordinary JWSSignatureVerificationFailed of
+		// a wrong secret: a token signed with a secret this deployment does not
+		// hold is not a key-resolution problem.
 		return current;
 	};
 }
 
 /**
  * Resolves HS256 verification key material from `config.secret`, plus the
- * retired secrets a rotation leaves overlapping (#112). Throws if no secret is
+ * retired secrets a rotation leaves overlapping. Throws if no secret is
  * configured, or if the rotation block is malformed.
  *
- * A config with neither `kid` nor `previousSecrets` — every deployment written
- * before #112, and every one that has never rotated — resolves to the bare
- * secret key it always did, with the token header never consulted. Rotation is
- * opt-in, and opting in is what starts pinning `kid`.
+ * A config with neither `kid` nor `previousSecrets` resolves to the bare secret
+ * key, with the token header never consulted. Rotation is opt-in, and opting in
+ * is what starts pinning `kid`.
  */
 export const HS256KeyResolverFactory: KeyResolverFactory = async (config: JwtFactoryInput) => {
 	if (!config.secret) {
@@ -209,7 +203,7 @@ export const EdDSAKeyResolverFactory: KeyResolverFactory = (config: JwtFactoryIn
  * `createApp({ modules })` to enable the default algorithms.
  *
  * Typed against {@link ServerModuleContext} rather than the base
- * `ModuleContext` (#170): the key-resolver registry is this server's, not
+ * `ModuleContext`: the key-resolver registry is this server's, not
  * core's, so only a host that supplies it can initialize this module.
  */
 export const builtinKeyResolversModule: Module<ServerModuleContext> = {

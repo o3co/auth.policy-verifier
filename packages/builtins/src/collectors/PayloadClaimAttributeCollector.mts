@@ -34,48 +34,29 @@ export type PayloadClaimAttributeType = AttributeMappingType;
 export type PayloadClaimAttributeCollectorConfig = AttributeMappingCollectorConfig;
 
 /**
- * Promotes declared claims of the verified subject into attributes (#219).
+ * Promotes declared claims of the verified subject into attributes. The
+ * builtins read `scope`, `sub` and `azp`; an external IdP puts what a rule
+ * needs elsewhere — Clerk's org role under `o.rol`, Auth0's roles under a
+ * namespaced `https://example.com/roles`, Okta's groups under `groups`. This
+ * is the declaration `RequestContextAttributeCollector` takes, pointed at
+ * `CollectorContext.subject` instead of the caller's body.
  *
- * The builtins read three claims — `scope`, `sub`, `azp` — and an external
- * IdP puts what a rule needs elsewhere: Clerk's org role under `o.rol`,
- * Auth0's roles under a namespaced `https://example.com/roles`, Okta's groups
- * under `groups`. Until now every one of those meant a bespoke collector,
- * even for the common case of "read this claim, check its type, write it
- * under this key". This is the same declaration `RequestContextAttributeCollector`
- * takes, pointed at `CollectorContext.subject` instead of the caller's body:
+ * The source is the signature-verified token, so a mapping may land on core's
+ * keys (`scopes`, `permissions`, `roles`, `userId`, `clientId`). Keys another
+ * package reserved (cedar's `request*`) stay refused: they are derived from
+ * the parsed request, not from the subject, and a claim landing on one would
+ * be a second writer with a different meaning.
  *
- * ```hocon
- * { collector = "PayloadClaimAttributeCollector"
- *   attributes = [
- *     { from = "o.rol", to = "roles", type = "string[]" }
- *     { from = "https://example.com/roles", to = "roles", type = "string[]" }
- *     { from = "tid", to = "tenantId" }
- *   ] }
- * ```
+ * Two cautions the trust argument depends on. Map only claims the IdP
+ * populates from its own registration or admin data, never from user-editable
+ * profile metadata (Clerk's `unsafe_metadata`, Auth0's `user_metadata`) — a
+ * mapping from those hands the end user their own roles. And two collectors
+ * writing one list key union it, but a scalar key written by two collectors
+ * with different values throws `AttributeConflictError` and denies every
+ * request: do not map onto `userId` / `clientId` while
+ * `PayloadSubjectIdCollector` writes them.
  *
- * ## Core's vocabulary is a valid destination here
- *
- * `RequestContextAttributeCollector` refuses to write `scopes`, `permissions`,
- * `roles`, `userId` and `clientId`, because its source is the request body
- * and those keys are what the engine decides from. This collector's source is
- * the signature-verified token — the same trust `PayloadScopeCollector` writes
- * `scopes` from — so a verified claim may land on them: `permissions` from
- * Auth0's `permissions`, `roles` from Clerk's `o.rol`, `scopes` from Okta's
- * `scp`. Two collectors writing one list key **union** it; that is the
- * deployment composing two issuer-derived sources, and it says so in config.
- *
- * Keys another package reserved — cedar's `request*` — stay refused: those
- * are derived from the parsed request, not from the subject, and a claim
- * landing on one would be a second writer with a different meaning.
- *
- * Two cautions the trust argument depends on. A signed claim is only as
- * trustworthy as what the IdP put in it: map claims the IdP populates from
- * its own registration or admin data, never from user-editable profile
- * metadata (Clerk's `unsafe_metadata`, Auth0's `user_metadata`) — a mapping
- * from those hands the end user their own roles. And the union rule is for
- * lists: a *scalar* key written by two collectors with different values
- * throws `AttributeConflictError` and denies every request, so do not map
- * onto `userId` / `clientId` while `PayloadSubjectIdCollector` writes them.
+ * Configuration, with an example: the package README, PayloadClaimAttributeCollector.
  */
 export class PayloadClaimAttributeCollector implements AttributeCollector {
 	private readonly mappings: ResolvedAttributeMapping[];

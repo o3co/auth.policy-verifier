@@ -2,16 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * #244: which policy revision a decision was evaluated against — on the audit
- * line always, on the wire when the deployment says so.
+ * Which policy revision a decision was evaluated against — on the audit line
+ * always, on the wire when the deployment says so.
  *
- * The router adds nothing of its own here. A rule reports the evaluation
- * behind its answer — to the reporter core hands it for that one call; it still
- * answers a boolean — `evaluate()` lands it on that invocation's outcome, and
- * the two projections of one `Decision` — the `decision` event and the
- * response — either carry it or drop it. So what these tests hold the router
- * to is that both projections say the same thing, that the response says it
- * only when configured to, and that nothing ever reports a revision for a
+ * The router adds nothing of its own. A rule reports its evaluation to the
+ * reporter core hands it for that one call, `evaluate()` lands it on that
+ * invocation's outcome, and the two projections of one `Decision` (the
+ * `decision` event and the response) carry it or drop it. These tests hold
+ * the router to both projections saying the same thing, the response saying
+ * it only when configured to, and nothing ever reporting a revision for a
  * decision no policy made.
  */
 
@@ -320,7 +319,7 @@ describe("the response — carries it only when the deployment says so", () => {
 		expect(allow.body.reason.groups[0].evaluated[0].evaluation).toEqual(completed(REVISION_A));
 		expect(allow.body.reason.groups[0].satisfiedBy.evaluation).toEqual(completed(REVISION_A));
 		expect(deny.body.reason.groups[0].evaluated[0].evaluation).toEqual(completed(REVISION_A));
-		// Existing consumers' fields are untouched by the addition.
+		// The evaluation sits beside the deny's own fields, not in place of them.
 		expect(deny.body).toMatchObject({ decision: "deny", code: "cedar_deny" });
 
 		for (const [index, res] of [allow, deny].entries()) {
@@ -331,7 +330,7 @@ describe("the response — carries it only when the deployment says so", () => {
 		}
 	});
 
-	// #199: the policies that determined an answer ride the same evaluation, so
+	// The policies that determined an answer ride the same evaluation, so
 	// the same switch governs them — on the audit line always, on the response
 	// only when the deployment opts in. A policy id is internal structure.
 	it("carries the determining policies the same way — on the line always, in the response only under include (#199)", async () => {
@@ -383,7 +382,7 @@ describe("the response — carries it only when the deployment says so", () => {
 		expect(deny.body.reason.groups[0].evaluated[0].evaluation.determiningPolicies).toEqual([
 			"20-forbid-delete",
 		]);
-		// The coarse code is what it was: the detail is beside it, not instead of it.
+		// The coarse code stays: the detail is beside it, not instead of it.
 		expect(deny.body).toMatchObject({ decision: "deny", code: "cedar_deny" });
 	});
 

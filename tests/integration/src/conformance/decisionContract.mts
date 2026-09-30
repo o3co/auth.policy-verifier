@@ -65,14 +65,11 @@ export interface DecisionContractAdapter {
 }
 
 /**
- * Conformance suite pinning the decision contract
- * (o3co/auth.policy-verifier#124).
- *
- * This is the migration seam for the authorization plane: whatever engine sits
- * behind the endpoint must take `(subject, resource, action, context)`, answer
- * per request in a batch, and say *why*. An engine that cannot report a reason,
- * or that can only answer one decision per round trip, is not interchangeable
- * with this one no matter how its policy is written.
+ * Conformance suite pinning the decision contract, the migration seam for the
+ * authorization plane: whatever engine sits behind the endpoint must take
+ * `(subject, resource, action, context)`, answer per request in a batch, and
+ * say *why*. An engine that cannot report a reason, or that can only answer one
+ * decision per round trip, is not interchangeable with this one.
  */
 export function describeDecisionContractConformance(adapter: DecisionContractAdapter): void {
 	describe(`decision contract conformance — ${adapter.name}`, () => {

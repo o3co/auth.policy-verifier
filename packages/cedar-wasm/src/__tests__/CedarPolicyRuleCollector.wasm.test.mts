@@ -4,9 +4,8 @@
 /*
  * The collector through the real evaluator: what `packages/cedar` pins with a
  * scripted engine, pinned here end to end — mapping, entity synthesis, Cedar's
- * own semantics — so that moving the engine behind the port changed nothing a
- * deployment can observe. Importing the package registers the engine; nothing
- * here selects it by name except the one test that does so on purpose.
+ * own semantics. Importing the package registers the engine; nothing here
+ * selects it by name except the one test that does so on purpose.
  */
 
 import "../index.mjs";
@@ -281,7 +280,7 @@ describe("CedarPolicyRuleCollector on the wasm engine — layered PDP through co
 });
 
 /*
- * #244, through the real evaluator and the synchronous path: a denial is
+ * Through the real evaluator and the synchronous path: a denial is
  * `cedar_deny` whether a policy produced it or not, and the record has to be
  * able to tell. The three that are not a policy's — the request never built,
  * the engine refusing the call, Cedar's own diagnostic errors — are each pinned
@@ -448,7 +447,7 @@ describe("CedarPolicyRuleCollector on the wasm engine — the evaluation behind 
 		expect(decision.reason.groups[0].evaluated[0].evaluation).toEqual({
 			status: "completed",
 			revision: revisionOf(FORBID_ALL),
-			// The inline set's one policy, named for it (#199).
+			// The inline set's one policy, named for it.
 			determiningPolicies: ["policies"],
 		});
 	});

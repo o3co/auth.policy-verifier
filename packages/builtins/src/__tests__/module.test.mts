@@ -94,7 +94,7 @@ describe("builtinCollectorsModule", () => {
 		expect(attrs.get("permissions")).toEqual(["admin", "read"]);
 	});
 
-	// #264: the factory is handed the config entry as the operator wrote it,
+	// The factory is handed the config entry as the operator wrote it,
 	// and the config schema passes a collector entry's fields through
 	// unchecked. A string where a list was meant must stop the boot.
 	it.each([

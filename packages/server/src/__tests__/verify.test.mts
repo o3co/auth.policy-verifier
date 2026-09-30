@@ -37,7 +37,7 @@ import { createVerifyRouter, type VerifyRouterConfig } from "#/routes/verify.mjs
 
 const generateKeyPairAsync = promisify(generateKeyPair);
 
-/** 64 hex characters — 32 decoded bytes, the entropy floor #114 enforces. */
+/** 64 hex characters — 32 decoded bytes, the HS256 secret's entropy floor. */
 const JWT_SECRET = "11".repeat(32);
 const hs256Key = await HS256KeyResolverFactory({ secret: JWT_SECRET });
 
@@ -60,7 +60,7 @@ async function signHS256Token(
 		new SignJWT(payload)
 			.setProtectedHeader({ alg: "HS256", typ: overrides.typ ?? "at+jwt" })
 			.setIssuedAt()
-			// iat and exp are both mandatory now (#110): a token without them is
+			// iat and exp are both mandatory: a token without them is
 			// refused before any of the deviations these cases are about is reached.
 			.setExpirationTime("1h")
 			.setIssuer(overrides.issuer ?? ISSUER)
@@ -71,7 +71,7 @@ async function signHS256Token(
 
 /**
  * The built-in bearer-JWT authenticator over the HS256 key these cases sign
- * with — what a consumer mounting the router hands it (#259), with the
+ * with — what a consumer mounting the router hands it, with the
  * console-backed logger the router itself defaults to.
  */
 function hs256Authenticator(): TokenAuthenticator {
@@ -676,9 +676,8 @@ describe("POST /verify — resource the parser refuses (#117)", () => {
 	});
 
 	it("refuses the resource before authenticating (#118)", async () => {
-		// BREAKING in #118, and the reverse of what this pinned before: 400 now
-		// outranks 401, because the body checks are bounded while verifying the
-		// token is the half that can reach the network. The cost is that an
+		// 400 outranks 401, because the body checks are bounded while verifying
+		// the token is the half that can reach the network. The cost is that an
 		// anonymous caller learns the grammar refused their string;
 		// `http.callerAuth` is the gate for a deployment that must not disclose
 		// even that. See the ordering paragraph on `createVerifyRouter`.
@@ -821,7 +820,7 @@ describe("POST /verify — RFC 9068 §4 token validation (#105)", () => {
 		expect(res.body.decision).toBe("allow");
 	});
 
-	// The router builds no authenticator since #259; these invariants hold
+	// The router builds no authenticator; these invariants hold
 	// where a consumer mounting it builds one, at the same package boundary.
 	it("refuses to build a verifying authenticator without an issuer", () => {
 		expect(() =>
@@ -976,8 +975,8 @@ describe("POST /verify — decision contract (#124)", () => {
 	it("never takes the subject from the request body", async () => {
 		// The token is the only authority on who is asking; accepting a body-supplied
 		// subject would let any token holder ask for a decision about anyone else.
-		// Since #118 the request is refused rather than silently stripped — a caller
-		// that sent one was being told nothing while believing it had been honoured.
+		// The request is refused rather than silently stripped, so a caller that
+		// sent one is not left believing it had been honoured.
 		const token = await signHS256Token({ sub: "user-1", scope: "read:project" });
 		const res = await request(app)
 			.post("/verify")
@@ -1190,9 +1189,9 @@ describe("POST /verify/batch (#124)", () => {
 describe("createVerifyRouter — maxBatchSize, one reader at both boundaries (#157)", () => {
 	// The router is the hand-built boundary for `verify.maxBatchSize`: `createApp`
 	// forwards whatever a config object carries there, so it must refuse the same
-	// values `AppConfigSchema` refuses, in the same words. It used to refuse
-	// nothing — `config.maxBatchSize ?? DEFAULT_MAX_BATCH_SIZE` read `null` as
-	// "unset" (a 50-entry cap where the schema refused to boot) and let a `0`
+	// values `AppConfigSchema` refuses, in the same words. A bare
+	// `config.maxBatchSize ?? DEFAULT_MAX_BATCH_SIZE` would read `null` as
+	// "unset" (a 50-entry cap where the schema refuses to boot) and let a `0`
 	// through as a cap that rejects every batch there is.
 	const buildRouter = (maxBatchSize: unknown) => () =>
 		createVerifyRouter({
@@ -1293,8 +1292,8 @@ describe("createVerifyRouter — the credential reaches collectors only by state
 
 		expect(seen).toHaveLength(1);
 		expect(seen[0]?.credential).toBeUndefined();
-		// #175 removed the token from the verified-claims bag — the subject
-		// carries no replayable credential for a context-logging collector to leak.
+		// The subject carries no replayable credential for a context-logging
+		// collector to leak.
 		expect(seen[0]?.subjectToken).toBeUndefined();
 	});
 
@@ -1352,9 +1351,8 @@ describe("createVerifyRouter — the credential reaches collectors only by state
 describe("POST /verify/batch — each entry gets its own copy of the headers (#251)", () => {
 	it("a collector that writes into context.headers in one entry is not seen by the next", async () => {
 		// The route builds one DecisionInput per request and every lane reads it;
-		// each decision hands its collectors its own copy of the headers, as the
-		// router built one per decision before the extraction. One lane, so the
-		// second entry runs after the first has written.
+		// each decision hands its collectors its own copy of the headers. One
+		// lane, so the second entry runs after the first has written.
 		const seen: Array<Record<string, string> | undefined> = [];
 		const poisoning: AttributeCollector = {
 			collect: async (context: CollectorContext) => {
@@ -1492,12 +1490,12 @@ describe("createVerifyRouter — a collector that runs out of time denies (#115)
 	])(
 		"answers %s before any collector runs, rather than spending the budget on it",
 		async (_label, send, status, code) => {
-			// Ordering, pinned rather than read. #118 put body validation ahead of
-			// the token, and both sit ahead of `decide` — so an unauthenticated
-			// caller cannot make the verifier hold a collector budget open. If a
-			// later change moved collection ahead of either gate, this case would
-			// come back `403 collector_timeout` (and take the full budget doing
-			// it) instead of the refusal it asserts.
+			// Ordering, pinned rather than read: body validation sits ahead of the
+			// token, and both ahead of `decide`, so an unauthenticated caller
+			// cannot make the verifier hold a collector budget open. With
+			// collection ahead of either gate, this case would come back
+			// `403 collector_timeout` (and take the full budget doing it) instead
+			// of the refusal it asserts.
 			const res = await send(stalledApp());
 
 			expect(res.status).toBe(status);
@@ -1533,13 +1531,12 @@ describe("createVerifyRouter — a collector that runs out of time denies (#115)
 });
 
 describe("POST /verify/batch — decisions in flight are bounded (#183)", () => {
-	// The collector concurrency cap is per pipeline, per decision. Before this
-	// bound the batch route started every entry's decision at once under a bare
-	// `Promise.all`, so one request at the default maxBatchSize of 50 could
-	// hold 50 × collectorConcurrency collectors in flight per pipeline —
-	// amplification a store-backed collector deployment feels as ~800
-	// simultaneous outbound calls from a single HTTP request. Entries are now
-	// decided in lanes, `verify.batchConcurrency` wide.
+	// The collector concurrency cap is per pipeline, per decision. Started all
+	// at once, one request at the default maxBatchSize of 50 could hold
+	// 50 × collectorConcurrency collectors in flight per pipeline — ~800
+	// simultaneous outbound calls from a single HTTP request for a
+	// store-backed collector deployment. Entries are decided in lanes,
+	// `verify.batchConcurrency` wide.
 	const gaugedApp = (batchConcurrency: number | string, gauge: AttributeCollector) => {
 		const app = express();
 		app.use(
@@ -1674,7 +1671,7 @@ describe("createVerifyRouter — an already-built authenticator (#219)", () => {
 		app.use(createVerifyRouter({ authenticator: stub, ...pipelines }));
 		const res = await request(app).post("/verify").send({ resource: "project:1", action: "read" });
 		expect(res.status).toBe(401);
-		// The deny envelope every non-decision answer wears (#118), carrying the
+		// The deny envelope every non-decision answer wears, carrying the
 		// authenticator's own code and message rather than the JWT path's.
 		expect(res.body).toEqual({
 			decision: "deny",
@@ -1689,10 +1686,10 @@ describe("createVerifyRouter — an already-built authenticator (#219)", () => {
 	});
 
 	it("refuses a config carrying jwt, with or without an authenticator: the router builds none (#259)", () => {
-		// A JavaScript caller written against the old option. Refused by name,
-		// with the migration, rather than as a missing authenticator or — worse,
-		// with both present — by silently running the authenticator and ignoring
-		// the JWT config the caller thought was in force.
+		// A JavaScript caller written against the removed `jwt` option. Refused by
+		// name, with the migration, rather than as a missing authenticator or —
+		// worse, with both present — by silently running the authenticator and
+		// ignoring the JWT config the caller thought was in force.
 		for (const config of [
 			{ jwt, ...pipelines },
 			{ jwt, authenticator: stub, ...pipelines },
@@ -1707,9 +1704,9 @@ describe("createVerifyRouter — an already-built authenticator (#219)", () => {
 	});
 
 	it("refuses a config carrying no authenticator, null included", () => {
-		// `null` is refused by name rather than read as absent — the rule the
-		// `previousSecrets` `null` contract set (#147) — and in the same words as
-		// an omitted one, since either way the router has nothing to run.
+		// `null` is refused by name rather than read as absent — the same rule as
+		// for `previousSecrets: null` — and in the same words as an omitted one,
+		// since either way the router has nothing to run.
 		for (const config of [
 			{ ...pipelines },
 			{ authenticator: null, ...pipelines },
@@ -1856,9 +1853,9 @@ describe("POST /verify — asynchronous rules (#225)", () => {
 	});
 
 	it("aborts the rule in flight when the caller goes away (v0.10.0 audit)", async () => {
-		// Nothing fed a signal to evaluate() or the collectors, so a caller that
-		// timed out and retried left the out-of-process call running to its full
-		// budget — amplified under a retry storm.
+		// Without a signal fed to evaluate() and the collectors, a caller that
+		// timed out and retried would leave the out-of-process call running to
+		// its full budget — amplified under a retry storm.
 		let handed: AbortSignal | undefined;
 		const started = new Promise<void>((resolveStarted) => {
 			const app = express();
@@ -1998,10 +1995,10 @@ describe("POST /verify — asynchronous rules (#225)", () => {
 	});
 
 	it("still reports an internal fault that is not the caller's abort, even if the caller left (review)", async () => {
-		// The route used to downgrade any failure to `verify_caller_gone` once the
-		// caller's signal had aborted. An authenticator is handed no signal, so
-		// when it fails after the caller left, its failure is its own — and it is
-		// still an internal fault.
+		// Not every failure after the caller's signal aborted is
+		// `verify_caller_gone`. An authenticator is handed no signal, so when it
+		// fails after the caller left, its failure is its own — and it is still
+		// an internal fault.
 		const events: string[] = [];
 		const logger = {
 			info(_ctx: unknown, event: string) {

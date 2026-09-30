@@ -18,7 +18,7 @@ import { ATTR_CLIENT_ID, ATTR_USER_ID } from "@o3co/auth.policy-verifier.core";
  * the subject bag into `ATTR_USER_ID` and `ATTR_CLIENT_ID`. Either claim may
  * be absent.
  *
- * The claim vocabulary lives here, not in core (#170): `SubjectAttributes` is
+ * The claim vocabulary lives here, not in core: `SubjectAttributes` is
  * a bag of unknowns, so this collector narrows what it promotes — a claim that
  * is not a non-empty string is not an identity and is left out.
  */

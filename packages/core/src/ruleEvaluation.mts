@@ -3,25 +3,21 @@
 
 /*
  * One invocation of a rule: the reporter it is handed, and the reading of what
- * came back (#244).
+ * came back.
  *
- * A rule is third-party code, and what it reports is copied onto the decision
- * — and from there onto the wire and into the audit log — so this is a trust
- * boundary, held the way the failure lines hold a rule's `ruleType` and `code`
- * to an identifier shape (#200). What does not read is refused with a
- * `TypeError` rather than trimmed to what did: dropping a malformed evaluation
- * would record the decision as having reported none, and a wrong audit record
- * that looks complete is worse than a loud fault.
+ * A rule is third-party code, and what it reports is copied onto the decision,
+ * the wire and the audit log, so this is a trust boundary. What does not read
+ * is refused with a `TypeError` rather than trimmed to what did: dropping a
+ * malformed evaluation would record the decision as having reported none, and
+ * a wrong audit record that looks complete is worse than a loud fault.
  *
- * No message written here repeats the value it refuses. The error is logged,
- * and the value is whatever the rule put there — policy text and paths
- * included. An error the report's own accessor threw is not one of these: it
- * is the rule's, and like anything else a rule throws it comes back unchanged
- * — the same object, so its class and message are its author's.
+ * No message written here repeats the value it refuses: the error is logged,
+ * and the value may hold policy text and paths. An error the report's own
+ * accessor threw is the rule's, and comes back unchanged (the same object).
  *
  * Everything is read ONCE, into locals, and what is kept is rebuilt from those
- * locals: an object whose properties answer differently the second time — an
- * accessor, a Proxy — is judged on the one reading it got.
+ * locals, so an accessor or a Proxy that answers differently the second time
+ * is judged on the one reading it got.
  */
 
 import {
@@ -71,11 +67,11 @@ const COMPLETED_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Whether `value` can be carried as a determining policy id (#199): a
- * well-formed string of 1 to {@link POLICY_ID_MAX_LENGTH} UTF-16 units that
- * holds no code point of {@link POLICY_ID_FORBIDDEN_RANGES}. The one check —
- * a reporter's `boundDeterminingPolicies` filters with it, and `evaluate()`
- * refuses with it — so a rule that bounds its report cannot be refused for it.
+ * Whether `value` can be carried as a determining policy id: a well-formed
+ * string of 1 to {@link POLICY_ID_MAX_LENGTH} UTF-16 units that holds no code
+ * point of {@link POLICY_ID_FORBIDDEN_RANGES}. A reporter's
+ * `boundDeterminingPolicies` filters with it and `evaluate()` refuses with it,
+ * so a rule that bounds its report cannot be refused for it.
  *
  * Published to be read, like the bounds it applies: a rule does not filter its
  * ids with it. The copy a rule's package imports need not be the core that
@@ -96,8 +92,8 @@ export function isReportablePolicyId(value: unknown): value is string {
 }
 
 /**
- * What every reporter of this core carries as `boundDeterminingPolicies`
- * (#199) — see `ReportRuleEvaluation` for the contract. Not exported from the
+ * What every reporter of this core carries as `boundDeterminingPolicies` —
+ * see `ReportRuleEvaluation` for the contract. Not exported from the
  * package: a rule reaches it through its reporter, so the bounds it applies
  * are those of the core that checks the report.
  */
@@ -160,8 +156,8 @@ export function beginRuleInvocation(): RuleInvocation {
 		}
 	};
 
-	// #199: the bounds a rule names determining policies to are this core's —
-	// see ReportRuleEvaluation. Neither writable nor configurable, so a rule
+	// The bounds a rule names determining policies to are this core's — see
+	// ReportRuleEvaluation. Neither writable nor configurable, so a rule
 	// cannot swap them; the function itself is left as it was.
 	Object.defineProperty(report, "boundDeterminingPolicies", {
 		value: boundDeterminingPolicies,
@@ -175,10 +171,10 @@ export function beginRuleInvocation(): RuleInvocation {
 			closed = true;
 			if (refusal !== undefined) throw refusal.error;
 			if (typeof answer !== "boolean") {
-				// Read by truthiness, this was fail-open for a rule authored in
-				// JavaScript — `verify: (attrs) => attrs.get("role")` passed whenever
-				// the attribute was set — and carried that value onto the wire as
-				// `passed`. The kind of value is named, never the value.
+				// Read by truthiness, a rule authored in JavaScript would fail open —
+				// `verify: (attrs) => attrs.get("role")` would pass whenever the
+				// attribute was set — and carry that value onto the wire as `passed`.
+				// The kind of value is named, never the value.
 				throw new TypeError(
 					`a rule must answer a boolean, got ${answer === null ? "null" : typeof answer}`,
 				);
@@ -277,7 +273,7 @@ function readEvaluatedRevision(
 }
 
 /**
- * The determining policies of a completed evaluation (#199), copied and
+ * The determining policies of a completed evaluation, copied and
  * frozen, or nothing when the rule named none. The list is read once, by
  * index, so a list whose length or entries answer differently the second time
  * is judged on the one reading.

@@ -2,28 +2,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * `verify.evaluationInResponse` (#244) — whether the decision response carries
- * what each rule reported about the evaluation behind its answer
- * (`RuleOutcome.evaluation`: its status, and the policy revision).
+ * `verify.evaluationInResponse`: whether the decision response carries what
+ * each rule reported about the evaluation behind its answer
+ * (`RuleOutcome.evaluation`: its status, and the policy revision). The
+ * determining policy ids ride the same object and so the same switch.
  *
  * The `decision` event always carries it: the audit log is the operator's own.
- * The response is another matter. It goes to whoever presented a token this
- * deployment accepts, and an evaluation says more about the inside of the PDP
- * than a deny code does — that a policy set changed between two calls, that a
- * denial was the engine failing rather than a policy refusing. OPA
- * (`?provenance=true`) and XACML (`ReturnPolicyIdList`) make the same
- * information opt-in, by the requester; here the opt-in is the deployment's,
- * because what a token holder may learn about the policy layer is not the
- * token holder's to decide. `"omit"` is the default, and with it the response
- * is key-for-key what it was before this existed. The determining policy
- * ids (#199) ride the same object and so the same switch.
+ * The response goes to whoever presented a token this deployment accepts, and
+ * an evaluation says more about the inside of the PDP than a deny code does —
+ * that a policy set changed between two calls, that a denial was the engine
+ * failing rather than a policy refusing. OPA (`?provenance=true`) and XACML
+ * (`ReturnPolicyIdList`) leave the opt-in to the requester; here it is the
+ * deployment's, because what a token holder may learn about the policy layer is
+ * not the token holder's to decide. `"omit"` is the default.
  *
  * One check, imported by both boundaries (AGENTS.md, "Two-Boundary Config
  * Validation"): `AppConfigSchema` files the refusal as an issue at the key,
- * `createVerifyRouter` throws it. A hand-built config that misspelt `"include"`
- * would otherwise run as `"omit"` without a word, and the consuming service
- * that turned this on in order to record revisions would record none.
- * Dependency-free, so the schema can import it.
+ * `createVerifyRouter` throws it. Otherwise a hand-built config that misspelt
+ * `"include"` would run as `"omit"` without a word. Dependency-free, so the
+ * schema can import it.
  */
 
 /** The accepted values, default first. */

@@ -2,25 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * JWKS transport policy (#109): which endpoints a deployment may fetch signing
- * keys from, and the bounds on that fetch.
+ * JWKS transport policy: which endpoints a deployment may fetch signing keys
+ * from, and the bounds on that fetch.
  *
- * Trust assumption — what requiring https buys, and all it buys: whatever the
- * JWKS endpoint serves is trusted wholesale, so every key in that document can
- * verify tokens this deployment accepts. The identity of the endpoint is
- * therefore the entire trust anchor, and TLS server authentication is what
- * establishes it. Over plaintext http anyone on the network path — or holding
- * a DNS answer — substitutes their own signing key and mints tokens that
- * verify: a full authorization bypass, with nothing in the verifier's logs to
- * distinguish it from ordinary traffic.
+ * Whatever the JWKS endpoint serves is trusted wholesale, so every key in it can
+ * verify tokens this deployment accepts: the endpoint's identity is the entire
+ * trust anchor, and TLS server authentication is what establishes it. Over
+ * plaintext http anyone on the network path, or holding a DNS answer,
+ * substitutes their own signing key and mints tokens that verify: a full
+ * authorization bypass that the verifier's logs cannot tell from ordinary
+ * traffic.
  *
- * Deliberately dependency-free: `AppConfigSchema` imports it so a rejected URI
- * fails at config-parse time (at boot, where an operator sees it) instead of at
- * the first request, and config-only consumers of the schema must not pull jose
- * or express in behind it. The `KeyResolverFactory` in `jwt/` re-checks at
- * construction, through this same function — see AGENTS.md, "Two-Boundary
- * Config Validation". It lives in `config/` so that the dependency runs one
- * way, `jwt/` → `config/` (#260).
+ * Dependency-free: `AppConfigSchema` imports it so a rejected URI fails at
+ * config-parse time (at boot) instead of at the first request, and config-only
+ * consumers of the schema must not pull jose or express in behind it. The
+ * `KeyResolverFactory` in `jwt/` re-checks at construction through this same
+ * function (AGENTS.md, "Two-Boundary Config Validation"). It lives in `config/`
+ * so the dependency runs one way, `jwt/` → `config/`.
  */
 
 import { isLoopbackHost } from "../net/loopback.mjs";
@@ -29,13 +27,11 @@ import { NUMERIC_BOUNDS, resolveBound } from "./bounds.mjs";
 /**
  * Hosts exempt from the https requirement, named in the rejection message.
  *
- * The carve-out exists because a loopback address cannot be reached from off
- * the machine: there is no network path to sit on, so plaintext costs nothing
- * an attacker with local code execution has not already won. It keeps local
- * development and this repo's own tests working against a provider on
- * `localhost` without a certificate. A service reached by container or DNS name
- * (`http://auth-provider:3000`) is *not* loopback — that traffic crosses a
- * network — and is rejected.
+ * A loopback address cannot be reached from off the machine, so plaintext costs
+ * nothing an attacker with local code execution has not already won; the
+ * exemption keeps local development and this repo's tests working against a
+ * provider on `localhost` without a certificate. A service reached by container
+ * or DNS name (`http://auth-provider:3000`) crosses a network and is rejected.
  */
 const LOOPBACK_HOSTS = "localhost, 127.0.0.0/8, [::1]";
 
@@ -86,12 +82,10 @@ export function parseJwksUri(jwksUri: string): URL {
 /**
  * JWKS fetch knobs an operator may set on `oauth.jwt`.
  *
- * Each admits the string a HOCON env substitution delivers as well as a number,
- * because {@link resolveJwksFetchBounds} runs on unparsed configs too: `createApp`
- * accepts hand-built config objects and passes the JWT block straight to the
- * `KeyResolverFactory`, so a consumer assembling one from `process.env` supplies
- * strings. `AppConfigSchema` coerces them for config files; the resolver coerces
- * them for everyone else.
+ * Each admits the string a HOCON env substitution delivers as well as a number:
+ * {@link resolveJwksFetchBounds} also runs on hand-built configs, which
+ * `createApp` passes straight to the `KeyResolverFactory` and which a consumer
+ * assembling one from `process.env` fills with strings.
  */
 export interface JwksFetchConfig {
 	/** Abort a JWKS fetch after this long (ms). Positive integer. */
@@ -114,17 +108,15 @@ export interface JwksFetchBounds {
 }
 
 /**
- * Resolves the JWKS fetch bounds, falling back to the defaults for anything the
- * config omits — hand-built configs never went through the schema, so the
- * defaults have to hold here too, and so does the validation `AppConfigSchema`
- * performs for config files: an unparsed string would otherwise reach jose,
- * which ignores a non-number option and silently applies its own default. An
- * absent bound defaults; a present one that is not a whole number of
- * milliseconds in range throws, naming the config key the operator wrote.
+ * Resolves the JWKS fetch bounds for configs that may never have gone through
+ * the schema: an absent bound takes its default, and a present one that is not
+ * a whole number of milliseconds in range throws, naming the config key the
+ * operator wrote. An unparsed string would otherwise reach jose, which ignores a
+ * non-number option and silently applies its own default.
  *
- * The bounds themselves live in `bounds.mts` and are the very specs
- * `AppConfigSchema` reads a config file through (#157), so the two boundaries
- * cannot diverge on what a knob admits or on how it says so.
+ * The specs are the ones in `bounds.mts` that `AppConfigSchema` reads a config
+ * file through, so the two boundaries cannot diverge on what a knob admits or on
+ * how they say so.
  *
  * @param path Config path of the JWT block at the calling boundary. `createApp`
  * hands the `oauth.jwt` block to the `KeyResolverFactory`, so that is the

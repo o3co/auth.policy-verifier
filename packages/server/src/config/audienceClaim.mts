@@ -2,21 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Where the audience is read from, and whether the `typ` header is pinned
- * (#219) — the two knobs that let the built-in JWT path accept an external
- * IdP's token without a custom authenticator. The comparison itself is the
- * authenticator's (`audienceMatches` in `jwt/tokenAuthenticator.mts`).
+ * Where the audience is read from, and whether the `typ` header is pinned: the
+ * two knobs that let the built-in JWT path accept an external IdP's token
+ * without a custom authenticator. The comparison itself is `audienceMatches` in
+ * `jwt/tokenAuthenticator.mts`.
  *
  * RFC 9068 §4 has a resource server check `aud`. Not every issuer puts the
- * binding there: a Clerk session token carries no `aud` at all and binds the
- * origin in `azp`; a Cognito access token carries `client_id` where its
- * id_token carries `aud`. `audienceClaim` moves the check to the named claim;
- * it never removes it, and `audience` stays required.
+ * binding there: a Clerk session token carries no `aud` and binds the origin in
+ * `azp`; a Cognito access token carries `client_id` where its id_token carries
+ * `aud`. `audienceClaim` moves the check to the named claim; it never removes
+ * it, and `audience` stays required.
  *
- * Dependency-free on purpose, like `checkJwksUri`: `AppConfigSchema` imports
- * it, and the built-in authenticator in `jwt/` reads the same verdict through
- * it — see AGENTS.md, "Two-Boundary Config Validation". It lives in `config/`
- * so that the dependency runs one way, `jwt/` → `config/` (#260).
+ * Dependency-free: `AppConfigSchema` imports it, and the built-in authenticator
+ * in `jwt/` reads the same verdict through it (AGENTS.md, "Two-Boundary Config
+ * Validation"). It lives in `config/` so the dependency runs one way, `jwt/` →
+ * `config/`.
  */
 
 /** The claim RFC 9068 §4 names, and the default `audienceClaim`. */

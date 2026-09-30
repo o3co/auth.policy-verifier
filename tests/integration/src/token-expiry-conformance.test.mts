@@ -94,11 +94,11 @@ describeTokenExpiryConformance(
 );
 
 // The decode-only mode skips signature verification, but a token's own
-// lifetime must still be honoured (#106) — otherwise a leaked expired token
-// stays a working credential in every deployment that runs this mode. The
-// same holds for the claims #110 made mandatory: a decode-only deployment
-// that accepted an eternal token would disagree with the verifying one about
-// the very token this suite mints.
+// lifetime must still be honoured — otherwise a leaked expired token stays a
+// working credential in every deployment that runs this mode. The same holds
+// for the mandatory time claims: a decode-only deployment that accepted an
+// eternal token would disagree with the verifying one about the very token
+// this suite mints.
 describeTokenExpiryConformance(
 	adapterFor("createVerifyRouter() decode-only mode (validate: false)", {
 		validate: false,

@@ -19,13 +19,11 @@ import { ATTR_PERMISSIONS, ATTR_ROLES } from "@o3co/auth.policy-verifier.core";
  *
  * Comparison is **exact and case-sensitive**, the same philosophy `HasScope`
  * applies to scope values and `DotNotationResourceParser` applies to resource
- * identifiers (#116, #117): compare what was written, never a normalized guess
- * at what was meant. This rule matched case-insensitively until #155, which
- * put permissions on the wrong side of the line those two argued —
- * `ResourceActionPermissionRuleCollector` builds `{resource.raw}.perm:{action}`
- * from the case-preserving parser, so `Project:1` and `project:1` were two
- * namespaces to a scope rule and one to a permission rule. One vocabulary, one
- * matching discipline.
+ * identifiers: compare what was written, never a normalized guess at what was
+ * meant. `ResourceActionPermissionRuleCollector` builds
+ * `{resource.raw}.perm:{action}` from the case-preserving parser, so
+ * `Project:1` and `project:1` are two namespaces to a permission rule, as they
+ * are to a scope rule.
  *
  * ## Wildcards
  *
@@ -38,7 +36,7 @@ import { ATTR_PERMISSIONS, ATTR_ROLES } from "@o3co/auth.policy-verifier.core";
  * Multiple wildcards are rejected outright because the two-part split would
  * silently drop segments and over-grant.
  *
- * The two halves must not overlap in the required permission (#180): a grant
+ * The two halves must not overlap in the required permission: a grant
  * of `"posts.*.read"` does not match `"posts.read"`, where the single `.`
  * would satisfy `startsWith` and `endsWith` at once. The wildcard may match
  * the empty string, but each character of the required permission counts
@@ -54,7 +52,7 @@ export class HasPermission implements Rule {
 	}
 
 	verify(attrs: ReadonlyAttributes): boolean {
-		// Nothing about these values is taken on the cast's word (#180): both
+		// Nothing about these values is taken on the cast's word: both
 		// arrive from collectors, and a store-backed one can hand back anything
 		// — a non-array under either key, a role whose `permissions` is missing
 		// or not an array, non-string entries. Every malformed shape is ignored
@@ -69,7 +67,7 @@ export class HasPermission implements Rule {
 		);
 		const all = [...(Array.isArray(direct) ? direct : []), ...fromRoles];
 
-		// Non-string entries never match and never throw, as in HasScope (#116).
+		// Non-string entries never match and never throw, as in HasScope.
 		return all.some((p) => typeof p === "string" && this.match(p, this.permission));
 	}
 
@@ -78,17 +76,13 @@ export class HasPermission implements Rule {
 		if (permission === required) return true;
 
 		if (permission.includes("*")) {
-			// Reject any granted permission that contains more than one wildcard.
-			// With 2+ wildcards, split("*") produces 3+ parts, but the destructuring
-			// `const [prefix, suffix] = ...` silently drops everything after the second
-			// segment. For example, "a*c*b" is treated as "a*c" (endsWith "c" instead of
-			// "b"), which can grant broader access than intended. Returning false is the
-			// safe default: deny rather than over-grant. Single-wildcard permissions
-			// (e.g. "posts.*" or "*.read") continue to work as before.
+			// A grant with more than one wildcard never matches: the two-part
+			// split below would drop everything after the second segment ("a*c*b"
+			// read as "a*c") and over-grant.
 			if ((permission.match(/\*/g) ?? []).length > 1) return false;
 
 			const [prefix, suffix] = permission.split("*");
-			// The halves must not overlap in `required` (#180): "posts.*.read"
+			// The halves must not overlap in `required`: "posts.*.read"
 			// must not match "posts.read", where the single "." satisfies both
 			// startsWith and endsWith. Length is the whole check — the wildcard
 			// may match the empty string, but a character may only count toward

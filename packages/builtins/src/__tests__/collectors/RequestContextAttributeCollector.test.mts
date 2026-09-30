@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 import { RequestContextAttributeCollector } from "#/collectors/RequestContextAttributeCollector.mjs";
 
 /**
- * `CollectorContext.signal` is required (#115): a pipeline supplies one per
+ * `CollectorContext.signal` is required: a pipeline supplies one per
  * collector, so a hand-built context carries one too. These fixtures are not
  * about cancellation, so it is a signal that never aborts.
  */
@@ -296,9 +296,9 @@ describe("RequestContextAttributeCollector — vocabulary another package reserv
 	});
 
 	it("suggests a rename that is not itself reserved", () => {
-		// The advice used to be "call it request<Key>" unconditionally — into the
-		// namespace `packages/cedar` occupies, so it could propose a name the very
-		// next guard refuses.
+		// `request<Key>` can itself be reserved by another package, as
+		// `packages/cedar`'s `request*` keys are; the advice must not name a key
+		// the next guard refuses.
 		reserveAttributeKeys({
 			owner: "@example/crowding",
 			keys: ["crowdedKey", "requestCrowdedKey"],
@@ -342,7 +342,7 @@ describe("RequestContextAttributeCollector — an exact key wins over a dot path
 
 	it("prefers the literal key when both spellings are present", async () => {
 		// Both spellings are the caller's, so nothing crosses a trust line; the
-		// precedence is pinned because it is a change on a shipped collector.
+		// precedence is pinned because callers of the published collector see it.
 		const collector = new RequestContextAttributeCollector({
 			attributes: [{ from: "tenant.id", to: "tenantId" }],
 		});

@@ -13,7 +13,7 @@ import type {
 } from "../types.mjs";
 
 // A `CollectorRequest`, not a `CollectorContext`: the per-collector `signal` is
-// the pipeline's to supply, and this is the shape a transport hands it (#115).
+// the pipeline's to supply, and this is the shape a transport hands it.
 const stubContext: CollectorRequest = {
 	subject: {} satisfies SubjectAttributes,
 	resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
@@ -46,9 +46,9 @@ describe("AttributePipeline", () => {
 		expect(result.get("scopes")).toEqual(["read:user", "write:user"]);
 	});
 
-	// #174: two collectors disagreeing on a scalar key is an integration bug,
-	// and last-writer-wins let it weaken decisions silently (#126 item 2). The
-	// merge now refuses the map; the transport answers the refusal as a deny.
+	// Two collectors disagreeing on a scalar key is an integration bug, and
+	// last-writer-wins would let it weaken decisions silently: the merge refuses
+	// the map, and the transport answers the refusal as a deny.
 	it("rejects two collectors writing DIFFERENT values to the same scalar key", async () => {
 		const a: Attributes = new Map([["userId", "1"]]);
 		const b: Attributes = new Map([["userId", "2"]]);
@@ -89,10 +89,9 @@ describe("AttributePipeline", () => {
 		await expect(pipeline.collect(stubContext)).rejects.toThrow(AttributeConflictError);
 	});
 
-	// #126 item 3 pinned the merge to one concatenation per key; these two pin
-	// the mixed-type semantics the old per-map shape had, so the rewrite could
-	// not drift them: a scalar overwrite RESETS accumulation (a later array
-	// starts fresh), and an array replaces an earlier scalar outright.
+	// The merge's mixed-type semantics: a scalar overwrite RESETS accumulation
+	// (a later array starts fresh), and an array replaces an earlier scalar
+	// outright.
 	it("a scalar write resets array accumulation for that key", async () => {
 		const a: Attributes = new Map([["scopes", ["read:user"]]]);
 		const b: Attributes = new Map([["scopes", "corrupted"]]);

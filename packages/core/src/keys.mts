@@ -8,9 +8,8 @@
  * owner and suggest an unreserved one.
  */
 
-// Canonical attribute keys used by built-in collectors and rules. Consumers
-// should reference these constants instead of raw strings so that renames stay
-// centralized and TypeScript can infer literal types.
+// Canonical attribute keys used by built-in collectors and rules. Reference
+// these constants rather than raw strings.
 
 export const ATTR_SCOPES = "scopes" as const;
 export const ATTR_PERMISSIONS = "permissions" as const;
@@ -54,42 +53,32 @@ const reservedKeys = new Set<string>();
 
 /**
  * Every reserved attribute key: the vocabulary the engine and its packages
- * decide from, and therefore the destinations a collector promoting
- * caller-supplied data must refuse to write.
+ * decide from, and so the keys a collector promoting caller-supplied data must
+ * refuse to write.
  *
- * **This set is live, not a snapshot.** It starts as core's own five and grows
- * as packages call {@link reserveAttributeKeys} — `packages/cedar` reserves
- * four `request*` keys when it loads. Read it at the moment you need the
- * verdict; copying it into a `new Set(...)` at module scope reintroduces
- * exactly the hole the registry closes, because a package that loads after
- * yours would not be in the copy.
+ * **This set is live, not a snapshot.** It starts as core's five and grows as
+ * packages call {@link reserveAttributeKeys} (`packages/cedar` reserves four
+ * `request*` keys when it loads). Read it when you need the verdict; a copy
+ * taken at module scope misses every package that loads after yours.
  *
- * Under the default server three of core's five are derived from the
- * signature-verified token — `scope` → {@link ATTR_SCOPES}, `sub` →
- * {@link ATTR_USER_ID}, `azp` → {@link ATTR_CLIENT_ID}, the mapping AGENTS.md
- * tabulates — and the other two carry the entitlements the builtin rules
- * decide from. Either way the value is the deployment's to write and never the
- * caller's, so a collector that promotes caller-supplied data refuses to write
- * here rather than joining the deployment's own contributions.
- *
- * It matters because of how the maps combine: `AttributePipeline` **unions**
- * array-valued entries across collectors, so writing to one of these keys from
- * caller-supplied data does not overwrite the deployment's value — it extends
- * it, and nothing says so. A scalar key is no safer for being loud: two
- * disagreeing writers throw `AttributeConflictError`, which denies, so an
- * unguarded mapping trades a silent escalation for an unannounced outage.
- * Where the owning collector writes its key only *sometimes* — `packages/cedar`
- * omits `requestResourceId` for an id-less resource such as `"document"` —
- * there is no second writer to disagree with, and the caller's value stands
- * alone. See `AttributePipeline`'s merge doc comment.
+ * A reserved key's value is the deployment's to write, never the caller's.
+ * Under the default server, `scope`, `sub` and `azp` of the signature-verified
+ * token become {@link ATTR_SCOPES}, {@link ATTR_USER_ID} and
+ * {@link ATTR_CLIENT_ID} (AGENTS.md tabulates the mapping).
+ * `AttributePipeline` unions array-valued entries across collectors, so a
+ * caller-supplied write to one of these keys silently extends the deployment's
+ * value; a disagreeing scalar throws `AttributeConflictError`, which denies.
+ * Where the owning collector writes its key only sometimes (`packages/cedar`
+ * omits `requestResourceId` for an id-less resource), there is no second
+ * writer and the caller's value stands alone. See `AttributePipeline`'s merge
+ * doc comment and docs/extending.md, "The trust boundary".
  *
  * `RequestContextAttributeCollector` (builtins) consults this for every key;
  * `PayloadClaimAttributeCollector` (builtins) consults it for the keys other
- * packages own, and lets a verified claim land on core's five. The line is
- * the trust boundary, not the source: core's five are written from what the
- * deployment established — the issuer's signature-verified claims, or its own
- * configuration — and never from the caller's request, and a verified claim
- * is on the deployment's side of that line.
+ * packages own and lets a verified claim land on core's five. The line is the
+ * trust boundary, not the source: core's five are written from what the
+ * deployment established (verified claims or its own configuration), never
+ * from the caller's request.
  */
 export const RESERVED_ATTRIBUTE_KEYS: ReadonlySet<string> = reservedKeys;
 
@@ -97,27 +86,19 @@ export const RESERVED_ATTRIBUTE_KEYS: ReadonlySet<string> = reservedKeys;
  * Reserves the attribute keys a package owns, so that a collector promoting
  * caller-supplied data refuses to write them.
  *
- * **Call it beside the `ATTR_*` constants, at module scope.** Reserving at
- * module load — rather than in a `Module.init`, or a collector factory — is
- * what makes the ordering hold without a rule anyone has to remember: a
- * composition can only name a package's collectors by importing the package,
- * an import runs the module body to completion before the importer's, and so
- * the keys are registered before any collector of any package can be
- * constructed. Reserving inside `init` would be later than that and would miss
- * a library consumer that never calls `createApp` at all.
+ * **Call it at module scope, beside the `ATTR_*` constants.** A composition can
+ * only name a package's collectors by importing the package, so a reservation
+ * made at module load is in place before any collector can be constructed.
+ * Reserving in `Module.init` or a collector factory would be later than that,
+ * and `init` would miss a library consumer that never calls `createApp`.
  *
- * Reserving the same key twice under the same `owner` is a no-op, so a module
- * evaluated more than once (two versions of a package on the graph, a test
- * that re-imports it) is not a failure. Two *different* owners claiming one key
- * is refused: the keys are a vocabulary, and a key with two owners has no
- * answer to "who writes this, and may the caller?".
+ * Reserving the same key again under the same `owner` is a no-op, so a module
+ * evaluated more than once is not a failure. A second owner for one key is
+ * refused.
  *
- * The registry is this module's own state, so it is shared by everything that
- * resolves to the same copy of this package — which is the normal case, and
- * what the guard in builtins depends on. A dependency graph carrying two copies
- * of core would carry two registries, and a reservation made against one would
- * be invisible to a guard reading the other; dedupe core if a resolver ever
- * produces that.
+ * The registry is this module's state. A dependency graph carrying two copies
+ * of core carries two registries, and a reservation in one is invisible to a
+ * guard reading the other; dedupe core if a resolver produces that.
  *
  * ```ts
  * export const ATTR_REQUEST_ACTION = "requestAction" as const;
@@ -129,11 +110,9 @@ export const RESERVED_ATTRIBUTE_KEYS: ReadonlySet<string> = reservedKeys;
  * });
  * ```
  *
- * @throws Error if `owner` or a key is not a non-empty string, or if any key is
- * already reserved by another package, or `keys` is not a non-string iterable.
- * Nothing is registered when it throws:
- * a half-applied batch would leave the calling package believing it holds a key
- * the registry never recorded.
+ * @throws Error if `owner` or a key is not a non-empty string, if `keys` is not
+ * a non-string iterable, or if any key is already reserved by another package.
+ * Nothing is registered when it throws.
  */
 export function reserveAttributeKeys(request: AttributeKeyReservationRequest): void {
 	const { owner, keys, reason } = request ?? {};
@@ -175,11 +154,8 @@ export function reserveAttributeKeys(request: AttributeKeyReservationRequest): v
 }
 
 /**
- * Who owns `key`, or `undefined` if nobody has reserved it.
- *
- * The owner is what lets a refusal name the package a key belongs to instead of
- * asserting it is core's — which stopped being true the moment a second package
- * reserved a vocabulary of its own.
+ * Who owns `key`, or `undefined` if nobody has reserved it. A refusal uses it to
+ * name the package the key belongs to.
  */
 export function attributeKeyReservation(key: string): AttributeKeyReservation | undefined {
 	return reservations.get(key);
@@ -191,14 +167,10 @@ const SUGGESTION_PREFIXES = ["request", "caller", "context"] as const;
 /**
  * A key like `key` that no package has reserved — the rename a refusal advises.
  *
- * Every candidate is checked against the registry, because the advice must not
- * walk into another package's vocabulary: `requestScopes` is a fine home for a
- * `scopes` field, and `request*` is also precisely what `packages/cedar` owns,
- * so a suggestion that only prefixed would eventually propose a name the very
- * next guard refuses. A prefix the key already carries is skipped rather than
- * doubled (`requestRequestResourceId` helps nobody).
- *
- * Terminates: the numbered fallback produces unboundedly many distinct
+ * Every candidate is checked against the registry, so the advice does not
+ * propose a key another package has reserved (`packages/cedar` owns
+ * `request*` keys). A prefix the key already carries is skipped rather than
+ * doubled. Terminates: the numbered fallback produces unboundedly many distinct
  * candidates and only finitely many keys are ever reserved.
  */
 export function suggestUnreservedAttributeKey(key: string): string {
@@ -228,9 +200,7 @@ function describe(value: unknown): string {
 }
 
 // Core's own five, reserved through the same call every other package makes.
-// Beside the constants, so that adding an `ATTR_*` above reserves it in the
-// same edit — and, unlike the frozen set this replaces, a package that owns
-// vocabulary core cannot see reserves it the same way.
+// Beside the constants, so that a new `ATTR_*` is reserved in the same edit.
 reserveAttributeKeys({
 	owner: CORE_ATTRIBUTE_KEY_OWNER,
 	keys: [ATTR_SCOPES, ATTR_PERMISSIONS, ATTR_ROLES, ATTR_USER_ID, ATTR_CLIENT_ID],

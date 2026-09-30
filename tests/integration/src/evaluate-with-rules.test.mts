@@ -13,22 +13,11 @@ import { describe, expect, it } from "vitest";
 /**
  * Engine-level integration scenario: three rules with distinct default ruleTypes
  * are AND-combined by the evaluator (one group per rule, no shared `group` option).
- *
- * Rules under test:
- *   - AttrLiteralEqual  ({ a: "role",   v: "admin" })   → code "attr_not_equal"
- *   - AttrPairNotEqual  ({ a: "userId", b: "ownerId" }) → code "attr_match"
- *   - AttrLiteralCompare({ a: "level",  v: 5, op: "ge" }) → code "attr_compare_violated"
- *
- * Base attributes (all rules satisfied):
- *   role    = "admin"   (equals literal "admin")
- *   userId  = "u1"      (not equal to ownerId "u2")
- *   ownerId = "u2"
- *   level   = 5         (≥ 5)
+ * The base attributes satisfy all three; each scenario breaks some of them.
  */
 
 describe("evaluate with AttrLiteralEqual + AttrPairNotEqual + AttrLiteralCompare", () => {
 	// Rules listed in a fixed order so Scenario C is deterministic.
-	// Order: [ruleEqual, rulePairNotEqual, ruleCompare]
 	const ruleEqual = new AttrLiteralEqual({ a: "role", v: "admin" });
 	const rulePairNotEqual = new AttrPairNotEqual({ a: "userId", b: "ownerId" });
 	const ruleCompare = new AttrLiteralCompare({ a: "level", v: 5, op: "ge" });

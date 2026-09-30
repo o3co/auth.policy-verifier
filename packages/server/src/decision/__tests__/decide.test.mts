@@ -2,15 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * One decision, without Express (#251).
- *
- * `createDecider` is what `POST /verify` runs once and `POST /verify/batch`
- * runs per entry: the two collects, the evaluation, the sorting of a failure
- * into a deny or a fault, the `decision` line and the counters. These tests
- * hold that contract through the function alone — no router, no request, no
- * response — so what the HTTP layer owns (wire validation, authentication,
- * status codes, the fault line) is deliberately not here. The router's own
- * suites still pin the wire.
+ * One decision, without Express. `createDecider` is what `POST /verify` runs
+ * once and `POST /verify/batch` runs per entry: the two collects, the
+ * evaluation, the sorting of a failure into a deny or a fault, the `decision`
+ * line and the counters. These tests hold that contract through the function
+ * alone, with no router, request or response; what the HTTP layer owns (wire
+ * validation, authentication, status codes, the fault line) is pinned by the
+ * router's own suites.
  */
 import { DotNotationResourceParser } from "@o3co/auth.policy-verifier.builtins";
 import {

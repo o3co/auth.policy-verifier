@@ -2,20 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Shutdown was delegated to `@o3co/auth.utils@0.0.4`, whose guarantees no
- * contract in this repository pinned.
- *
- * Reading its 22 lines answered the question and the answer was the reason to
- * move it: **there was no force-close deadline**. `server.close()` waits for
- * in-flight requests indefinitely, so one stuck decision meant the process
- * never exited on its own and the orchestrator's SIGKILL took it down
- * mid-flight. Its cleanup-failure path also wrote to `console.error`, a bare
- * line in a composition root whose every other line is NDJSON (#107), and
- * every exit was zero.
- *
- * The behaviour lives in the template now, with a deadline and the app's own
- * logger, and these tests are the contract that was missing. `auth.provider`'s
- * standalone template made the same move in its issue #290.
+ * The contract of the template's graceful shutdown (`shutdown.ts`): a
+ * force-close deadline, since `server.close()` waits for in-flight requests
+ * indefinitely; failures logged through the app's own logger; and a non-zero
+ * exit whenever the shutdown was not clean.
  */
 import type { Server } from "node:http";
 import type { Logger } from "@o3co/auth.policy-verifier.core";
@@ -190,9 +180,9 @@ describe("installGracefulShutdown", () => {
 	});
 
 	it("bounds cleanup so a hanging dispose cannot wedge the process", async () => {
-		// `finish` awaited cleanup with no deadline, and the drain deadline was
-		// already cleared by then, so a dispose that never settled meant `exit`
-		// was never reached — the wedge the deadline was added to remove.
+		// The drain deadline is already cleared when cleanup runs, so only the
+		// cleanup budget stands between a dispose that never settles and an
+		// `exit` that is never reached.
 		vi.useFakeTimers();
 		try {
 			const { signals, finishDraining, exit, logger } = install({
@@ -240,9 +230,9 @@ describe("installGracefulShutdown", () => {
 	});
 
 	it("reports the cleanup outcome as the reason, not the drain that preceded it", async () => {
-		// `exitCode` became 1 while `reason` still said "drained", so the one line
-		// an operator alerts on contradicted itself. The drain outcome is still
-		// carried, under its own key, so neither fact is lost.
+		// `reason` names what decided the exit code, so the line an operator
+		// alerts on never says "drained" beside a non-zero code. The drain
+		// outcome is carried under its own key.
 		const { signals, finishDraining, logger, exit } = install({
 			cleanup: () => Promise.reject(new Error("teardown failed")),
 		});
