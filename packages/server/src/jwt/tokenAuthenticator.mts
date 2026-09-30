@@ -223,7 +223,8 @@ export interface JwtConfigErrorContext {
  * lowercases the `typ` option to compare it and throws a bare `TypeError` off
  * the array on each request. That escapes as a non-`JOSEError`, so
  * {@link isVerificationUnavailable} would log a config typo as the
- * infrastructure outage `jwt_verification_unavailable`.
+ * infrastructure outage `jwt_verification_unavailable`, and answer it
+ * `503 verification_unavailable`.
  */
 function isPresentString(value: unknown): boolean {
 	return typeof value === "string" && value !== "";
@@ -612,14 +613,20 @@ export function createTokenAuthenticator(
 					);
 				}
 			} catch (cause) {
-				// Same invalid_token rejection either way — the caller is
-				// unauthenticated regardless — but the log line is what lets the
-				// operator tell a provider outage from a bad token.
+				// A token that failed verification is invalid_token. One that could
+				// not be verified — the keys could not be fetched — is
+				// verification_unavailable: the token may be fine, and a caller told
+				// it is invalid would drop it and sign in again against the very
+				// provider that is down. Nothing is allowed either way.
 				if (isVerificationUnavailable(cause)) {
 					logger.error({ err: cause }, "jwt_verification_unavailable");
-				} else {
-					logger.warn({ err: describeRejection(cause) }, "jwt_token_rejected");
+					return {
+						ok: false,
+						code: "verification_unavailable",
+						message: "Token verification is unavailable",
+					};
 				}
+				logger.warn({ err: describeRejection(cause) }, "jwt_token_rejected");
 				return {
 					ok: false,
 					code: "invalid_token",

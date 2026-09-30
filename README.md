@@ -1,6 +1,6 @@
 # auth.policy-verifier
 
-Last updated: 2026-09-28
+Last updated: 2026-09-30
 
 [![CI](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth.policy-verifier.core)](https://www.npmjs.com/package/@o3co/auth.policy-verifier.core)
@@ -536,6 +536,8 @@ oauth.jwt {
 
 The policy-verifier fetches and caches the public keys automatically via jose's `createRemoteJWKSet`, bounded by `jwksTimeoutMs` / `jwksCooldownMs` / `jwksCacheMaxAgeMs`.
 
+**While the keys cannot be fetched, a token is answered `503 verification_unavailable`, not `401 invalid_token`.** The fetch failing or timing out, the endpoint answering something that is not a JWKS, and any other failure that is not about the token itself all mean the verifier could not tell whether the token is good. `invalid_token` would send a client to drop a token that may be fine and sign in again, usually against the provider that is down, so an enforcement layer gets the distinct code and can answer "could not verify" instead. Nothing is allowed either way. A key set that was fetched and has no key for the token's `kid` has answered, so that token is `401 invalid_token`, within the refetch cooldown too. The verifier logs `jwt_verification_unavailable` at error for the one and `jwt_token_rejected` at warn for the other.
+
 **The JWKS URI must be `https://`.** Every key that endpoint serves can verify tokens this deployment accepts, so its identity is the entire trust anchor and TLS is what establishes it; over plaintext, anyone on the network path — or holding a DNS answer — substitutes their own signing key and mints tokens that verify. Plaintext `http://` is accepted only for loopback hosts (`localhost`, `127.0.0.0/8`, `[::1]`), where there is no network path to sit on; that carve-out is for local development and tests. A service reached by container or DNS name (`http://auth-provider:3000`) is **not** loopback and is rejected at config-parse time — put a TLS terminator in front of the provider, or share the public key directly with `publicKey` / `publicKeyPath`.
 
 For HS256, both services share the same secret:
@@ -631,7 +633,7 @@ A decision that could not be made is logged at `error`, and the line says what k
 | `attribute_conflict` | `403 attribute_conflict` | `attribute_conflict` | — (two collectors disagreed; neither alone is answerable) |
 | `verify_internal_error` | `500 internal_error` | `collector_threw`, `rule_threw`, `body_rejected` or `internal` | `collector` for `collector_threw`, `rule` for `rule_threw` |
 
-`category` is a closed set of those seven values, so filter by equality rather than by a regex over `err.message`. `collector` is the entry's position in `attribute.collectors` / `rule.collectors` plus its class, both fixed by configuration. `body_rejected` is a body-parser failure the deny envelope does not map to a 4xx (e.g. a request stream something in front of the router already read); `internal` is anything that did not come out of a decision's own collect or evaluation — a resource parser or authenticator that threw, whatever it threw. An unreachable JWKS is not among them: it is answered `401` and logged as `jwt_verification_unavailable`.
+`category` is a closed set of those seven values, so filter by equality rather than by a regex over `err.message`. `collector` is the entry's position in `attribute.collectors` / `rule.collectors` plus its class, both fixed by configuration. `body_rejected` is a body-parser failure the deny envelope does not map to a 4xx (e.g. a request stream something in front of the router already read); `internal` is anything that did not come out of a decision's own collect or evaluation — a resource parser or authenticator that threw, whatever it threw. An unreachable JWKS is not among them: it is answered `503 verification_unavailable` before any decision and logged as `jwt_verification_unavailable`.
 
 Nothing the router adds to these lines carries the credential, the claims or `context`. The category is an enum. The collector is the one the collector runner recorded for that decision — never a name read off the error, so a collector cannot relabel itself by throwing a `CollectorTimeoutError` it built — and a timeout nothing recorded is `collector: "unattributed"`. A rule's `ruleType` and `code` are carried only when identifier-shaped (a letter, then letters, digits, `_`, `.` or `-`, at most 64 characters), since a rule collector may build them per request, and are `redacted` otherwise. The request id is validated as below. `err` is the error as thrown, with one exception: the three deny errors core defines (`CollectorTimeoutError`, `RuleTimeoutError`, `AttributeConflictError`) name a collector, a rule or an attribute key in their message and their own fields, so each is logged rebuilt — the classified collector or rule, the key held to the same identifier shape, and a stack of the header line only. Any other error's message is its author's responsibility.
 

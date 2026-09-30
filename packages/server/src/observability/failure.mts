@@ -41,8 +41,8 @@ import type { NamedRule } from "./decisionEvent.mjs";
  * (`routes/verify.mts`); this set only sorts.
  *
  * An unreachable JWKS is not a category: the built-in authenticator answers it
- * `401 invalid_token` and logs `jwt_verification_unavailable` at error, so it
- * never reaches a line this set labels.
+ * `503 verification_unavailable` and logs `jwt_verification_unavailable` at
+ * error, so it never reaches a line this set labels.
  */
 export const FAILURE_CATEGORIES = [
 	"collector_timeout",

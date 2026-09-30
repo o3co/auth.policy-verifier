@@ -1,6 +1,6 @@
 # auth.policy-verifier
 
-最終更新: 2026-09-28
+最終更新: 2026-09-30
 
 [![CI](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth.policy-verifier.core)](https://www.npmjs.com/package/@o3co/auth.policy-verifier.core)
@@ -527,6 +527,8 @@ oauth.jwt {
 
 jose の `createRemoteJWKSet` により公開鍵を自動取得・キャッシュする。取得は `jwksTimeoutMs` / `jwksCooldownMs` / `jwksCacheMaxAgeMs` で上限が付く。
 
+**鍵を取得できない間、トークンには `401 invalid_token` ではなく `503 verification_unavailable` で応答する。** 取得の失敗やタイムアウト、エンドポイントが JWKS でないものを返したこと、そのほかトークン自体とは関係のない失敗は、いずれも verifier がトークンの良し悪しを判断できなかったことを意味する。`invalid_token` を返すと、クライアントは問題のないかもしれないトークンを捨てて、たいていは停止しているそのプロバイダーに再ログインしようとする。そこで enforcement 層には別のコードを返し、「検証できなかった」として応答できるようにする。どちらの場合も許可はしない。取得できた鍵セットにトークンの `kid` に一致する鍵がない場合は応答が得られているので、そのトークンは再取得のクールダウン中も含めて `401 invalid_token` である。前者は `jwt_verification_unavailable`（error）、後者は `jwt_token_rejected`（warn）としてログに出す。
+
 **JWKS URI は `https://` 必須。** そのエンドポイントが返す鍵はすべてこの deployment が受け入れるトークンを検証できる — つまりエンドポイントの同一性がトラストアンカーそのものであり、それを確立するのが TLS である。平文であれば経路上の第三者（あるいは DNS 応答を握る者）が自分の署名鍵を差し込み、検証を通るトークンを発行できる。平文 `http://` はループバックホスト（`localhost`, `127.0.0.0/8`, `[::1]`）に限って許可する — そこには攻撃者が座れる経路が存在しないためで、ローカル開発とテストのための例外である。コンテナ名や DNS 名で到達するサービス（`http://auth-provider:3000`）はループバックでは**ない**ので config パース時に拒否される。プロバイダーの前段に TLS 終端を置くか、`publicKey` / `publicKeyPath` で公開鍵を直接渡すこと。
 
 HS256 の場合は両サービスで同じシークレットを共有:
@@ -622,7 +624,7 @@ Rule が answer の背後にある evaluation を報告する場合（#244。`pa
 | `attribute_conflict` | `403 attribute_conflict` | `attribute_conflict` | —（2 つのコレクターが食い違った。どちらか一方だけの責任ではない） |
 | `verify_internal_error` | `500 internal_error` | `collector_threw`、`rule_threw`、`body_rejected`、`internal` のいずれか | `collector_threw` なら `collector`、`rule_threw` なら `rule` |
 
-`category` はこの 7 値の閉じた集合なので、`err.message` への正規表現ではなく等値でフィルタしてください。`collector` は `attribute.collectors` / `rule.collectors` 内のエントリ位置とクラス名で、どちらも設定で決まります。`body_rejected` は deny エンベロープが 4xx に対応付けていない body parser の失敗（router の手前の何かがストリームを読んでしまった等）、`internal` は decision 自身の collect や評価から出てきたのではないもの — throw した resource parser や authenticator（何を throw したかによらず）— です。JWKS に到達できない場合はここに含まれません: それは `401` で応答され、`jwt_verification_unavailable` としてログに出ます。
+`category` はこの 7 値の閉じた集合なので、`err.message` への正規表現ではなく等値でフィルタしてください。`collector` は `attribute.collectors` / `rule.collectors` 内のエントリ位置とクラス名で、どちらも設定で決まります。`body_rejected` は deny エンベロープが 4xx に対応付けていない body parser の失敗（router の手前の何かがストリームを読んでしまった等）、`internal` は decision 自身の collect や評価から出てきたのではないもの — throw した resource parser や authenticator（何を throw したかによらず）— です。JWKS に到達できない場合はここに含まれません: それは判定の前に `503 verification_unavailable` で応答され、`jwt_verification_unavailable` としてログに出ます。
 
 router がこれらの行に加えるものは、資格情報・クレーム・`context` のいずれも含みません。category は列挙値です。collector はその decision についてコレクターのランナーが記録したもので、エラーから読んだ名前ではありません — 自分で作った `CollectorTimeoutError` を throw してもコレクターは名前を付け替えられません — 何も記録されていないタイムアウトは `collector: "unattributed"` です。ルールの `ruleType` と `code` はルールコレクターがリクエストごとに組み立てうるため、識別子の形（英字で始まり、英数字・`_`・`.`・`-` が続く 64 文字以内）の場合だけ載り、それ以外は `redacted` になります。リクエスト ID は下記のとおり検証済みです。`err` は throw されたエラーそのものですが、例外が 1 つあります: core が定義する 3 つの deny エラー（`CollectorTimeoutError`、`RuleTimeoutError`、`AttributeConflictError`）はメッセージと自身のフィールドにコレクター・ルール・属性キーを含むため、分類されたコレクターやルール、同じ識別子の形に制限した属性キー、ヘッダ行だけの stack で組み立て直したものを記録します。それ以外のエラーのメッセージは、その作者の責任です。
 

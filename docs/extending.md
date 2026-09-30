@@ -300,7 +300,11 @@ interface TokenAuthenticator {
 
 type AuthenticationResult =
   | { ok: true; subject: SubjectAttributes; credential: string }
-  | { ok: false; code: "missing_token" | "unsupported_scheme" | "invalid_token"; message: string };
+  | {
+      ok: false;
+      code: "missing_token" | "unsupported_scheme" | "invalid_token" | "verification_unavailable";
+      message: string;
+    };
 ```
 
 The built-in implementation verifies a bearer JWT against `oauth.jwt` and spreads the verified claims into `subject`. It is what `oauth.authenticator = "jwt"` — the default — selects. A deployment whose subject is established some other way registers its own factory under its own name and selects that:
@@ -371,7 +375,7 @@ Notes:
 - `"jwt"` is registered by `createApp` before any module runs and cannot be replaced; register under your own name. An `oauth.authenticator` that no module registered fails at boot, naming the key and the value.
 - `subject` is the neutral attribute bag core evaluates (see [AGENTS.md — Core Vocabulary Scope](../AGENTS.md#core-vocabulary-scope)). Anything you put there is trusted as the verified identity, so put in it only what you verified; the request body never reaches it.
 - **Everything the built-in path enforces is now yours to enforce.** The JWT path verifies the signature, pins `iss`, the audience and `typ`, requires `exp` and `iat`, applies `maxTokenAgeSeconds` / `clockToleranceSeconds` and `nbf`, refuses `cnf`-bound tokens, and records `authScheme`. None of that runs for an authenticator you register: do what applies before returning `ok: true`. The `credential` you return is whatever you choose, and it reaches collectors under `credentialToCollectors = "expose"`.
-- A refusal is a 401 wearing the deny envelope, with your `code` and `message`. Log the reason yourself (the built-in path emits `jwt_token_rejected` / `jwt_verification_unavailable`) — the router logs nothing about *why* an authenticator refused.
+- A refusal is a 401 wearing the deny envelope, with your `code` and `message` — except `verification_unavailable`, which is a 503. Return it when you could not tell whether the credential is good (your introspection endpoint or key source is unreachable), so the caller is not told a credential that may be fine is invalid. Log the reason yourself (the built-in path emits `jwt_token_rejected` / `jwt_verification_unavailable`) — the router logs nothing about *why* an authenticator refused.
 - Sender-constrained tokens (`cnf`) stay refused on the built-in path (#209). A registered authenticator is handed only the `Authorization` header — no proof, no client certificate, not the original request — so it cannot verify possession itself. Accept a bound token only when an authentication boundary upstream of this server has already verified possession for the original protected request, and you can trust that it did.
 - A library consumer that composes without `createApp` hands `createVerifyRouter` a built `authenticator` — yours, or `createTokenAuthenticator(jwt, logger)` for the built-in bearer-JWT path. The router builds none of its own (#259). The contract types are declared in [`packages/server/src/auth/`](../packages/server/src/auth/), which loads neither the JWT implementation nor jose.
 

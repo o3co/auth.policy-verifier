@@ -15,8 +15,14 @@ import type { KeyResolverFactory } from "./keyResolver.mjs";
 /**
  * Outcome of authenticating a caller. On failure the authenticator names the
  * machine-readable code and the caller-safe message; what HTTP status that
- * maps to (401 for all of them) is the route's concern, not the
- * authenticator's.
+ * maps to is the route's concern, not the authenticator's.
+ *
+ * `missing_token`, `unsupported_scheme` and `invalid_token` are about the
+ * credential: the caller has none this deployment accepts. The route answers
+ * them `401`. `verification_unavailable` is about the authenticator: it could
+ * not tell whether the credential is good — the keys it needs could not be
+ * fetched, say — so the caller's credential may be fine, and the route
+ * answers `503`. Either way nothing is allowed.
  *
  * `subject` is core's neutral `SubjectAttributes` bag, and the authenticator
  * is the one edge that populates it — the built-in one spreads the claims of
@@ -26,7 +32,11 @@ import type { KeyResolverFactory } from "./keyResolver.mjs";
  */
 export type AuthenticationResult =
 	| { ok: true; subject: SubjectAttributes; credential: string }
-	| { ok: false; code: "missing_token" | "unsupported_scheme" | "invalid_token"; message: string };
+	| {
+			ok: false;
+			code: "missing_token" | "unsupported_scheme" | "invalid_token" | "verification_unavailable";
+			message: string;
+	  };
 
 /**
  * Authenticates one `Authorization` header value into the subject attributes
