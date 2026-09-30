@@ -77,9 +77,10 @@ describe("Rule.verify contract", () => {
 
 	it("leaves the attributes it was judged against untouched", async () => {
 		// The evaluator hands the same live map to every rule in every group
-		// (`evaluate.mts`). A rule that wrote into it would change the
-		// inputs of every group after it, which is what the read-only view above
-		// makes a compile error rather than a debugging session.
+		// (the group loop in `evaluate`, `evaluate.mts`). A rule that wrote into
+		// it would change the inputs of every group after it, which is what the
+		// read-only view above makes a compile error rather than a debugging
+		// session.
 		const rule = requiresScope("read:project");
 		const attrs: Attributes = new Map([["scopes", ["read:project"]]]);
 		const before = [...attrs];

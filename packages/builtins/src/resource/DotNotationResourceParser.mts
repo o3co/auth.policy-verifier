@@ -11,11 +11,12 @@ import type { Resource, ResourceParser } from "@o3co/auth.policy-verifier.core";
 import { ResourceParseError } from "@o3co/auth.policy-verifier.core";
 
 /**
- * Characters a segment type or id may carry: RFC 6749 §3.3 `NQCHAR`
- * (`%x21 / %x23-5B / %x5D-7E` — printable ASCII minus space, `"` and `\`) less
- * the structural `.` and `:`. `resourceType` is concatenated into the
- * `{action}:{resourceType}` scope `ResourceActionScopeRuleCollector` requires,
- * so a type that cannot appear in a scope value is one no issuer could grant.
+ * Characters a segment type or id may carry: those of an RFC 6749 §3.3
+ * `scope-token` (`%x21 / %x23-5B / %x5D-7E`, which its Appendix A names
+ * `NQCHAR` — printable ASCII minus space, `"` and `\`) less the structural `.`
+ * and `:`. `resourceType` is concatenated into the `{action}:{resourceType}`
+ * scope `ResourceActionScopeRuleCollector` requires, so a type that cannot
+ * appear in a scope value is one no issuer could grant.
  */
 const SEGMENT_TOKEN = /^[\x21\x23-\x2D\x2F-\x39\x3B-\x5B\x5D-\x7E]+$/;
 

@@ -199,8 +199,10 @@ const OAuthJwtSchema = z
 		/**
 		 * How the verifier treats bearer tokens. `"verify"` (the default)
 		 * fully verifies signature, iss, aud and typ; `"insecure-decode"` is the
-		 * test-only mode that decodes without signature verification (`exp` /
-		 * `nbf` are still enforced at request time). The value itself is the
+		 * test-only mode that decodes without checking any of those four. The
+		 * time claims are still enforced at request time, as in `"verify"`:
+		 * `exp` and `iat` required, `nbf` honoured, `maxTokenAgeSeconds`
+		 * applied, within `clockToleranceSeconds`. The value itself is the
 		 * consent: an accidental env-var flip can produce a stray boolean, but
 		 * never the literal string `"insecure-decode"`, so one mistyped variable
 		 * cannot disable all token verification. The removed pair `validate` /
@@ -281,9 +283,9 @@ const OAuthJwtSchema = z
 			});
 		}
 		if (data.mode === "insecure-decode") {
-			// Decode-only mode: no signature check (exp/nbf are still enforced
-			// at request time, but nothing else is). The mode string itself is
-			// the explicit consent — see the `mode` doc comment.
+			// Decode-only mode: no signature, iss, aud or typ check; the time
+			// claims are still enforced at request time. The mode string itself
+			// is the explicit consent — see the `mode` doc comment.
 			return; // key-material checks below only apply when verifying
 		}
 		const issuers = Array.isArray(data.issuer) ? data.issuer : [data.issuer];

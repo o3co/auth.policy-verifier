@@ -14,7 +14,8 @@
  * failing rather than a policy refusing. OPA (`?provenance=true`) and XACML
  * (`ReturnPolicyIdList`) leave the opt-in to the requester; here it is the
  * deployment's, because what a token holder may learn about the policy layer is
- * not the token holder's to decide. `"omit"` is the default.
+ * not the token holder's to decide. `"omit"` is the default, and under it no
+ * outcome in the response carries an `evaluation` key.
  *
  * One check, imported by both boundaries (AGENTS.md, "Two-Boundary Config
  * Validation"): `AppConfigSchema` files the refusal as an issue at the key,

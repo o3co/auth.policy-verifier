@@ -17,9 +17,9 @@
  * - `code` is a rule's own `code`, which a rule collector can compute from the
  *   request, so it is capped.
  * - `collector` is a collector's position and identifier-shaped class name as
- *   the collector runner recorded it — never the name inside an error — or
- *   `"unattributed"`, capped as a backstop. `category` is a closed enum
- *   (`observability/failure.mts`).
+ *   the collector runner recorded it — never the name inside an error — or the
+ *   list whose deadline ran out, or `"unattributed"`, capped as a backstop.
+ *   `category` is a closed enum (`observability/failure.mts`).
  *
  * `resource` and `action` are not labels: they come straight out of the
  * request body, unbounded, and an open label mints a time series per distinct
@@ -76,10 +76,11 @@ export const MAX_DENY_CODE_LABELS = 32;
  * `"other"`.
  *
  * A collector's name is what the collector runner recorded — its position and
- * its identifier-shaped class name — or `"unattributed"`, so a deployment
- * reaches this only with more than 32 collectors that have all failed. The cap
- * is a backstop: a class's `name` is an ordinary property, and code can mint it
- * per request.
+ * its identifier-shaped class name — or, when a pipeline's deadline ran out,
+ * the list itself (`attribute.collectors`, `rule.collectors`), or
+ * `"unattributed"`: one value per collector that has failed, and at most three
+ * more. The cap is a backstop: a class's `name` is an ordinary property, and
+ * code can mint it per request.
  */
 export const MAX_COLLECTOR_LABELS = 32;
 

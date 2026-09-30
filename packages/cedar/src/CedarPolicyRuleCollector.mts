@@ -111,7 +111,9 @@ export interface CedarPolicyRuleCollectorConfig {
 	 */
 	onNoDeterminingPolicy?: NoDeterminingPolicy;
 	/**
-	 * Whether the rule logs Cedar evaluation errors (default `true`).
+	 * Whether the rule logs Cedar evaluation errors (default `true`), and with
+	 * them a request it could not build and a failed call. Faults of the
+	 * deployment are logged whatever this says (see the class doc comment).
 	 *
 	 * The error branch is load-bearing: Cedar answers a policy that reads a
 	 * missing attribute with `decision: "deny"` and the cause only in
@@ -153,7 +155,10 @@ export interface CedarPolicyRuleCollectorConfig {
 
 /** Constructor options beyond the config entry (programmatic composition only). */
 export interface CedarPolicyRuleCollectorOptions {
-	/** Receives evaluation-error logs. Defaults to the console-backed logger. */
+	/**
+	 * Receives the collector's log lines, and is handed to the engine's `load`.
+	 * Defaults to the console-backed logger.
+	 */
 	logger?: Logger;
 }
 
@@ -180,9 +185,13 @@ export interface CedarPolicyRuleCollectorOptions {
  * retained, so equal attributes give equal answers. The rule object is built
  * once, in `create`.
  *
- * The one deliberate softening: on the error branch the rule emits a log line
- * (`logEvaluationErrors`, default on). The decision itself remains a pure
- * function of `attrs`.
+ * The rule also logs, and no log line changes an answer: the decision remains
+ * a pure function of `attrs`. A request that could not be built, a failed
+ * call and an evaluation error are logged unless `logEvaluationErrors = false`.
+ * Faults of the deployment are always logged: an answer from a revision or
+ * policies this collector did not load, an `allow` naming no policy, an
+ * unvouched answer under `requireConfirmedRevision` — and, once, that knob set
+ * on a rule asked without a reporter.
  *
  * ## Which kind of rule
  *
@@ -389,13 +398,18 @@ interface BoundRule {
 	loadedRevision: string;
 	requireConfirmedRevision: boolean;
 	mapping: ResolvedMapping;
-	/** For evaluation errors; absent under `logEvaluationErrors = false`. */
+	/**
+	 * For evaluation errors, requests that could not be built and failed
+	 * calls; absent under `logEvaluationErrors = false`.
+	 */
 	logger: Logger | undefined;
 	/**
 	 * For what `logEvaluationErrors` does not govern: an engine answering from
-	 * a policy set this collector did not load, or not vouching under
-	 * `requireConfirmedRevision`. Those are faults of the deployment, not of a
-	 * policy reading a missing attribute, and are never silent.
+	 * a policy set this collector did not load, an `allow` naming no policy, an
+	 * answer not vouched for under `requireConfirmedRevision`, and the one-time
+	 * warning that that knob's revisions go unrecorded. Those are faults of the
+	 * deployment, not of a policy reading a missing attribute, and are never
+	 * silent.
 	 */
 	faultLogger: Logger;
 }

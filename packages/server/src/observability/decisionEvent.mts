@@ -90,7 +90,10 @@ function reportedEvaluations(decision: Decision): ReportedEvaluation[] {
 	);
 }
 
-/** Everything the router knows about one decision at the moment it emits the line. */
+/**
+ * What `createDecider` (`decision/decide.mts`) knows about one decision at the
+ * moment it emits the line.
+ */
 export interface DecisionEventInput {
 	decision: Decision;
 	/**
@@ -124,10 +127,10 @@ export interface DecisionEventInput {
  * record shares, so grouping by it collapses unrelated decisions into one
  * apparent trace.
  *
- * Exported because the verify route applies it to the same `sub` before putting
- * it on the wire. The audit line and the decision response describe one
- * decision, so the empty subject is absent from both or from neither, and one
- * function makes that structural rather than remembered.
+ * Exported because `createDecider` (`decision/decide.mts`) applies it to the
+ * `sub` once and hands the result to both this line and the decision response.
+ * The two describe one decision, so the empty subject is absent from both or
+ * from neither, and one function makes that structural rather than remembered.
  */
 export function present(value: string | undefined): string | undefined {
 	return value !== undefined && value !== "" ? value : undefined;
@@ -194,7 +197,7 @@ export function decisionEvent({
 	};
 
 	// Absent rather than empty when no rule reported one, so a deployment with
-	// no policy-backed rule writes no `evaluations` key. A decision the router
+	// no policy-backed rule writes no `evaluations` key. A deny `createDecider`
 	// built itself — a timeout, a conflict — has no groups and so none.
 	const evaluations = reportedEvaluations(decision);
 	if (evaluations.length > 0) event.evaluations = evaluations;

@@ -241,11 +241,11 @@ function describeRule(rule: AnyRule, index: number): string {
  * and ask them again.
  *
  * The rules are collected from a revocable view of `context`. Each rule is
- * verified once while the request is still reachable, the view is then revoked,
- * and each rule is verified again. A rule that copied what it needs out at
- * collect time answers identically; a rule that kept the context — or anything
- * live inside it — throws on the access, which is the violation, reported
- * against the rule that committed it.
+ * asked twice while the request is still reachable — the second answer must
+ * match the first — then the view is revoked and each rule is asked again. A
+ * rule that copied what it needs out at collect time answers identically; a
+ * rule that kept the context — or anything live inside it — throws on the
+ * access, which is the violation, reported against the rule that committed it.
  *
  * Determinism and non-mutation, the other two clauses of the same sentence in
  * AGENTS.md, are checked in the same pass.

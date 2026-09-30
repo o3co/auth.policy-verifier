@@ -83,7 +83,10 @@ export interface WireRequestCase extends WireExchange {
 	id: string;
 	/** What this row exists to pin, in one sentence. */
 	pins: string;
-	/** The issue that decided it. */
+	/**
+	 * The o3co/auth.policy-verifier issue that decided this row's answer — where
+	 * a reader finds why; the suite does not read it.
+	 */
 	issue: string;
 	expect: { status: number; code: string };
 	/** Substrings the refusal must name — a field, or a batch index. */

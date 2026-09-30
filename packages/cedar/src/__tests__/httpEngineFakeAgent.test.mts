@@ -9,10 +9,6 @@
  * scripted `fetch` hands it; this file pins what actually crosses the wire,
  * and how each way the wire can fail comes out — as a `CedarEngineError` from
  * the engine, and as a logged deny with a `failed` evaluation from the rule.
- *
- * A documented contract the engine does not meet over the real `fetch` is
- * pinned as `it.fails`, the finding named in the comment above it, and made an
- * ordinary `it` once the engine meets it.
  */
 
 import { randomUUID } from "node:crypto";
