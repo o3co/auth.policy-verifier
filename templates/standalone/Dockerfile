@@ -76,7 +76,7 @@ EXPOSE ${HTTP_PORT}
 
 # Probes the container's own routable address, NOT 127.0.0.1 — deliberately.
 #
-# `application.conf` binds loopback by default (#108), because /verify answers
+# `application.conf` binds loopback by default, because /verify answers
 # with an authorization decision and a reachable port is a decision oracle. A
 # container that keeps that default is reachable from nothing: the published
 # port never connects. A probe against 127.0.0.1 passes anyway — inside the
