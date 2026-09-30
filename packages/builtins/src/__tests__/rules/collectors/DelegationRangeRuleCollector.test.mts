@@ -28,6 +28,7 @@ describe("DelegationRangeRuleCollector", () => {
 			"entries of other types only",
 			{ authorization_details: [{ type: "payment_initiation", path: "a.run" }] },
 		],
+		["an empty list", { authorization_details: [] }],
 	])("emits no rule for a token with %s", async (_label, subject) => {
 		const rules = await new DelegationRangeRuleCollector({ type: TYPE }).collect(
 			contextWith(subject),
@@ -92,6 +93,8 @@ describe("DelegationRangeRuleCollector", () => {
 		["an object", { type: TYPE, path: "a.run" }],
 		["a string", "a.run"],
 		["a list of non-objects", ["a.run"]],
+		["null", null],
+		["a list holding a list", [[{ type: TYPE, path: "a.run" }]]],
 	])("emits the rule for an authorization_details claim that is %s", async (_label, claim) => {
 		const rules = await new DelegationRangeRuleCollector({ type: TYPE }).collect(
 			contextWith({ authorization_details: claim }),

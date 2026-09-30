@@ -71,6 +71,8 @@ describe("DelegationRangeCollector", () => {
 		["an object", { type: TYPE, path: "a.run" }],
 		["a string", "a.run"],
 		["a list of non-objects", ["a.run"]],
+		["null", null],
+		["a list holding a list", [[{ type: TYPE, path: "a.run" }]]],
 	])(
 		"writes an empty range for an authorization_details claim that is %s",
 		async (_label, claim) => {
