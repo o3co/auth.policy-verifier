@@ -9,8 +9,10 @@
  *
  * What a request can carry is Node's HTTP parser's to say. It strips the
  * spaces and tabs around a header value (RFC 9110 §5.5), refuses a request
- * whose header value holds a control character other than a tab, and reads a
- * header name only as an RFC 9110 §5.6.2 token.
+ * whose header value holds a control character other than a tab, reads a
+ * header value's bytes as Latin-1 — so no value it hands over holds a
+ * character above U+00FF — and reads a header name only as an RFC 9110
+ * §5.6.2 token.
  *
  * Dependency-free: `AppConfigSchema` and the runtime guards in
  * `http/callerAuth.mts` read the same verdict through it (AGENTS.md,
@@ -24,11 +26,19 @@ export type CallerAuthFieldCheck = { ok: true; value: string } | { ok: false; me
 /** RFC 9110 §5.6.2: `token = 1*tchar`. */
 const TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 
-/** True when `value` holds a character no header value can carry: a control character other than a tab. */
+/** True when `value` holds a control character other than a tab, which no header value can carry. */
 function hasControlCharacter(value: string): boolean {
 	for (let i = 0; i < value.length; i++) {
 		const code = value.charCodeAt(i);
 		if ((code < 0x20 && code !== 0x09) || code === 0x7f) return true;
+	}
+	return false;
+}
+
+/** True when `value` holds a character above U+00FF, which a header value read as Latin-1 never does. */
+function hasCharacterAboveLatin1(value: string): boolean {
+	for (let i = 0; i < value.length; i++) {
+		if (value.charCodeAt(i) > 0xff) return true;
 	}
 	return false;
 }
@@ -42,6 +52,11 @@ export function checkCallerAuthToken(value: unknown): CallerAuthFieldCheck {
 	if (typeof value !== "string" || value === "") {
 		return { ok: false, message: "token must be a non-empty string" };
 	}
+	// Refused however it is spelled, a no-break space a Latin-1 client could
+	// send included: whitespace is a mistake, not a credential.
+	if (value.trim() === "") {
+		return { ok: false, message: "token must not be blank" };
+	}
 	if (/^[ \t]|[ \t]$/.test(value)) {
 		return {
 			ok: false,
@@ -54,6 +69,13 @@ export function checkCallerAuthToken(value: unknown): CallerAuthFieldCheck {
 			ok: false,
 			message:
 				"token must not contain a control character, a trailing newline included: no request can carry one in a header value",
+		};
+	}
+	if (hasCharacterAboveLatin1(value)) {
+		return {
+			ok: false,
+			message:
+				"token must not contain a character above U+00FF: a header value's bytes are read as Latin-1, so no request can present one",
 		};
 	}
 	return { ok: true, value };
