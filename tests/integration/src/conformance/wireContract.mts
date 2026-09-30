@@ -830,7 +830,7 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 			);
 		});
 
-		describe("the code the table names without a request case", () => {
+		describe("the codes the table names without a request case", () => {
 			it("names the caller-auth gate's refusal: code caller_unauthenticated, status 401", () => {
 				// The optional `http.callerAuth` gate sits IN FRONT of the pinned
 				// surface — it answers before the body is parsed, so it is not one
@@ -841,6 +841,17 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 				// exhaustive must not be narrower than the wire.
 				expect(codes.callerUnauthenticated).toBe("caller_unauthenticated");
 				expect(status.callerUnauthenticated).toBe(401);
+			});
+
+			it("names an unreachable key set: code verification_unavailable, status 503", () => {
+				// The built-in authenticator's answer when the keys a token needs
+				// cannot be fetched, as distinct from a token that fails
+				// verification. This reference deployment verifies with a shared
+				// secret and fetches no keys, so no request case reaches it; the
+				// table still names it for an enforcement layer switching on
+				// `code` or on the status.
+				expect(codes.verificationUnavailable).toBe("verification_unavailable");
+				expect(status.verificationUnavailable).toBe(503);
 			});
 		});
 	});

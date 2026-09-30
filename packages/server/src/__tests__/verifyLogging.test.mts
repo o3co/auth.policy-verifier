@@ -13,8 +13,8 @@
  *   - `verify_internal_error`         (error) — a collector/parser/pipeline
  *     error answered 500; carries the cause the response does not.
  *
- * Callers see only 401/500; the log is where the operator tells the three
- * situations apart.
+ * Callers see `401 invalid_token`, `503 verification_unavailable` and `500
+ * internal_error` respectively; the log carries what each response does not.
  */
 import {
 	DotNotationResourceParser,
@@ -244,8 +244,14 @@ describe("verify router failure logging: verification unavailable (error)", () =
 			.set("Authorization", `Bearer ${token}`)
 			.send({ resource: "project", action: "read" });
 
-		// The caller still cannot be authenticated — the wire contract stays 401.
-		expect(res.status).toBe(401);
+		// Not the token's fault, so not invalid_token: a PEP answers it as the
+		// verifier being unable to decide, and nothing is allowed.
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			decision: "deny",
+			code: "verification_unavailable",
+			message: "Token verification is unavailable",
+		});
 		expect(events).toHaveLength(1);
 		expect(events[0]).toMatchObject({ level: "error", msg: "jwt_verification_unavailable" });
 		expect(events[0].obj.err).toBeInstanceOf(errors.JWKSTimeout);
@@ -275,7 +281,8 @@ describe("verify router failure logging: verification unavailable (error)", () =
 			.set("Authorization", `Bearer ${token}`)
 			.send({ resource: "project", action: "read" });
 
-		expect(res.status).toBe(401);
+		expect(res.status).toBe(503);
+		expect(res.body.code).toBe("verification_unavailable");
 		expect(events).toHaveLength(1);
 		expect(events[0]).toMatchObject({ level: "error", msg: "jwt_verification_unavailable" });
 	});
@@ -298,10 +305,64 @@ describe("verify router failure logging: verification unavailable (error)", () =
 			.set("Authorization", `Bearer ${token}`)
 			.send({ resource: "project", action: "read" });
 
-		expect(res.status).toBe(401);
+		expect(res.status).toBe(503);
+		expect(res.body.code).toBe("verification_unavailable");
 		expect(events).toHaveLength(1);
 		expect(events[0]).toMatchObject({ level: "error", msg: "jwt_verification_unavailable" });
 		expect(events[0].obj.err).toBeInstanceOf(TypeError);
+	});
+
+	it("answers a whole batch 503 verification_unavailable when the keys cannot be fetched", async () => {
+		const { events, logger } = captureEvents();
+		const app = createTestApp({
+			jwt: {
+				...verifyingJwt,
+				key: async () => {
+					throw new errors.JWKSTimeout();
+				},
+			},
+			logger,
+		});
+		const token = await signToken({ scope: "read:project" });
+
+		const res = await request(app)
+			.post("/verify/batch")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ decisions: [{ resource: "project", action: "read" }] });
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			decision: "deny",
+			code: "verification_unavailable",
+			message: "Token verification is unavailable",
+		});
+		expect(events).toMatchObject([{ level: "error", msg: "jwt_verification_unavailable" }]);
+	});
+
+	// A key set that was fetched and names no key for the token's `kid` has
+	// answered: the token is one this deployment cannot verify, which is
+	// invalid_token, the refetch cooldown included.
+	it("keeps a fetched key set with no matching key 401 invalid_token", async () => {
+		const { events, logger } = captureEvents();
+		const app = createTestApp({
+			jwt: {
+				...verifyingJwt,
+				key: async () => {
+					throw new errors.JWKSNoMatchingKey();
+				},
+			},
+			logger,
+		});
+		const token = await signToken({ scope: "read:project" });
+
+		const res = await request(app)
+			.post("/verify")
+			.set("Authorization", `Bearer ${token}`)
+			.send({ resource: "project", action: "read" });
+
+		expect(res.status).toBe(401);
+		expect(res.body.code).toBe("invalid_token");
+		expect(events).toMatchObject([{ level: "warn", msg: "jwt_token_rejected" }]);
 	});
 });
 

@@ -78,7 +78,7 @@ npm install @o3co/auth.policy-verifier.server
 
 1. トークンを見る前にボディを検証する (#118): `resource` を `resourceParser` でパースし、`action` と `context` を読み取り、そのすべてをリクエストの上限に照らす。失敗時は `400 invalid_request` を返す — つまり不正なリクエストは、有効なトークンを持っていなくても 400 になる。
 2. `Authorization` ヘッダーを authenticator に渡す。組み込みの bearer-JWT authenticator（`createTokenAuthenticator`）は `Bearer <token>` を取り出し（スキームは大文字小文字を区別せずに照合）、ヘッダーが存在しないかスキームが Bearer でない場合は 401 を返す。それ以外の authenticator は自身の `code` / `message` で応答し、ステップ 3〜5 はその authenticator の責務になる。
-3. `validate` が `true` の場合: 署名に加えて RFC 9068 §4 のクレームを検証する — `iss` を `issuer` と、audience クレーム（`aud`、または `audienceClaim` が指すクレーム）を `audience` と、`typ` ヘッダを `tokenType` と照合する（`application/` プレフィックスは無視。`"*"` は何も pin しない）。失敗時は 401 を返す。3 つのいずれかが欠けている場合、`createTokenAuthenticator` は例外を投げる。
+3. `validate` が `true` の場合: 署名に加えて RFC 9068 §4 のクレームを検証する — `iss` を `issuer` と、audience クレーム（`aud`、または `audienceClaim` が指すクレーム）を `audience` と、`typ` ヘッダを `tokenType` と照合する（`application/` プレフィックスは無視。`"*"` は何も pin しない）。失敗時は 401 を、トークンに必要な鍵がキャッシュになく取得もできない場合は 503 `verification_unavailable` を返す。3 つのいずれかが欠けている場合、`createTokenAuthenticator` は例外を投げる。
 4. `validate` が `false` の場合: JWT を検証なしでデコードする。不正なトークンの場合は 401 を返す。
 5. どちらの経路でもトークン自身の寿命を検証する: `exp` と `iat` は**必須**（有効期限を宣言しないトークンは失効しない）、`nbf` は存在すれば検証、`exp` は未来でなければならず、`now - iat` は `maxTokenAgeSeconds` を超えてはならない — 発行者が何年も先の `exp` を付けたトークンを拒否するのはこれ。`clockToleranceSeconds` はこれら全ての比較に効く。失敗時は 401 を返す。デコード専用経路はこれらの検査を省略せず手書きで再現するので、同一トークンに対して両モードの答えは一致する。
 6. `x-request-id` ヘッダーが存在し、受け入れられる形であれば `CollectorContext.headers` に含める（コレクターが上流呼び出し時に転送可能）。受け入れられるのは `A-Z a-z 0-9 - _ . : + / = #` からなる 1〜128 文字（`acceptRequestId`、#200）で、それ以外の値はここでもログ行でもレスポンスでも無かったものとして扱う。受け入れた ID は、手順 1〜5 の拒否を含め router が書くすべてのレスポンスに `x-request-id` レスポンスヘッダとして返し、呼び出し元が送らなかった場合に採番することはない。
@@ -276,7 +276,7 @@ HTTP/1.1 200 OK
 決定されます (#183) — collector の上限は decision 単位なので、これが 1 バッチに
 `maxBatchSize × collectorConcurrency` 本の collector を同時に持たせないための上限です。`decisions` が無い / 空 / `verify.maxBatchSize` 超過 / 不正なエントリ
 （`resource` がパーサーに拒否されたものを含む）を含む場合は `400 invalid_request`（メッセージが該当 index を
-示します）、トークンが検証できない場合は `401` でバッチ全体を拒否します。バッチは 1 件も判定する前に全件を
+示します）、トークンが検証に失敗した場合は `401` で、検証できなかった場合は `503 verification_unavailable` でバッチ全体を拒否します。バッチは 1 件も判定する前に全件を
 検証するため、1 件の不正なエントリは部分的な回答ではなくリクエスト全体の拒否になります。
 
 ## 使い方

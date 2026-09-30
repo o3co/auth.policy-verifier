@@ -300,7 +300,11 @@ interface TokenAuthenticator {
 
 type AuthenticationResult =
   | { ok: true; subject: SubjectAttributes; credential: string }
-  | { ok: false; code: "missing_token" | "unsupported_scheme" | "invalid_token"; message: string };
+  | {
+      ok: false;
+      code: "missing_token" | "unsupported_scheme" | "invalid_token" | "verification_unavailable";
+      message: string;
+    };
 ```
 
 組み込み実装は bearer JWT を `oauth.jwt` に照らして検証し、検証済みのクレームを `subject` に展開します。既定値である `oauth.authenticator = "jwt"` が選択するのがこれです。subject を別の方法で確立するデプロイは、自分の名前で自分のファクトリを登録し、それを選択します:
@@ -366,12 +370,12 @@ oauth {
 
 要点:
 
-- ファクトリは `oauth` ブロック全体と `{ logger, keyResolverRegistry }` を受け取ります。`keyResolverRegistry` には `builtinKeyResolversModule`（と自分のモジュール）が登録したものがすべて入っているので、独自に JWT を検証する authenticator — たとえば IdP のセッショントークンを検証するもの — は、`oauth.jwt.algorithm` の鍵の配管を再実装せずに再利用できます。
+- ファクトリは `oauth` ブロック全体と `{ logger, keyResolverRegistry }` を受け取ります。`keyResolverRegistry` には `builtinKeyResolversModule`（と自分のモジュール）が登録したものがすべて入っているので、独自に JWT を検証する authenticator — たとえば IdP のセッショントークンを検証するもの — は、`oauth.jwt.algorithm` の鍵の配管を再実装せずに再利用できます。登録する key resolver は、組み込み authenticator による例外の読み方に従います: トークンを拒否する get-key 関数は、トークンについての jose のエラー（持っていない `kid` なら `JWKSNoMatchingKey`）を投げてください。それ以外の例外は鍵が取得できないものとして読まれ、`503 verification_unavailable` で応答されて error でログに出ます。関数に届く `kid` はトークンが選ぶので、未知の `kid` に素の `Error` を投げると、どの呼び出し元でもその両方を起こせてしまいます。
 - `oauth.jwt` は `oauth.authenticator` が `"jwt"` の間は必須で、それ以外の名前では**拒否**されます — 誰も読まないからです。鍵は自分のサブブロック（`oauth.introspection { … }`）の下に置いてください。パース済みの config にそのまま載るので、ファクトリから読めます。
 - `"jwt"` はどのモジュールよりも先に `createApp` が登録し、置き換えることはできません。自分の名前で登録してください。どのモジュールも登録していない `oauth.authenticator` は、キーと値を示して起動時に失敗します。
 - `subject` は core が評価する中立な属性バッグです（[AGENTS.md — Core Vocabulary Scope](../AGENTS.md#core-vocabulary-scope) を参照）。そこに入れたものはすべて検証済みの identity として信頼されるので、自分が検証したものだけを入れてください。リクエストボディがそこに届くことはありません。
 - **組み込み経路が強制していることは、すべて自分で強制する必要があります。** JWT 経路は署名を検証し、`iss`・audience・`typ` を pin し、`exp` と `iat` を必須とし、`maxTokenAgeSeconds` / `clockToleranceSeconds` と `nbf` を適用し、`cnf` に束縛されたトークンを拒否し、`authScheme` を記録します。登録した authenticator ではそのどれも実行されません: `ok: true` を返す前に、該当するものを行ってください。返す `credential` は何を選んでもよく、`credentialToCollectors = "expose"` の下では collector に届きます。
-- 拒否は deny エンベロープをまとった 401 で、`code` と `message` は自分が返したものになります。理由は自分でログに出してください（組み込み経路は `jwt_token_rejected` / `jwt_verification_unavailable` を出力します） — authenticator が*なぜ*拒否したかについて、router は何もログに出しません。
+- 拒否は deny エンベロープをまとった 401 で、`code` と `message` は自分が返したものになります。ただし `verification_unavailable` は 503 です。資格情報の良し悪しを判断できなかったとき（イントロスペクションのエンドポイントや鍵の取得元に到達できない等）に返してください。問題のないかもしれない資格情報を無効だと呼び出し元に伝えずに済みます。理由は自分でログに出してください（組み込み経路は `jwt_token_rejected` / `jwt_verification_unavailable` を出力します） — authenticator が*なぜ*拒否したかについて、router は何もログに出しません。
 - sender-constrained トークン（`cnf`）は組み込み経路では引き続き拒否されます (#209)。登録した authenticator に渡されるのは `Authorization` ヘッダーだけで、proof もクライアント証明書も元のリクエストも届かないため、authenticator 自身は所持を検証できません。束縛トークンを受け入れてよいのは、このサーバーより上流の認証境界が元の保護対象リクエストについて所持をすでに検証しており、それを信頼できる場合だけです。
 - `createApp` を使わずに組み立てるライブラリ利用者は、構築済みの `authenticator` を `createVerifyRouter` に渡します — 自分のもの、または組み込みの bearer-JWT 経路なら `createTokenAuthenticator(jwt, logger)` です。router 自身は authenticator を構築しません (#259)。契約の型は [`packages/server/src/auth/`](../packages/server/src/auth/) で宣言されており、JWT 実装も jose も読み込みません。
 

@@ -19,7 +19,7 @@ import {
 	type SubjectAttributes,
 } from "@o3co/auth.policy-verifier.core";
 import express from "express";
-import type { TokenAuthenticator } from "../auth/tokenAuthenticator.mjs";
+import type { AuthenticationResult, TokenAuthenticator } from "../auth/tokenAuthenticator.mjs";
 import { NUMERIC_BOUNDS, resolveBound } from "../config/bounds.mjs";
 import {
 	checkEvaluationInResponse,
@@ -178,6 +178,14 @@ const errorBody = (code: string, message: string): ErrorBody => ({
 	code,
 	message,
 });
+
+/**
+ * The status an authentication failure is answered with: `503` when the
+ * authenticator could not verify the credential, `401` when the caller has
+ * none this deployment accepts. See `AuthenticationResult`.
+ */
+const authFailureStatus = (code: Extract<AuthenticationResult, { ok: false }>["code"]): number =>
+	code === "verification_unavailable" ? 503 : 401;
 
 /** Outcome of validating one decision request: either the parsed entry or the reason it is unusable. */
 type ParsedDecisionRequest =
@@ -420,9 +428,10 @@ function callerSignal(res: express.Response): AbortSignal {
  * denials is still 200 — the caller reads each entry.
  *
  * Both answer 400 for a malformed body — including a `resource` the configured
- * `ResourceParser` refuses — 401 for authentication failures, 413 for a body
- * over `maxBodyBytes`, 415 for a content type the parser cannot read, and 500
- * for anything unexpected. Every one of those answers is the deny envelope
+ * `ResourceParser` refuses — 401 for authentication failures, 503 for
+ * credentials that could not be verified, 413 for a body over `maxBodyBytes`,
+ * 415 for a content type the parser cannot read, and 500 for anything
+ * unexpected. Every one of those answers is the deny envelope
  * `{ decision: "deny", code, message }`, the body-parser failures included:
  * a caller that parses only decision JSON is never handed Express's HTML error
  * page.
@@ -447,17 +456,18 @@ function callerSignal(res: express.Response): AbortSignal {
  * - `body_rejected` — `500 internal_error`, from the router's terminal error
  *   handler, the only place a body-parser failure is told apart.
  *
- * An unreachable JWKS is none of these: the built-in authenticator answers it
- * `401 invalid_token`.
+ * An unreachable JWKS is none of these: the authenticator reports it as
+ * `verification_unavailable`, answered `503` with that code before any
+ * decision, for a batch as a whole.
  *
  * Every decision — one per `/verify` call, one per entry of a batch — emits a
  * `decision` event at info and, when `metrics` is wired, increments the
  * decision counters. The deny answered for a collector timeout, rule timeout or
  * attribute conflict is a decision and emits both; a request refused before
- * any decision (400, 401, 413, 415, and the 500 for a body the parser
- * rejects) emits neither, nor does a decision that could not be made (a 500)
- * or whose caller left, so the log stream and the metric agree on what a
- * decision is. See `observability/decisionEvent.mts` for what the line does and
+ * any decision (400, 401, 413, 415, the 503 for credentials that could not
+ * be verified, and the 500 for a body the parser rejects) emits neither, nor
+ * does a decision that could not be made (a 500) or whose caller left, so the
+ * log stream and the metric agree on what a decision is. See `observability/decisionEvent.mts` for what the line does and
  * does not carry.
  *
  * A caller-sent `x-request-id` is echoed on every response the router
@@ -629,7 +639,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 
 			const auth = await authenticator.authenticate(req.get("authorization"));
 			if (!auth.ok) {
-				res.status(401).json(errorBody(auth.code, auth.message));
+				res.status(authFailureStatus(auth.code)).json(errorBody(auth.code, auth.message));
 				return;
 			}
 
@@ -716,7 +726,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 
 			const auth = await authenticator.authenticate(req.get("authorization"));
 			if (!auth.ok) {
-				res.status(401).json(errorBody(auth.code, auth.message));
+				res.status(authFailureStatus(auth.code)).json(errorBody(auth.code, auth.message));
 				return;
 			}
 

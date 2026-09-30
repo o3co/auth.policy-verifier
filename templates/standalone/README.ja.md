@@ -1,6 +1,6 @@
 # @o3co/auth-policy-verifier-standalone
 
-最終更新: 2026-09-28
+最終更新: 2026-09-30
 
 auth.policy-verifier のデプロイ可能なサーバーテンプレートです。このパッケージはコンポジションルートとして機能し、設定の読み込み・モジュールのロード・Express サーバーの起動を担います。`@o3co/create-auth-policy-verifier` によって生成されます。
 
@@ -197,7 +197,7 @@ Authorization: Bearer <jwt>
 | `body_rejected` | JSON body parser が、deny エンベロープが 4xx に対応付けていない形で失敗した |
 | `internal` | decision 自身の collect や評価から出てきたのではないもの — throw した resource parser や authenticator（何を throw したかによらず） |
 
-この集合は閉じています: アラートとフィルタは `err.message` ではなく `category` の等値に対して張ってください。`collector` は `config/application.conf` の `attribute.collectors` / `rule.collectors` 内のエントリ位置とクラス名です。JWKS に到達できないことは category ではありません — `401` で応答され、`jwt_verification_unavailable` としてログに出ます（後述）。
+この集合は閉じています: アラートとフィルタは `err.message` ではなく `category` の等値に対して張ってください。`collector` は `config/application.conf` の `attribute.collectors` / `rule.collectors` 内のエントリ位置とクラス名です。JWKS に到達できないことは category ではありません — 判定の前に `503 verification_unavailable` で応答され、`jwt_verification_unavailable` としてログに出ます（後述）。
 
 サーバーがこれらの行に加えるものは、トークン・クレーム・`context` のいずれも含みません。collector はその decision についてコレクターのランナーが記録したもので、エラーから読んだ名前ではなく、何も記録されていないタイムアウトは `collector: "unattributed"` です。ルールの `ruleType` と `code` はルールコレクターがリクエストごとにルールを組み立てうるため、識別子の形（英字で始まり、英数字・`_`・`.`・`-` が続く 64 文字以内）の場合だけ載り、それ以外は `redacted` になります。リクエスト ID は検証済みです。`err` は throw されたエラーそのものですが、例外が 1 つあります: core が定義する 3 つの deny エラー（`CollectorTimeoutError`、`RuleTimeoutError`、`AttributeConflictError`）はメッセージと自身のフィールドにコレクター・ルール・属性キーを含むため、分類されたコレクターやルール、同じ識別子の形に制限した属性キー、ヘッダ行だけの stack で組み立て直したものを記録します。それ以外のエラーのメッセージは、その作者の責任です。
 
@@ -251,7 +251,7 @@ scrape_configs:
 
 `HTTP_PATH_PREFIX` は他のエンドポイントと同様にこのパスも動かします。`HTTP_PATH_PREFIX=/pdp` なら `/pdp/metrics` になり、scrape config の `metrics_path` も合わせる必要があります。
 
-**まだ公開していないもの:** 依存先ごとの `up` ゲージ（auth.provider はバックエンドストア向けに持っています）。ここでの相当物は JWKS エンドポイントですが、サンプリング対象になる readiness probe のレジストリがありません。依存先の一覧を別途手で持つゲージは、auth.provider が probe をサンプリングすることで避けた drift そのものです。そのレジストリができるまで、JWKS 障害は `jwt_verification_unavailable` ログイベントとして見えます — アラートを張れるようにこれは `error` で出力されています。
+**まだ公開していないもの:** 依存先ごとの `up` ゲージ（auth.provider はバックエンドストア向けに持っています）。ここでの相当物は JWKS エンドポイントですが、サンプリング対象になる readiness probe のレジストリがありません。依存先の一覧を別途手で持つゲージは、auth.provider が probe をサンプリングすることで避けた drift そのものです。そのレジストリができるまで、JWKS 障害は `jwt_verification_unavailable` ログイベントとして見えます — アラートを張れるようにこれは `error` で出力されています。HTTP リクエストのヒストグラムにも `503` の応答として現れます。
 
 ## デフォルトコレクター
 
