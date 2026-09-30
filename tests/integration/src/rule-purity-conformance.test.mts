@@ -426,6 +426,38 @@ describe("rule purity conformance — the check itself", () => {
 		expect(cancelled).toBe(true);
 	});
 
+	it("asks a restricting rule, which a decision never asks on its own", async () => {
+		const collect = async (): Promise<Rule[]> => [
+			{
+				ruleType: "range",
+				code: "outside_range",
+				message: "Outside the range",
+				restricts: true,
+				verify: (attributes) => attributes.has("scopes"),
+			},
+		];
+
+		await expect(assertRuleIndependentOfContext(collect, scopeContext, attrs)).resolves.toEqual([
+			true,
+		]);
+	});
+
+	it("rejects a restricting rule that reads the collector's context at verify time", async () => {
+		const collect = async (ctx: CollectorContext): Promise<Rule[]> => [
+			{
+				ruleType: "range",
+				code: "outside_range",
+				message: "Outside the range",
+				restricts: true,
+				verify: () => ctx.action === "read",
+			},
+		];
+
+		await expect(assertRuleIndependentOfContext(collect, scopeContext, attrs)).rejects.toThrow(
+			/read its collector's context/,
+		);
+	});
+
 	it("rejects a rule that mutates the attributes it is judged against", async () => {
 		const collect = async (): Promise<Rule[]> => [
 			{
