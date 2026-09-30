@@ -31,8 +31,9 @@ export interface CedarDecision {
 	 * request — which only a `deny` can say: Cedar allows only on a permit, so
 	 * an `allow` naming none is refused as not a decision. An item the http
 	 * engine cannot read as an id means it cannot say which set answered: that
-	 * answer is `foreign` (`"unreadable policy"`) with `reason` empty, and the
-	 * collector fails it closed.
+	 * answer is `foreign`, with `reason` empty, and the collector fails it
+	 * closed (labelled `"unreadable policy"` when that item is the first it
+	 * cannot place).
 	 */
 	reason: readonly string[];
 	/**

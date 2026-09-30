@@ -6,8 +6,9 @@ import { pino, stdSerializers } from "pino";
 
 /**
  * The composition root's logger, injected into `createApp` so the failure
- * events of the verify router (`verify_internal_error`) and of the JWT
- * authenticator `createApp` builds (`jwt_token_rejected`,
+ * events of the verify router (`verify_internal_error` and the
+ * `collector_timeout` / `rule_timeout` / `attribute_conflict` denies) and of
+ * the JWT authenticator `createApp` builds (`jwt_token_rejected`,
  * `jwt_verification_unavailable`) reach an aggregator-ready sink.
  *
  * pino, emitting newline-delimited JSON on stdout, which log aggregators ingest

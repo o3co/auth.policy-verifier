@@ -198,7 +198,7 @@ describe("requireHomogeneousLiteralArray", () => {
 		);
 	});
 
-	it("throws when an element is NaN (would silently mismatch AttrLiteralIn/NotIn)", () => {
+	it("throws when an element is NaN (AttrLiteralIn's Set.has would match a NaN attribute)", () => {
 		// AttrLiteralIn tests membership with `Set.has`, under which a NaN
 		// element matches a NaN attribute: something that is not a number
 		// would satisfy the set.

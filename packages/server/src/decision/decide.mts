@@ -9,8 +9,8 @@
  * either side (wire validation, subject authentication, turning the caller's
  * disconnect into a signal, status codes and headers) and the one line a fault
  * produces, because a fault speaks for the request: a batch's 500 is one line
- * for the whole batch. Caller authentication is mounted ahead of the router, by
- * `createApp`.
+ * for the whole batch. Caller authentication, when `http.callerAuth` is
+ * configured, is mounted ahead of the router by `createApp`.
  *
  * A decision that was *made* (allow, deny, or one of the three denies a failure
  * is answered with) is reported here, once, at the moment it is made. A

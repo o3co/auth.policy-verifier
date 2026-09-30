@@ -131,7 +131,8 @@ export interface VerifyRouterConfig {
 	 * `jwt_verification_unavailable` are the authenticator's and go to the
 	 * logger it was built with (`createTokenAuthenticator(jwt, logger)`;
 	 * `createApp` hands both the same one). Defaults to the console-backed
-	 * logger so none of these is ever silent in a deployment that wires nothing.
+	 * logger so none of the router's lines is ever silent in a deployment that
+	 * wires nothing (the authenticator's logger is a required argument).
 	 * The decision line is emitted at `info`, so `logging.level` is the one
 	 * switch that turns it off.
 	 */
@@ -453,8 +454,9 @@ function callerSignal(res: express.Response): AbortSignal {
  * `decision` event at info and, when `metrics` is wired, increments the
  * decision counters. The deny answered for a collector timeout, rule timeout or
  * attribute conflict is a decision and emits both; a request refused before
- * any decision (400, 401, 413, 415) emits neither, nor does a decision that
- * could not be made (the 500), so the log stream and the metric agree on what a
+ * any decision (400, 401, 413, 415, and the 500 for a body the parser
+ * rejects) emits neither, nor does a decision that could not be made (a 500)
+ * or whose caller left, so the log stream and the metric agree on what a
  * decision is. See `observability/decisionEvent.mts` for what the line does and
  * does not carry.
  *

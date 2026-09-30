@@ -63,9 +63,9 @@ export type RequestContextAttributeCollectorConfig = AttributeMappingCollectorCo
  * scopes; a scalar key written with a different value throws
  * `AttributeConflictError` and denies, and where its owner writes it only
  * sometimes (cedar's `requestResourceId` for an id-less resource) the
- * caller's value stands unopposed. Such a mapping is a configuration error, refused at construction
- * so the deployment fails at boot. Only the attribute key is reserved:
- * `{ from = "scopes", to = "requestedScopes" }` is fine.
+ * caller's value stands unopposed. Such a mapping is a configuration error,
+ * refused at construction so the deployment fails at boot. Only the attribute
+ * key is reserved: `{ from = "scopes", to = "requestedScopes" }` is fine.
  *
  * Configuration, with an example: the package README, RequestContextAttributeCollector.
  */

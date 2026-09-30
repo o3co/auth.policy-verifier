@@ -7,7 +7,7 @@
  * again, and when it runs at all. The engine's wiring of it is pinned in
  * `httpEngine.test.mts`. The agent's own behaviour — its PUT answer and a
  * later GET byte-identical, a token holder's edits showing in the GET, a
- * restart coming back empty — was observed against a real cedar-agent 0.2.2;
+ * restart coming back empty — matches a real cedar-agent 0.2.2 run by hand;
  * no test in this package runs one. The first is checked again at every boot.
  */
 

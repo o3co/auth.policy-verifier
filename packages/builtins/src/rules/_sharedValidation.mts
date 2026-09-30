@@ -13,10 +13,9 @@
  * Used by `computeValuesKey` to build a stable grouping suffix for `ruleType`.
  * The 64-bit output puts the birthday-collision bound at ~2^32, far above any
  * realistic policy size, so distinct value sets do not collide by accident.
- * It is not collision-resistant: a birthday search of about 2^32 hashes finds
- * a collision on purpose (for a 32-bit hash, seconds of work), and two
- * distinct rules on the same attribute that share a `ruleType` are
- * OR-combined.
+ * It is not collision-resistant: a birthday search of about 2^32 hashes,
+ * within reach of commodity hardware, finds one on purpose, and two distinct
+ * rules on the same attribute that share a `ruleType` are OR-combined.
  *
  * Iterates UTF-16 code units via `charCodeAt`. BigInt is used because
  * 64-bit multiplication overflows IEEE-754 doubles; `Math.imul` only
