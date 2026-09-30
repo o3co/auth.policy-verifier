@@ -80,6 +80,44 @@ describe("resolveCallerAuth", () => {
 			resolveCallerAuth({ callerAuth: { header: "", token: "s3cret" } }, context),
 		).toThrow(/^createApp: http\.callerAuth\.header must be a non-empty string/);
 	});
+
+	// HTTP strips the spaces and tabs around a header value, and Node refuses
+	// a request whose header value carries a control character, so no caller
+	// can present such a token and every request would be refused. The
+	// deployment fails at boot instead.
+	it.each([
+		["whitespace only", "   "],
+		["a leading space", " s3cret"],
+		["a trailing space", "s3cret "],
+		["a leading tab", "\ts3cret"],
+		["a trailing newline", "s3cret\n"],
+		["a control character", "s3\u0001cret"],
+		["a DEL", "s3cret\u007f"],
+	])("rejects a token with %s, which no request can present", (_label, token) => {
+		expect(() => resolveCallerAuth({ callerAuth: { token } }, context)).toThrow(
+			/^createApp: http\.callerAuth\.token /,
+		);
+	});
+
+	it("accepts a token with an inner space, which a request can present", () => {
+		expect(resolveCallerAuth({ callerAuth: { token: "s3 cret" } }, context)).toEqual({
+			header: "x-caller-token",
+			token: "s3 cret",
+		});
+	});
+
+	// A request header's name is an RFC 9110 token, so a configured name
+	// with any other character never matches one.
+	it.each([
+		["whitespace only", "   "],
+		["a leading space", " x-caller-token"],
+		["an inner space", "x caller"],
+		["a colon", "x-caller-token:"],
+	])("rejects a header name with %s, which no request can carry", (_label, header) => {
+		expect(() =>
+			resolveCallerAuth({ callerAuth: { header, token: "s3cret" } }, context),
+		).toThrow(/^createApp: http\.callerAuth\.header /);
+	});
 });
 
 describe("createCallerAuthMiddleware", () => {
@@ -160,6 +198,15 @@ describe("createCallerAuthMiddleware", () => {
 			.send({});
 
 		expect(calls).toEqual([]);
+	});
+
+	it("refuses to be constructed with a credential no request can present", () => {
+		expect(() =>
+			createCallerAuthMiddleware({ header: "x-caller-token", token: "   " }),
+		).toThrow(/^createCallerAuthMiddleware: config\.token /);
+		expect(() =>
+			createCallerAuthMiddleware({ header: "x caller", token: "s3cret" }),
+		).toThrow(/^createCallerAuthMiddleware: config\.header /);
 	});
 
 	it("refuses to be constructed with an empty credential", () => {

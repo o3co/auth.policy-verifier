@@ -986,6 +986,33 @@ describe("AppConfigSchema — http.callerAuth", () => {
 		});
 		expect(result.success).toBe(false);
 	});
+
+	// `HTTP_CALLER_AUTH_TOKEN="   "`, or a secret stored with its trailing
+	// newline, boots a gate no request can pass: HTTP strips the whitespace
+	// around a header value and refuses a control character in one.
+	it.each([["   "], ["s3cret "], ["s3cret\n"], ["s3\u0001cret"]])(
+		"rejects the token %j, which no request can present",
+		(token) => {
+			const result = AppConfigSchema.safeParse({
+				oauth: { jwt: validJwt },
+				...baseBody,
+				http: { callerAuth: { token } },
+			});
+			expect(result.success).toBe(false);
+		},
+	);
+
+	it.each([["   "], [" x-api-key"], ["x api key"]])(
+		"rejects the header name %j, which no request can carry",
+		(header) => {
+			const result = AppConfigSchema.safeParse({
+				oauth: { jwt: validJwt },
+				...baseBody,
+				http: { callerAuth: { header, token: "s3cret" } },
+			});
+			expect(result.success).toBe(false);
+		},
+	);
 });
 
 describe("AppConfigSchema — HS256 secret rotation", () => {
