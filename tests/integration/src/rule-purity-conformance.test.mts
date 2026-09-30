@@ -426,7 +426,7 @@ describe("rule purity conformance — the check itself", () => {
 		expect(cancelled).toBe(true);
 	});
 
-	it("asks a restricting rule, which a decision never asks on its own", async () => {
+	it("asks a restricting rule, which a decision under the default never asks on its own", async () => {
 		const collect = async (): Promise<Rule[]> => [
 			{
 				ruleType: "range",

@@ -357,6 +357,28 @@ describe("evaluate — restricting rules", () => {
 		expect((error as Error).message).not.toContain("scope");
 	});
 
+	it("names the refused group by the ruleType it was grouped under, read once", async () => {
+		let reads = 0;
+		const granting = makeRule("scope", "invalid_scope", false);
+		Object.defineProperty(granting, "ruleType", {
+			get() {
+				reads += 1;
+				return reads === 1 ? "scope" : "elsewhere";
+			},
+		});
+		const failures = new FailureRecord();
+
+		const error = await evaluate(
+			new Map(),
+			[granting, restricting("scope", "outside_range", true)],
+			{
+				failures,
+			},
+		).catch((cause: unknown) => cause);
+
+		expect(failures.sourceOf(error)).toMatchObject({ kind: "rule", ruleType: "scope" });
+	});
+
 	it("reads each rule's marker once, so a rule cannot be restricting to one check and granting to the next", async () => {
 		let reads = 0;
 		const rule = makeRule("range", "outside_range", true);
