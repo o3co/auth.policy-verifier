@@ -17,7 +17,8 @@ a host such as the server's `createApp`. It depends on `@o3co/auth.policy-verifi
 - **Owns** what these implementations read, write and match: the mapping from JWT claims
   (`sub`, `azp`, `scope`, declared claims) to attribute keys (#170), the matching rules of
   `HasScope` / `HasPermission` and the comparison rules, the dot-notation resource
-  grammar, and the delegation-range grammar and containment rule of the claims contract.
+  grammar, and the implementation of the claims contract's delegation-range grammar and
+  containment rule (the contract itself is the umbrella repository's).
 - **Does not own** the pipelines, the grouping or the decision (core), authentication or HTTP
   (`server`), policy engines or `AsyncRule`s (`cedar`), or collectors that do I/O — those are
   the consumer's to write ([docs/extending.md](../../docs/extending.md)).
@@ -117,8 +118,8 @@ A scalar key is no safer, in two ways. Where both sides write it the values disa
 
 A token a delegation grant issued — a client acting for a subject — carries its range as RFC 9396 `authorization_details` entries of one type, each `{ "type": <that type>, "path": "<path>" }`, and the acting client as `act.sub` (RFC 8693 §4.1). The path grammar and the containment rule are the provider–verifier [claims contract](https://github.com/o3co/auth/blob/develop/docs/claims-contract.md)'s:
 
-- a path is `(type(:id)?.)*action`: `type` and `action` are `[a-z][a-z0-9_]*`, and `id` is `[A-Za-z0-9_~-]`, anything else percent-encoded in upper-case hex;
-- an entry contains a path when it is a segment-wise prefix of it, and an entry segment that names no id contains the same type with any id: `project:p1.report` contains `project:p1.report:r7.run`.
+- a path is `(type(:id)?.)*action`: `type` and `action` are `[a-z][a-z0-9_]*`, and `id` is `[A-Za-z0-9_~-]`, anything else percent-encoded in upper-case hex. An id is compared as written, so `%41` and `A` are two ids: the issuer and the resource must encode alike;
+- an entry contains a path when it is a segment-wise prefix of it, and an entry segment that names no id contains the same type with any id: `project:p1.report` contains `project:p1.report:r7.run`. The entry's last element is compared as a type even when it names an action, so `project:p1.run` contains `project:p1.run.more`: keep action names apart from type names.
 
 To decide the range together with the policies, configure the pair with the same `type`, read from one place:
 
@@ -139,6 +140,7 @@ rule { collectors = [
 - `DelegationRangeCollector` writes the entries' paths to `ATTR_DELEGATION_RANGE` (`"delegationRange"`, reserved by this package). A path outside the grammar is left out, which narrows the range; a token with entries of the type but no readable path gets an empty range, which contains nothing, and so does a token whose claim is there in another shape — not a list, or a list holding something other than entry objects.
 - `DelegationRangeRuleCollector` emits one [`WithinDelegationRange`](#withindelegationrange) rule for the requested path — `<resource.raw>.<action>`, so `resource: "project:p1.report:r7"` with `action: "run"` is `project:p1.report:r7.run` — when the token carries a range (an entry of the type, or the claim in another shape), and no rule otherwise. The action must be one action of the grammar: one of several elements (`report.delete`) would re-split the joined path, so a request on the parent would read as one on a child the range contains, and the rule fails instead. The rule is a group of its own, so a delegated token is allowed only what the range and the policies both allow, and a token without a range is decided as it is without the pair.
 - Give both the same `type` and `claim` (default `authorization_details`); nothing checks that they agree. Configured apart, the pair fails one of two ways. Where the rule collector finds the token's entries and the attribute collector does not, the rule finds no range and the request is denied. The other way round, no rule is emitted and **the range is not enforced**.
+- The requested path is built from the resource string the caller sent, whatever resource parser is configured. Resources written in another grammar (`projects/p1/reports/r7`) parse as no path, and every delegated request is denied.
 - The resource a request names is the caller's claim, its parent chain included. A policy that relies on the chain — containment, `in` — needs it confirmed first, by a collector of your own that reads the store it lives in ([docs/extending.md](../../docs/extending.md#writing-a-custom-attributecollector)).
 
 ## Rules
@@ -187,7 +189,7 @@ new AttrMatchRule({ a: string, b: string, group?: string })
 
 ### WithinDelegationRange
 
-Passes when an entry of `ATTR_DELEGATION_RANGE` contains the requested path, by the claims contract's containment rule ([Delegated tokens](#delegated-tokens-range-and-actor)). A range that is absent, or holds no string that contains the path, fails, and so does a requested path outside the grammar. `ruleType` is `delegation_range` and `code` is `outside_delegation_range`. `DelegationRangeRuleCollector` builds it.
+Passes when an entry of `ATTR_DELEGATION_RANGE` contains the requested path, by the claims contract's containment rule ([Delegated tokens](#delegated-tokens-range-and-actor)). A range that is absent, or holds no string that contains the path, fails, and so does a requested path outside the grammar. `ruleType` is `delegation_range` and `code` is `outside_delegation_range`. `DelegationRangeRuleCollector` builds it. A deployment that needs another containment rule writes its own rule over `ATTR_DELEGATION_RANGE`, and a rule collector that emits it, in place of `DelegationRangeRuleCollector`.
 
 ## Attribute Comparison Rules
 

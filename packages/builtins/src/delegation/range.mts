@@ -32,7 +32,8 @@ const ID = /^(?:[A-Za-z0-9_~-]|%[0-9A-F]{2})+$/;
  *
  * - `type` and `action` are `[a-z][a-z0-9_]*`;
  * - `id` is `[A-Za-z0-9_~-]`, any other character percent-encoded with
- *   upper-case hex, so each id has one spelling to compare;
+ *   upper-case hex. An id is compared as written, so `%41` and `A` are two
+ *   ids: the issuer and the resource must encode alike;
  * - the action, the last element, carries no id.
  */
 export function parseRangePath(path: string): RangeElement[] | null {
@@ -68,8 +69,10 @@ export function requestedRangePath(resource: string, action: string): string | n
 /**
  * Whether the range entry `entry` contains the requested `path`: a
  * segment-wise prefix of it, each element of the same type, and an element
- * that names no id containing the same type with any id. Either side outside
- * the grammar contains nothing.
+ * that names no id containing the same type with any id. The entry's last
+ * element is compared as a type whether it names an action or not, so
+ * `a:1.run` contains `a:1.run.more`. Either side outside the grammar contains
+ * nothing.
  */
 export function rangeContains(entry: string, path: string): boolean {
 	const within = parseRangePath(entry);

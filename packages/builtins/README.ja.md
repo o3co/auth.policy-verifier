@@ -10,7 +10,7 @@ auth.policy-verifier 向けの組み込み attribute collector、rule collector�
 
 core のインターフェースを実装した、小さな既製のセットです: attribute collector、rule、rule collector、resource parser、そしてそれらを server の `createApp` などのホストに登録する `builtinCollectorsModule`。依存は `@o3co/auth.policy-verifier.core` だけです。`templates/standalone` がこれを組み込み、`server` はテストでのみ使います（`devDependencies`）。
 
-- **所有するもの:** これらの実装が何を読み、何を書き、どう照合するか — JWT クレーム（`sub`、`azp`、`scope`、宣言したクレーム）から属性キーへの対応（#170）、`HasScope` / `HasPermission` と比較ルールの照合規則、ドット記法のリソース文法、クレーム契約の委任 range の文法と包含ルール。
+- **所有するもの:** これらの実装が何を読み、何を書き、どう照合するか — JWT クレーム（`sub`、`azp`、`scope`、宣言したクレーム）から属性キーへの対応（#170）、`HasScope` / `HasPermission` と比較ルールの照合規則、ドット記法のリソース文法、クレーム契約の委任 range の文法と包含ルールの実装（契約そのものは umbrella リポジトリのもの）。
 - **所有しないもの:** パイプライン、グルーピング、判定（core）、認証や HTTP（`server`）、ポリシーエンジンや `AsyncRule`（`cedar`）、I/O を行う collector（利用側が書くもの。[docs/extending.ja.md](../../docs/extending.ja.md)）。
 - **core と別パッケージである理由:** core はエンジン中立の契約で、subject のフィールドを一切名指ししません（#170）。クレームの語彙と具体的な照合はその線の反対側、つまりここに置きます（[AGENTS.md — Core Vocabulary Scope](../../AGENTS.md#core-vocabulary-scope)）。また任意導入でもあります: builtins は意図的に基本セットであってカタログではない（[docs/extending.ja.md](../../docs/extending.ja.md)）ので、collector と rule を自前で書くデプロイメントはインストール不要で、core もこれに合わせて肥大化しません。
 
@@ -102,8 +102,8 @@ scope クレームについては `PayloadScopeCollector { claim = "scp" }` を�
 
 委任 grant が発行したトークン（subject のために client が動くもの）は、その range を 1 種類の type の RFC 9396 `authorization_details` エントリ（各 `{ "type": <その type>, "path": "<パス>" }`）として、動いている client を `act.sub`（RFC 8693 §4.1）として持ちます。パスの文法と包含ルールは、provider–verifier の[クレーム契約](https://github.com/o3co/auth/blob/develop/docs/claims-contract.md)のものです:
 
-- パスは `(type(:id)?.)*action`。`type` と `action` は `[a-z][a-z0-9_]*`、`id` は `[A-Za-z0-9_~-]` で、それ以外の文字は大文字の 16 進でパーセントエンコードします。
-- エントリがパスの先頭からセグメント単位の接頭辞になっていれば、そのエントリはパスを含みます。id を持たないエントリのセグメントは、同じ type の任意の id を含みます。`project:p1.report` は `project:p1.report:r7.run` を含みます。
+- パスは `(type(:id)?.)*action`。`type` と `action` は `[a-z][a-z0-9_]*`、`id` は `[A-Za-z0-9_~-]` で、それ以外の文字は大文字の 16 進でパーセントエンコードします。id は書かれたとおりに比較されるので、`%41` と `A` は別の id です。issuer とリソースは同じようにエンコードしてください。
+- エントリがパスの先頭からセグメント単位の接頭辞になっていれば、そのエントリはパスを含みます。id を持たないエントリのセグメントは、同じ type の任意の id を含みます。`project:p1.report` は `project:p1.report:r7.run` を含みます。エントリの最後の要素は、action を名指すときも type として比較されるので、`project:p1.run` は `project:p1.run.more` を含みます。action の名前と type の名前は分けてください。
 
 range をポリシーと合わせて判定するには、1 か所から読んだ同じ `type` で 2 つを設定します:
 
@@ -124,6 +124,7 @@ rule { collectors = [
 - `DelegationRangeCollector` はエントリのパスを `ATTR_DELEGATION_RANGE`（`"delegationRange"`、このパッケージが予約）に書きます。文法外のパスは除外され、range が狭まる方向に働きます。その type のエントリはあるが読めるパスがないトークンは空の range になり、何も含みません。クレームが別の形（リストでない、またはエントリのオブジェクト以外を含むリスト）で存在するトークンも同じです。
 - `DelegationRangeRuleCollector` は、トークンが range を持つとき（その type のエントリがあるか、クレームが別の形で存在するとき）、リクエストのパス（`<resource.raw>.<action>`。`resource: "project:p1.report:r7"` と `action: "run"` なら `project:p1.report:r7.run`）について [`WithinDelegationRange`](#withindelegationrange) ルールを 1 つ生成し、持たないときは何も生成しません。action は文法上の 1 つの action でなければなりません。複数の要素からなる action（`report.delete`）は結合したパスの区切りを変えてしまい、親へのリクエストが range に含まれる子へのリクエストとして読めてしまうので、その場合ルールは fail します。このルールは独立したグループなので、委任トークンは range とポリシーの両方が許すものだけを許され、range のないトークンはこの 2 つがない場合と同じく判定されます。
 - 2 つには同じ `type` と `claim`（既定 `authorization_details`）を与えてください。一致しているかを確かめる仕組みはありません。食い違うと、2 通りに壊れます。ルール collector がトークンのエントリを見つけ、属性 collector が見つけない場合は、ルールが range を見つけられず、リクエストは deny されます。逆の場合はルールが生成されず、**range は適用されません**。
+- リクエストのパスは、設定したリソースパーサーにかかわらず、呼び出し元が送ったリソース文字列から作られます。別の文法で書かれたリソース（`projects/p1/reports/r7`）はパスとして読めず、委任されたリクエストはすべて deny されます。
 - リクエストが名指すリソースは、親の連鎖も含めて呼び出し元の主張です。連鎖に依拠するポリシー（包含、`in`）は、その連鎖を保存しているストアを読む独自の collector で、使う前に確かめる必要があります（[docs/extending.md](../../docs/extending.md#writing-a-custom-attributecollector)）。
 
 ## Rules
@@ -172,7 +173,7 @@ new AttrMatchRule({ a: string, b: string, group?: string })
 
 ### WithinDelegationRange
 
-`ATTR_DELEGATION_RANGE` のエントリのどれかが、クレーム契約の包含ルール（[委任トークン](#委任トークン-range-と-actor)）でリクエストのパスを含むとき pass します。range がない場合や、パスを含む文字列が 1 つもない場合は fail し、文法外のリクエストパスも fail します。`ruleType` は `delegation_range`、`code` は `outside_delegation_range` です。`DelegationRangeRuleCollector` が生成します。
+`ATTR_DELEGATION_RANGE` のエントリのどれかが、クレーム契約の包含ルール（[委任トークン](#委任トークン-range-と-actor)）でリクエストのパスを含むとき pass します。range がない場合や、パスを含む文字列が 1 つもない場合は fail し、文法外のリクエストパスも fail します。`ruleType` は `delegation_range`、`code` は `outside_delegation_range` です。`DelegationRangeRuleCollector` が生成します。別の包含ルールが必要なデプロイは、`ATTR_DELEGATION_RANGE` を読む独自のルールと、それを生成するルール collector を書き、`DelegationRangeRuleCollector` の代わりに使います。
 
 ## Attribute Comparison Rules
 
