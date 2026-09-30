@@ -104,18 +104,39 @@ describe("resolveCallerAuth", () => {
 		["a trailing newline", "s3cret\n"],
 		["a control character", "s3\u0001cret"],
 		["a DEL", "s3cret\u007f"],
+		// Node reads a header value's bytes as Latin-1, so no request carries a
+		// character above U+00FF.
+		["an ideographic space only", "\u3000"],
+		["a byte-order mark", "\ufeffs3cret"],
+		["a curly quote", "s3cret\u2019"],
+		// Blank however it is spelled, as the issue's "empty after trimming" reads.
+		["no-break spaces only", "\u00a0\u00a0"],
 	])("rejects a token with %s, which no request can present", (_label, token) => {
 		expect(() => resolveCallerAuth({ callerAuth: { token } }, context)).toThrow(
 			/^createApp: http\.callerAuth\.token /,
 		);
 	});
 
-	it("accepts a token with an inner space, which a request can present", () => {
-		expect(resolveCallerAuth({ callerAuth: { token: "s3 cret" } }, context)).toEqual({
+	it.each([
+		["an inner space", "s3 cret"],
+		["an inner tab", "s3\tcret"],
+		["a Latin-1 letter", "s3crét"],
+	])("accepts a token with %s, which a request can present", (_label, token) => {
+		expect(resolveCallerAuth({ callerAuth: { token } }, context)).toEqual({
 			header: "x-caller-token",
-			token: "s3 cret",
+			token,
 		});
 	});
+
+	it.each([["X_Caller"], ["x.api~key"], ["x-caller-token"]])(
+		"accepts the header name %j, which is RFC 9110 token characters",
+		(header) => {
+			expect(resolveCallerAuth({ callerAuth: { header, token: "s3cret" } }, context)).toEqual({
+				header,
+				token: "s3cret",
+			});
+		},
+	);
 
 	// A request header's name is an RFC 9110 token, so a configured name
 	// with any other character never matches one.

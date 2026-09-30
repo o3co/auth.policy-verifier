@@ -990,24 +990,29 @@ describe("AppConfigSchema — http.callerAuth", () => {
 	// `HTTP_CALLER_AUTH_TOKEN="   "`, or a secret stored with its trailing
 	// newline, boots a gate no request can pass: HTTP strips the whitespace
 	// around a header value and refuses a control character in one.
-	it.each([["   "], ["s3cret "], ["s3cret\n"], ["s3\u0001cret"]])(
-		"rejects the token %j, which no request can present",
-		(token) => {
-			const result = AppConfigSchema.safeParse({
-				oauth: { jwt: validJwt },
-				...baseBody,
-				http: { callerAuth: { token } },
-			});
-			expect(result.success).toBe(false);
-			// The key and the words the runtime guard uses: one shared check.
-			expect(result.error?.issues).toEqual([
-				expect.objectContaining({
-					path: ["http", "callerAuth", "token"],
-					message: expect.stringMatching(/^token must /),
-				}),
-			]);
-		},
-	);
+	it.each([
+		["   "],
+		["s3cret "],
+		["s3cret\n"],
+		["s3\u0001cret"],
+		["\u3000"],
+		["\ufeffs3cret"],
+		["\u00a0"],
+	])("rejects the token %j, which no request can present", (token) => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			http: { callerAuth: { token } },
+		});
+		expect(result.success).toBe(false);
+		// The key and the words the runtime guard uses: one shared check.
+		expect(result.error?.issues).toEqual([
+			expect.objectContaining({
+				path: ["http", "callerAuth", "token"],
+				message: expect.stringMatching(/^token must /),
+			}),
+		]);
+	});
 
 	it.each([
 		["   ", "s3cret"],
@@ -1027,6 +1032,32 @@ describe("AppConfigSchema — http.callerAuth", () => {
 				path: ["http", "callerAuth", "header"],
 				message: expect.stringMatching(/^header must /),
 			}),
+		]);
+	});
+
+	it.each([
+		["s3 cret", "x-caller-token"],
+		["s3\tcret", "X_Caller"],
+		["s3crét", "x.api~key"],
+	])("accepts the token %j with the header %j, which a request can present", (token, header) => {
+		const result = AppConfigSchema.parse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			http: { callerAuth: { header, token } },
+		});
+		expect(result.http.callerAuth).toEqual({ header, token });
+	});
+
+	// Each field is checked on its own, so every issue is reported at once.
+	it("reports a bad header and a bad token together", () => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			http: { callerAuth: { header: 5, token: "   " } },
+		});
+		expect(result.error?.issues.map((issue) => issue.path.join("."))).toEqual([
+			"http.callerAuth.header",
+			"http.callerAuth.token",
 		]);
 	});
 });
