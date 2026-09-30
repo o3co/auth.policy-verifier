@@ -54,7 +54,8 @@ const repoRoot = new URL("../../../../", import.meta.url);
 /**
  * The deny envelope exactly as `README.md`, `README.ja.md` and `CHANGELOG.md`
  * print it for a body the parser refuses, checked against the route's own
- * answer and against all three files — see the last describe.
+ * answer and against all three files — see the describe
+ * "the deny envelope and verify defaults the docs print".
  *
  * **Read from the conformance fixture, not restated here.** That file is the
  * contract an enforcement layer implements against. It is read as bytes rather

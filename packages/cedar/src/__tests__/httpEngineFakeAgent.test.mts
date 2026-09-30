@@ -199,7 +199,7 @@ describe("cedarHttpEngine over the wire — what reaches the agent", () => {
 		});
 	});
 
-	it("reads the set back with GET <base>/v1/policies, the token verbatim, once an interval has passed (#286)", async () => {
+	it("reads the set back with GET <base>/v1/policies, the token verbatim, once an interval has passed", async () => {
 		let clock = 0;
 		const loaded = await createCedarHttpEngine({ env: {}, now: () => clock }).load(
 			policySet(),
@@ -271,7 +271,7 @@ describe("cedarHttpEngine over the wire — reading the answer", () => {
 		});
 	});
 
-	it("names no revision, whatever the agent claims — cedar-agent does not say what it ran (#244)", async () => {
+	it("names no revision, even when the agent claims the one it was pushed — cedar-agent does not say what it ran", async () => {
 		const loaded = await loadedAgainst(agent.origin);
 		agent.answer(
 			cedarAgent({ ...decision("Allow", [pushed("10-permit")]), revision: policySet().revision }),
@@ -570,7 +570,7 @@ describe("cedarHttpEngine over the wire — boot", () => {
 		);
 	});
 
-	it("never calls a refused agent reachable, wherever the deadline falls on its last attempt (#271)", async () => {
+	it("never calls a refused agent reachable when the load retries it up to the deadline", async () => {
 		// With room for retries, the last attempt runs under whatever is left of
 		// the deadline — a millisecond, when a timer overshoots — and can time
 		// out before its refusal arrives. It is a race, so this is the check on
@@ -711,7 +711,7 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 		return { status, revision: null, loadedRevision };
 	}
 
-	it("permits, reporting the revision it pushed as loaded and none as evaluated (#244)", async () => {
+	it("permits, reporting the revision it pushed as loaded and none as evaluated", async () => {
 		const { rule: permit } = await rule();
 		expect(loadedRevision).toMatch(/^sha256:[0-9a-f]{64}$/);
 		agent.answer(cedarAgent(decision("Allow", [pushed("10-permit")])));
@@ -775,7 +775,7 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 		});
 	});
 
-	it("does not take an agent's word for the revision — it cannot vouch for what it ran (#244)", async () => {
+	it("does not take an agent's word for the revision — it cannot vouch for what it ran", async () => {
 		const { rule: permit } = await rule();
 		agent.answer(
 			cedarAgent({ ...decision("Allow", [pushed("10-permit")]), revision: loadedRevision }),
@@ -787,7 +787,7 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 		});
 	});
 
-	it("names the policies an agent reports in a structured form by their file ids (#199)", async () => {
+	it("names the policies an agent reports in a structured form by their file ids", async () => {
 		const { rule: permit } = await rule();
 		agent.answer(
 			cedarAgent({
@@ -807,7 +807,7 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 		["an unmarked id — a set somebody else pushed", ["10-permit"]],
 		["another load's", [agentPolicyId("10-permit", "sha256:0000000000000000")]],
 		["an item that is not an id", [42]],
-	])("denies, and logs, an allow naming %s (#283)", async (_label, reason) => {
+	])("denies, and logs, an allow naming %s", async (_label, reason) => {
 		const { rule: permit, logger } = await rule({ logEvaluationErrors: false });
 		agent.answer(cedarAgent({ decision: "Allow", diagnostics: { reason, errors: [] } }));
 		const decided = await evaluate(attrs(), [permit]);
@@ -820,7 +820,7 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 	});
 
 	it.each([true, false])(
-		"denies, and logs as a foreign answer, errors alone naming a policy this load never pushed — logEvaluationErrors = %s (#283)",
+		"denies, and logs as a foreign answer, errors alone naming a policy this load never pushed — logEvaluationErrors = %s",
 		async (logEvaluationErrors) => {
 			// A set this verifier did not load, answering with errors only: a
 			// foreign answer, not this load's evaluation errors, so
@@ -845,7 +845,7 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 		},
 	);
 
-	it("denies, and logs a read-back refusal, while the agent holds another's set (#286)", async () => {
+	it("denies, and logs a read-back refusal, while the agent holds another's set", async () => {
 		let clock = 0;
 		// A name of its own each run: the registry is process-wide and refuses a
 		// second engine under a taken name, as a retry would register.
@@ -884,7 +884,7 @@ describe("CedarPolicyRuleCollector over the wire", () => {
 		);
 	});
 
-	it("refuses requireConfirmedRevision at boot, before anything reaches the agent (#244)", async () => {
+	it("refuses requireConfirmedRevision at boot, before anything reaches the agent", async () => {
 		await expect(rule({ requireConfirmedRevision: true })).rejects.toThrow(
 			/requireConfirmedRevision = true cannot be used with the "http" engine/,
 		);

@@ -481,7 +481,7 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 				expect((res.body as Record<string, unknown>).subject).toBe(adapter.fixtures.subject);
 			});
 
-			it("omits subject entirely when the token carries no sub (#158)", async () => {
+			it("omits subject entirely when the token carries no sub", async () => {
 				// Omitted, not `null` and not `""`: a subject that does not exist must
 				// not be reported as one every subject-less token shares.
 				const res = await post("/verify", adapter.fixtures.allowed, "validWithoutSubject");
@@ -504,7 +504,7 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 				expect(body.message).toBe(representative.message);
 			});
 
-			it("names what decided each passing group, and nothing on a failing one (#135)", async () => {
+			it("names what decided each passing group, and nothing on a failing one", async () => {
 				const request = adapter.fixtures.partiallySatisfied ?? adapter.fixtures.denied;
 				const res = await post("/verify", request);
 				const groups = (
@@ -588,7 +588,7 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 			);
 		});
 
-		describe("a collector fan-out that runs out of time (#115)", () => {
+		describe("a collector fan-out that runs out of time", () => {
 			it.runIf(adapter.fixtures.stalling)("denies with 403 and an empty reason", async () => {
 				const stalling = adapter.fixtures.stalling;
 				if (!stalling) return;
@@ -630,7 +630,7 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 		// reads is not narrower than the surface it meets. Two are exercised on
 		// the wire below; the third — the optional caller-auth gate's — cannot
 		// be, and the case says why.
-		describe("a scalar attribute conflict (#174, table row #182)", () => {
+		describe("a scalar attribute conflict", () => {
 			it.runIf(adapter.fixtures.conflicting)("denies with 403 and an empty reason", async () => {
 				const conflicting = adapter.fixtures.conflicting;
 				if (!conflicting) return;
@@ -649,7 +649,7 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 			});
 		});
 
-		describe("a collector failure that is not a timeout (table row #182)", () => {
+		describe("a collector failure that is not a timeout", () => {
 			it.runIf(adapter.fixtures.failing)("answers the terminal 500 envelope", async () => {
 				const failing = adapter.fixtures.failing;
 				if (!failing) return;
@@ -667,7 +667,7 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 			});
 		});
 
-		describe("the caller's request id (#200)", () => {
+		describe("the caller's request id", () => {
 			/** An id inside the contract's shape: the one protobuf.interceptors mints. */
 			const ID = "20260917123456_0123456789abcdef";
 
@@ -738,7 +738,7 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 			});
 		});
 
-		describe("the evaluation behind a rule's answer (#244)", () => {
+		describe("the evaluation behind a rule's answer", () => {
 			const reporting = adapter.fixtures.reportingEvaluation;
 
 			it.runIf(reporting)(
@@ -762,7 +762,7 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 			);
 
 			it.runIf(reporting?.unconfirmed)(
-				"says null when what was evaluated is not established, and what was loaded beside it",
+				"says null when what was evaluated is not established",
 				async () => {
 					const res = await post("/verify", reporting?.unconfirmed);
 					const evaluations = evaluationsOf(expectDecisionEnvelope(res.body));
@@ -774,7 +774,7 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 			);
 
 			it.runIf(reporting?.determining)(
-				"names the policies that determined a completed answer, and only on a completed one (#199)",
+				"names the policies that determined a completed answer, and only on a completed one",
 				async () => {
 					const res = await post("/verify", reporting?.determining);
 					const evaluations = evaluationsOf(expectDecisionEnvelope(res.body));
@@ -829,8 +829,8 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 			);
 		});
 
-		describe("the code the table names without a request case (#182)", () => {
-			it("names the caller-auth gate's refusal, which answers ahead of this surface (#108)", () => {
+		describe("the code the table names without a request case", () => {
+			it("names the caller-auth gate's refusal: code caller_unauthenticated, status 401", () => {
 				// The optional `http.callerAuth` gate sits IN FRONT of the pinned
 				// surface — it answers before the body is parsed, so it is not one
 				// of the per-request refusals the request cases enumerate, and this
