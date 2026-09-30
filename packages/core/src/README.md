@@ -69,7 +69,8 @@ documented, not tested.
 - OR within a `ruleType` group, AND across; every group is evaluated even after one fails;
   `evaluated` is what ran, `satisfiedBy` what decided; a request no granting rule applies to
   is a deny unless `onEmptyRuleSet: "allow"`, which still holds it to its restricting rules; a
-  group mixing the two kinds is refused before any rule runs —
+  group mixing the two kinds is refused before any rule runs, and a restricting group's outcome
+  carries `restricts: true` —
   [`__tests__/evaluate.test.mts`](__tests__/evaluate.test.mts).
 - An `AsyncRule` runs under `ruleTimeoutMs` and the phase's `evaluateDeadlineMs`, whichever
   ends first, and none starts once the phase is spent; a synchronous rule is not timed; the

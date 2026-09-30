@@ -434,10 +434,20 @@ export interface RuleOutcome {
  * ends with that rule, which is also `satisfiedBy`, and alternatives after it
  * never ran and are not reported. A failing group ran every alternative, so
  * `evaluated` lists them all.
+ *
+ * `restricts` is `true` on a group of restricting rules, and absent on a
+ * granting one: an allow whose groups all restrict was granted by none of
+ * them, and reached through `onEmptyRuleSet: "allow"`.
  */
 export type RuleGroupOutcome =
-	| { ruleType: string; passed: true; evaluated: RuleOutcome[]; satisfiedBy: RuleOutcome }
-	| { ruleType: string; passed: false; evaluated: RuleOutcome[] };
+	| {
+			ruleType: string;
+			passed: true;
+			evaluated: RuleOutcome[];
+			satisfiedBy: RuleOutcome;
+			restricts?: true;
+	  }
+	| { ruleType: string; passed: false; evaluated: RuleOutcome[]; restricts?: true };
 
 /**
  * Structured account of how a decision was reached, carried on both allow and

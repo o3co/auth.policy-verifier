@@ -40,7 +40,8 @@ npm install @o3co/auth.policy-verifier.core
 先に試して失敗した代替ルールに続いてそのルールが入り、決め手となったそのルールは `satisfiedBy`
 （通過グループにのみ存在）で明示されます。最初に失敗したグループ以降も評価します — 途中で打ち切ると
 「残りも失敗したのか」に答えられないためです。deny の `code` / `message` は従来どおり最初に失敗した
-グループから取ります。
+グループから取ります。絞るルールのグループは `restricts: true` を持つので、すべてのグループが絞るものである
+allow（`onEmptyRuleSet: "allow"` が通したもの）を、ルールが許可した allow と見分けられます。
 
 ルールのリストにはどちらの種類のルールも混在できます (#225)。同期の `Rule` は `verify` で、`AsyncRule` は `ruleTimeoutMs` の制限下で `decide` を await して問い合わせます。どちらも収集順に 1 つずつ問い、グループ内で最初に通ったルール以降の代替ルールは種類を問わず実行されません。`evaluate` が非同期なのはそのためだけで、同期ルールだけのリストは同じターン内で答えが出ます。非同期ルールが予算を超えたとき、またはルール全体で `evaluateDeadlineMs` を超えたときは `RuleTimeoutError` で reject します（`limit: "rule"` または `"deadline"`。transport にとっては deny であり、pass にはなりません）。`signal` が abort されれば呼び出し側の abort 理由で、ルールが throw / reject すればその値でそのまま reject し、[`FailureRecord`](#failurerecord) が渡されていればそのルールを `failures` に記録します。
 
