@@ -72,7 +72,7 @@ function checked(check: CallerAuthFieldCheck, { caller, path }: CallerAuthErrorC
  * the shape HOCON produces when the variable behind
  * `token = ${?HTTP_CALLER_AUTH_TOKEN}` is unset: the key is absent, while the
  * block survives because of the header default. "Present but tokenless" is off,
- * not malformed.
+ * not malformed — though its header is still checked, as the schema checks it.
  *
  * A malformed block throws rather than silently disabling the gate: an empty
  * credential is a configuration mistake, and reading it as "caller auth is off"
@@ -96,14 +96,16 @@ export function resolveCallerAuth(
 	}
 
 	const { header, token } = raw as { header?: unknown; token?: unknown };
+	// Checked before the tokenless return, as `AppConfigSchema` checks it: a
+	// header no request can carry is refused whether or not the gate is on.
+	const checkedHeader =
+		header === undefined
+			? DEFAULT_CALLER_AUTH_HEADER
+			: checked(checkCallerAuthHeader(header), context);
 	if (token === undefined) {
 		return undefined;
 	}
-	const checkedToken = checked(checkCallerAuthToken(token), context);
-	if (header === undefined) {
-		return { header: DEFAULT_CALLER_AUTH_HEADER, token: checkedToken };
-	}
-	return { header: checked(checkCallerAuthHeader(header), context), token: checkedToken };
+	return { header: checkedHeader, token: checked(checkCallerAuthToken(token), context) };
 }
 
 /**

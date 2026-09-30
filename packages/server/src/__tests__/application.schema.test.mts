@@ -1009,23 +1009,26 @@ describe("AppConfigSchema — http.callerAuth", () => {
 		},
 	);
 
-	it.each([["   "], [" x-api-key"], ["x api key"]])(
-		"rejects the header name %j, which no request can carry",
-		(header) => {
-			const result = AppConfigSchema.safeParse({
-				oauth: { jwt: validJwt },
-				...baseBody,
-				http: { callerAuth: { header, token: "s3cret" } },
-			});
-			expect(result.success).toBe(false);
-			expect(result.error?.issues).toEqual([
-				expect.objectContaining({
-					path: ["http", "callerAuth", "header"],
-					message: expect.stringMatching(/^header must /),
-				}),
-			]);
-		},
-	);
+	it.each([
+		["   ", "s3cret"],
+		[" x-api-key", "s3cret"],
+		["x api key", "s3cret"],
+		// Checked with the gate off too, as the runtime guard checks it.
+		["x api key", undefined],
+	])("rejects the header name %j, which no request can carry (token %j)", (header, token) => {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt: validJwt },
+			...baseBody,
+			http: { callerAuth: { header, token } },
+		});
+		expect(result.success).toBe(false);
+		expect(result.error?.issues).toEqual([
+			expect.objectContaining({
+				path: ["http", "callerAuth", "header"],
+				message: expect.stringMatching(/^header must /),
+			}),
+		]);
+	});
 });
 
 describe("AppConfigSchema — HS256 secret rotation", () => {

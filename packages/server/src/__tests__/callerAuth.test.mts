@@ -45,6 +45,17 @@ describe("resolveCallerAuth", () => {
 		).toBeUndefined();
 	});
 
+	// The schema checks the header whether or not a token is set, so the guard
+	// does too: the same block gets the same verdict at both boundaries.
+	it.each([
+		["empty", ""],
+		["not a field name", "x api key"],
+	])("rejects a tokenless block whose header is %s, as the schema does", (_label, header) => {
+		expect(() => resolveCallerAuth({ callerAuth: { header } }, context)).toThrow(
+			/^createApp: http\.callerAuth\.header /,
+		);
+	});
+
 	it("defaults the header when only a token is supplied", () => {
 		expect(resolveCallerAuth({ callerAuth: { token: "s3cret" } }, context)).toEqual({
 			header: "x-caller-token",
