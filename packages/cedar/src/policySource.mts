@@ -4,7 +4,7 @@
 /*
  * Reads the Cedar policy files a `CedarPolicyRuleCollector` evaluates, from
  * `policyDir` or inline `policies`, computes the revision a decision's
- * provenance names for them, and names the policies in them (#199) — the one
+ * provenance names for them, and names the policies in them — the one
  * place a policy id is made, for every engine. Reading and naming only:
  * parsing and compiling are the engine's job.
  */
@@ -37,7 +37,7 @@ export interface PolicySource {
 	/** Human description of the source (`inline policies` or the resolved directory). */
 	description: string;
 	/**
-	 * Identifies the contents above (#244) — see {@link computePolicyRevision}.
+	 * Identifies the contents above — see {@link computePolicyRevision}.
 	 * Computed here, once, from the same `files` an engine is handed, so the
 	 * reference and what it refers to cannot be read at two different moments.
 	 */
@@ -48,7 +48,7 @@ export interface PolicySource {
 const REVISION_PREIMAGE_HEADER = "auth.policy-verifier.cedar/policy-set/v1\n";
 
 /**
- * The reference a decision's provenance names for a loaded policy set (#244):
+ * The reference a decision's provenance names for a loaded policy set:
  * `sha256:` and the lowercase hex SHA-256 of
  *
  * ```text
@@ -57,25 +57,20 @@ const REVISION_PREIMAGE_HEADER = "auth.policy-verifier.cedar/policy-set/v1\n";
  * ```
  *
  * with `<bytes>` the decimal UTF-8 byte length of what follows it (netstring
- * framing). The notation is the OCI digest grammar, which is the shape core
- * holds a revision to.
+ * framing), in the OCI digest notation core holds a revision to.
  *
- * **What it covers, and why that.** Each file's name and text, in the order
- * they are loaded, and nothing else. The name is in because the policy ids
- * are made from it ({@link policyIdsOf}), so a rename changes what a
- * decision's determining policies are called. The framing is there because the
- * concatenation is not injective — `"X\n" + "Y"` and `"X" + "\nY"` are one
- * `text` and two policy sets. The directory is deliberately out: two replicas
- * mounting the same files at different paths hold the same revision, and a
- * path is not something a decision response may carry.
+ * It covers each file's name and text, in load order, and nothing else. The
+ * name is in because the policy ids are made from it ({@link policyIdsOf}).
+ * The framing is there because concatenation is not injective: `"X\n" + "Y"`
+ * and `"X" + "\nY"` are one `text` and two policy sets. The directory is out:
+ * replicas mounting the same files at different paths hold the same revision,
+ * and a decision response may not carry a path. The text as decoded is
+ * hashed, since that is what an engine is handed; for a file that is valid
+ * UTF-8 that is the file's own bytes.
  *
- * **What it does not cover.** The collector's mapping, `onNoDeterminingPolicy`,
- * the engine and its version, and the attributes a request was decided over
- * all shape an answer too. The revision says which policies were evaluated; it
- * does not promise that evaluating them again gives the same answer.
- *
- * It is the text as decoded that is hashed, because that is what an engine is
- * handed. For a file that is valid UTF-8 that is the file's own bytes.
+ * It says which policies were evaluated, not that evaluating them again gives
+ * the same answer: the collector's mapping, `onNoDeterminingPolicy`, the
+ * engine and its version, and the request's attributes shape an answer too.
  */
 export function computePolicyRevision(files: readonly Pick<PolicyFile, "name" | "text">[]): string {
 	const hash = createHash("sha256").update(REVISION_PREIMAGE_HEADER, "utf8");
@@ -91,7 +86,7 @@ function netstring(value: string): string {
 
 /**
  * The ids the `count` policies of `file` are known by — what Cedar names in
- * `diagnostics.reason`, and a decision in `determiningPolicies` (#199): the
+ * `diagnostics.reason`, and a decision in `determiningPolicies`: the
  * file's name without `.cedar` for a file that holds one policy, and that
  * name numbered `#1`, `#2`… in the file's order for a file that holds several.
  * The inline set's name is `policies` already.
@@ -119,7 +114,7 @@ export function policyIdsOf(file: Pick<PolicyFile, "name" | "source">, count: nu
 	return Array.from({ length: count }, (_, index) => `${stem}#${index + 1}`);
 }
 
-/** One policy of a set, named for its file (#199). */
+/** One policy of a set, named for its file. */
 export interface NamedPolicy {
 	/** Its id, from {@link policyIdsOf}. */
 	readonly id: string;
@@ -165,23 +160,22 @@ export function namePolicies(
  *
  * Exactly one of `policyDir` / `policies` must be set. `policyDir` is the
  * intended shape: the `*.cedar` files in that directory (sorted by name,
- * concatenated) are byte-identical to what a Cedar agent would load, so the
- * corpus stays lift-and-shift portable and the official `cedar` CLI can
- * validate the same files in CI. `policies` inlines a small set directly in
- * config.
+ * concatenated) are byte-identical to what a Cedar agent would load, and the
+ * official `cedar` CLI can validate the same files in CI. `policies` inlines a
+ * small set directly in config.
  *
  * Reading is this function's whole job; parsing is the engine's. The files
  * are handed over individually (`files`) as well as concatenated (`text`) so
- * that `CedarEngine.load` can parse-check each one and report a syntax error
- * against the file that contains it rather than against an offset into an
- * invisible concatenation. All of this runs at boot, inside the collector
- * factory: a broken policy set refuses to start, it does not serve denials
- * (two-boundary validation — config is checked before the first request, here
- * because file contents cannot be checked by the config schema).
+ * that `CedarEngine.load` can report a syntax error against the file that
+ * contains it. This runs at boot, inside the collector factory: a broken
+ * policy set refuses to start, it does not serve denials.
  *
  * A directory with zero `.cedar` files is allowed and yields the empty policy
- * set: that is migration step one — the collector mounted, abstaining on every
- * request, behavior unchanged until the first policy lands.
+ * set, under which no policy determines any request: the collector's rule
+ * fails every request under the default `onNoDeterminingPolicy = "deny"`, and
+ * passes every one Cedar is asked under `"abstain"` (refused over an
+ * asynchronous engine) — the posture for mounting the collector before the
+ * first policy lands.
  *
  * Relative paths resolve against the working directory, matching how the
  * standalone template addresses its `config/` tree.

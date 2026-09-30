@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * The declaration shape two collectors share (#219): an operator names the
+ * The declaration shape two collectors share: an operator names the
  * fields to promote, what to call them, and what type each must have.
  * `RequestContextAttributeCollector` reads them out of the caller's request
  * body; `PayloadClaimAttributeCollector` reads them out of the verified

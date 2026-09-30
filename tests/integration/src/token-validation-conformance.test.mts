@@ -46,7 +46,7 @@ async function mint(envelope: TokenEnvelope): Promise<string> {
 	let jwt = new SignJWT({ scope: "read:project" })
 		.setProtectedHeader(tokenType === null ? { alg: "HS256" } : { alg: "HS256", typ: tokenType })
 		.setIssuedAt()
-		// iat and exp are both mandatory now (#110). This suite is about the RFC
+		// iat and exp are both mandatory. This suite is about the RFC
 		// 9068 §4 envelope, so its tokens carry valid time claims and deviate only
 		// in iss / aud / typ; token lifetime is pinned by the sibling expiry suite.
 		.setExpirationTime("1h");

@@ -69,7 +69,7 @@ async function mintToken(subject: string): Promise<string> {
 		new SignJWT({ scope: "read:project" })
 			.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
 			.setIssuedAt()
-			// iat and exp are both mandatory now (#110); the time claims are not what
+			// iat and exp are both mandatory; the time claims are not what
 			// this suite is about, so the token simply carries valid ones.
 			.setExpirationTime("1h")
 			.setIssuer(ISSUER)

@@ -11,12 +11,11 @@
  * lowercase hex characters, zero-padded.
  *
  * Used by `computeValuesKey` to build a stable grouping suffix for `ruleType`.
- * The 64-bit output gives ~2^32 birthday-collision bound, which is
- * effectively non-colliding for any realistic policy size and resists
- * deliberate collision construction by a hostile policy author or supply
- * chain. (A 32-bit variant was rejected during review because random short
- * strings can be made to collide within seconds, weakening evaluator
- * grouping when two distinct rules on the same attribute share a `ruleType`.)
+ * The 64-bit output puts the birthday-collision bound at ~2^32, far above any
+ * realistic policy size, so distinct value sets do not collide by accident.
+ * It is not collision-resistant: a birthday search of about 2^32 hashes,
+ * within reach of commodity hardware, finds one on purpose, and two distinct
+ * rules on the same attribute that share a `ruleType` are OR-combined.
  *
  * Iterates UTF-16 code units via `charCodeAt`. BigInt is used because
  * 64-bit multiplication overflows IEEE-754 doubles; `Math.imul` only
@@ -54,11 +53,9 @@ export const COMPARE_OPS: readonly CompareOp[] = ["lt", "le", "gt", "ge"];
 
 /**
  * Validates that a config field used as an attribute name is a non-empty string
- * that does not contain the `:` separator character used in derived `ruleType`
- * strings. Allowing `:` would let distinct configs collide on the same
- * `ruleType` (e.g. `(a="x:y", b="z")` and `(a="x", b="y:z")` both produce
- * `attr_pair_equal:x:y:z`), which the evaluator would silently OR together
- * and weaken authorization.
+ * without `:`, the separator of derived `ruleType` strings. With `:` allowed,
+ * `(a="x:y", b="z")` and `(a="x", b="y:z")` would both produce
+ * `attr_pair_equal:x:y:z`, which the evaluator would silently OR together.
  * @param className - The rule class name, used in error messages.
  * @param fieldName - The config field name ("a" or "b"), used in error messages.
  * @param value - The raw value to validate.
@@ -84,10 +81,9 @@ export function requireAttrName(className: string, fieldName: "a" | "b", value: 
 
 /**
  * Validates that a config field used as a literal comparison value is a
- * string, number, or boolean (i.e. a LiteralValue). NaN is rejected because
- * its comparison semantics (`NaN !== NaN` is always true, `NaN === NaN` is
- * always false) would silently invert Equal/NotEqual rules — a NotEqual(v=NaN)
- * would always pass against any numeric attribute, weakening authorization.
+ * string, number, or boolean (i.e. a LiteralValue). NaN is rejected: `x !== NaN`
+ * is always true and `x === NaN` always false, so a NotEqual(v=NaN) would pass
+ * against any numeric attribute and an Equal(v=NaN) against none.
  * @param className - The rule class name, used in error messages.
  * @param fieldName - The config field name ("v"), used in error messages.
  * @param value - The raw value to validate.
@@ -222,20 +218,16 @@ export function requireOptionalGroup(className: string, value: unknown): string 
 
 /**
  * Computes a stable cache/dedup key for an array of LiteralValues.
- * Format: `{type}:{count}:{hashPrefix}` — `hashPrefix` is a 16-hex-character
- * FNV-1a 64-bit hash over a canonical serialization of `values`. The canonical
- * form first deduplicates `values` (to mirror the Set-based semantics of
- * AttrLiteralIn / AttrLiteralNotIn — duplicates do not change the rule's
- * behavior, so they must not change its `ruleType`), then applies
+ * Format: `{type}:{count}:{hashPrefix}` — `hashPrefix` is `fnv1a64` over a
+ * canonical serialization of `values`. The canonical form first deduplicates
+ * `values` (AttrLiteralIn / AttrLiteralNotIn test membership through a `Set`,
+ * so duplicates must not change the `ruleType`), then applies
  * `JSON.stringify(String(v))` to each remaining element before sorting and
  * joining with `,`. The per-element quoting prevents separator collisions
  * across different arrays (e.g. `["a,b", "c"]` vs `["a", "b,c"]`).
- * The `{count}` segment reflects the post-dedup element count.
+ * `{count}` is the post-dedup element count.
  * Caller must guarantee values is a non-empty homogeneous LiteralValue[].
- *
- * The hash is non-cryptographic by design, but uses 64-bit output to keep
- * the birthday-collision bound (~2^32) far above any realistic policy size
- * and to resist deliberate collision construction.
+ * The hash is non-cryptographic by design (see `fnv1a64`).
  */
 export function computeValuesKey(values: LiteralValue[]): string {
 	const elementType = typeof values[0];

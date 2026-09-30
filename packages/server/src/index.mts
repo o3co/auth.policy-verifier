@@ -53,7 +53,7 @@ export {
 	parseJwksUri,
 	resolveJwksFetchBounds,
 } from "./config/jwks.mjs";
-// The HS256 entropy floor's measurement (#114), exported so a consumer that
+// The HS256 entropy floor's measurement, exported so a consumer that
 // accepts its own operator secrets — a custom key resolver, a composition root
 // building a JWT config by hand — applies the identical reading rather than a
 // second opinion about what a 32-character hex string is worth.

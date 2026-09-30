@@ -7,7 +7,7 @@ import { MIN_SECRET_ENTROPY_BYTES } from "#/config/defaults.mjs";
 import { describeWeakSecret, measureSecretEntropyBytes } from "#/config/secretEntropy.mjs";
 
 describe("MIN_SECRET_ENTROPY_BYTES", () => {
-	it("is 32 bytes (256 bits) — the same floor auth.provider#282 set", () => {
+	it("is 32 bytes (256 bits)", () => {
 		expect(MIN_SECRET_ENTROPY_BYTES).toBe(32);
 	});
 });
@@ -81,8 +81,7 @@ describe("measureSecretEntropyBytes — base64 padding must be well-formed", () 
 	 * for it. Trimming any run of '=' would turn a passphrase that merely ends in
 	 * equals signs into a "valid" base64 body and score it at three-quarters of
 	 * its real length — fail-closed, but a usability trap with no security to
-	 * show for it. auth.provider#282 shipped that bug and then fixed it; this
-	 * port must not reintroduce it.
+	 * show for it.
 	 */
 
 	it("accepts one '=' after a 3-character final group", () => {

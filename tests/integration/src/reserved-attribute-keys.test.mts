@@ -3,13 +3,11 @@
 
 /*
  * Cross-package reservation, exercised the way a deployment reaches it: through
- * `createApp` with the real modules and a config an operator could write.
- *
- * The guard lives in `packages/builtins`, the vocabulary it protects lives in
- * `packages/cedar`, and the registry both consult lives in `packages/core` —
- * no two of which depend on each other in that direction. This suite is the
- * only place all three are on one dependency graph, which is also exactly the
- * situation a deployment is in.
+ * `createApp` with the real modules and a config an operator could write. The
+ * guard lives in `packages/builtins`, the vocabulary it protects in
+ * `packages/cedar`, and the registry both consult in `packages/core`; this
+ * suite is the only place all three are on one dependency graph, as they are
+ * in a deployment.
  */
 
 // Registers the in-process Cedar engine; the collector refuses to start without one.

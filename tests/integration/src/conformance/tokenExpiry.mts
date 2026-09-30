@@ -44,26 +44,23 @@ export interface TokenExpiryAdapter {
 }
 
 /**
- * Conformance suite pinning `exp` / `nbf` / `iat` enforcement
- * (o3co/auth.policy-verifier#106, #110).
+ * Conformance suite pinning `exp` / `nbf` / `iat` enforcement.
  *
  * Every deployment mode of the verifier must honour a token's own lifetime —
  * including the decode-only mode that skips signature verification: skipping
  * the signature is an (acknowledged, test-only) trust decision about the
- * issuer, but honouring an expired token is simply wrong in every mode, and is
- * what turns a leaked old token into a permanent credential.
+ * issuer, but honouring an expired token is wrong in every mode, and turns a
+ * leaked old token into a permanent credential.
  *
- * `exp` is **required**, not merely honoured when present (#110). jose's
- * `jwtVerify` checks time claims only when they appear, which left a token
- * minted (or forged) without `exp` valid forever — a fail-closed authorization
- * service must not depend on the issuer's discipline for expiry. `maxTokenAge`
- * closes the same hole from the other side: an `exp` the issuer set years out
- * is still bounded by how long ago the token was issued, which is why `iat` is
- * required too (RFC 9068 §2.2 requires both claims of an access token).
+ * `exp` is **required**, not merely honoured when present: jose's `jwtVerify`
+ * checks time claims only when they appear, and a fail-closed authorization
+ * service must not depend on the issuer's discipline for expiry. `iat` is
+ * required too, since `maxTokenAge` bounds an `exp` the issuer set years out by
+ * how long ago the token was issued (RFC 9068 §2.2 requires both claims of an
+ * access token).
  *
  * Both deployment modes are held to the identical outcome for the identical
- * token: the decode path restates these checks by hand, so this suite is what
- * keeps the two from disagreeing.
+ * token: the decode path restates these checks by hand.
  */
 export function describeTokenExpiryConformance(adapter: TokenExpiryAdapter): void {
 	describe(`token time-claim conformance — ${adapter.name}`, () => {
@@ -79,7 +76,7 @@ export function describeTokenExpiryConformance(adapter: TokenExpiryAdapter): voi
 			expect(await adapter.verify({ nbfOffsetSeconds: 3600 })).toBe("rejected");
 		});
 
-		// #110: the eternal token. Nothing about a token without `exp` says when
+		// The eternal token. Nothing about a token without `exp` says when
 		// it stops being a credential, so it never does.
 		it("rejects a token carrying no exp claim", async () => {
 			expect(await adapter.verify({ expOffsetSeconds: null })).toBe("rejected");

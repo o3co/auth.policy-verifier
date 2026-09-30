@@ -2,22 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Caller authentication for the decision endpoints (#108).
+ * Caller authentication for the decision endpoints.
  *
- * The bearer token on `/verify` establishes the *subject* a decision is about.
- * It says nothing about which service supplied `resource` / `action` /
- * `context` — so an endpoint that checks only the subject token is still a
- * decision oracle: anyone who can route to the port can probe which tokens,
- * scopes and resources this deployment accepts, and make it do pipeline work
- * while they do.
+ * The subject credential on `/verify` (a bearer token under the built-in
+ * authenticator) establishes the *subject* a decision is about, not which
+ * service supplied `resource` / `action` / `context`. An endpoint that checks
+ * only the subject credential is a decision oracle: anyone who can route to
+ * the port can probe which tokens, scopes and resources this deployment accepts,
+ * and make it do pipeline work while they do.
  *
- * This module closes that with a shared credential between the enforcement
- * layer and the verifier, checked before anything else runs. It is a second,
- * orthogonal question — "may you ask?" — and so it travels in its own header
- * rather than overloading `Authorization`.
+ * A shared credential between the enforcement layer and the verifier, checked
+ * before anything else runs, closes that. It answers a separate question, "may
+ * you ask?", so it travels in its own header rather than in `Authorization`.
  *
- * The gate is OPTIONAL today; see `CALLER_AUTH_REQUIRED` in `config/defaults`
- * for the one-line change that makes it mandatory.
+ * The gate is optional; flipping `CALLER_AUTH_REQUIRED` in `config/defaults`
+ * makes it mandatory.
  */
 
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -60,15 +59,15 @@ function assertNonEmptyString(
 /**
  * Reads the optional caller-auth block off an `http` config.
  *
- * Returns `undefined` when the deployment did not configure one — either the
- * block is absent, or it exists with no token. The second case is the shape
- * HOCON produces: `token = ${?HTTP_CALLER_AUTH_TOKEN}` leaves the key absent
- * when the variable is unset, while the block itself survives because of the
- * header default. "Present but tokenless" therefore means off, not malformed.
+ * Returns `undefined` when the block is absent or has no token. The second is
+ * the shape HOCON produces when the variable behind
+ * `token = ${?HTTP_CALLER_AUTH_TOKEN}` is unset: the key is absent, while the
+ * block survives because of the header default. "Present but tokenless" is off,
+ * not malformed.
  *
- * A block that *is* malformed throws rather than silently disabling the gate:
- * an empty credential is a configuration mistake, and reading it as "caller
- * auth is off" is exactly the silent failure this endpoint cannot afford.
+ * A malformed block throws rather than silently disabling the gate: an empty
+ * credential is a configuration mistake, and reading it as "caller auth is off"
+ * is the silent failure this endpoint cannot afford.
  */
 export function resolveCallerAuth(
 	http: object,
@@ -116,16 +115,14 @@ function credentialMatches(presented: string, expected: string): boolean {
  * decision work happens.
  *
  * Mount it ahead of the verify router: a rejected caller is answered before the
- * request body is parsed, so an unauthenticated peer cannot spend the process's
- * time on JSON parsing or the collector pipelines either.
+ * body is parsed, so it cannot spend the process's time on JSON parsing or the
+ * collector pipelines. A missing credential and a wrong one get the identical
+ * 401, so the rejection does not tell a prober whether what they sent had the
+ * right shape; rejections are logged so a probing campaign is visible.
  *
- * A missing credential and a wrong one get the identical 401 — the endpoint is
- * an oracle, and the rejection must not tell a prober whether what they sent
- * had the right shape. Rejections are logged so a probing campaign is visible.
- *
- * Validates its own config at construction, the same posture
- * `createTokenAuthenticator` takes: a misbuilt config fails here rather than
- * serving requests it can never authenticate.
+ * Validates its own config at construction, as `createTokenAuthenticator` does:
+ * a misbuilt config fails here rather than serving requests it can never
+ * authenticate.
  */
 export function createCallerAuthMiddleware(
 	config: CallerAuthConfig,

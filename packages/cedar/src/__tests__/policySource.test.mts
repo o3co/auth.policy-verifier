@@ -82,7 +82,7 @@ describe("loadPolicySource", () => {
 });
 
 /*
- * #244: the revision identifies the policy CONTENTS that were loaded — not
+ * The revision identifies the policy CONTENTS that were loaded — not
  * where they were loaded from, and not when. It is what a decision's
  * provenance names, so two replicas holding the same files must agree on it
  * and an edit that keeps every policy id must change it.
@@ -189,7 +189,7 @@ describe("loadPolicySource — the policy revision", () => {
 	});
 });
 
-describe("policyIdsOf — the ids a file's policies are known by (#199)", () => {
+describe("policyIdsOf — the ids a file's policies are known by", () => {
 	const file = (name: string) => ({ name, source: `/etc/verifier/policies/${name}`, text: "" });
 
 	it("names a file's one policy for the file, without .cedar — the id the http engine gives it", () => {
@@ -236,7 +236,7 @@ describe("policyIdsOf — the ids a file's policies are known by (#199)", () => 
 	});
 });
 
-describe("namePolicies — every policy of a set, named for its file (#199)", () => {
+describe("namePolicies — every policy of a set, named for its file", () => {
 	const file = (name: string, text: string): PolicyFile => ({
 		name,
 		source: `/etc/verifier/policies/${name}`,

@@ -42,19 +42,18 @@ export const CEDAR_AUTHENTICATION_ENV = "CEDAR_AUTHENTICATION";
 export const CEDAR_LOAD_TIMEOUT_MS = 10_000;
 
 /**
- * The default for `maxAnswerBytes`: the maximum number of bytes the engine
- * reads from one answer from the agent. A longer answer — declared by
- * `content-length` or streamed — is refused, a deny, rather than held in
- * memory for the rule's deadline: a faulty agent, or a proxy in front of it,
- * would otherwise hold that per concurrent call, and a process out of memory
- * takes every route down, not only the ones Cedar gates (#271). An answer's
- * determining-policy and error lists grow with the policy set, so a large set
- * can answer honestly past it; the collector's `maxAnswerBytes` raises it.
+ * The default for `maxAnswerBytes`: the most bytes the engine reads from one
+ * answer from the agent. A longer answer — declared by `content-length` or
+ * streamed — is refused, a deny, rather than held in memory for the rule's
+ * deadline: a faulty agent, or a proxy in front of it, would otherwise hold
+ * that per concurrent call, and a process out of memory takes every route
+ * down. A large policy set can answer honestly past it; the collector's
+ * `maxAnswerBytes` raises it.
  */
 export const CEDAR_ANSWER_MAX_BYTES = 1024 * 1024;
 
 /**
- * The default for `readBackIntervalMs` (#286): the most one read-back of the
+ * The default for `readBackIntervalMs`: the most one read-back of the
  * agent's policy set waits for the next — each wait is drawn from half of it
  * to all of it. A check starts behind an answer, so it bounds how long a
  * changed or emptied set goes unseen while the verifier is answering, at the
@@ -71,32 +70,30 @@ export interface CedarHttpEngineOptions {
 	/**
 	 * The `fetch` to call. Defaults to the global one, looked up per call. It
 	 * must honour `init.redirect`: every call asks for `"manual"` so that a 3xx
-	 * fails closed (#270), and a `fetch` that follows redirects anyway undoes that.
-	 * It must also reject once `init.signal` aborts, and fail a body still being
-	 * read, as the platform's does: the load tells its deadline apart from other
-	 * failures by that signal, and a body that stalls ends there (#271).
+	 * fails closed. It must also reject once `init.signal` aborts, and fail a
+	 * body still being read, as the platform's does: the load tells its deadline
+	 * apart from other failures by that signal, and a body that stalls ends there.
 	 */
 	fetch?: typeof fetch;
 	/** Where `CEDAR_ENDPOINT` / `CEDAR_AUTHENTICATION` are read. Defaults to `process.env`. */
 	env?: Readonly<Record<string, string | undefined>>;
 	/**
 	 * How long `load` keeps retrying an unreachable engine — and the deadline of
-	 * each read-back of the set, and of a push again into an empty agent (#286).
+	 * each read-back of the set, and of a push again into an empty agent.
 	 * Defaults to {@link CEDAR_LOAD_TIMEOUT_MS}.
 	 */
 	loadTimeoutMs?: number;
 	/** The pause between those retries. Defaults to 500 ms. */
 	retryMs?: number;
 	/**
-	 * The clock the read-back interval is measured on (#286), in milliseconds.
+	 * The clock the read-back interval is measured on, in milliseconds.
 	 * Defaults to `performance.now`: monotonic, so a wall clock stepped back
 	 * does not stop the checks.
 	 */
 	now?: () => number;
 	/**
-	 * Draws the wait between read-backs (#286), from half of
-	 * `readBackIntervalMs` to all of it: a number in [0, 1). Defaults to
-	 * `Math.random`.
+	 * Draws the wait between read-backs, from half of `readBackIntervalMs` to
+	 * all of it: a number in [0, 1). Defaults to `Math.random`.
 	 */
 	random?: () => number;
 }
@@ -112,74 +109,59 @@ interface AgentAuthorizationCall {
 
 /**
  * The out-of-process Cedar engine: a [cedar-agent](https://github.com/permitio/cedar-agent)
- * reached over HTTP, behind the `CedarEngine` port.
- *
- * ## What it does
+ * reached over HTTP, behind the `CedarEngine` port. Deploying it: the package
+ * README, "Running out of process".
  *
  * At `load` the policy set is pushed to the agent — `PUT /v1/policies`, one
- * entry per file, under the file's name and the load's mark (`agentPolicyId`,
- * #283) — so the agent holds
- * exactly the verifier's `config/policies` and nothing has to be converted or
- * mounted twice. The agent parses on receipt; a set it refuses fails boot
- * here, with the agent's message and the ids that were sent (the agent does
- * not say which one it choked on). Per request, `POST /v1/is_authorized` carries the
- * same `CedarRequest` the wasm engine evaluates, entities inline, and the
- * agent's `{ decision, diagnostics }` comes back as a {@link CedarDecision}.
- * The loaded set is asynchronous, so the collector builds an `AsyncRule` and
- * every call runs under the server's `verify.ruleTimeoutMs`; the signal that
- * deadline aborts is handed to `fetch`.
+ * entry per file — so the agent holds exactly the verifier's `config/policies`.
+ * A set the agent refuses fails boot, with the agent's message and the ids
+ * that were sent (the agent does not say which one it choked on). Per request,
+ * `POST /v1/is_authorized` carries the same `CedarRequest` the wasm engine
+ * evaluates, entities inline, and the agent's `{ decision, diagnostics }`
+ * comes back as a {@link CedarDecision}. The loaded set is asynchronous, so the
+ * collector builds an `AsyncRule` and every call runs under the server's
+ * `verify.ruleTimeoutMs`; the signal that deadline aborts is handed to `fetch`.
  *
- * ## Where the agent is
- *
- * `endpoint` in the collector's config entry, else `CEDAR_ENDPOINT`. Neither
- * is a boot error that names both ways out — this engine is also what a
- * deployment gets when it upgraded without importing the wasm package, and a
- * default address would turn that into ten seconds of "unreachable", or a
- * boot against whatever answered there (v0.10.0 audit; #225 specified the
- * error). The standalone template's compose file sets `CEDAR_ENDPOINT` for
- * its `cedar-engine` profile. A base URL: the two paths above are appended. Plain `http://` is accepted for loopback hosts only; anything
- * routable must be `https://`, the rule `jwksUri` follows, because the wire
- * carries the request's attributes and the agent's answer is an authorization.
+ * The agent is `endpoint` in the collector's config entry, else
+ * `CEDAR_ENDPOINT`: a base URL the two paths above are appended to. With
+ * neither, boot fails naming both ways out. There is no default address: this
+ * engine is also what a deployment gets when it does not import the wasm
+ * package, and a default would turn that into ten seconds of "unreachable", or
+ * a boot against whatever answered there. Plain `http://` is accepted for
+ * loopback hosts only, the rule `jwksUri` follows, because the wire carries
+ * the request's attributes and the agent's answer is an authorization.
  * `authentication` in config, else `CEDAR_AUTHENTICATION`, is sent verbatim as
- * the `Authorization` header — the value the agent was started with. A value
- * `fetch` cannot send — an ASCII control character other than a tab inside
- * it, a character above U+00FF — is refused at load, naming where it came
- * from and not the value: `fetch`'s own refusal can quote it whole, and the
- * load would have called the agent unreachable (#271).
- *
- * ## What it asks of the policy set
+ * the `Authorization` header. A value `fetch` cannot send is refused at load,
+ * naming where it came from and not the value, which `fetch`'s own refusal can
+ * quote whole.
  *
  * cedar-agent stores policies one by one, so **each `.cedar` file must hold
  * exactly one policy** (and inline `policies` one policy); a file with two is
- * refused at boot with the agent's message. Each is given the id
- * `namePolicies` makes of its file's name — the id the wasm engine compiles a
- * one-policy file under too — so a corpus laid out one policy per file works
- * under both and names its policies alike (#199); the agent holds it under
- * that id and the load's mark (`agentPolicyId`, #283), by which an answer from
- * a set this verifier did not load is told apart. `PUT /v1/policies` replaces the agent's
- * whole set, so one collector per agent: a second `load` against the same
- * endpoint is refused rather than silently overwriting the first.
+ * refused at boot. Each is pushed under the id `namePolicies` makes of its
+ * file's name, as the wasm engine names a one-policy file, and the load's mark
+ * ({@link agentPolicyId}), by which an answer from a set this verifier did not
+ * load is told apart. `PUT /v1/policies` replaces the agent's whole set, so
+ * run one collector per agent: this engine refuses a second `load` against an
+ * endpoint it has loaded or is loading (loopback spellings and the default
+ * port read as one; the path is part of the endpoint). The same agent reached
+ * under another base path or host name, or pushed to by another process, is
+ * not refused here; the read-back then finds the set changed and refuses
+ * answers.
  *
- * ## Failure is loud and closed
- *
- * Boot retries a connection refusal for {@link CEDAR_LOAD_TIMEOUT_MS} (a
- * compose sibling may be a few hundred milliseconds behind) and then refuses
- * to start; a load answered with a 3xx fails boot at once. After boot, an
- * agent that is unreachable, answers non-2xx, breaks off its answer or answers
- * something that is not a decision rejects with {@link CedarEngineError}; the
- * collector logs it and denies, never abstains. No redirect is followed
- * (#270): a 3xx is non-2xx, so `endpoint` must be the URL that answers the
- * calls itself.
- *
- * Each failure says what failed (#271). A transport failure names the cause
- * `fetch` keeps on its error — `connect ECONNREFUSED 127.0.0.1:8180`,
- * `getaddrinfo ENOTFOUND …`, a TLS code — rather than "fetch failed" for all
- * of them. An abort rejects with the signal's reason wherever it lands, before
- * the answer or while its body is read. A load whose deadline passes is
- * reported as no answer in time, with how the attempt before failed, never as
- * a reachable agent: a timeout does not show the connection was made. An
- * answer longer than `maxAnswerBytes` in the collector's config entry —
- * {@link CEDAR_ANSWER_MAX_BYTES} when it is absent — is refused, not read.
+ * Failure is loud and closed. Boot retries a connection refusal for
+ * {@link CEDAR_LOAD_TIMEOUT_MS} (a compose sibling may be a few hundred
+ * milliseconds behind) and then refuses to start; a load answered with a 3xx
+ * fails boot at once. After boot, an agent that is unreachable, answers
+ * non-2xx, breaks off its answer or answers something that is not a decision
+ * rejects with {@link CedarEngineError}; the collector logs it and denies,
+ * never abstains. No redirect is followed, so `endpoint` must be the URL that
+ * answers the calls itself. A transport failure names the cause `fetch` keeps
+ * on its error (`connect ECONNREFUSED 127.0.0.1:8180`, a TLS code), not "fetch
+ * failed". An abort rejects with the signal's reason, before the answer or
+ * while its body is read. A load whose deadline passes is reported as no
+ * answer in time, never as a reachable agent. An answer longer than
+ * `maxAnswerBytes` in the collector's config entry
+ * ({@link CEDAR_ANSWER_MAX_BYTES} when it is absent) is refused, not read.
  */
 export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): CedarEngine {
 	const env = options.env ?? process.env;
@@ -202,9 +184,9 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 			const readBackIntervalMs = resolveReadBackIntervalMs(context.config.readBackIntervalMs);
 
 			const nonBlank = source.files.filter((file) => file.text.trim().length > 0);
-			// One policy per file (see the doc comment), so each file is one
-			// policy — named before the endpoint is reserved, so a refusal holds nothing.
-			// Pushed under this load's mark (#283); the file id is what a decision records.
+			// One policy per file, so each file is one policy — named before the
+			// endpoint is reserved, so a refusal holds nothing. Pushed under this
+			// load's mark; the file id is what a decision records.
 			const named = namePolicies(nonBlank, (file) => [file.text]);
 			const ownIds = new Map(named.map(({ id }) => [agentPolicyId(id, source.revision), id]));
 			const ownMark = loadMark(source.revision);
@@ -271,8 +253,8 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 				throw cause;
 			}
 			// The agent's set, read back behind answers and compared with its copy
-			// of what was pushed (#286): a token holder's edits and an emptied agent
-			// show there, not in any answer.
+			// of what was pushed: a token holder's edits and an emptied agent show
+			// there, not in any answer.
 			let readBack: ReturnType<typeof createAgentReadBack>;
 			try {
 				readBack = createAgentReadBack({
@@ -319,10 +301,10 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 						headers,
 						body: JSON.stringify(call),
 						signal,
-						// Not followed (#270): a 3xx is the non-2xx it is, and fails closed
-						// below. Followed, it re-sent the call — the subject's attributes —
-						// wherever `Location` pointed and took that server's answer as the
-						// decision, so a redirect could turn a forbid into an allow.
+						// Not followed: a 3xx is the non-2xx it is, and fails closed below.
+						// Followed, the call — the subject's attributes — would go wherever
+						// `Location` points and that server's answer would be the decision,
+						// so a redirect could turn a forbid into an allow.
 						redirect: "manual",
 					});
 					if (!response.ok) {
@@ -349,7 +331,7 @@ export function createCedarHttpEngine(options: CedarHttpEngineOptions = {}): Ced
 }
 
 /**
- * The id the agent holds a policy under (#283): its file id, and the load's
+ * The id the agent holds a policy under: its file id, and the load's
  * mark — the first 16 hex of the policy set's revision — after an `@`
  * (`10-permit-eng@9f2c…`). cedar-agent evaluates whatever set it holds, which
  * anyone with its token can replace, and names no revision; the ids of the
@@ -371,24 +353,22 @@ function loadMark(revision: string): string {
 }
 
 /**
- * An answer, read against what this load pushed (#283). Every policy it
- * names must be one of this load's, under its mark — each determining policy,
- * and the policy each evaluation error names; then the answer names the
- * determining ones by their file ids, each once — so it can name no more than
- * were pushed. One that is not — no mark, another load's, an id never pushed,
- * an item that is not an id at all — means the answer did not come from this
- * set: it is marked `foreign`, and names nothing of it. The errors count as
- * much as the reason: a set this verifier did not load can answer with errors
- * alone, and they would otherwise be logged as this load's.
+ * An answer, read against what this load pushed. Every policy it names — each
+ * determining policy, and the policy each evaluation error names — must be one
+ * of this load's, under its mark; the answer then names the determining ones
+ * by their file ids, each once, so it can name no more than were pushed. One
+ * that is not — no mark, another load's, an id never pushed, an item that is
+ * not an id at all — means the answer did not come from this set: it is
+ * marked `foreign`, and names nothing of it. The errors count as much as the
+ * reason: a set this verifier did not load can answer with errors alone, and
+ * they would otherwise be logged as this load's. The errors stay the agent's
+ * text, marked ids and all, for the log.
  *
- * The errors stay the agent's text, marked ids and all, for the log.
- *
- * The mark is no secret and no authenticator: the ids are in every answer, in
- * the agent's `GET /v1/policies`, and computable from the policy files. It
- * catches a set this verifier did not load — replaced, shared, reloaded — not
- * someone holding the agent's token, who can rewrite a policy under its own
- * marked id, or delete one, and be answered for as this load. No check of an
- * answer can see that; the agent's token is the boundary.
+ * The mark is no secret and no authenticator: it catches a set this verifier
+ * did not load — replaced, shared, reloaded — not someone holding the agent's
+ * token, who can rewrite a policy under its own marked id, or delete one, and
+ * be answered for as this load. No check of an answer can see that; the
+ * agent's token is the boundary.
  */
 function ownDecision(
 	{ decision, errorItems }: AgentAnswer,
@@ -436,26 +416,25 @@ const ATTRIBUTE_EVALUATION_ERROR = "error occurred while evaluating entity attri
  * one (Cedar 3.x+). An item that names no id it can read is
  * {@link UNREADABLE_POLICY_ID}, no policy of this load's.
  *
- * In a string, Cedar prints the id through Rust's `escape_debug` — in
- * `diagnostics.reason` it is sent raw — so it is unescaped to compare. And a
+ * In a string, Cedar prints the id through Rust's `escape_debug` (in
+ * `diagnostics.reason` it is sent raw), so it is unescaped to compare. A
  * backtick is not escaped: a file named `` a`: b.cedar `` holds the `` `: ``
  * that ends an id. So an id of this load's is read to where this load's mark
  * ends it; any other, to the first `` `: ``. Either way the slice starts at
- * the id, so the message after it — which may carry the request's values —
- * cannot make another set's id read as this load's, unless one of this
- * load's own file names holds `` `: ``: there the text is ambiguous, and no
- * reading can tell an error of `` a`: b `` from one of `a` whose message
- * begins `` b@<mark>`: ``. An erroring answer is denied either way; only
- * which line logs it is at stake. For such a name, too, another load's mark
- * is not read off it — the answer is foreign without one.
+ * the id, so the message after it, which may carry the request's values,
+ * cannot make another set's id read as this load's — unless one of this
+ * load's own file names holds `` `: ``: there the text is ambiguous (an error
+ * of `` a`: b `` reads like one of `a` whose message begins `` b@<mark>`: ``),
+ * and another load's mark is not read off such a name either — the answer is
+ * foreign without one. An erroring answer is denied either way; only which
+ * line logs it is at stake.
  *
  * Nor can the text tell one of this load's ids from another set's id that
  * embeds it and the delimiter (`` a@<mark>`: x ``): that reads as this load's.
  * Only a token holder can push such an id, and a token holder can already
  * answer as this load (see `ownDecision`). Refusing the ambiguity instead
- * would hand it to the request: its values reach the message, so a requester
- * could turn this load's own errors into foreign-set alarms. The answer is
- * denied either way.
+ * would let a requester, whose values reach the message, turn this load's own
+ * errors into foreign-set alarms. The answer is denied either way.
  */
 function erroringPolicy(item: unknown, ownMark: string): string | undefined {
 	if (typeof item === "string") {
@@ -532,18 +511,18 @@ async function pushPolicies(
 				headers,
 				body: JSON.stringify(policies),
 				signal: attemptSignal,
-				// Not followed (#270): the policy set goes to the configured endpoint
-				// or nowhere.
+				// Not followed: the policy set goes to the configured endpoint or
+				// nowhere.
 				redirect: "manual",
 			});
 		} catch (cause) {
 			// The attempt's own signal is the load deadline, told by the signal
 			// and not by the name of what `fetch` threw. It proves only that no
-			// answer came in time, not that the agent is reachable (#271): a
-			// retry runs on what is left of the deadline — a millisecond, when a
-			// timer overshoots — and can time out before its refusal arrives, and
-			// a host that drops packets never completes the connection at all.
-			// So the message says what is known, and names how the attempt before
+			// answer came in time, not that the agent is reachable: a retry runs
+			// on what is left of the deadline — a millisecond, when a timer
+			// overshoots — and can time out before its refusal arrives, and a
+			// host that drops packets never completes the connection at all. So
+			// the message says what is known, and names how the attempt before
 			// failed when one did.
 			if (attemptSignal.aborted) {
 				throw new CedarEngineError(
@@ -585,8 +564,8 @@ async function pushPolicies(
 		}
 		if (response.status === 401 || response.status === 403) {
 			// The agent's own body says only "requires user authentication"; the
-			// fix is on this side, so name it (v0.10.0 audit — the template starts
-			// the agent with CEDAR_AGENT_AUTHENTICATION from CEDAR_AUTHENTICATION).
+			// fix is on this side, so name it. The template starts the agent with
+			// CEDAR_AGENT_AUTHENTICATION from CEDAR_AUTHENTICATION.
 			await response.body?.cancel().catch(() => undefined);
 			throw new CedarEngineError(
 				headers.authorization === undefined
@@ -605,14 +584,14 @@ async function pushPolicies(
 	}
 }
 
-/** Every answer while the read-back refuses (#286): a fresh one each time, nothing shared. */
+/** Every answer while the read-back refuses: a fresh one each time, nothing shared. */
 function refused(why: ReadBackRefusal): CedarDecision {
 	return { decision: "deny", reason: [], errors: [], foreign: { why } };
 }
 
 /**
  * The agent's answer to the push: its own copy of the set — the ids sent,
- * each policy as its Cedar re-printed it (#286). A later read-back is compared
+ * each policy as its Cedar re-printed it. A later read-back is compared
  * with it, so an answer that is not a set, or not the ids that were sent,
  * fails the load: there would be nothing to read the set back against.
  */
@@ -654,7 +633,7 @@ async function pushedCopy(
 
 /**
  * The set the agent holds: `GET /v1/policies`, bounded as an answer is, within
- * the load's deadline (#286). Once an answer has begun to arrive, whatever
+ * the load's deadline. Once an answer has begun to arrive, whatever
  * keeps it from being compared — an error status, a set past the bound,
  * something that is not a set, a body broken off or not whole in time — comes
  * back as `unverifiable`, and refuses answers: a token holder who can grow the
@@ -674,7 +653,7 @@ async function readAgentSet(
 			method: "GET",
 			headers,
 			signal,
-			// Not followed (#270): the set is read from the configured endpoint.
+			// Not followed: the set is read from the configured endpoint.
 			redirect: "manual",
 			// From the agent, not a copy a hop kept: a cached set that matched would
 			// make the read-back pass whatever the agent now holds.
@@ -747,13 +726,13 @@ function isLoopbackHost(hostname: string): boolean {
 }
 
 /**
- * What identifies an agent for "one collector per agent" (v0.10.0 audit): the
- * endpoint with every loopback spelling — `localhost`, `127.0.0.0/8`, `[::1]` —
- * read as one host and the default port made explicit. Keyed on the string,
- * `http://127.0.0.1:8180` and `http://localhost:8180` were two agents, and the
- * second collector silently replaced the first's policy set. Two loopback
- * addresses could in principle be two agents on one port; treating them as
- * one only ever refuses a boot, never overwrites a set.
+ * What identifies an agent for "one collector per agent": the endpoint with
+ * every loopback spelling — `localhost`, `127.0.0.0/8`, `[::1]` — read as one
+ * host and the default port made explicit, so that `http://127.0.0.1:8180` and
+ * `http://localhost:8180` are one agent and a second collector cannot silently
+ * replace the first's policy set. Two loopback addresses could in principle be
+ * two agents on one port; treating them as one only ever refuses a boot, never
+ * overwrites a set.
  */
 function agentKey(endpoint: string): string {
 	const url = new URL(endpoint);
@@ -813,27 +792,25 @@ function resolveEndpoint(configured: unknown, fromEnv: string | undefined): stri
 
 /**
  * The range `maxAnswerBytes` may be set in. Below 1 KiB a bound saves no
- * memory worth having and is almost certainly a unit slip — `4` meant as MiB,
- * `512` meant as KiB. The smallest decision is about 60 bytes and grows with
- * each determining policy and error, so such a bound denies some answers or
- * all of them, and only once requests arrive; refused at boot instead. Above
- * 256 MiB the text would approach the longest string V8 can hold, about
- * 512 Mi characters, and a failure there would be reported as a broken-off
- * answer.
+ * memory worth having and is almost certainly a unit slip (`4` meant as MiB):
+ * the smallest decision is about 60 bytes and grows with each determining
+ * policy and error, so such a bound denies some answers or all of them, and
+ * only once requests arrive; it is refused at boot instead. Above 256 MiB the
+ * text would approach the longest string V8 can hold, and a failure there
+ * would be reported as a broken-off answer.
  */
 const MIN_ANSWER_BYTES = 1024;
 const MAX_ANSWER_BYTES = 256 * 1024 * 1024;
 
 /**
- * The collector entry's `maxAnswerBytes`, else {@link CEDAR_ANSWER_MAX_BYTES}.
- * Written as a number or a numeric string — what a HOCON env substitution of
- * the operator's own variable (`${?MY_ANSWER_BYTES}`) delivers — the rule the
- * server's numeric knobs follow (`resolveBound` in the server package, which
- * this package cannot import), and a whole number of bytes in range. Checked
- * here, where `endpoint` is: the config schema passes a collector entry
- * through, so the engine is where its keys are checked
- * (`CedarEngineLoadContext.config`). `null` is a value, and refused like
- * anything else that is not a byte count.
+ * The collector entry's `maxAnswerBytes`, else {@link CEDAR_ANSWER_MAX_BYTES}:
+ * a whole number of bytes in range, written as a number or a numeric string —
+ * what a HOCON env substitution of the operator's own variable
+ * (`${?MY_ANSWER_BYTES}`) delivers — the rule the server's numeric knobs follow
+ * (`resolveBound` in the server package, which this package cannot import).
+ * The config schema passes a collector entry through, so the engine checks its
+ * keys (`CedarEngineLoadContext.config`). `null` is refused like anything else
+ * that is not a byte count.
  */
 function resolveMaxAnswerBytes(configured: unknown): number {
 	if (configured === undefined) return CEDAR_ANSWER_MAX_BYTES;
@@ -855,7 +832,7 @@ const MIN_READ_BACK_INTERVAL_MS = 1_000;
 const MAX_READ_BACK_INTERVAL_MS = 60 * 60 * 1000;
 
 /**
- * `readBackIntervalMs` from the collector's entry (#286): a whole number of
+ * `readBackIntervalMs` from the collector's entry: a whole number of
  * milliseconds from 1 s to 1 h, written as a number or a string, as
  * `maxAnswerBytes` is — {@link CEDAR_READ_BACK_INTERVAL_MS} when absent. Under
  * a second is a `GET` of the whole set per request; past an hour, a changed
@@ -931,7 +908,7 @@ function requestHeaders(configured: unknown, fromEnv: string | undefined): Recor
  * does itself, a tab, printable ASCII or U+0080–U+00FF and nothing else. So a
  * token read from a file with its trailing newline still goes. `fetch`
  * refuses anything else — quoting the value for a line break or a NUL — and
- * the load would have called the agent unreachable (#271).
+ * the load would call the agent unreachable.
  */
 function isSendableHeaderValue(value: string): boolean {
 	const trimmed = value.replace(/^[\t\n\r ]+|[\t\n\r ]+$/g, "");
@@ -959,7 +936,7 @@ async function send(doFetch: typeof fetch, url: string, init: RequestInit): Prom
 
 /**
  * The body of a 2xx answer, read whole. The status arrives before the body,
- * and the read can fail in between (#271): an abort — the rule deadline, or
+ * and the read can fail in between: an abort — the rule deadline, or
  * the caller leaving — rejects with the signal's reason, as it does before the
  * status, since that is how the collector and any other caller of the port
  * tell a timeout from an outage; any other failure is the answer broken off,
@@ -1036,7 +1013,7 @@ function parseJson(text: string): unknown {
  * cedar-agent's error body is `{ reason, description, code }`; fall back to
  * the status text. The status is the fact, so a body that does not arrive, or
  * is over the bound, leaves it to the status text, unless the read was cut by
- * `signal` aborting, which is the signal's to report (#271). The bound is
+ * `signal` aborting, which is the signal's to report. The bound is
  * `maxAnswerBytes`, and never more than {@link CEDAR_ANSWER_MAX_BYTES}.
  */
 async function errorDescription(
@@ -1109,16 +1086,15 @@ function readDecision(body: unknown, endpoint: string): AgentAnswer {
 /**
  * `diagnostics.reason` as policy ids, or `undefined` when it is not a list.
  *
- * The ids are what a decision's `determiningPolicies` names (#199), so an item
- * is read, not rendered: a string is the id, and an object carrying a string
+ * The ids are what a decision's `determiningPolicies` names, so an item is
+ * read, not rendered: a string is the id, and an object carrying a string
  * `policyId` — the structured form Cedar gives an error — yields that. Any
  * other item is kept as its JSON behind a NUL, which no policy id is: the
- * answer is then read as not this load's (`ownDecision`, #283), since a permit
- * that cannot be named cannot be attributed — `"unreadable policy"`, told
- * apart in the log from a policy this load never pushed. An agent image that
- * changed the shape of its reason items would so deny every permit, loudly
- * and saying why; before #283 such items were only counted. The list itself
- * stays required.
+ * answer is then read as not this load's (`ownDecision`), since a permit that
+ * cannot be named cannot be attributed — `"unreadable policy"`, told apart in
+ * the log from a policy this load never pushed. An agent image that changed
+ * the shape of its reason items would so deny every permit, loudly and saying
+ * why. The list itself stays required.
  */
 function policyIds(value: unknown): string[] | undefined {
 	if (!Array.isArray(value)) return undefined;
@@ -1141,8 +1117,8 @@ const UNREADABLE_POLICY_ID = "\u0000";
  * The items are strings from cedar-agent 0.2.x (cedar-policy 2.5); Cedar 3.x+
  * serialises errors as objects. The rule only logs errors and decides on
  * whether there are any — which rendering cannot change — so a non-string
- * item is rendered rather than the whole answer refused (v0.10.0 audit). The
- * list itself stays required.
+ * item is rendered rather than the whole answer refused. The list itself
+ * stays required.
  */
 function renderedList(value: unknown): string[] | undefined {
 	if (!Array.isArray(value)) return undefined;
@@ -1155,14 +1131,14 @@ function renderedList(value: unknown): string[] | undefined {
 const CEDAR_TYPE_PATH = /^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$/;
 
 /**
- * Renders an entity reference in Cedar's own syntax — `User::"alice"` — which
- * is how cedar-agent's `AuthorizationCall` takes principal, action and
- * resource. The type must be a Cedar identifier path (it comes from config
- * and from the `requestResourceType` attribute, so it is checked here rather
- * than trusted); anything else throws {@link CedarEngineError}, which inside
- * `isAuthorized` is a logged deny before any request is sent. The id is a
- * Cedar string literal: `\` and `"` escaped, `\n` `\r` `\t` `\0` as their
- * short escapes, every other control character as `\u{…}`.
+ * Renders an entity reference in Cedar's own syntax — `User::"alice"` — as
+ * cedar-agent's `AuthorizationCall` takes principal, action and resource. The
+ * type comes from config and from the `requestResourceType` attribute, so it
+ * is checked to be a Cedar identifier path; anything else throws
+ * {@link CedarEngineError}, which inside `isAuthorized` is a logged deny
+ * before any request is sent. The id is a Cedar string literal: `\` and `"`
+ * escaped, `\n` `\r` `\t` `\0` as their short escapes, every other control
+ * character as `\u{…}`.
  */
 export function entityUidLiteral(uid: CedarEntityUid): string {
 	if (!CEDAR_TYPE_PATH.test(uid.type)) {
@@ -1197,16 +1173,16 @@ const FAILURE_LINK_MAX = 200;
 const UNDESCRIBABLE = "a failure that could not be described";
 
 /**
- * A failure as one line, its causes included (#271). The real `fetch` rejects
- * with "fetch failed" whatever happened, and keeps what did — a refusal, a
- * name that does not resolve, a TLS error, a reset — on `cause`; the message
- * alone reads the same for all of them. Each link is its message with
- * whitespace collapsed (OpenSSL's spans lines), led by its `code` when the
- * message does not carry it already, and cut at {@link FAILURE_LINK_MAX}
- * characters; an `AggregateError` without a message — one error per address
- * tried, as `localhost` gives — is its errors. At most {@link FAILURE_DEPTH}
- * links, each object once. Describing never throws: whatever a `fetch`
- * rejected with, the caller still raises its `CedarEngineError`.
+ * A failure as one line, its causes included. The real `fetch` rejects with
+ * "fetch failed" whatever happened, and keeps what did — a refusal, a name
+ * that does not resolve, a TLS error, a reset — on `cause`. Each link is its
+ * message with whitespace collapsed (OpenSSL's spans lines), led by its `code`
+ * when the message does not carry it already, and cut at
+ * {@link FAILURE_LINK_MAX} characters; an `AggregateError` without a message —
+ * one error per address tried, as `localhost` gives — is its errors. At most
+ * {@link FAILURE_DEPTH} links, each object once. Describing never throws:
+ * whatever a `fetch` rejected with, the caller still raises its
+ * `CedarEngineError`.
  *
  * Only messages and codes are read, never the request. `fetch`'s one error
  * that quotes a header — an invalid value — cannot arise for the token, which

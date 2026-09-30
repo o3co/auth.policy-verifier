@@ -65,14 +65,11 @@ export interface DecisionContractAdapter {
 }
 
 /**
- * Conformance suite pinning the decision contract
- * (o3co/auth.policy-verifier#124).
- *
- * This is the migration seam for the authorization plane: whatever engine sits
- * behind the endpoint must take `(subject, resource, action, context)`, answer
- * per request in a batch, and say *why*. An engine that cannot report a reason,
- * or that can only answer one decision per round trip, is not interchangeable
- * with this one no matter how its policy is written.
+ * Conformance suite pinning the decision contract, the migration seam for the
+ * authorization plane: whatever engine sits behind the endpoint must take
+ * `(subject, resource, action, context)`, answer per request in a batch, and
+ * say *why*. An engine that cannot report a reason, or that can only answer one
+ * decision per round trip, is not interchangeable with this one.
  */
 export function describeDecisionContractConformance(adapter: DecisionContractAdapter): void {
 	describe(`decision contract conformance — ${adapter.name}`, () => {
@@ -112,7 +109,7 @@ export function describeDecisionContractConformance(adapter: DecisionContractAda
 			expect(result.reason.groups.some((group) => !group.passed)).toBe(true);
 		});
 
-		it("names what decided each passing unit, distinct from what ran (#135)", async () => {
+		it("names what decided each passing unit, distinct from what ran", async () => {
 			// `evaluated` answers "what ran"; `satisfiedBy` answers "what decided".
 			// A passing group decided at its last evaluated rule — anything before
 			// it in `evaluated` was an alternative that was tried and refused.
@@ -126,7 +123,7 @@ export function describeDecisionContractConformance(adapter: DecisionContractAda
 			}
 		});
 
-		it("reports every refused alternative of a failing unit (#135)", async () => {
+		it("reports a failing unit's alternatives, every one refused, and names none as deciding", async () => {
 			// A failing group ran every alternative and all of them refused; there
 			// is no deciding rule to name.
 			const result = await adapter.decide(denied);

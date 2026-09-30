@@ -3,11 +3,11 @@
 
 /*
  * The key-resolver vocabulary: what a module registers to turn an
- * `oauth.jwt.algorithm` block into verification key material. It lived in core
- * until #170; it is the server's because it is token-credential plumbing, and
- * core's engine never touches a credential.
+ * `oauth.jwt.algorithm` block into verification key material. It is the
+ * server's, not core's, because it is token-credential plumbing and core's
+ * engine never touches a credential.
  *
- * Part of the authentication contract rather than of `jwt/` (#259): the
+ * Part of the authentication contract rather than of `jwt/`: the
  * contract hands the key-resolver registry to every module
  * (`ServerModuleContext`) and to every authenticator factory
  * (`TokenAuthenticatorDependencies`), so a module that contributes a resolver,

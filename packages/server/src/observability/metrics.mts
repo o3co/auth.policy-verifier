@@ -2,45 +2,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Prometheus metrics for the policy verifier (#111).
+ * Prometheus metrics for the policy verifier.
  *
- * Before this there was no counter of decisions by outcome and no scrape
- * endpoint, so "what is our allow/deny rate?" could only be answered by
- * grepping logs — and only if something was logging, which #111 is also about.
- *
- * The shape follows auth.provider's `/metrics` (its 39767d52) so one Prometheus
- * job and one set of dashboard conventions serve both halves of the stack:
+ * The shape follows auth.provider's `/metrics` so one Prometheus job and one
+ * set of dashboard conventions serve both halves of the stack:
  * `http_request_duration_seconds` verbatim, application series under the
  * `auth_` family, Node process defaults under a per-service prefix.
  *
- * ## Label bounding
+ * Every label is bounded:
  *
- * Every label here is bounded, and each one is bounded on purpose:
- *
- * - `route` is the Express route **pattern**, never the URL, and unmatched
+ * - `route` is the Express route pattern, never the URL, and unmatched
  *   requests collapse to `"unmatched"`.
- * - `method` is an allowlist; anything else is `"other"`. Node's HTTP parser
- *   accepts any valid token, so `req.method` is as caller-controlled as a path.
- * - `code` is a rule's own `code`, which comes from the deployment's configured
- *   rules — but `Rule.code` is an interface field, and a rule collector *can*
- *   compute it from the request, so it is additionally capped.
+ * - `method` is an allowlist; anything else is `"other"`.
+ * - `code` is a rule's own `code`, which a rule collector can compute from the
+ *   request, so it is capped.
  * - `collector` is a collector's position and identifier-shaped class name as
- *   the collector runner recorded it (#200) — never the name inside an error —
- *   or `"unattributed"`; it is capped as well, as a backstop. `category` is a
- *   closed enum (`observability/failure.mts`).
+ *   the collector runner recorded it — never the name inside an error — or the
+ *   list whose deadline ran out, or `"unattributed"`, capped as a backstop.
+ *   `category` is a closed enum (`observability/failure.mts`).
  *
- * And two values are deliberately **not** labels at all: `resource` and
- * `action`. They come straight out of the request body, they are unbounded by
- * construction ("project:1", "project:2", …), and one label left open mints a
- * fresh time series per distinct value — which is how a metrics endpoint takes
- * down the monitoring that was supposed to watch it. They are on the
- * per-decision log line instead, which is the right medium for high-cardinality
- * facts: see `observability/decisionEvent.mts`.
+ * `resource` and `action` are not labels: they come straight out of the
+ * request body, unbounded, and an open label mints a time series per distinct
+ * value. They are on the per-decision log line instead
+ * (`observability/decisionEvent.mts`).
  */
 
 import express from "express";
 import { Counter, collectDefaultMetrics, Histogram, Registry } from "prom-client";
-// The port this implements lives apart from it (#258), so that what only
+// The port this implements lives apart from it, so that what only
 // reports through it reaches neither express nor prom-client.
 import type { DecisionMetrics } from "./decisionMetrics.mjs";
 
@@ -74,30 +63,24 @@ const KNOWN_METHODS = new Set([
  * Distinct `code` label values published before the rest collapse into
  * `"other"`.
  *
- * Deny codes come from the rules a deployment configured, which makes them
- * operator-bounded the same way a route pattern is — a builtin such as
- * `HasScope` carries a single constant `invalid_scope`. But `code` is a field
- * on the `Rule` interface, and a rule collector builds its rules per request,
- * so a third-party collector is free to derive a code from the resource it was
- * asked about. That is one edit away from an unbounded label in somebody
- * else's repository, so the cap is here rather than in a code review comment.
- *
- * 32 is far more than any real pipeline distinguishes, and the collapse is
- * visible: `code="other"` climbing is itself the signal that a rule is minting
- * codes per request.
+ * Deny codes come from the rules a deployment configured, but `code` is a field
+ * on the `Rule` interface and a rule collector builds its rules per request, so
+ * a third-party collector can derive a code from the resource it was asked
+ * about. 32 is far more than any real pipeline distinguishes; `code="other"`
+ * climbing is the signal that a rule is minting codes per request.
  */
 export const MAX_DENY_CODE_LABELS = 32;
 
 /**
  * Distinct `collector` label values published before the rest collapse into
- * `"other"` (#200).
+ * `"other"`.
  *
  * A collector's name is what the collector runner recorded — its position and
- * its identifier-shaped class name — or `"unattributed"`, so a deployment
- * reaches this only with more than 32 collectors that have all failed. The cap
- * is a backstop for the one part code controls: a class's `name` is an ordinary
- * property, and a label is the wrong place to find out it was minted per
- * request.
+ * its identifier-shaped class name — or, when a pipeline's deadline ran out,
+ * the list itself (`attribute.collectors`, `rule.collectors`), or
+ * `"unattributed"`: one value per collector that has failed, and at most three
+ * more. The cap is a backstop: a class's `name` is an ordinary property, and
+ * code can mint it per request.
  */
 export const MAX_COLLECTOR_LABELS = 32;
 
@@ -137,13 +120,10 @@ function routeLabel(req: express.Request): string {
 
 /**
  * Process-wide registry holding the Node defaults (event-loop lag, heap, GC,
- * handles).
- *
- * Registered once and shared, rather than per `createMetrics()` call: these are
- * facts about the process, not about an app instance, and `collectDefaultMetrics`
- * installs collectors — a `PerformanceObserver` among them — that a second
- * registration would install a second copy of while publishing the same numbers.
- * Building two apps in one process (every test file here does) must not cost two.
+ * handles). Registered once and shared rather than per `createMetrics()` call:
+ * these are facts about the process, and `collectDefaultMetrics` installs
+ * collectors — a `PerformanceObserver` among them — that a second registration
+ * would install again while publishing the same numbers.
  */
 let processDefaults: Registry | undefined;
 
@@ -182,27 +162,26 @@ export interface Metrics {
  * - `http_request_duration_seconds{method,route,status}` — request rate, error
  *   rate and latency in one histogram (the RED method). Same name and label set
  *   as auth.provider's, so one dashboard covers both services.
- * - `auth_decisions_total{decision}` — exactly two series, and the answer to
- *   "what is our allow/deny rate". A deny is a normal outcome for a decision
- *   point, so the alert worth writing is on a *change* in the ratio.
- * - `auth_denials_total{code}` — which rule is doing the denying. This is the
- *   aggregate counterpart of the `decision` log line's `deniedBy`.
+ * - `auth_decisions_total{decision}` — exactly two series: the allow/deny rate.
+ *   A deny is a normal outcome for a decision point, so alert on a change in
+ *   the ratio.
+ * - `auth_denials_total{code}` — which rule is denying; the aggregate of the
+ *   `decision` log line's `deniedBy`.
  * - `auth_decision_duration_seconds{decision}` — time inside the collector
- *   pipelines and the evaluator, which is distinct from the HTTP histogram:
- *   one `POST /verify/batch` request is up to `verify.maxBatchSize` decisions.
+ *   pipelines and the evaluator, distinct from the HTTP histogram: one
+ *   `POST /verify/batch` request is up to `verify.maxBatchSize` decisions.
  * - `auth_collector_failures_total{collector,category}` — which fact source is
- *   failing decisions, and how (#200): `category` is `collector_timeout` or
+ *   failing decisions, and how: `category` is `collector_timeout` or
  *   `collector_threw`. The aggregate of the `collector` field on the
  *   `collector_timeout` and `verify_internal_error` log lines.
  * - `auth_policy_verifier_*` — Node process defaults.
  *
- * **Deliberately not published yet:** a per-dependency `up` gauge like
- * auth.provider's `auth_dependency_up`. Its equivalent here is the JWKS
- * endpoint, and there is no readiness-probe registry to sample — a gauge built
- * from a second, hand-maintained list of dependencies is the drift auth.provider
- * avoided by sampling the probes. Until such a registry exists, a JWKS outage is
- * visible as the `jwt_verification_unavailable` log event, which is emitted at
- * error precisely so it can be alerted on.
+ * There is no per-dependency `up` gauge like auth.provider's
+ * `auth_dependency_up`: its equivalent here is the JWKS endpoint, there is no
+ * readiness-probe registry to sample, and a gauge fed from a hand-maintained
+ * list of dependencies would drift. A JWKS outage shows as the
+ * `jwt_verification_unavailable` log event, emitted at error so it can be
+ * alerted on.
  *
  * Each call builds its own registry, so several apps can be constructed in one
  * process without colliding on metric names.

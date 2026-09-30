@@ -3,11 +3,10 @@
 
 /*
  * The reference deployment the wire contract is checked against: this
- * repository's own `createVerifyRouter`, over real HTTP.
- *
- * Everything the suite needs that is deployment-specific is here — the key
- * material, the policy that makes one request an allow and another a deny, and
- * the collector that can be made to stall. The contract itself is in
+ * repository's own `createVerifyRouter`, over real HTTP. Everything the suite
+ * needs that is deployment-specific is here — the key material, the policy
+ * that makes one request an allow and another a deny, and the collector that
+ * can be made to stall. The contract itself is in
  * `conformance/fixtures/wireContract/*.json`, which is what another repository
  * implementing `VerifierEndpoint` reads.
  */
@@ -66,15 +65,15 @@ const secret = new TextEncoder().encode("wire-contract-conformance-secret");
 /** The action the stalling collector below never answers for. */
 const STALLING_ACTION = "stall";
 
-/** The action that makes two collectors disagree about `tenantId` (#174). */
+/** The action that makes two collectors disagree about `tenantId`. */
 const CONFLICTING_ACTION = "conflict";
 
 /** The action the failing collector below throws on — a fault, not a timeout. */
 const FAILING_ACTION = "explode";
 
 /**
- * The actions the policy-backed rule below reports each evaluation shape for
- * (#244). `read` and `delete` — the suite's ordinary allow and deny — report a
+ * The actions the policy-backed rule below reports each evaluation shape for.
+ * `read` and `delete` — the suite's ordinary allow and deny — report a
  * completed evaluation of a vouched revision.
  */
 const UNCONFIRMED_ACTION = "read-remote";
@@ -92,7 +91,7 @@ const MAX_BATCH_SIZE = 8;
 /**
  * Answers instantly for every action but one, and never for that one — so a
  * single deployment serves both the ordinary cases and the `collector_timeout`
- * deny (#115) without a second app.
+ * deny without a second app.
  */
 const stallableCollector: AttributeCollector = {
 	collect: (collectorContext: CollectorContext) =>
@@ -105,7 +104,7 @@ const stallableCollector: AttributeCollector = {
  * For `CONFLICTING_ACTION`, answers `tenantId` with a value the request's own
  * `tenant_id` context never carries — so it and
  * `RequestContextAttributeCollector` disagree about one scalar, which is the
- * `attribute_conflict` deny (#174). Inert for every other action.
+ * `attribute_conflict` deny. Inert for every other action.
  */
 const conflictableCollector: AttributeCollector = {
 	collect: (collectorContext: CollectorContext) =>
@@ -119,7 +118,7 @@ const conflictableCollector: AttributeCollector = {
 /**
  * For `FAILING_ACTION`, rejects with a plain error — the store-outage shape,
  * which is a genuine fault and must surface as the terminal `internal_error`
- * envelope rather than as any refusal (#182). Inert for every other action.
+ * envelope rather than as any refusal. Inert for every other action.
  */
 const failableCollector: AttributeCollector = {
 	collect: (collectorContext: CollectorContext) =>
@@ -131,7 +130,7 @@ const failableCollector: AttributeCollector = {
 /**
  * A second rule group, driven by a request-context attribute, so a deny can
  * carry a passing group beside a failing one — which is what the `satisfiedBy`
- * case (#135) needs to see in one response.
+ * case needs to see in one response.
  */
 const tenantRuleCollector: RuleCollector = {
 	async collect() {
@@ -149,17 +148,17 @@ const tenantRuleCollector: RuleCollector = {
  * A rule group backed by a policy evaluator, as `packages/cedar` builds one:
  * each rule answers a boolean and reports, to the reporter core hands it for
  * that one call, how the evaluation went and which policy revision it
- * concerned (#244). Synthetic so that one deployment can stage every shape of
- * the evaluation envelope; the real collector's reports are pinned against
- * Cedar in `packages/cedar-wasm`.
+ * concerned. Synthetic so that one deployment can stage every shape of the
+ * evaluation envelope; the real collector's reports are pinned against Cedar
+ * in `packages/cedar-wasm`.
  *
  * The group is an OR of two policy sources. For the ordinary actions the first
  * never reaches its evaluator and refuses, and the second evaluates and
  * passes — so one response carries a `not_invoked` outcome beside a confirmed
- * one, which is the shape a suite filtering on `revision !== null` mistook for
- * a confirmed evaluation (`undefined !== null`). It passes whatever it is
- * asked about except where a staged shape implies a denial, so the scope and
- * tenant groups beside it keep deciding the cases they always decided.
+ * one, the shape a check filtering on `revision !== null` would mistake for a
+ * confirmed evaluation (`undefined !== null`). It passes whatever it is asked
+ * about except where a staged shape implies a denial, so the scope and tenant
+ * groups beside it keep deciding the cases they decide.
  */
 const REVISION = `sha256:${"0123456789abcdef".repeat(4)}`;
 const policyBackedRuleCollector: RuleCollector = {
@@ -251,7 +250,7 @@ async function mintToken(subject: string | undefined): Promise<string> {
 	const jwt = new SignJWT({ scope: "read:project" })
 		.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
 		.setIssuedAt()
-		// Required since #110; the time claims are not what this suite is about,
+		// Required; the time claims are not what this suite is about,
 		// so the token simply carries valid ones.
 		.setExpirationTime("1h")
 		.setIssuer(ISSUER)
@@ -355,7 +354,7 @@ describeWireContractConformance(
 	),
 );
 
-// …and the same one opted in (#244), with a policy-backed rule group beside the
+// …and the same one opted in, with a policy-backed rule group beside the
 // others. The whole table runs again, because the opt-in must change nothing
 // but the one optional key: every refusal, status and envelope is the same.
 // The token carries `read:project` only, so the staged actions are told apart
@@ -399,7 +398,7 @@ describe("the fixture's evaluation table is core's own", () => {
 		expect(evaluation.revision.maxLength).toBe(POLICY_REVISION_MAX_LENGTH);
 	});
 
-	it("states the determining-policy bounds and id shape core enforces (#199)", () => {
+	it("states the determining-policy bounds and id shape core enforces", () => {
 		expect(evaluation.determiningPolicies.maxItems).toBe(DETERMINING_POLICIES_MAX);
 		expect(evaluation.determiningPolicies.idMaxLength).toBe(POLICY_ID_MAX_LENGTH);
 		// The unit is what core counts in: an id of astral characters at the bound
@@ -416,7 +415,7 @@ describe("the fixture's evaluation table is core's own", () => {
 		).toEqual(POLICY_ID_FORBIDDEN_RANGES.map(([low, high]) => [low, high]));
 	});
 
-	it("names as completed-only exactly the keys core takes on a completed report and refuses on a failed one (#199)", async () => {
+	it("names as completed-only exactly the keys core takes on a completed report and refuses on a failed one", async () => {
 		const accepts = async (report: Record<string, unknown>): Promise<boolean> =>
 			evaluate(new Map(), [
 				{
@@ -447,7 +446,7 @@ describe("the fixture's evaluation table is core's own", () => {
 		expect([...evaluation.evaluated.onlyWhenCompleted].sort()).toEqual(Object.keys(keys).sort());
 	});
 
-	it("states the omitted count's rules and id well-formedness as core holds them (#199)", async () => {
+	it("states the omitted count's rules and id well-formedness as core holds them", async () => {
 		const accepts = async (report: Record<string, unknown>): Promise<boolean> =>
 			evaluate(new Map(), [
 				{

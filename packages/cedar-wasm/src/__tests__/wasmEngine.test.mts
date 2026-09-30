@@ -108,7 +108,7 @@ describe("cedarWasmEngine — isAuthorized answers Cedar's own response", () => 
 		expect(answer).toMatchObject({ decision: "deny", reason: [], errors: [] });
 	});
 
-	it("reports evaluation errors naming the policy by its file (#199) — the missing-attribute case", () => {
+	it("reports evaluation errors naming the policy by its file — the missing-attribute case", () => {
 		const loaded = load(`permit(principal, action, resource) when { principal.dept == "eng" };`);
 		const answer = loaded.isAuthorized(request());
 		expect(answer.decision).toBe("deny");
@@ -155,7 +155,7 @@ describe("cedarWasmEngine — isAuthorized answers Cedar's own response", () => 
 });
 
 /*
- * #244: the confirmation contract, from the engine that can honour it. The set
+ * The confirmation contract, from the engine that can honour it. The set
  * is compiled in this process, under an id nothing else holds, from the source
  * `load` was handed — so an answer can only have come from that source, and
  * the engine says so on every one of them.
@@ -187,11 +187,10 @@ describe("cedarWasmEngine — vouches for the revision it evaluated", () => {
 	});
 
 	it("vouches for what it loaded, not for what the source says later", () => {
-		// The claim is about the set that was COMPILED. A `PolicySource` is a
+		// The claim is about the set that was compiled. A `PolicySource` is a
 		// plain object the caller still holds; rewriting it after `load` changes
 		// nothing about the compiled policies, so it must change nothing about
-		// the revision an answer names (#244: capture it with the snapshot, do
-		// not read "the current revision" when answering).
+		// the revision an answer names.
 		const source = inline("permit(principal, action, resource);");
 		const loadedRevision = source.revision;
 		const loaded = cedarWasmEngine.load(source);
@@ -215,14 +214,14 @@ describe("cedarWasmEngine — vouches for the revision it evaluated", () => {
 });
 
 /*
- * #199: the ids Cedar names in `reason` are what an operator reads as "the
+ * The ids Cedar names in `reason` are what an operator reads as "the
  * policy that decided". Compiled from one concatenated text they would be
  * Cedar's positional `policy0`, `policy1`…; the engine gives each policy the
  * name of its file instead — the file's name alone for a file that holds one
  * policy, which is also the id the http engine pushes, so a corpus laid out
  * one policy per file reads the same under both.
  */
-describe("cedarWasmEngine — names each policy for its file (#199)", () => {
+describe("cedarWasmEngine — names each policy for its file", () => {
 	function dir(entries: Array<[string, string]>): PolicySource {
 		const files = entries.map(([name, text]) => ({ name, source: `/policies/${name}`, text }));
 		return {
@@ -261,7 +260,7 @@ describe("cedarWasmEngine — names each policy for its file (#199)", () => {
 		]);
 	});
 
-	it("decides as the concatenated set did — naming changes, the answers do not", () => {
+	it("decides as its policies say, and names the inline set's second policy `policies#2`", () => {
 		const text = `permit(principal, action, resource);
 			forbid(principal, action, resource) when { context.suspended == true };`;
 		const loaded = load(text);

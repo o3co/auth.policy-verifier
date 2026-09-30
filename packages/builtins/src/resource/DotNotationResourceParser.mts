@@ -11,14 +11,12 @@ import type { Resource, ResourceParser } from "@o3co/auth.policy-verifier.core";
 import { ResourceParseError } from "@o3co/auth.policy-verifier.core";
 
 /**
- * Characters a segment type or id may carry.
- *
- * The set is RFC 6749 §3.3 `NQCHAR` (`%x21 / %x23-5B / %x5D-7E` — printable
- * ASCII minus space, `"` and `\`) less the two structural characters `.` and
- * `:`. Anchoring it there is not arbitrary: `resourceType` is concatenated into
- * the `{action}:{resourceType}` scope that `ResourceActionScopeRuleCollector`
- * requires, so a type that cannot appear in a scope value is a type no issuer
- * could ever grant.
+ * Characters a segment type or id may carry: those of an RFC 6749 §3.3
+ * `scope-token` (`%x21 / %x23-5B / %x5D-7E`, which its Appendix A names
+ * `NQCHAR` — printable ASCII minus space, `"` and `\`) less the structural `.`
+ * and `:`. `resourceType` is concatenated into the `{action}:{resourceType}`
+ * scope `ResourceActionScopeRuleCollector` requires, so a type that cannot
+ * appear in a scope value is one no issuer could grant.
  */
 const SEGMENT_TOKEN = /^[\x21\x23-\x2D\x2F-\x39\x3B-\x5B\x5D-\x7E]+$/;
 
@@ -52,25 +50,22 @@ interface Segment {
  * `resourceType` is the authorization namespace: scope rules authorize it, so
  * two distinct resources that parse to the same type are authorized
  * identically, and a caller can reach resource A through a grant written for
- * resource B. Every rewrite the parser could perform is a way for that to
- * happen, so it performs none:
+ * resource B. Every rewrite is a way for that to happen, so the parser
+ * performs none:
  *
- * - **The `.` separator is preserved.** Joining types with `_` collapsed the
- *   nested type `a.b` and the flat type literally named `a_b` onto one string.
- *   `.` is reserved as the separator and cannot occur inside a type, so the
- *   sequence of types round-trips: distinct type sequences are distinct
- *   `resourceType`s. `_` is now an ordinary type character.
- * - **Empty segments are refused.** `a..b` used to parse, and every input with
- *   a repeated `.` landed in whatever namespace the empty types produced.
- * - **Extra `:` components are refused, not truncated.** `a:1:2` used to be
- *   read as `a:1` with the tail silently dropped, so a deliberately narrowed
- *   identifier widened into the broader one.
- * - **Whitespace is refused, not trimmed.** Trimming made `project : 1` and
- *   `project:1` one resource for scope rules while
- *   `ResourceActionPermissionRuleCollector`, which reads `raw`, still saw two.
+ * - **The `.` separator is preserved.** `.` cannot occur inside a type, so
+ *   distinct type sequences are distinct `resourceType`s; `_` is an ordinary
+ *   type character, and the nested type `a.b` stays apart from `a_b`.
+ * - **Empty segments are refused** (`a..b`): no input lands in a namespace
+ *   produced by empty types.
+ * - **Extra `:` components are refused, not truncated:** `a:1:2` read as
+ *   `a:1` would widen a deliberately narrowed identifier.
+ * - **Whitespace is refused, not trimmed:** trimmed, `project : 1` and
+ *   `project:1` would be one resource for scope rules while
+ *   `ResourceActionPermissionRuleCollector`, which reads `raw`, sees two.
  *
- * This is the same principle `HasScope` applies to scope values: compare what
- * was written, never a normalized guess at what was meant.
+ * This is the principle `HasScope` applies to scope values: compare what was
+ * written, never a normalized guess at what was meant.
  *
  * An id that needs `.`, `:` or a character outside the set must be encoded by
  * the caller (percent-encoding round-trips through this grammar) or handled by

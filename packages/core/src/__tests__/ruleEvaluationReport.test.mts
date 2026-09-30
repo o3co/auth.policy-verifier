@@ -2,24 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * #244: a rule backed by a policy evaluator has more to say than pass / fail —
+ * A rule backed by a policy evaluator has more to say than pass / fail —
  * whether the evaluator ran at all, and against which policy snapshot. That is
  * a fact about ONE invocation, so it cannot live on the rule, which answers
  * concurrent decisions.
  *
  * The channel is a reporter the evaluator hands the rule for that one
  * invocation: `verify(attrs, report)` / `decide(attrs, signal, report)`. The
- * rule still answers a boolean. That is the point of the shape: an evaluator
- * that knows nothing of reports — an older copy of core in a mixed install, a
- * composite rule calling `verify` itself — passes no reporter and reads a
- * boolean, so it decides correctly and merely records no evaluation. An answer
- * that carried the evaluation would have been an object, and an object is
- * truthy: every such evaluator would have read a deny as a pass.
+ * rule still answers a boolean, so an evaluator that knows nothing of reports
+ * — an older copy of core in a mixed install, a composite rule calling
+ * `verify` itself — passes no reporter, decides correctly and merely records
+ * no evaluation. An answer carrying the evaluation would be an object, and an
+ * object is truthy: such an evaluator would read a deny as a pass.
  *
- * What is pinned here is that channel, engine-neutrally: what may be reported,
- * that it lands on the outcome of the invocation it belongs to and on no
- * other, and that nothing unbounded crosses — a rule is third-party code and
- * what it reports ends up on the wire and in the audit log.
+ * Pinned here, engine-neutrally: what may be reported, that it lands on the
+ * outcome of the invocation it belongs to and on no other, and that nothing
+ * unbounded crosses — a rule is third-party code and what it reports ends up
+ * on the wire and in the audit log.
  */
 import { describe, expect, it } from "vitest";
 import { RuleTimeoutError } from "../errors.mjs";
@@ -133,8 +132,8 @@ describe("evaluate — what a rule reports about one invocation", () => {
 	});
 
 	it("keeps each source's evaluation on its own outcome across groups", async () => {
-		// Two policy sources in one decision (#244: a single revision must not be
-		// reported as though it described every rule that took part).
+		// Two policy sources in one decision: a single revision must not be
+		// reported as though it described every rule that took part.
 		const decision = await evaluate(attrs, [
 			sync("cedar-a", "cedar_deny", reporting(true, { status: "completed", revision: REVISION_A })),
 			sync("scope", "invalid_scope", () => true),
@@ -206,7 +205,7 @@ describe("evaluate — what a rule reports about one invocation", () => {
 		expect(Object.isFrozen(outcome.evaluation)).toBe(true);
 	});
 
-	it("keeps a frozen copy of the determining policies too, so the rule cannot rewrite them afterwards (#199)", async () => {
+	it("keeps a frozen copy of the determining policies too, so the rule cannot rewrite them afterwards", async () => {
 		const determining = ["10-permit-eng", "20-permit-ops"];
 		const { outcome } = await outcomeOf(
 			sync(
@@ -264,7 +263,7 @@ describe("evaluate — what a rule may report", () => {
 			"failed, revision not established, naming what was loaded",
 			{ status: "failed", revision: null, loadedRevision: REVISION_A },
 		],
-		// #199: which policies determined a completed answer.
+		// Which policies determined a completed answer.
 		[
 			"completed, no policy determining the request",
 			{ status: "completed", revision: REVISION_A, determiningPolicies: [] },
@@ -364,7 +363,7 @@ describe("evaluate — what a rule may report", () => {
 			"a key the contract does not name",
 			{ status: "completed", revision: REVISION_A, policyText: "permit(…);" },
 		],
-		// #199: determining policies belong to a completed answer, bounded.
+		// Determining policies belong to a completed answer, bounded.
 		[
 			"determining policies on a failed evaluation — its answer is not the policies'",
 			{ status: "failed", revision: REVISION_A, determiningPolicies: ["20-forbid"] },
@@ -495,7 +494,7 @@ describe("evaluate — what a rule may report", () => {
 		const rule = sync("cedar", "cedar_deny", reporting(false, evaluation as RuleEvaluation));
 		const attempt = evaluate(attrs, [rule], { failures });
 		await expect(attempt).rejects.toThrow(TypeError);
-		// Attributed like any other fault of the rule's (#200), so the failure
+		// Attributed like any other fault of the rule's, so the failure
 		// line names the rule rather than reporting an anonymous 500.
 		const error = await attempt.catch((cause: unknown) => cause);
 		expect(failures.sourceOf(error)).toEqual({
@@ -596,7 +595,7 @@ describe("evaluate — what a rule may report", () => {
 	// value is read however it is reached — so an evaluation carrying, by any
 	// route, what its status may not carry is refused rather than recorded as
 	// if it had said nothing: determining policies on a failed or not_invoked
-	// one (#199), a revision of either kind on a not_invoked one (#244).
+	// one, a revision of either kind on a not_invoked one.
 	const routes: ReadonlyArray<[string, (visible: object, key: string, value: unknown) => object]> =
 		[
 			[
@@ -645,8 +644,9 @@ describe("evaluate — what a rule may report", () => {
 
 	it("still takes a report built with its status widened to completed | failed", () => {
 		// The union splits on `status`, so a helper typed with the wider status —
-		// as rules written before #199 are — still builds a RuleEvaluation. The
-		// typecheck is the test; the assertion only keeps the helpers used.
+		// as a rule written against a core without determining policies is —
+		// still builds a RuleEvaluation. The typecheck is the test; the
+		// assertion only keeps the helpers used.
 		const vouched = (status: "completed" | "failed"): RuleEvaluation => ({
 			status,
 			revision: REVISION_A,
@@ -667,7 +667,7 @@ describe("evaluate — what a rule may report", () => {
 		["a fraction", 1.5],
 		["a negative length", -1],
 	])(
-		"refuses a list whose length is %s, however it came to say so (#199)",
+		"refuses a determining-policies list whose length is %s, however it came to say so",
 		async (_label, length) => {
 			const lying = new Proxy(["10-permit-eng"], {
 				get: (target, key, receiver) =>
@@ -682,7 +682,7 @@ describe("evaluate — what a rule may report", () => {
 		},
 	);
 
-	it("reads the list's length and each entry once, and keeps what that reading said (#199)", async () => {
+	it("reads the list's length and each entry once, and keeps what that reading said", async () => {
 		const reads = new Map<PropertyKey, number>();
 		let turn = 0;
 		const drifting = new Proxy(["10-permit-eng", "20-permit-ops"], {
@@ -714,7 +714,7 @@ describe("evaluate — what a rule may report", () => {
 		expect(reads.get("1")).toBe(1);
 	});
 
-	it("carries the determining policies an asynchronous rule reports (#199)", async () => {
+	it("carries the determining policies an asynchronous rule reports", async () => {
 		const { outcome } = await outcomeOf(
 			async(
 				"cedar",
@@ -733,7 +733,7 @@ describe("evaluate — what a rule may report", () => {
 		});
 	});
 
-	it("does not repeat a refused determining policy id in the error either (#199)", async () => {
+	it("does not repeat a refused determining policy id in the error either", async () => {
 		const secret = "tenant-acme-internal\nlevel=info msg=forged";
 		const rule = sync(
 			"cedar",
@@ -760,10 +760,10 @@ describe("evaluate — what a rule may report", () => {
 });
 
 /*
- * The answer itself is a boolean and nothing else. It used to be read by
- * truthiness, which is fail-open — a JavaScript rule that returns the attribute
- * it looked up (`attrs.get("role")`) passed whenever the attribute was set — and
- * it put that value on the wire as `passed`.
+ * The answer itself is a boolean and nothing else. Read by truthiness it would
+ * fail open — a JavaScript rule that returns the attribute it looked up
+ * (`attrs.get("role")`) would pass whenever the attribute was set — and put
+ * that value on the wire as `passed`.
  */
 describe("evaluate — a rule answers a boolean", () => {
 	it.each([
@@ -773,8 +773,8 @@ describe("evaluate — a rule answers a boolean", () => {
 		["an empty string", ""],
 		["undefined", undefined],
 		["null", null],
-		// What carrying the evaluation in the answer would have looked like: an
-		// object is truthy, so a deny of this shape read as a pass.
+		// The evaluation carried in the answer: an object is truthy, so read by
+		// truthiness a deny of this shape would pass.
 		["an object, even one that says it did not pass", { passed: false }],
 		["a promise from a synchronous rule", Promise.resolve(false)],
 	])("refuses an answer that is not a boolean: %s", async (_name, answer) => {
@@ -807,13 +807,13 @@ describe("evaluate — a rule answers a boolean", () => {
 
 /*
  * The reason for the shape, executed: an evaluator that predates the reporter
- * calls `verify(attrs)` and reads what comes back by truthiness. With the
- * evaluation in the answer it read every deny as a pass; with the reporter it
- * reads a boolean and is merely unaware of the evaluation.
+ * calls `verify(attrs)` and reads what comes back by truthiness. It reads a
+ * boolean and is merely unaware of the evaluation; with the evaluation in the
+ * answer it would read every deny as a pass.
  */
 describe("a rule asked by an evaluator that passes no reporter", () => {
 	const legacyEvaluate = (rules: Rule[]): boolean =>
-		// v0.11.0's evaluateGroup, reduced to what matters: `if (passed)`.
+		// An evaluator older than the reporter, reduced to what matters: `if (passed)`.
 		rules.some((rule) => Boolean(rule.verify(attrs)));
 
 	it("still answers a boolean, so a deny stays a deny", () => {
@@ -828,12 +828,12 @@ describe("a rule asked by an evaluator that passes no reporter", () => {
 });
 
 /*
- * #199: a core older than determining policies refuses the keys as unknown, and
+ * A core older than determining policies refuses the keys as unknown, and
  * the bounds on them are the checking core's, not those of the copy a rule's
  * package imports. So the reporter carries the bounding itself: present, a
  * rule names the policies through it; absent, it names none.
  */
-describe("a reporter bounds determining policies to its own core's contract (#199)", () => {
+describe("a reporter bounds determining policies to its own core's contract", () => {
 	/** The reporter `evaluate()` hands a rule, kept for the test to inspect. */
 	async function handed(kind: "sync" | "async"): Promise<ReportRuleEvaluation> {
 		let kept: ReportRuleEvaluation | undefined;
@@ -918,7 +918,7 @@ describe("a reporter bounds determining policies to its own core's contract (#19
 	});
 });
 
-describe("a reporter's boundDeterminingPolicies — what a rule reports, made to fit (#199)", () => {
+describe("a reporter's boundDeterminingPolicies — what a rule reports, made to fit", () => {
 	/** The one a fresh reporter carries: the bounds that apply are the checking core's. */
 	const boundDeterminingPolicies = (names: Iterable<unknown> & object) => {
 		const bound = beginRuleInvocation().report.boundDeterminingPolicies;
@@ -977,7 +977,7 @@ describe("a reporter's boundDeterminingPolicies — what a rule reports, made to
 	});
 });
 
-describe("isReportablePolicyId (#199)", () => {
+describe("isReportablePolicyId", () => {
 	it.each([
 		["a file name", true, "10-permit-eng"],
 		["spaces and non-ASCII letters", true, "team policies ポリシー"],

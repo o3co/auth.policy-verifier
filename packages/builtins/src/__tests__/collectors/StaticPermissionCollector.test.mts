@@ -8,7 +8,7 @@ import { StaticPermissionCollector } from "#/collectors/StaticPermissionCollecto
 import { HasPermission } from "#/rules/HasPermission.mjs";
 
 /**
- * `CollectorContext.signal` is required (#115): a pipeline supplies one per
+ * `CollectorContext.signal` is required: a pipeline supplies one per
  * collector, so a hand-built context carries one too. These fixtures are not
  * about cancellation, so it is a signal that never aborts.
  */
@@ -22,7 +22,7 @@ const stubContext: CollectorContext = {
 };
 
 describe("StaticPermissionCollector", () => {
-	// #264: only an array is accepted. A string is iterable, so a copy by
+	// Only an array is accepted. A string is iterable, so a copy by
 	// spread would split it into characters — and a lone "*" among them is a
 	// grant-all to HasPermission.
 	it.each([
@@ -33,7 +33,7 @@ describe("StaticPermissionCollector", () => {
 		["a string", "posts.*"],
 		["a lone wildcard string", "*"],
 	])(
-		"refuses at construction a `permissions` that is %s, with a TypeError naming the field (#264)",
+		"refuses at construction a `permissions` that is %s, with a TypeError naming the field",
 		(_label, value) => {
 			const construct = () => new StaticPermissionCollector({ permissions: value } as never);
 			expect(construct).toThrow(TypeError);
@@ -41,11 +41,10 @@ describe("StaticPermissionCollector", () => {
 		},
 	);
 
-	it("cannot be configured into granting every permission with a string `permissions` (#264)", async () => {
-		// The misconfiguration the issue describes, where `[ "posts.*" ]` was
-		// meant. Split into characters it collected a lone "*", which
-		// HasPermission honours as grant-all; refused at construction, it
-		// never reaches a rule.
+	it("cannot be configured into granting every permission with a string `permissions`", async () => {
+		// `[ "posts.*" ]` was meant. Split into characters it would collect a
+		// lone "*", which HasPermission honours as grant-all; refused at
+		// construction, it never reaches a rule.
 		const grants = async () => {
 			const collector = new StaticPermissionCollector({ permissions: "posts.*" as never });
 			const attrs = await collector.collect(stubContext);
@@ -68,7 +67,7 @@ describe("StaticPermissionCollector", () => {
 		expect(attrs.get(ATTR_PERMISSIONS)).toEqual([]);
 	});
 
-	// #255: the collector answers from what it was given at construction. A
+	// The collector answers from what it was given at construction. A
 	// host that keeps the config and changes it afterwards changes nothing.
 	it.each<[string, (config: { permissions: string[] }) => void]>([
 		["pushing to the permissions array", (c) => c.permissions.push("*")],
@@ -79,7 +78,7 @@ describe("StaticPermissionCollector", () => {
 				c.permissions = ["*"];
 			},
 		],
-	])("%s after construction changes nothing it collects (#255)", async (_name, mutate) => {
+	])("%s after construction changes nothing it collects", async (_name, mutate) => {
 		const config = { permissions: ["project:*.perm:read", "document:*.perm:write"] };
 		const collector = new StaticPermissionCollector(config);
 

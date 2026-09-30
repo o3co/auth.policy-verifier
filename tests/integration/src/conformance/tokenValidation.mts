@@ -35,13 +35,12 @@ export interface TokenValidationAdapter {
 }
 
 /**
- * Conformance suite pinning RFC 9068 §4 token validation
- * (o3co/auth.policy-verifier#105).
+ * Conformance suite pinning RFC 9068 §4 token validation.
  *
  * An authorization server signs access tokens, id_tokens, refresh tokens and
- * logout tokens with the same key, and neighbouring services share issuers. A
- * decision endpoint that checks only the signature therefore accepts tokens it
- * was never the audience for. Every engine that can sit behind the verifier's
+ * logout tokens with the same key, and neighbouring services share issuers, so
+ * a decision endpoint that checks only the signature accepts tokens it was
+ * never the audience for. Every engine that can sit behind the verifier's
  * decision contract must reject the same set, otherwise swapping the engine
  * changes which tokens are honored.
  */

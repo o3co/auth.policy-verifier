@@ -61,7 +61,7 @@ describe("builtinKeyResolversModule", () => {
 		await builtinKeyResolversModule.init(context);
 
 		const factory = context.keyResolverRegistry.get("HS256");
-		// 64 hex characters — 32 decoded bytes, the entropy floor #114 enforces.
+		// 64 hex characters — 32 decoded bytes, the HS256 secret's entropy floor.
 		const resolver = await factory({
 			algorithm: "HS256",
 			secret: "11".repeat(32),
@@ -143,7 +143,7 @@ async function rs256Factory(): Promise<KeyResolverFactory> {
 	return context.keyResolverRegistry.get("RS256");
 }
 
-describe("builtinKeyResolversModule — JWKS transport security (#109)", () => {
+describe("builtinKeyResolversModule — JWKS transport security", () => {
 	// AppConfigSchema rejects these at config-parse time; the factory re-checks
 	// because createApp also accepts hand-built configs that never went through
 	// the schema — the same division of labor as assertVerifyRouterJwtConfig.
@@ -172,7 +172,7 @@ describe("builtinKeyResolversModule — JWKS transport security (#109)", () => {
 	});
 });
 
-describe("builtinKeyResolversModule — JWKS fetch bounds (#109)", () => {
+describe("builtinKeyResolversModule — JWKS fetch bounds", () => {
 	const servers: (Server | SocketServer)[] = [];
 	const sockets: Socket[] = [];
 
@@ -295,8 +295,8 @@ describe("builtinKeyResolversModule — JWKS fetch bounds (#109)", () => {
 	});
 });
 
-describe("HS256KeyResolverFactory — secret rotation (#112)", () => {
-	/** 64 hex characters — 32 decoded bytes, the floor auth.provider#282 set. */
+describe("HS256KeyResolverFactory — secret rotation", () => {
+	/** 64 hex characters — 32 decoded bytes, the HS256 secret's entropy floor. */
 	const CURRENT = "11".repeat(32);
 	const PREVIOUS = "22".repeat(32);
 	const STRANGER = "33".repeat(32);
@@ -337,7 +337,7 @@ describe("HS256KeyResolverFactory — secret rotation (#112)", () => {
 	};
 
 	it("keeps a single-secret config on a static key — the shape that never rotated", async () => {
-		// The umbrella E2E and every pre-#112 deployment configure `secret` alone.
+		// The umbrella E2E and every deployment not rotating configure `secret` alone.
 		// They must keep verifying tokens whatever `kid` the issuer stamps, so the
 		// resolver hands back the bare key and no header lookup happens at all.
 		const resolver = await (await hs256Factory())({ algorithm: "HS256", secret: CURRENT });
@@ -471,17 +471,17 @@ describe("HS256KeyResolverFactory — secret rotation (#112)", () => {
 			/^oauth\.jwt\.previousSecrets\[0\]\.expiresAt is not a valid timestamp/,
 		],
 		[
-			"a current secret under the entropy floor (#114)",
+			"a current secret under the entropy floor",
 			{ algorithm: "HS256", secret: "your-secret" },
 			/^oauth\.jwt\.secret must carry at least 32 bytes/,
 		],
 		[
-			"a current secret that is 32 hex characters — 16 decoded bytes (#114)",
+			"a current secret that is 32 hex characters — 16 decoded bytes",
 			{ algorithm: "HS256", secret: "ab".repeat(16) },
 			/^oauth\.jwt\.secret must carry at least 32 bytes/,
 		],
 		[
-			"a retired secret under the entropy floor (#114)",
+			"a retired secret under the entropy floor",
 			{
 				algorithm: "HS256",
 				secret: CURRENT,

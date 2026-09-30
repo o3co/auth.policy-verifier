@@ -31,7 +31,7 @@ export interface ResourceActionScopeRuleCollectorConfig {
 	 */
 	allowBareScopeRewrite?: boolean;
 	/**
-	 * The claim whose presence says the token asserted scopes (#219). Defaults
+	 * The claim whose presence says the token asserted scopes. Defaults
 	 * to `scope`; set it to what `PayloadScopeCollector` reads (`scp` for Okta)
 	 * so the two look at the same claim — each keeps its own option, and
 	 * nothing checks that both were given the same name. Only presence is
@@ -48,36 +48,26 @@ export interface ResourceActionScopeRuleCollectorConfig {
  * ## Scope as capability ceiling
  *
  * The JWT `scope` claim represents what the session **can request** — a
- * capability ceiling — not what the session **has been granted**. Whether the
- * operation is ultimately permitted is determined by the full rule pipeline
- * (other collectors, resource-owner policy, etc.). This collector enforces the
- * ceiling only: it produces a `HasScope` rule for the requested
- * `{action}:{resourceType}`, which must be satisfied by the token's scopes.
+ * capability ceiling — not what the session **has been granted**; the full
+ * rule pipeline decides the latter. This collector enforces the ceiling only:
+ * it produces a `HasScope` rule for the requested `{action}:{resourceType}`,
+ * which the token's scopes must satisfy, compared exactly and case-sensitively.
+ * An issuer that emits bare resource names (`project` rather than
+ * `read:project`) must opt in with `{ allowBareScopeRewrite: true }`.
  *
- * ## Matching
+ * ## Scopeless tokens
  *
- * The emitted `HasScope` compares scopes exactly and case-sensitively. An
- * issuer that emits bare resource names (`project` rather than `read:project`)
- * must opt in with `{ allowBareScopeRewrite: true }`; without it a bare scope
- * satisfies nothing of the `{action}:{resourceType}` form.
+ * By default the rule is emitted whether or not the token carries the scope
+ * claim, so a scopeless token fails it. Dropping the rule instead would remove
+ * the scope group from AND-evaluation, and in a scope-only pipeline that turns
+ * "the token asserts no capability" into "every capability is allowed".
  *
- * ## Behavior for scopeless tokens
- *
- * By default the rule is emitted regardless of whether the token carries a
- * `scope` claim, so a scopeless token fails it. Dropping the rule instead would
- * remove the scope group from AND-evaluation, and in a scope-only pipeline that
- * turns "the token asserts no capability" into "every capability is allowed".
- *
- * Flows where the IdP does not issue a `scope` claim (e.g. DID-grant tokens)
- * must opt out explicitly with `{ scopeless: "skip" }`, and only in a pipeline
- * where another rule group authorizes the request — otherwise the request is
- * left with no applicable rule, which the evaluator denies.
- *
- * For pipelines that exclusively serve scopeless flows, prefer collectors that
- * derive rules from identity claims (e.g. DID, `sub`, role) instead.
- *
- * See https://github.com/o3co/auth.provider/issues/56 for background on why
- * the IdP asserts identity, not permissions.
+ * Flows where the IdP issues no scope claim (e.g. DID-grant tokens) must opt
+ * out explicitly with `{ scopeless: "skip" }`, and only in a pipeline where
+ * another rule group authorizes the request — otherwise the request is left
+ * with no applicable rule, which the evaluator denies by default and allows
+ * under `onEmptyRuleSet: "allow"`. A pipeline that serves only scopeless
+ * flows should derive rules from identity claims (DID, `sub`, role) instead.
  */
 export class ResourceActionScopeRuleCollector implements RuleCollector {
 	private readonly scopeless: ScopelessPolicy;

@@ -5,32 +5,22 @@
  * The numeric knobs an operator sets on a config block: what each one admits,
  * and the one reader that admits it.
  *
- * Every such knob arrives the same way and fails the same way: absent (take the
- * default), a number, or the string a HOCON env substitution delivers — and a
- * value that is not a whole number in range must be refused rather than passed
- * to a library that ignores unusable options and quietly applies its own
- * default. The JWKS fetch bounds (#109) and the token lifetime bounds (#110)
- * both need exactly that, so it is written once here rather than restated per
- * knob, and the rejection message has a single shape operators learn once.
+ * Every such knob is absent (take the default), a number, or the string a HOCON
+ * env substitution delivers. A value that is not a whole number in range must
+ * be refused rather than passed to a library that ignores unusable options and
+ * quietly applies its own default, and the rejection message has one shape.
  *
- * Both boundaries read a knob through this one function (#157): `AppConfigSchema`
+ * Both boundaries read a knob through this one function: `AppConfigSchema`
  * serves config files and the runtime resolvers serve the hand-built configs
- * `createApp` also accepts. See AGENTS.md, "Two-Boundary Config Validation" —
- * the numeric knobs are the worked cautionary example there, since they were the
- * family that shared only the constants until #157.
+ * `createApp` also accepts. See AGENTS.md, "Two-Boundary Config Validation".
  *
- * {@link NUMERIC_BOUNDS} is the whole table, in one place, for the same reason
- * the reader is: a spec kept beside the module that consumes it could not be
- * shared with `AppConfigSchema` without dragging that module's dependencies in
- * behind it — `jwt/tokenAuthenticator.mts` brings jose with it, and
- * `routes/verify.mts` brings express.
- *
- * Which is also why this module imports nothing but `config/defaults.mts`. The
- * arrows all point *at* it: `AppConfigSchema` imports it to read config files,
- * and `config/jwks.mts`, `jwt/tokenAuthenticator.mts` and `routes/verify.mts`
- * import it to read the hand-built ones. Anything it reached back for would
- * arrive in every one of those — a config-only consumer of the schema included,
- * which must not end up with jose or express behind a numeric bound.
+ * {@link NUMERIC_BOUNDS} is the whole table, here rather than beside each
+ * consumer, and this module imports nothing but `config/defaults.mts`:
+ * `AppConfigSchema` imports it to read config files, and `config/jwks.mts`,
+ * `jwt/tokenAuthenticator.mts` and `routes/verify.mts` to read hand-built ones.
+ * Anything it reached back for would arrive in every one of those, and a
+ * config-only consumer of the schema must not end up with jose or express
+ * behind a numeric bound.
  */
 
 import {
@@ -88,8 +78,7 @@ export const NUMERIC_BOUNDS = {
 	/**
 	 * TCP port to bind. `0` is excluded on purpose even though `listen(0)`
 	 * accepts it: it asks the OS for an arbitrary free port, which is unusable
-	 * for a service the enforcement layer has to find — and `0` is exactly what
-	 * `Number(false)` produced here before #157.
+	 * for a service the enforcement layer has to find.
 	 */
 	port: {
 		field: "port",
@@ -99,8 +88,8 @@ export const NUMERIC_BOUNDS = {
 	},
 	/**
 	 * Abort a JWKS fetch after this long. Bounded above by what a timer can
-	 * hold (#181): Node clamps a `setTimeout` delay past 2^31 - 1 to ~1 ms,
-	 * which would abort every fetch rather than none of them.
+	 * hold: Node clamps a `setTimeout` delay past 2^31 - 1 to ~1 ms, which
+	 * would abort every fetch rather than none of them.
 	 */
 	jwksTimeoutMs: {
 		field: "jwksTimeoutMs",
@@ -156,10 +145,9 @@ export const NUMERIC_BOUNDS = {
 		unit: "entries",
 	},
 	/*
-	 * What one decision request may carry (#118). Each is a floor of 1 and no
-	 * ceiling: raising one is an operator's explicit statement about their own
-	 * callers, while `Infinity` and the non-integers are refused here as they
-	 * are for every other knob — an unstated size is exactly what these replace.
+	 * What one decision request may carry. Each has a floor of 1 and no ceiling:
+	 * raising one is an operator's explicit statement about their own callers.
+	 * `Infinity` and non-integers are refused as for every other knob.
 	 */
 	/** Cap on the JSON body `express.json()` will read. */
 	maxBodyBytes: {
@@ -197,12 +185,10 @@ export const NUMERIC_BOUNDS = {
 		unit: "characters",
 	},
 	/**
-	 * How long one collector may take before it is cancelled (#115). The floor
-	 * is 1: a zero budget cancels every collector before it can answer, which is
-	 * a verifier that denies everything — the same shape as the `0` cap
-	 * `maxBatchSize` refuses. The ceiling is the timer's own (#181): past
-	 * 2^31 - 1, Node clamps the delay to ~1 ms and the huge budget *is* the
-	 * zero budget, reached through validation instead of refused by it.
+	 * How long one collector may take before it is cancelled. The floor is 1: a
+	 * zero budget cancels every collector before it can answer, a verifier that
+	 * denies everything. The ceiling is the timer's own: past 2^31 - 1, Node
+	 * clamps the delay to ~1 ms, so a huge budget would be the zero budget.
 	 */
 	collectorTimeoutMs: {
 		field: "collectorTimeoutMs",
@@ -213,13 +199,10 @@ export const NUMERIC_BOUNDS = {
 	},
 	/**
 	 * How long a whole collector fan-out may take. Not bounded below by
-	 * `collectorTimeoutMs`: a deployment may legitimately want a deadline
-	 * tighter than one collector's budget (every stall then reported as a
-	 * deadline, which is a cruder message but a correct decision), and
-	 * cross-knob validation is not something one `BoundSpec` can express.
-	 * `Infinity` is refused like every other knob here — an unbounded deadline
-	 * is the state #115 found — and the ceiling is the timer's own (#181),
-	 * like `collectorTimeoutMs` and for the same reason.
+	 * `collectorTimeoutMs`: a deadline tighter than one collector's budget is
+	 * legitimate (every stall is then reported as a deadline, a cruder message
+	 * but a correct decision), and one `BoundSpec` cannot express a cross-knob
+	 * rule. The ceiling is the timer's own, as for `collectorTimeoutMs`.
 	 */
 	collectorDeadlineMs: {
 		field: "collectorDeadlineMs",
@@ -229,8 +212,8 @@ export const NUMERIC_BOUNDS = {
 		unit: "milliseconds",
 	},
 	/**
-	 * How long one asynchronous rule may take to answer (#225) — the same
-	 * budget, and the same timer ceiling, as one collector.
+	 * How long one asynchronous rule may take to answer: the same budget, and
+	 * the same timer ceiling, as one collector.
 	 */
 	ruleTimeoutMs: {
 		field: "ruleTimeoutMs",
@@ -241,7 +224,7 @@ export const NUMERIC_BOUNDS = {
 	},
 	/**
 	 * How long the whole rule phase may take — every asynchronous rule of one
-	 * decision together (v0.10.0 audit). Groups run one after another, so a
+	 * decision together. Groups run one after another, so a
 	 * per-rule budget cannot bound the set; this is the rule side's twin of
 	 * `collectorDeadlineMs`.
 	 */
@@ -265,11 +248,11 @@ export const NUMERIC_BOUNDS = {
 		unit: "collectors",
 	},
 	/**
-	 * How many of a batch's entries are decided at once (#183). The three
-	 * collector bounds above are per decision, so without this one
-	 * `POST /verify/batch` multiplied them by up to `maxBatchSize`. The floor
-	 * is 1 for `collectorConcurrency`'s reason: `0` is not "no limit", it is a
-	 * batch that decides nothing.
+	 * How many of a batch's entries are decided at once. The collector bounds
+	 * above are per decision; without this one `POST /verify/batch` would
+	 * multiply them by up to `maxBatchSize`. The floor is 1 for
+	 * `collectorConcurrency`'s reason: `0` is not "no limit" but a batch that
+	 * decides nothing.
 	 */
 	batchConcurrency: {
 		field: "batchConcurrency",
@@ -321,8 +304,8 @@ function describeRange({ minimum, maximum, unit }: BoundSpec): string {
  * `Number("")` is 0, so the knobs whose floor is 0 — `jwksCooldownMs`,
  * `clockToleranceSeconds` — would read a variable that was exported empty as a
  * deliberate zero. A zero cooldown is "refetch on every miss", which is the
- * fetch storm the knob exists to prevent; this is the same silent failure
- * `http.callerAuth.token` already refuses (#108).
+ * fetch storm the knob exists to prevent. `http.callerAuth.token` refuses an
+ * empty value for the same reason.
  */
 function isWrittenAsNumber(value: unknown): value is number | string {
 	return typeof value === "number" || (typeof value === "string" && value.trim() !== "");

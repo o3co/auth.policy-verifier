@@ -19,18 +19,17 @@ import { ATTR_ROLES } from "@o3co/auth.policy-verifier.core";
  * `ATTR_ROLES`, independent of the JWT payload. Each role bundles a name and
  * the permissions it implies.
  *
- * The list is copied at construction, and so is each role in it and each
- * role's `permissions` array (#255): a caller that mutates the config, its
- * array or a `Role` in it afterwards changes nothing this collector emits.
+ * The list, each role in it and each role's `permissions` array are copied at
+ * construction: a caller that mutates the config, its array or a `Role` in it
+ * afterwards changes nothing this collector emits.
  *
- * Only an array is accepted (#264). Anything else — a missing field, `null`, a
- * number, an object, a string — is refused with a `TypeError` naming the
- * collector and the field, so a misconfigured deployment fails at boot. A
- * string is iterable and would otherwise be split into single characters, as
- * it would be in `StaticPermissionCollector`.
+ * Only an array is accepted. Anything else — a missing field, `null`, a
+ * number, an object, a string (which a copy would split into characters) — is
+ * refused with a `TypeError` naming the collector and the field, so a
+ * misconfigured deployment fails at boot.
  *
- * The entries are not checked: a malformed `Role` entry is copied as it is
- * (see `copyRole`). It is inert: `HasPermission` ignores a role that is not an
+ * Entries are not checked: a malformed `Role` is copied as it is (see
+ * `copyRole`) and is inert, since `HasPermission` ignores a role that is not an
  * object or whose `permissions` is not an array, and a non-string permission
  * inside a role. Each collect returns a shallow copy of the list, so its `Role`
  * copies are shared between the outputs of different collects.
@@ -58,7 +57,7 @@ export class StaticRoleCollector implements AttributeCollector {
  *
  * Nothing about the entry is validated here, and a malformed one keeps its
  * shape rather than being coerced — `HasPermission` ignores a role that is not
- * an object or whose `permissions` is not an array (#180), and spreading a bare
+ * an object or whose `permissions` is not an array, and spreading a bare
  * string under `permissions` would splay it into characters it then honours.
  */
 function copyRole(role: Role): Role {

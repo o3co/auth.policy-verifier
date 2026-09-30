@@ -17,7 +17,7 @@ import { DEFAULT_SCOPE_CLAIM, resolveClaimName, scopesFrom } from "./_claims.mjs
 /** Config entry accepted by `PayloadScopeCollector`. */
 export interface PayloadScopeCollectorConfig {
 	/**
-	 * The claim the scopes are read from (#219). Defaults to `scope`, the
+	 * The claim the scopes are read from. Defaults to `scope`, the
 	 * space-delimited OAuth claim; `scp` for Okta, `permissions` for Auth0,
 	 * both of which are arrays of strings. Either shape is read.
 	 */

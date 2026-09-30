@@ -28,12 +28,10 @@ const EXCLUDED_DIRS = new Set(["node_modules", "dist"]);
 /**
  * Decides whether one entry of the template tree is copied into a new project.
  *
- * The exclusion is judged on the path RELATIVE to the template root, which is
- * the whole point: the scaffolder ships inside `node_modules` whenever it is
- * run the documented way (`npm create`, `npx`), so every absolute source path
- * it copies from contains a `node_modules` segment. Matching against the
- * absolute path therefore rejected the entire template and produced an empty
- * project directory — the scaffolder only ever worked from a source checkout.
+ * The exclusion is judged on the path relative to the template root. Run the
+ * documented way (`npm create`, `npx`), the scaffolder sits inside
+ * `node_modules`, so every absolute source path contains a `node_modules`
+ * segment and matching on it would exclude the whole template.
  */
 export const isTemplateEntryIncluded = (templatesDir: string, source: string): boolean => {
 	const rel = relative(templatesDir, source);
@@ -82,11 +80,9 @@ export const scaffold = (targetDir: string, projectName: string): void => {
 	const pkgPath = resolve(targetDir, "package.json");
 	const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
 	pkg.name = projectName;
-	// `"private": true` is deliberately KEPT (#126 item 4). The scaffold is an
-	// authorization service — policy code and config — and deleting the field
-	// made an accidental `npm publish` succeed by default. Publishing a
-	// scaffolded service is the rare intent; the operator who has it states it
-	// by removing the field.
+	// `"private": true` is kept: the scaffold is an authorization service —
+	// policy code and config — and the field makes an accidental `npm publish`
+	// fail. An operator who means to publish removes it.
 
 	// Replace all workspace:* references with per-package published versions
 	const versions = getPackageVersions();
@@ -127,29 +123,22 @@ const LOCKFILE_ARGS = ["install", "--lockfile-only", "--ignore-workspace"] as co
  * covers a machine that only has Node, and honours the `packageManager` field
  * the template ships.
  *
- * The fallback is narrow on purpose: it applies to `ENOENT` and nothing else,
- * because `ENOENT` is the one failure that means "this binary is not here" and
- * is therefore the only one a different launcher can answer. Any other launch
- * error (`EACCES`, `EPERM`, …) says the binary IS there and could not be run,
- * and a package manager that ran and exited non-zero has already reported that
- * resolution failed — retrying either would hide the real cause behind
- * "package manager missing" and hand the operator the wrong instruction.
+ * Only `ENOENT` (the binary is not here) moves on to the next launcher. Any
+ * other launch error (`EACCES`, `EPERM`, …) means the binary is there and could
+ * not be run, and a non-zero exit means resolution failed; retrying either
+ * would hide the real cause behind "package manager missing".
  */
 const LOCKFILE_LAUNCHERS: readonly (readonly string[])[] = [["pnpm"], ["corepack", "pnpm"]];
 
 /**
- * Generates `pnpm-lock.yaml` inside an already-scaffolded `targetDir`.
+ * Generates `pnpm-lock.yaml` inside an already-scaffolded `targetDir`, for the
+ * template's `pnpm install --frozen-lockfile` build. The lockfile cannot ship
+ * with the template: its dependency set exists only once `scaffold` has
+ * replaced every `workspace:*` with a published version.
  *
- * This is what makes the template's `pnpm install --frozen-lockfile` build
- * possible: the lockfile cannot be shipped with the template, because the
- * template's dependency set does not exist until `scaffold` has replaced every
- * `workspace:*` with a published version. So it is resolved here, once, against
- * the rewritten `package.json`, and the project commits the result.
- *
- * Best-effort by design: it needs a package manager and a reachable registry,
- * and neither is guaranteed on the machine running the scaffolder. Failure is
- * reported, never thrown — the generated project is perfectly usable without
- * it, the operator just has to run `pnpm install` before `docker build`.
+ * Best-effort: it needs a package manager and a reachable registry. Failure is
+ * reported, never thrown; the project is usable without the lockfile once the
+ * operator runs `pnpm install` before `docker build`.
  */
 export const generateLockfile = (targetDir: string): LockfileResult => {
 	const attempts: string[] = [];

@@ -2,24 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Request correlation for the decision endpoints (#200).
- *
- * `x-request-id` was read and handed to collectors, and #111 put it on the
- * `decision` line — but never on `verify_internal_error`, and never back on the
- * response. So a 500 could not be matched to the enforcing service's own log,
- * which is the one join an operator needs when the verifier is the thing
- * answering 500 at 3 a.m.
- *
- * Now the id the caller sent is on every failure line and echoed on every
- * response the router writes. Two things are refused on purpose:
+ * Request correlation for the decision endpoints. The `x-request-id` the
+ * caller sent is on the `decision` line, on `verify_internal_error` and on the
+ * three deny lines, and echoed on every response the router writes, so a 500
+ * can be matched to the enforcing service's own log. Two things are refused on
+ * purpose:
  *
  * - **Minting one.** An id the server made up and logged, but never returned,
  *   correlates with nothing the caller has. No id sent, no id anywhere.
  * - **Carrying one it cannot vouch for.** The header is the caller's text, and
- *   it now reaches a response header and three log streams. Only a bounded
- *   token of a conservative charset is accepted; anything else is treated as
- *   absent — not echoed, not logged, not forwarded to collectors — rather
- *   than trimmed or escaped into something the caller did not send.
+ *   it reaches a response header and three log streams. Only a bounded token
+ *   of a conservative charset is accepted; anything else is treated as absent
+ *   — not echoed, not logged, not forwarded to collectors — rather than
+ *   trimmed or escaped into something the caller did not send.
  */
 import {
 	DotNotationResourceParser,
@@ -41,7 +36,7 @@ import { acceptRequestId, MAX_REQUEST_ID_LENGTH, REQUEST_ID_HEADER } from "#/htt
 import { createTokenAuthenticator, HS256KeyResolverFactory } from "#/jwt/index.mjs";
 import { createVerifyRouter } from "#/routes/verify.mjs";
 
-/** 64 hex characters — 32 decoded bytes, the entropy floor #114 enforces. */
+/** 64 hex characters — 32 decoded bytes, the HS256 secret's entropy floor. */
 const JWT_SECRET = "11".repeat(32);
 const hs256Key = await HS256KeyResolverFactory({ secret: JWT_SECRET });
 const ISSUER = "https://issuer.test";
@@ -118,7 +113,7 @@ function createTestApp() {
 	return { app, events, headers: recording.headers };
 }
 
-describe("acceptRequestId (#200)", () => {
+describe("acceptRequestId", () => {
 	it.each([
 		["a UUID", "3f2c5a9e-6d1b-4c1f-9a7e-2b8d4c6e1f00"],
 		["a ULID", "01J8ZQ4X9V6M3K2N7P5R8T1W0Y"],
@@ -148,7 +143,7 @@ describe("acceptRequestId (#200)", () => {
 		["angle brackets", "<script>"],
 		// Without the `m` flag a JavaScript `$` matches only at the end of the
 		// input — unlike PCRE or Python, not before a final line terminator — so
-		// none of these slips past the anchor (PR #242 review).
+		// none of these slips past the anchor.
 		["a trailing line feed", "req-1\n"],
 		["a trailing CRLF", "req-1\r\n"],
 		["a trailing LINE SEPARATOR", "req-1\u2028"],
@@ -158,7 +153,7 @@ describe("acceptRequestId (#200)", () => {
 	});
 });
 
-describe("x-request-id on the decision endpoints (#200)", () => {
+describe("x-request-id on the decision endpoints", () => {
 	const ID = "3f2c5a9e-6d1b-4c1f-9a7e-2b8d4c6e1f00";
 
 	it.each([

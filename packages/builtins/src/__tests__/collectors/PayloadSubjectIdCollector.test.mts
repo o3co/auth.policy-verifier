@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { PayloadSubjectIdCollector } from "#/collectors/PayloadSubjectIdCollector.mjs";
 
 /**
- * `CollectorContext.signal` is required (#115): a pipeline supplies one per
+ * `CollectorContext.signal` is required: a pipeline supplies one per
  * collector, so a hand-built context carries one too. These fixtures are not
  * about cancellation, so it is a signal that never aborts.
  */
@@ -39,7 +39,7 @@ describe("PayloadSubjectIdCollector", () => {
 	});
 
 	it("promotes neither claim when its value is not a string", async () => {
-		// `SubjectAttributes` is a bag of unknowns (#170): the claim vocabulary
+		// `SubjectAttributes` is a bag of unknowns: the claim vocabulary
 		// and its narrowing are this collector's, so a `sub` that is not a string
 		// must not become an identity attribute.
 		const attrs = await collector.collect(makeContext({ sub: 42, azp: ["c1"] }));

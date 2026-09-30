@@ -4,9 +4,8 @@
 /*
  * The collector through the real evaluator: what `packages/cedar` pins with a
  * scripted engine, pinned here end to end — mapping, entity synthesis, Cedar's
- * own semantics — so that moving the engine behind the port changed nothing a
- * deployment can observe. Importing the package registers the engine; nothing
- * here selects it by name except the one test that does so on purpose.
+ * own semantics. Importing the package registers the engine; nothing here
+ * selects it by name except the one test that does so on purpose.
  */
 
 import "../index.mjs";
@@ -281,13 +280,13 @@ describe("CedarPolicyRuleCollector on the wasm engine — layered PDP through co
 });
 
 /*
- * #244, through the real evaluator and the synchronous path: a denial is
+ * Through the real evaluator and the synchronous path: a denial is
  * `cedar_deny` whether a policy produced it or not, and the record has to be
  * able to tell. The three that are not a policy's — the request never built,
  * the engine refusing the call, Cedar's own diagnostic errors — are each pinned
  * here against Cedar itself rather than a scripted answer.
  */
-describe("CedarPolicyRuleCollector on the wasm engine — the evaluation behind an answer (#244)", () => {
+describe("CedarPolicyRuleCollector on the wasm engine — the evaluation behind an answer", () => {
 	const PERMIT_READ = `permit(principal, action == Action::"read", resource);`;
 	const FORBID_ALL = "forbid(principal, action, resource);";
 	const NEEDS_DEPT = `permit(principal, action, resource) when { principal.dept == "eng" };`;
@@ -387,7 +386,7 @@ describe("CedarPolicyRuleCollector on the wasm engine — the evaluation behind 
 		expect(rule.verify(attrsWith())).toBe(true);
 	});
 
-	describe("a user acting on their own record — the principal and the resource are one entity (#282)", () => {
+	describe("a user acting on their own record — the principal and the resource are one entity", () => {
 		const OWN = attrsWith([
 			["requestResourceType", "User"],
 			["requestResourceId", "alice"],
@@ -448,12 +447,12 @@ describe("CedarPolicyRuleCollector on the wasm engine — the evaluation behind 
 		expect(decision.reason.groups[0].evaluated[0].evaluation).toEqual({
 			status: "completed",
 			revision: revisionOf(FORBID_ALL),
-			// The inline set's one policy, named for it (#199).
+			// The inline set's one policy, named for it.
 			determiningPolicies: ["policies"],
 		});
 	});
 
-	it("names the policies that decided for their files, through core evaluate (#199)", async () => {
+	it("names the policies that decided for their files, through core evaluate", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "cedar-determining-"));
 		writeFileSync(join(dir, "10-permit-read.cedar"), PERMIT_READ);
 		writeFileSync(

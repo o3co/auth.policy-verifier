@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * #225: a rule whose answer comes from I/O — an out-of-process policy engine —
+ * A rule whose answer comes from I/O — an out-of-process policy engine —
  * cannot be a `Rule`, whose `verify` is synchronous and, by contract, does no
  * I/O. `AsyncRule.decide(attrs, signal)` is the additive form: same grouping,
  * same reporting, same "a function of attrs and nothing else", with a deadline.
@@ -54,10 +54,10 @@ describe("isAsyncRule", () => {
 		expect(isAsyncRule(async("scope", "a", true))).toBe(true);
 	});
 
-	it("does not treat a synchronous rule that happens to carry a decide method as asynchronous (v0.10.0 audit)", async () => {
-		// Duck-typing on `decide` sent such a rule down the asynchronous path;
-		// the policy-set union beside it in cedar discriminates on an explicit
-		// `async` flag, which is the safer house style.
+	it("does not treat a synchronous rule that happens to carry a decide method as asynchronous", async () => {
+		// Duck-typing on `decide` would send such a rule down the asynchronous
+		// path; the explicit `async` flag decides, as it does for the policy-set
+		// union in cedar.
 		const incidental = { ...sync("scope", "a", true), decide: async () => false };
 		expect(isAsyncRule(incidental)).toBe(false);
 		expect((await evaluate(attrs, [incidental])).decision).toBe("allow");
@@ -146,7 +146,7 @@ describe("evaluate — asynchronous rules", () => {
 	});
 });
 
-describe("evaluate — the deadline (#225)", () => {
+describe("evaluate — the deadline", () => {
 	it("defaults the per-rule budget to the collector timeout's value", () => {
 		expect(DEFAULT_RULE_TIMEOUT_MS).toBe(2_000);
 		expect(DEFAULT_RULE_TIMEOUT_MS).toBe(DEFAULT_COLLECTOR_TIMEOUT_MS);
@@ -214,7 +214,7 @@ describe("evaluate — the deadline (#225)", () => {
 	});
 });
 
-describe("evaluate — the rule phase has a deadline of its own (v0.10.0 audit)", () => {
+describe("evaluate — the rule phase has a deadline of its own", () => {
 	// `ruleTimeoutMs` is per rule and groups run one after another, so N
 	// asynchronous rules could take N × the budget with nothing capping the
 	// phase — while the collect side has both a per-collector timeout and a
@@ -248,7 +248,7 @@ describe("evaluate — the rule phase has a deadline of its own (v0.10.0 audit)"
 		});
 	});
 
-	it("does not start an asynchronous rule once the phase is spent, and says it was not started (review)", async () => {
+	it("does not start an asynchronous rule once the phase is spent, and says it was not started", async () => {
 		const late = vi.fn(async () => true);
 		// A synchronous rule that spends the phase: nothing was in flight when
 		// the deadline passed, and the error must not claim `b` was running.
@@ -275,7 +275,7 @@ describe("evaluate — the rule phase has a deadline of its own (v0.10.0 audit)"
 		expect(late).not.toHaveBeenCalled();
 	});
 
-	it("measures the phase on a monotonic clock, so a wall-clock step does not stretch it (review)", async () => {
+	it("measures the phase on a monotonic clock, so a wall-clock step does not stretch it", async () => {
 		// An NTP step backwards between groups would otherwise hand the later
 		// rules time the deployment never granted.
 		const realNow = Date.now;

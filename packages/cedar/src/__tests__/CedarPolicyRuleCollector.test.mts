@@ -32,11 +32,10 @@ import { ALLOW, FORBIDDEN, scriptedEngine, UNDETERMINED } from "./scriptedEngine
 // deployment that imported the wasm package; the asynchronous one under a
 // name no real engine takes, selected explicitly.
 //
-// #244: the synchronous one vouches for the revision it evaluated, as the real
+// The synchronous one vouches for the revision it evaluated, as the real
 // wasm engine does; the asynchronous one does not, as the http engine cannot.
-// `fake-async-vouching` is the remote engine that does not exist yet — one
-// whose answers name a revision — so the confirmation contract is pinned for
-// the day one does.
+// `fake-async-vouching` is a remote engine whose answers name a revision —
+// no real one does — so the confirmation contract is pinned for one too.
 const sync = scriptedEngine("wasm", false, { confirmsRevision: true });
 const async = scriptedEngine("fake-async", true);
 const asyncVouching = scriptedEngine("fake-async-vouching", true, { confirmsRevision: true });
@@ -140,7 +139,7 @@ describe("CedarPolicyRuleCollector — config validation", () => {
 		).rejects.toThrow(/onNoDeterminingPolicy must be one of abstain, deny/);
 	});
 
-	it("refuses abstain over an asynchronous policy set, at boot (v0.10.0 audit)", async () => {
+	it("refuses abstain over an asynchronous policy set, at boot", async () => {
 		// An out-of-process engine that restarted empty answers every request
 		// "deny, no determining policy" — byte-identical to a request the set
 		// covers and nothing matched. Under abstain every `forbid` then stops
@@ -155,8 +154,8 @@ describe("CedarPolicyRuleCollector — config validation", () => {
 		).rejects.toThrow(
 			/onNoDeterminingPolicy = "abstain" cannot be used with the asynchronous "fake-async" engine/,
 		);
-		// The way out is named concretely. An upgrade from 0.9.0 that kept abstain
-		// and never imported cedar-wasm lands here with the http engine picked by
+		// The way out is named concretely. A deployment that kept abstain and
+		// never imported cedar-wasm lands here with the http engine picked by
 		// default: "use deny" is the wrong fix for a missing import.
 		await expect(
 			CedarPolicyRuleCollector.create({
@@ -165,7 +164,7 @@ describe("CedarPolicyRuleCollector — config validation", () => {
 				onNoDeterminingPolicy: "abstain",
 			}),
 		).rejects.toThrow(/import "@o3co\/auth\.policy-verifier\.cedar-wasm" and set engine = "wasm"/);
-		// Refused before the engine is asked to load anything (review): a remote
+		// Refused before the engine is asked to load anything: a remote
 		// load has side effects — the policy set is pushed, the agent reserved.
 		expect(async.loads).toHaveLength(0);
 		// The same set in-process is fine: the evaluator cannot lose it.
@@ -174,7 +173,7 @@ describe("CedarPolicyRuleCollector — config validation", () => {
 		).resolves.toBeDefined();
 	});
 
-	it("warns when no engine is named — which evaluator decides belongs in config (v0.10.0 audit)", async () => {
+	it("warns when no engine is named — which evaluator decides belongs in config", async () => {
 		// With `engine` absent the choice is made by what happens to be imported:
 		// a transitive dependency pulling in cedar-wasm silently flips a
 		// deployment from out-of-process to in-process.
@@ -296,7 +295,7 @@ describe("CedarPolicyRuleCollector — engine selection and what the engine rece
 });
 
 /*
- * #282: an entity is what a uid names, not the role that reached it. A user
+ * An entity is what a uid names, not the role that reached it. A user
  * acting on their own record is the principal and the resource at once, and
  * Cedar holds one description per entity — so the request carries one entity
  * per uid, and the roles' descriptions of it are reconciled under the
@@ -304,7 +303,7 @@ describe("CedarPolicyRuleCollector — engine selection and what the engine rece
  * resource's may repeat but not add; under `"merge"` what only one declares is
  * added. What cannot be reconciled is refused, never settled by picking a side.
  */
-describe("CedarPolicyRuleCollector — one entity per uid (#282)", () => {
+describe("CedarPolicyRuleCollector — one entity per uid", () => {
 	const SELF: ReadonlyArray<[string, unknown]> = [
 		["requestResourceType", "User"],
 		["requestResourceId", "alice"],
@@ -628,7 +627,7 @@ describe("CedarPolicyRuleCollector — one entity per uid (#282)", () => {
 				[...asAction, ["ctxActs", ["all"]]],
 			);
 			expect(parented.passed).toBe(false);
-			// Nothing to add: the resource is one entry, as it always was.
+			// Nothing to add: the resource is one entry.
 			const plain = await ask(flagged, asAction);
 			expect(plain.passed).toBe(true);
 			expect(plain.entities?.map((entity) => entity.uid)).toEqual([
@@ -820,7 +819,7 @@ describe("CedarPolicyRuleCollector — an asynchronous engine yields an AsyncRul
 		expect(JSON.stringify(error.mock.calls[0])).toMatch(/"engine":"fake-async"/);
 	});
 
-	it("rejects with the signal's reason when the call was aborted, rather than denying (review)", async () => {
+	it("rejects with the signal's reason when the call was aborted, rather than denying", async () => {
 		// The evaluator's timeout and the caller's abort both arrive as the
 		// signal's reason. Folded into a logged deny, a timeout read as
 		// `cedar_deny` and a caller that left read as an engine outage.
@@ -878,13 +877,13 @@ describe("CedarPolicyRuleCollector — layered PDP through core evaluate", () =>
 });
 
 /*
- * #244: what the rule reports about the evaluation behind each answer.
+ * What the rule reports about the evaluation behind each answer.
  *
  * Every `false` below is the same `cedar_deny` to the evaluator, and has to
  * be — the rule fails closed. What differs is whether a policy produced it,
- * and the rule says so through the reporter core hands it for that one call.
- * It still ANSWERS a boolean: see "asked without a reporter".
- * The answer table, again, with the column the audit record needs:
+ * and the rule says so through the reporter core hands it for that one call;
+ * it still answers a boolean (see "asked without a reporter"). The answer
+ * table, with the column the audit record needs:
  *
  * | the rule answered because | evaluation.status | revision |
  * | --- | --- | --- |
@@ -893,7 +892,7 @@ describe("CedarPolicyRuleCollector — layered PDP through core evaluate", () =>
  * | the call itself failed | failed | null — nothing answered, so nothing vouched |
  * | the request could not be built | not_invoked | no key at all |
  */
-describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", () => {
+describe("CedarPolicyRuleCollector — the evaluation behind an answer", () => {
 	const REVISION = computePolicyRevision([{ name: "policies", text: PERMIT_ALL }]);
 	const OTHER_POLICIES = "forbid(principal, action, resource);";
 	const OTHER_REVISION = computePolicyRevision([{ name: "policies", text: OTHER_POLICIES }]);
@@ -1004,12 +1003,12 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 	});
 
 	/*
-	 * #199: a completed evaluation also names the policies that determined it —
+	 * A completed evaluation also names the policies that determined it —
 	 * Cedar's `diagnostics.reason` — made to fit core's contract: each id once,
 	 * sorted (Cedar keeps them in a set, whose order is not the attributes'),
 	 * at most DETERMINING_POLICIES_MAX, and what does not fit counted.
 	 */
-	describe("which policies determined a completed answer (#199)", () => {
+	describe("which policies determined a completed answer", () => {
 		/**
 		 * A reporter that records, and bounds determining policies the way this
 		 * release's core does — its own `boundDeterminingPolicies`, taken from a
@@ -1127,7 +1126,7 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 			});
 		});
 
-		it("names none to a reporter that does not bound them — a core older than #199 would refuse the keys", async () => {
+		it("names none to a reporter that does not bound them", async () => {
 			sync.answer = () => ({ decision: "deny", reason: ["30-forbid-contractors"], errors: [] });
 			const rule = await collectSync({ policies: PERMIT_ALL });
 			expect(ask(rule, attrsWith())).toEqual({
@@ -1228,7 +1227,7 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 		 * install — this package beside a server and core one release older —
 		 * has the OLD `evaluate()` running this rule, and it reads the answer by
 		 * truthiness. An answer carrying the evaluation is an object, and an
-		 * object is truthy: every Cedar deny would have been an allow.
+		 * object is truthy: every Cedar deny would be an allow.
 		 */
 		const legacyReads = (answer: unknown): boolean => Boolean(answer);
 
@@ -1352,7 +1351,7 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 			expect(error).toHaveBeenCalledOnce();
 		});
 
-		it("fails closed and logs an answer the engine can tell came from another set — unvouched as it is (#283)", async () => {
+		it("fails closed and logs an answer the engine can tell came from another set — unvouched as it is", async () => {
 			// The http engine cannot vouch for a revision, but it can tell when an
 			// answer names policies it never pushed. That is the same fault as a
 			// foreign revision, and just as never silent.
@@ -1373,7 +1372,7 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 			);
 		});
 
-		it("says so before it looks at errors — a foreign answer with errors is no evaluation error to silence (#283)", async () => {
+		it("says so before it looks at errors — a foreign answer with errors is no evaluation error to silence", async () => {
 			const { logger, error } = fakeLogger();
 			async.answer = () => ({
 				...ALLOW,
@@ -1389,7 +1388,7 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 		});
 
 		it.each(["altered policy set", "unverifiable policy set"] as const)(
-			"logs the read-back's label %j as the reason (#286)",
+			"logs the read-back's label %j as the reason",
 			async (why) => {
 				const { logger, error } = fakeLogger();
 				async.answer = () => ({ decision: "deny", reason: [], errors: [], foreign: { why } });
@@ -1589,7 +1588,7 @@ describe("CedarPolicyRuleCollector — the evaluation behind an answer (#244)", 
 			);
 			for (const decision of decisions) {
 				const byType = new Map(decision.reason.groups.map((group) => [group.ruleType, group]));
-				// Core's reporter reads determining policies (#199), so they ride along.
+				// Core's reporter reads determining policies, so they ride along.
 				expect(byType.get("cedar-a")?.evaluated[0].evaluation).toEqual({
 					status: "completed",
 					revision: REVISION,

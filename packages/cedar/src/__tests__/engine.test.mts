@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CedarEngine } from "../engine.mjs";
 
-/** The process-wide slot the registry lives in (v0.10.0 audit), cleared for a fresh one. */
+/** The process-wide slot the registry lives in, cleared for a fresh one. */
 const ENGINES_SLOT = Symbol.for("@o3co/auth.policy-verifier.cedar#engines");
 
 /** A fresh registry per test: a fresh module, and the process-wide slot emptied. */
@@ -58,12 +58,12 @@ describe("registerCedarEngine", () => {
 	});
 });
 
-describe("the registry is one per process, not one per copy of the package (v0.10.0 audit)", () => {
+describe("the registry is one per process, not one per copy of the package", () => {
 	it("sees an engine another copy of the module registered", async () => {
 		// cedar-wasm registers into whichever copy of `.cedar` it resolves. With
-		// two versions on the graph, a module-scope map split the registry: the
-		// collector's copy never saw wasm and fell through to the http engine —
-		// a different process deciding authorization, silently.
+		// two versions on the graph, a module-scope map would split the registry:
+		// the collector's copy would never see wasm and fall through to the http
+		// engine — a different process deciding authorization, silently.
 		const first = await fresh();
 		first.registerCedarEngine(engine("wasm"));
 		vi.resetModules();

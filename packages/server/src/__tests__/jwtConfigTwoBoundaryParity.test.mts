@@ -2,37 +2,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * The parity test the one documented departure owes (#164).
+ * The parity test the one documented departure owes.
  *
- * AGENTS.md, "Two-Boundary Config Validation": the invariant is that the same
- * configuration gets the same verdict at both boundaries. The mechanism is
- * normally one shared check function, which guarantees that structurally.
- * `assertVerifyRouterJwtConfig` and `AppConfigSchema`'s `superRefine` are the
- * section's one legitimate departure — #134 split the spellings, so the wire
- * says `oauth.jwt.mode = "insecure-decode"` (one key) where the internal config
- * says `validate: false` + `allowInsecureDecode: true` (two keys), and there is
- * no single shape for a shared function to read.
- *
- * The burden a departure carries is this file. Both sides already had parallel
- * suites pinning the same cases, but nothing asserted the two *agree* on one
- * input — which is what "held in step by hand" turned out to mean for the
- * numeric knobs in #157, where seven values had quietly diverged.
+ * AGENTS.md, "Two-Boundary Config Validation": the same configuration gets the
+ * same verdict at both boundaries, normally guaranteed structurally by one
+ * shared check function. `assertVerifyRouterJwtConfig` and `AppConfigSchema`'s
+ * `superRefine` are the one departure: the wire says
+ * `oauth.jwt.mode = "insecure-decode"` (one key) where the internal config
+ * says `validate: false` + `allowInsecureDecode: true` (two keys), so there is
+ * no single shape for a shared function to read. Parallel suites on each side
+ * do not show that the two agree on one input; this table does.
  *
  * Each row is one configuration written twice — once as an operator writes it
  * in a config file, once as a library consumer hands it to the router — and the
  * assertion is on the verdicts, not on how they are produced. A new invariant
  * on either side is a row here, not a new test.
- *
- * The table earned its keep on its first run: `tokenType: ["at+jwt"]` was
- * refused by the schema and accepted by the guard, whose `isPresent` was shared
- * with `issuer`/`audience` and so admitted a list for a header that is a single
- * value. See the `tokenType`-shaped rows below and the #164 CHANGELOG entry.
  */
 import { describe, expect, it } from "vitest";
 import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { assertVerifyRouterJwtConfig, type UncheckedJwtConfig } from "#/jwt/tokenAuthenticator.mjs";
 
-/** 64 hex characters — clears the #114 entropy floor, so no row fails on its secret. */
+/** 64 hex characters — clears the HS256 entropy floor, so no row fails on its secret. */
 const SECRET = "11".repeat(32);
 
 /** Everything outside `oauth.jwt`, so only the block under test can decide a verdict. */
@@ -46,7 +36,7 @@ const OTHER_ISSUER = "https://issuer-b.test";
 const AUDIENCE = "https://api.test";
 const TOKEN_TYPE = "at+jwt";
 
-/** A complete verifying `oauth.jwt` block, in the wire spelling #134 settled on. */
+/** A complete verifying `oauth.jwt` block, in the wire spelling. */
 const WIRE_VERIFYING = {
 	algorithm: "HS256",
 	secret: SECRET,
@@ -160,8 +150,7 @@ const PARITY_CASES: ParityCase[] = [
 		expect: { both: "refuse", key: "issuer" },
 	},
 	{
-		// The exact drift the pre-#132 `createApp` copy had: a bare falsy check
-		// accepts `[]`, because an empty array is truthy.
+		// A bare falsy check would accept `[]`, because an empty array is truthy.
 		name: "a verifying config whose issuer is an empty array",
 		wire: { ...WIRE_VERIFYING, issuer: [] },
 		guard: { ...GUARD_VERIFYING, issuer: [] },
@@ -218,18 +207,17 @@ const PARITY_CASES: ParityCase[] = [
 		expect: { both: "refuse", key: "tokenType" },
 	},
 	{
-		// The divergence this table found (#164). `tokenType` is the accepted
-		// `typ` header — one value, `z.string()` at the schema — where `issuer`
-		// and `audience` may be lists because jose accepts lists for them. The
-		// guard checked all three with the same list-tolerant `isPresent`, so
-		// this booted and then rejected every token.
+		// `tokenType` is the accepted `typ` header — one value, `z.string()` at
+		// the schema — where `issuer` and `audience` may be lists because jose
+		// accepts lists for them. A list-tolerant presence check would let this
+		// boot and then reject every token.
 		name: "a verifying config whose tokenType is a one-element array",
 		wire: { ...WIRE_VERIFYING, tokenType: [TOKEN_TYPE] },
 		guard: { ...GUARD_VERIFYING, tokenType: [TOKEN_TYPE] as unknown as string },
 		expect: { both: "refuse", key: "tokenType" },
 	},
 	{
-		// #219: the claim the audience is read from. Absent means `aud`; any
+		// The claim the audience is read from. Absent means `aud`; any
 		// other non-empty string names a claim to compare against `audience`
 		// (`azp` for a Clerk session token, `client_id` for a Cognito access
 		// token). Both boundaries read it through `checkAudienceClaim`.
@@ -251,7 +239,7 @@ const PARITY_CASES: ParityCase[] = [
 		expect: { both: "refuse", key: "audienceClaim" },
 	},
 	{
-		// `"*"` is the one tokenType that pins nothing (#219); it is still a
+		// `"*"` is the one tokenType that pins nothing; it is still a
 		// non-empty string to both boundaries, so it is accepted like any other.
 		name: 'a verifying config whose tokenType is "*"',
 		wire: { ...WIRE_VERIFYING, tokenType: "*" },
@@ -284,7 +272,7 @@ const PARITY_CASES: ParityCase[] = [
 		},
 	},
 	{
-		// The consent, in each spelling: one wire key, two internal ones (#134).
+		// The consent, in each spelling: one wire key, two internal ones.
 		name: "a decode-only config with the acknowledgment",
 		wire: { algorithm: "HS256", mode: "insecure-decode" },
 		guard: { validate: false, allowInsecureDecode: true },
@@ -301,8 +289,8 @@ const PARITY_CASES: ParityCase[] = [
 	{
 		// There is no wire spelling for decode-only *without* consent — the mode
 		// string is the consent. The nearest thing an operator can write is the
-		// key #134 removed, and the schema refuses that too, naming the key the
-		// guard names. Both boundaries agree this configuration is unreachable.
+		// removed `validate` key, and the schema refuses that too, naming the key
+		// the guard names. Both boundaries agree this configuration is unreachable.
 		name: "a decode-only config without the acknowledgment",
 		wire: { algorithm: "HS256", validate: false },
 		guard: { validate: false },
@@ -310,7 +298,7 @@ const PARITY_CASES: ParityCase[] = [
 	},
 ];
 
-describe("Two-boundary parity — AppConfigSchema vs assertVerifyRouterJwtConfig (#164)", () => {
+describe("Two-boundary parity — AppConfigSchema vs assertVerifyRouterJwtConfig", () => {
 	it.each(PARITY_CASES)("$name", (parityCase) => {
 		const schema = schemaVerdict(parityCase.wire);
 		const guard = guardVerdict(parityCase.guard);
@@ -332,20 +320,20 @@ describe("Two-boundary parity — AppConfigSchema vs assertVerifyRouterJwtConfig
 	});
 
 	it("has exactly one documented asymmetry, and it is the tokenType default", () => {
-		// A second one would mean the departure had drifted again without the
-		// reasoning in AGENTS.md having been revisited.
+		// A second one would mean the departure drifted without the reasoning in
+		// AGENTS.md being revisited.
 		const asymmetries = PARITY_CASES.filter((row) => "asymmetry" in row.expect);
 		expect(asymmetries.map((row) => row.name)).toEqual(["a verifying config with no tokenType"]);
 	});
 
 	it("does not mistake the removed wire keys for the internal interlock", () => {
-		// The trap #134's split leaves behind: `{ validate: false,
+		// The trap the spelling split leaves: `{ validate: false,
 		// allowInsecureDecode: true }` is the *current* internal consent and the
 		// *removed* wire spelling, so the identical text is accepted by the guard
-		// and refused by the schema. That is the spelling split itself, not a
-		// divergence — the wire counterpart of this internal config is
-		// `mode: "insecure-decode"`, which is a row above. Pinned here so it is
-		// not "fixed" into a parity row by someone reading the two as one config.
+		// and refused by the schema. That is the split itself, not a divergence —
+		// the wire counterpart of this internal config is
+		// `mode: "insecure-decode"`, a row above. Pinned here so it is not
+		// "fixed" into a parity row by someone reading the two as one config.
 		const wire = { algorithm: "HS256", validate: false, allowInsecureDecode: true };
 		expect(schemaVerdict(wire)).toMatchObject({ accepted: false, key: "validate" });
 		expect(guardVerdict({ validate: false, allowInsecureDecode: true })).toMatchObject({

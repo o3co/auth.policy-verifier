@@ -3,31 +3,28 @@
 
 /*
  * What a collector fan-out is allowed to cost, and the one runner that enforces
- * it (#115).
+ * it.
  *
- * Collectors are designed to call databases and HTTP APIs — that is the whole
- * point of the layer — and both pipelines used to run them under a bare
- * `Promise.all`. A `Promise.all` has no deadline, no cancellation and no bound
- * on how much work it starts, so one collector holding a dead socket held the
- * decision with it, on the authorization hot path, for as long as the socket
- * took to notice. The siblings kept running after one of them had already
- * failed the request, and a dependency slowdown piled up unbounded in-flight
- * work rather than shedding it.
+ * Collectors call databases and HTTP APIs on the authorization hot path. A
+ * bare `Promise.all` has no deadline, no cancellation and no bound on how much
+ * work it starts: one collector holding a dead socket would hold the decision
+ * with it, siblings would keep running after one had failed the request, and
+ * a dependency slowdown would pile up in-flight work rather than shed it.
  *
  * Three bounds, because each catches something the others cannot:
  *
  * - a **per-collector timeout**, which names the collector that stalled;
  * - an **end-to-end deadline**, which catches a fan-out where nothing overran
  *   its own budget but the total still did — the shape a queue produces;
- * - a **concurrency bound**, which is what stops a slow dependency from turning
- *   one request into an unbounded number of simultaneous outbound calls.
+ * - a **concurrency bound**, which stops a slow dependency from turning one
+ *   request into an unbounded number of simultaneous outbound calls.
  *
  * And one rule over all three: **a bound that trips fails the collect.** It
  * never resolves with what it managed to gather. Partial attributes weaken a
  * rule's inputs and partial rules weaken the policy itself — an empty rule set
- * is an *allow* under `onEmptyRuleSet: "allow"` — so "return what we have" is
- * the one implementation that turns a timeout into a permit. See the fail-closed
- * suite in `__tests__/collectorLimits.test.mts`.
+ * is an *allow* under `onEmptyRuleSet: "allow"` — so "return what we have"
+ * turns a timeout into a permit. See the fail-closed suite in
+ * `__tests__/collectorLimits.test.mts`.
  */
 
 import { CollectorTimeoutError } from "./errors.mjs";
@@ -36,26 +33,18 @@ import type { CollectorContext, CollectorRequest } from "./types.mjs";
 
 /**
  * How long one collector may take before it is cancelled and the decision
- * fails.
- *
- * Two seconds: a collector on this path is doing one lookup against a
- * dependency the deployment runs (a session store, a directory, an entitlement
- * API), and a healthy one answers in single-digit milliseconds. Two seconds is
- * far past "slow" and well short of the timeouts callers put on the verify call
- * itself, so the verifier is the layer that notices — and it can say *which*
- * collector, which a caller-side timeout never can.
+ * fails. A collector does one lookup against a dependency the deployment runs,
+ * and a healthy one answers in milliseconds; two seconds is far past "slow"
+ * and well short of the timeouts callers put on the verify call, so the
+ * verifier is the layer that notices, and it can say *which* collector.
  */
 export const DEFAULT_COLLECTOR_TIMEOUT_MS = 2_000;
 
 /**
  * How long the whole fan-out may take, per pipeline, however many collectors
- * are configured.
- *
- * Five seconds — deliberately more than one collector's budget and less than
- * the sum of several. The per-collector timeout cannot bound a *set*: with the
- * concurrency cap in play, collectors queue, and enough of them each finishing
- * just inside their own budget still adds up to a request nobody is waiting for
- * any more. This is the bound on the answer the caller actually experiences.
+ * are configured: more than one collector's budget and less than the sum of
+ * several. Under the concurrency cap collectors queue, so the per-collector
+ * timeout cannot bound a *set*; this bounds the answer the caller experiences.
  */
 export const DEFAULT_COLLECT_DEADLINE_MS = 5_000;
 
@@ -63,22 +52,19 @@ export const DEFAULT_COLLECT_DEADLINE_MS = 5_000;
  * How many collectors may be in flight at once, per pipeline, per decision.
  *
  * Eight: more than the collector set of any deployment this project has seen,
- * so a normal configuration still fans out in a single wave and nothing about
- * its latency changes. What the cap removes is the tail — a config with dozens
- * of collectors multiplying into simultaneous outbound calls against a
- * dependency that has just started to slow down. That is the amplification the
- * bound exists for; the number is a ceiling on pathology, not a tuning
- * parameter.
+ * so a normal configuration still fans out in one wave. The cap removes the
+ * tail — dozens of collectors multiplying into simultaneous outbound calls
+ * against a dependency that has started to slow down. It is a ceiling on
+ * pathology, not a tuning parameter.
  *
- * Per **decision**, which is worth saying twice: the cap does not bound a
- * request that carries many decisions. A `POST /verify/batch` multiplies it by
- * however many entries are decided at once — bounding that product is the
- * batch route's own job (`verify.batchConcurrency`, #183), not this cap's.
+ * Per **decision**: a `POST /verify/batch` multiplies it by however many
+ * entries are decided at once, and bounding that product is the batch route's
+ * job (`verify.batchConcurrency`), not this cap's.
  */
 export const DEFAULT_COLLECTOR_CONCURRENCY = 8;
 
 /**
- * How long one asynchronous rule may take to answer (#225) — the same budget
+ * How long one asynchronous rule may take to answer — the same budget
  * as one collector, for the same reason: it is one call to a dependency the
  * deployment runs (a policy engine), a healthy one answers in milliseconds,
  * and the verifier is the layer that can say *which* rule stalled. Defined in
@@ -88,7 +74,7 @@ export const DEFAULT_RULE_TIMEOUT_MS: number = DEFAULT_COLLECTOR_TIMEOUT_MS;
 
 /**
  * How long the whole rule phase may take — every asynchronous rule of one
- * decision, together (v0.10.0 audit). The same five seconds as a collector
+ * decision, together. The same five seconds as a collector
  * fan-out, for the same reason: a per-rule budget cannot bound a set, and
  * groups are evaluated one after another, so rules that each finish inside
  * their own budget still add up. Defined in terms of the collect deadline so
@@ -101,7 +87,7 @@ export const DEFAULT_EVALUATE_DEADLINE_MS: number = DEFAULT_COLLECT_DEADLINE_MS;
  * 24.8 days. Node stores a `setTimeout` delay in a signed 32-bit integer and
  * silently clamps anything above to ~1 ms — so a bigger "budget" is not a
  * generous bound but a timer that fires almost immediately, cancelling every
- * collector and denying every decision (#181). A millisecond knob above this
+ * collector and denying every decision. A millisecond knob above this
  * is refused wherever one is read.
  */
 export const MAX_TIMER_MS = 2_147_483_647;
@@ -116,9 +102,8 @@ export type CollectorPipeline = "attribute" | "rule";
  *
  * A deployment sets these through `verify.collectorTimeoutMs`,
  * `verify.collectorDeadlineMs` and `verify.collectorConcurrency`; the server
- * package holds those to the same bound at both of its config boundaries (see
- * AGENTS.md, "Two-Boundary Config Validation") and hands the resolved numbers
- * here.
+ * holds those to the same bound at both of its config boundaries (AGENTS.md,
+ * "Two-Boundary Config Validation") and hands the resolved numbers here.
  */
 export interface CollectorLimits {
 	/** Milliseconds one collector may take. Defaults to {@link DEFAULT_COLLECTOR_TIMEOUT_MS}. */
@@ -136,7 +121,7 @@ export interface CollectorLimits {
  */
 export interface CollectOptions {
 	/**
-	 * Where this decision's failures are recorded (#200) — which collector
+	 * Where this decision's failures are recorded — which collector
 	 * rejected, overran its budget, or which pipeline overran its deadline. One
 	 * per decision; see `FailureRecord`. Omitted, nothing is recorded, and the
 	 * collect behaves exactly as without it.
@@ -153,23 +138,20 @@ export interface ResolvedCollectorLimits {
 
 /**
  * Fills in the defaults and refuses a limit that is not a positive whole
- * number — or a millisecond budget above what a timer can hold (#181) —
- * naming the field.
+ * number — or a millisecond budget above what a timer can hold — naming the
+ * field.
  *
- * Refused rather than repaired, and refused at construction rather than at the
- * first request: `concurrency: 0` would otherwise start no collector at all and
- * resolve with an empty result — an empty attribute map and an empty rule set,
- * which is precisely the fail-open this module exists to close. A silently
- * ignored bound is the failure mode #157 catalogued for the config knobs, and
- * a timeout past {@link MAX_TIMER_MS} is its twin: `setTimeout` quietly clamps
- * it to ~1 ms, a bound nobody wrote that denies everything.
+ * Refused rather than repaired, and at construction rather than at the first
+ * request: `concurrency: 0` would start no collector and resolve with an empty
+ * attribute map and an empty rule set, the fail-open this module exists to
+ * close; a timeout past {@link MAX_TIMER_MS} is clamped by `setTimeout` to
+ * ~1 ms, a bound nobody wrote that denies everything.
  *
- * This check is deliberately *weaker* than the config layer's `resolveBound`
- * rather than a second opinion on the same values: every number `resolveBound`
- * produces for these knobs is a positive integer within the timer ceiling, so
- * anything accepted there is accepted here. The two cannot reach different
- * verdicts on a configured value — this only catches a hand-written call that
- * never met a config boundary.
+ * This check is weaker than the config layer's `resolveBound`, not a second
+ * opinion: every number `resolveBound` produces for these knobs is a positive
+ * integer within the timer ceiling, so the two cannot reach different
+ * verdicts on a configured value. It catches a hand-written call that never
+ * met a config boundary.
  */
 export function resolveCollectorLimits(limits?: CollectorLimits): ResolvedCollectorLimits {
 	return {
@@ -212,7 +194,7 @@ function positive(value: number | undefined, fallback: number, field: string): n
 	return value;
 }
 
-/** A millisecond budget: positive, and small enough for a timer to hold (#181). */
+/** A millisecond budget: positive, and small enough for a timer to hold. */
 function timer(value: number | undefined, fallback: number, field: string): number {
 	const resolved = positive(value, fallback, field);
 	if (resolved > MAX_TIMER_MS) {
@@ -237,7 +219,7 @@ interface Collecting<T> {
  * @throws whatever a collector rejected with, or the caller's abort reason —
  * both unchanged, so a store outage still surfaces as the store's own error.
  * Where each failure came from is recorded in `failures` beside the error
- * rather than wrapped around it (#200).
+ * rather than wrapped around it.
  *
  * It never resolves partially: on any failure the results gathered so far are
  * discarded and every sibling still running is cancelled.
@@ -324,19 +306,17 @@ export async function runCollectors<T>(
  * Runs one collector under its own timeout, with a signal that aborts when
  * either that timeout or the fan-out does.
  *
- * The budget starts here, when the collector starts, rather than when the
- * fan-out did: under the concurrency cap a collector waits its turn, and
- * charging it for the queue would refuse work that had not yet begun.
+ * The budget starts when the collector starts, not when the fan-out did:
+ * under the concurrency cap a collector waits its turn, and charging it for
+ * the queue would refuse work that had not yet begun.
  *
- * A collector whose decision is already lost is **not invoked at all**. Handing
- * one an aborted signal and relying on it to notice is not the same thing: a
- * collector that does not check `signal.aborted` before its first `await` — and
- * most do not, because the honest way to use a signal is to pass it to `fetch`
- * — would have already put the request on the wire. That is an outbound call
- * for an answer nobody will read, made against a dependency that is very often
- * the one whose slowness abandoned the decision in the first place. Refusing to
- * start is the whole point of a concurrency bound; starting and then cancelling
- * only bounds how long the amplification lasts.
+ * A collector whose decision is already lost is **not invoked at all**. An
+ * aborted signal is not enough: `fetch` refuses one before connecting, but a
+ * driver call that takes no signal, or whatever a collector does before its
+ * first signal-aware call, still goes out — an outbound call for an answer
+ * nobody will read, often against the dependency whose slowness abandoned the
+ * decision. Refusing to start is the point of a concurrency bound; starting
+ * and then cancelling only bounds how long the amplification lasts.
  */
 async function runOne<T>(
 	collector: Collecting<T>,
@@ -381,7 +361,7 @@ async function runOne<T>(
 		// returning a promise is attributed exactly as one that rejects.
 		const collected = new Promise<T>((resolve) => resolve(collector.collect(context))).catch(
 			(error: unknown) => {
-				// #200: only a failure of the collector's own is its to answer for.
+				// Only a failure of the collector's own is its to answer for.
 				// Once its signal has aborted — a sibling failed, the deadline
 				// passed, the caller left — a collector honouring the signal
 				// rejects with that reason, and naming it here would blame it for
@@ -405,14 +385,13 @@ async function runOne<T>(
  * A promise that rejects with `signal.reason` when it aborts and otherwise
  * never settles, plus the way to unsubscribe it once the race is over.
  *
- * **Precondition: `signal` is not yet aborted.** Its one caller creates the
- * controller a few lines above and refuses an already-abandoned fan-out before
- * that, so an already-aborted signal cannot reach here. There is deliberately no
- * defensive branch for it: a listener added to an aborted signal never fires, so
- * such a branch would be the difference between rejecting and hanging — which
- * makes it exactly the kind of code that must be reachable to be trusted, and
- * this one would not be. A future caller that cannot honour the precondition
- * should reject before calling rather than adding an untested path here.
+ * **Precondition: `signal` is not yet aborted** — a listener added to an
+ * aborted signal never fires, so the promise would hang. Both callers create
+ * the controller just above, having refused what was already lost: `runOne`
+ * an abandoned fan-out, `evaluate`'s `runAsyncRule` an aborted caller or a
+ * spent rule phase. There is no defensive branch: it would be unreachable,
+ * and so untested. A caller that cannot honour the precondition should reject
+ * before calling.
  */
 export function rejectOnAbort(signal: AbortSignal): {
 	promise: Promise<never>;

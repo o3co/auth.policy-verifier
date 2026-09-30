@@ -83,12 +83,12 @@ describe("AttrLiteralNotEqual", () => {
 	});
 
 	// ---------------------------------------------------------------------------
-	// Evaluation-time safe-deny: NaN attr (#254)
+	// Evaluation-time safe-deny: NaN attr
 	// ---------------------------------------------------------------------------
 
-	it("returns false when the attribute is NaN — not a number is not an unequal number (#254)", () => {
-		// `NaN !== v` holds for every v, so a numeric NotEqual passed a NaN
-		// attribute: a restriction that allowed. JSON carries no NaN; a collector
+	it("returns false when the attribute is NaN — not a number is not an unequal number", () => {
+		// `NaN !== v` holds for every v, so a plain `!==` would pass a NaN
+		// attribute: a restriction that allows. JSON carries no NaN; a collector
 		// that computes a number can produce one.
 		const rule = new AttrLiteralNotEqual({ a: "age", v: 30 });
 		const attrs: Attributes = new Map<string, unknown>([["age", Number.NaN]]);
@@ -188,7 +188,7 @@ describe("AttrLiteralNotEqual", () => {
 	});
 
 	it("distinguishes literals by type in ruleType (e.g. number 1 vs string '1')", () => {
-		// Regression guard: see AttrLiteralEqual test for the same rationale.
+		// Same rationale as in the AttrLiteralEqual test.
 		const r1 = new AttrLiteralNotEqual({ a: "flag", v: 1 });
 		const r2 = new AttrLiteralNotEqual({ a: "flag", v: "1" });
 		expect(r1.ruleType).not.toBe(r2.ruleType);

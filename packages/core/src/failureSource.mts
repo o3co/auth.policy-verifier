@@ -2,13 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Which collector — or which rule — a failure came from (#200).
+ * Which collector — or which rule — a failure came from.
  *
  * A collector that rejects fails its decision, and so does a rule whose
  * `verify` throws or whose `decide` rejects. The transport answers either as a
- * fault, and the one thing its log line could not say was *where* the fault
- * was: the collector runner and the evaluator knew, and threw the error on
- * without saying.
+ * fault; the collector runner and the evaluator know *where* the fault was,
+ * and record it here for the transport to name.
  *
  * **Recorded beside the error, not wrapped around it.** `pipeline.collect` and
  * `evaluate()` are documented to reject with whatever the collector or rule
@@ -21,8 +20,8 @@
  * {@link FailureRecord} the caller creates for one decision and hands to both
  * pipelines and the evaluator. Nothing is kept process-wide: one error object
  * is routinely shared — a memoised downstream call, a circuit breaker's cached
- * failure — and an association keyed by the object alone let a concurrent
- * decision's record overwrite this one's before its caller had read it.
+ * failure — and an association keyed by the object alone would let a
+ * concurrent decision's record overwrite this one's before its caller read it.
  */
 
 import type { CollectorPipeline } from "./collectorLimits.mjs";
@@ -67,8 +66,8 @@ export type FailureSource =
  * `attributePipeline.collect(request, { failures })`,
  * `rulePipeline.collect(request, { failures })` and
  * `evaluate(attrs, rules, { failures })`; then ask {@link sourceOf} with
- * whatever the decision was failed with. Sharing one across decisions brings
- * back exactly the cross-talk it exists to prevent.
+ * whatever the decision was failed with. Sharing one across decisions causes
+ * exactly the cross-talk it exists to prevent.
  *
  * Keyed by the value that was thrown, primitives included — a record lives as
  * long as its decision, so nothing is retained. **The first source recorded

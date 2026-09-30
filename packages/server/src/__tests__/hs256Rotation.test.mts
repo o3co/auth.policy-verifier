@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { MAX_PREVIOUS_SECRETS, MIN_SECRET_ENTROPY_BYTES } from "#/config/defaults.mjs";
 import { checkHs256Rotation, parseHs256Rotation } from "#/config/hs256Rotation.mjs";
 
-/** 64 hex characters — 32 decoded bytes, the floor auth.provider#282 set. */
+/** 64 hex characters — 32 decoded bytes, the HS256 secret's entropy floor. */
 const SECRET = "11".repeat(32);
 const OLD_SECRET = "22".repeat(32);
 
@@ -195,7 +195,7 @@ describe("checkHs256Rotation — the invariants rotation depends on", () => {
 	});
 });
 
-describe("checkHs256Rotation — the entropy floor (#114)", () => {
+describe("checkHs256Rotation — the entropy floor", () => {
 	/** 32 characters, but only 16 decoded bytes: the value the floor is for. */
 	const SHORT_HEX = "ab".repeat(16);
 
@@ -326,13 +326,13 @@ describe("parseHs256Rotation", () => {
 		);
 	});
 
-	it("throws on a current secret under the floor (#114)", () => {
+	it("throws on a current secret under the floor", () => {
 		expect(() => parseHs256Rotation({ secret: "x" })).toThrow(
 			/^oauth\.jwt\.secret must carry at least 32 bytes/,
 		);
 	});
 
-	it("throws on a retired secret under the floor (#114)", () => {
+	it("throws on a retired secret under the floor", () => {
 		expect(() =>
 			parseHs256Rotation({
 				secret: SECRET,

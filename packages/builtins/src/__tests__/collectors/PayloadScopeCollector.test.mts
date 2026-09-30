@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { PayloadScopeCollector } from "#/collectors/PayloadScopeCollector.mjs";
 
 /**
- * `CollectorContext.signal` is required (#115): a pipeline supplies one per
+ * `CollectorContext.signal` is required: a pipeline supplies one per
  * collector, so a hand-built context carries one too. These fixtures are not
  * about cancellation, so it is a signal that never aborts.
  */
@@ -40,7 +40,7 @@ describe("PayloadScopeCollector", () => {
 	});
 });
 
-describe("PayloadScopeCollector — the claim option (#219)", () => {
+describe("PayloadScopeCollector — the claim option", () => {
 	const ctx = (subject: SubjectAttributes): CollectorContext => ({
 		subject,
 		resource: { raw: "test:1", resourceType: "test", resourceId: "1" },
@@ -75,8 +75,8 @@ describe("PayloadScopeCollector — the claim option (#219)", () => {
 			"a",
 			"b",
 		]);
-		// A list that is not a list of scopes asserts no capability, the way a
-		// non-string `scope` never did — fail closed rather than pick the strings out.
+		// A list that is not a list of scopes asserts no capability, as a
+		// non-string `scope` asserts none — fail closed rather than pick the strings out.
 		expect((await collector.collect(ctx({ scp: ["a", 7] }))).get(ATTR_SCOPES)).toEqual([]);
 	});
 

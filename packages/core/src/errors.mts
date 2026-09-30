@@ -13,16 +13,14 @@
  * Raised by a {@link ResourceParser} when the resource string does not belong
  * to the syntax it parses.
  *
- * A parser that cannot read its input has two options: guess, or refuse.
- * Guessing is what makes distinct resources collide into one authorization
- * namespace — the derived `resourceType` is what scope rules authorize, so a
- * parser that silently repairs its input can hand a caller a grant that was
- * written for a different resource. Refusing keeps the failure at the edge,
- * where it is a malformed request rather than a wrong decision.
+ * A parser refuses rather than guesses: the derived `resourceType` is what
+ * scope rules authorize, so a parser that silently repairs its input can make
+ * distinct resources collide and hand a caller a grant written for a
+ * different resource. Refused, it is a malformed request rather than a wrong
+ * decision.
  *
  * This is a **request** error, not a server error: the transport layer should
- * answer it as a 400-class response naming the offending string, the same as
- * any other unusable field of the request body.
+ * answer it as a 400-class response naming the offending string.
  */
 export class ResourceParseError extends Error {
 	constructor(
@@ -70,19 +68,14 @@ export type CollectorTimeoutDetail =
 	  };
 
 /**
- * Raised when a collector fan-out exceeds one of its bounds (#115) — a single
+ * Raised when a collector fan-out exceeds one of its bounds — a single
  * collector overrunning its own budget, or the pipeline overrunning its
  * end-to-end deadline.
  *
- * **This is a deny, not a degradation.** It exists as a distinct error class so
- * a transport can answer it as a deny of its own rather than letting it fall
- * into a generic 500, and so the collectors that were quick cannot be mistaken
- * for the whole answer: a pipeline that timed out returns nothing at all. A
- * partial attribute map merely weakens a rule's inputs, but a partial rule list
- * weakens the *policy* — and an empty one is an allow wherever
- * `onEmptyRuleSet: "allow"` is set. There is no shape of "answer with what we
- * got" that is safe on an authorization path, which is why this is thrown
- * instead.
+ * **This is a deny, not a degradation.** A distinct class, so a transport can
+ * answer it as a deny of its own rather than a generic 500. A pipeline that
+ * timed out returns nothing at all: a partial rule list weakens the *policy*,
+ * and an empty one is an allow wherever `onEmptyRuleSet: "allow"` is set.
  */
 export class CollectorTimeoutError extends Error {
 	readonly pipeline: "attribute" | "rule";
@@ -106,14 +99,13 @@ export class CollectorTimeoutError extends Error {
 
 /**
  * Raised when two attribute maps write **different** values to the same
- * scalar (non-array) key (#174). An identical re-write — same primitive
- * value, or the same object reference — is not a conflict.
+ * scalar (non-array) key. An identical re-write — same primitive value, or the
+ * same object reference — is not a conflict; array-valued keys concatenate.
  *
- * **This is a deny, not a degradation** — the same stance as
- * {@link CollectorTimeoutError}: an attribute map whose content depends on
- * collector ordering is not something to authorize from, and the previous
- * last-writer-wins silently weakened decisions when collectors disagreed
- * (#126 item 2). Array-valued keys are unaffected; they concatenate.
+ * **This is a deny, not a degradation**, as {@link CollectorTimeoutError} is:
+ * an attribute map whose content depends on collector ordering is not
+ * something to authorize from, and last-writer-wins would silently weaken
+ * decisions when collectors disagree.
  *
  * The message names the KEY only, never the values: attribute values are
  * claims and may be sensitive, and this message travels into logs.
@@ -134,7 +126,7 @@ export class AttributeConflictError extends Error {
 
 /**
  * Raised by `evaluate()` when an `AsyncRule` does not answer within its
- * budget (#225). **A deny, not a degradation**, for the reason
+ * budget. **A deny, not a degradation**, for the reason
  * {@link CollectorTimeoutError} is: a rule that has not answered has not
  * passed, and there is no partial answer to an authorization question.
  *

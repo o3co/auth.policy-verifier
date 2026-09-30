@@ -73,7 +73,7 @@ describe("scaffold", () => {
 		}
 	});
 
-	it('keeps "private": true so a scaffolded service is not publishable by accident (#126 item 4)', () => {
+	it('keeps "private": true so a scaffolded service is not publishable by accident', () => {
 		const targetDir = join(tempDir, "verifier");
 		scaffold(targetDir, "verifier");
 

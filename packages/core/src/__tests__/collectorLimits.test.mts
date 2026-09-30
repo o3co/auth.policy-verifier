@@ -56,7 +56,7 @@ function cancellable(): { collector: AttributeCollector; aborted: () => boolean 
 	};
 }
 
-describe("AttributePipeline — collector cancellation (#115)", () => {
+describe("AttributePipeline — collector cancellation", () => {
 	it("hands every collector an AbortSignal to pass to its own I/O", async () => {
 		const seen: AbortSignal[] = [];
 		const record = (): AttributeCollector => ({
@@ -125,7 +125,7 @@ describe("AttributePipeline — collector cancellation (#115)", () => {
 	});
 });
 
-describe("AttributePipeline — per-collector timeout (#115)", () => {
+describe("AttributePipeline — per-collector timeout", () => {
 	it("refuses a collector that overruns its own budget", async () => {
 		const pipeline = new AttributePipeline([hanging()], {
 			collectorTimeoutMs: 20,
@@ -204,7 +204,7 @@ describe("AttributePipeline — per-collector timeout (#115)", () => {
 	});
 });
 
-describe("AttributePipeline — end-to-end deadline (#115)", () => {
+describe("AttributePipeline — end-to-end deadline", () => {
 	it("refuses a fan-out that overruns the deadline though no collector overran its own budget", async () => {
 		const slow = (): AttributeCollector => ({
 			collect: async () => {
@@ -274,7 +274,7 @@ describe("AttributePipeline — end-to-end deadline (#115)", () => {
 	});
 });
 
-describe("AttributePipeline — concurrency bound (#115)", () => {
+describe("AttributePipeline — concurrency bound", () => {
 	it("never has more than the configured number of collectors in flight", async () => {
 		let inFlight = 0;
 		let peak = 0;
@@ -322,7 +322,7 @@ describe("AttributePipeline — concurrency bound (#115)", () => {
 	});
 });
 
-describe("AttributePipeline — fail closed (#115)", () => {
+describe("AttributePipeline — fail closed", () => {
 	it("never returns the attributes it did collect when another collector stalls", async () => {
 		const fast: AttributeCollector = {
 			collect: async () => new Map([["scopes", ["read:project"]]]),
@@ -466,7 +466,7 @@ describe("AttributePipeline — fail closed (#115)", () => {
 	});
 });
 
-describe("collector limits — refused at construction (#115)", () => {
+describe("collector limits — refused at construction", () => {
 	it.each([
 		["a zero timeout", { collectorTimeoutMs: 0 }],
 		["a negative timeout", { collectorTimeoutMs: -1 }],
@@ -498,7 +498,7 @@ describe("collector limits — refused at construction (#115)", () => {
 	});
 });
 
-describe("RulePipeline — collector deadlines (#115)", () => {
+describe("RulePipeline — collector deadlines", () => {
 	const rule = (code: string): Rule => ({
 		ruleType: "scope",
 		code,
@@ -567,7 +567,7 @@ describe("RulePipeline — collector deadlines (#115)", () => {
 	});
 });
 
-describe("pipeline limits — timer knobs are bounded above (#181)", () => {
+describe("pipeline limits — timer knobs are bounded above", () => {
 	// Node clamps a `setTimeout` delay above 2^31 - 1 to ~1 ms, so a huge
 	// budget would cancel every collector almost on arrival — a verifier that
 	// denies everything, produced by a value that looked valid. Refused at

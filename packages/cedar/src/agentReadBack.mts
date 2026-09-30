@@ -2,69 +2,60 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * The http engine's read-back of cedar-agent's policy set (#286).
+ * The http engine's read-back of cedar-agent's policy set.
  *
- * Every answer is read against what this load pushed (#283): a policy id it
- * names that is not one of this load's marks it foreign. Two things no answer
- * shows. A token holder can rewrite or delete one of this load's policies
- * under its own id, and the answers still name this load's ids. An agent that
- * lost its set — restarted, recreated — answers "no determining policy" to
- * everything, which is a deny that names nothing foreign.
+ * An answer naming a policy id that is not one of this load's is marked
+ * foreign, but two things no answer shows. A token holder can rewrite or
+ * delete one of this load's policies under its own id, and the answers still
+ * name this load's ids. An agent that lost its set — restarted, recreated —
+ * answers "no determining policy" to everything, a deny that names nothing
+ * foreign.
  *
  * The agent's own copy of the set shows both. `PUT /v1/policies` answers with
  * it — each id, and the policy re-printed by the agent's Cedar — and a later
  * `GET /v1/policies` answers the same bytes while nothing changed it (checked
- * at every boot, and against cedar-agent 0.2.2). So the copy the push was
- * answered with is the baseline, and the agent's set is read back and
- * compared with it by id: a policy rewritten, deleted or added, or an empty
- * agent, is a difference.
+ * at every boot, and against cedar-agent 0.2.2). That copy is the baseline;
+ * the agent's set is read back and compared with it by id, so a policy
+ * rewritten, deleted or added, or an empty agent, is a difference.
  *
  * A check runs behind an answer, never before it: when an answer is asked for
  * and the wait since the last check has passed, one starts, and the answer
- * goes ahead on what is known. The wait is drawn anew after each check, from
- * half the interval to all of it: the next check falls no sooner than half an
- * interval after the last, and past that, when is a guess. So this is
- * detection with a window — up to an interval,
- * and the check's own time — not proof per answer; the engine still does not
- * confirm a revision. A verifier that answers nothing checks nothing, and has
- * nothing to protect.
+ * goes ahead on what is known. Each wait is drawn anew from half the interval
+ * to all of it. This is detection with a window — up to an interval, and the
+ * check's own time — not proof per answer; the engine still does not confirm
+ * a revision. A verifier that answers nothing checks nothing.
  *
  * Every answer is refused while the agent was last seen holding a set other
- * than this load's — or answering its set in a way that cannot be compared:
- * an error, a set past the answer bound, something that is not a set, an
- * answer broken off, late, or never begun. That the read-back cannot be made
- * to fail quietly is what makes it worth anything: a token holder who pads the
- * set past the bound, or anything in the path that cuts large answers off,
- * would otherwise turn it off. The one read that leaves things as they were is
- * a connection that fails outright while the agent answers no authorization
- * call either — it is down, its answers fail on their own, and "altered" would
- * misname the fault. An agent that answers those calls but whose set cannot be
- * read is not showing it: a block on the read, or an agent gone down since the
- * call; either way the set is not seen, and answers are refused. While
- * refusing, the set is read again after a second, then two, doubling up to
- * the interval, so answers resume soon after the set is this load's again.
+ * than this load's, or answering its set in a way that cannot be compared: an
+ * error, a set past the answer bound, something that is not a set, an answer
+ * broken off, late, or never begun. The read-back must not fail quietly: a
+ * token holder who pads the set past the bound, or anything in the path that
+ * cuts large answers off, would otherwise turn it off. The one read that
+ * leaves things as they were is a connection that fails outright while the
+ * agent answers no authorization call either: it is down, its answers fail
+ * on their own, and "altered" would misname the fault. An agent that answers
+ * those calls but whose set cannot be read is not showing it, and answers are
+ * refused. While refusing, the set is read again after a second, then two,
+ * doubling up to the interval, so answers resume soon after the set is this
+ * load's again. An answer to a call that was out while a refusal began is
+ * refused too, even when the set has been restored by the time it arrives: it
+ * may have come from the set that was found changed.
  *
- * An answer to a call that was out while a refusal began is refused too, even
- * when the set has been restored by the time it arrives: it may have come
- * from the set that was found changed.
+ * The set is pushed again only into an agent that holds nothing — restarted or
+ * recreated: an accident, and a harmless one, since an empty set denies
+ * everything. A set that holds anything else is not written over: a policy of
+ * this load's rewritten or deleted, one added, marked or not, is what
+ * tampering looks like, and is left for an operator to see; another load's
+ * set, from a replica sharing the agent, would be overwritten back and forth.
+ * It stays refused until the agent holds this load's set again, however it
+ * gets there — a restart of the verifier pushes it.
  *
- * The set is pushed again only into an agent that holds nothing — one that
- * restarted, or was recreated: an accident, and a harmless one, since an
- * empty set denies everything. A set that holds anything else is not written
- * over: a policy of this load's rewritten or deleted, one added, marked or
- * not, is what tampering looks like, and is left for an operator to see;
- * another load's set, from a replica sharing the agent, would be overwritten
- * back and forth. It stays refused until the agent holds this load's set
- * again, however it gets there — a restart of the verifier pushes it.
- *
- * What this does not do is stop someone holding the agent's token. They can
- * lift a refusal themselves — put the set back as it was, or empty the agent
- * so it is pushed again — and change it again after the next check. One who
- * sees a check knows the next is at least half an interval away: a change
- * made and undone within that goes unseen for certain, and only past it is
- * their timing a guess. The read-back detects, logs and refuses what it sees,
- * and heals a restarted agent; the token is the boundary, as it is for #283's
- * marks.
+ * This does not stop someone holding the agent's token. They can lift a
+ * refusal themselves — put the set back, or empty the agent so it is pushed
+ * again — and change it again after the next check; a change made and undone
+ * within half an interval of a check they saw goes unseen for certain. The
+ * read-back detects, logs and refuses what it sees, and heals a restarted
+ * agent; the token is the boundary, as it is for the load's marks.
  */
 
 import type { Logger } from "@o3co/auth.policy-verifier.core";

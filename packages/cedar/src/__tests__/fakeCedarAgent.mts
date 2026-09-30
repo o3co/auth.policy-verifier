@@ -3,14 +3,14 @@
 
 /*
  * A fake cedar-agent for this package's own tests: a real `node:http` server on
- * an ephemeral loopback port that the HTTP engine reaches through Node's real
- * `fetch`. It evaluates nothing. It records every request it receives — method,
- * path, headers, body — and answers each one with whatever the test programmed,
- * by default the way cedar-agent 0.2.x does: `PUT …/v1/policies` accepted and
- * answered with the set, `GET …/v1/policies` answered with what was last put
- * there (#286), `POST …/v1/is_authorized` answered with an Allow. Paths are matched on their
- * suffix, so one agent serves several base URLs (`/rule-1`, `/rule-2`), which is
- * how collector tests that share the registered engine stay one agent each.
+ * an ephemeral loopback port, reached through Node's real `fetch`. It evaluates
+ * nothing; it records every request — method, path, headers, body — and
+ * answers as the test programmed, by default as cedar-agent 0.2.x does:
+ * `PUT …/v1/policies` accepted and answered with the set, `GET …/v1/policies`
+ * with what was last put there, `POST …/v1/is_authorized` with an Allow. Paths
+ * are matched on their suffix, so one agent serves several base URLs
+ * (`/rule-1`, `/rule-2`) and collector tests that share the registered engine
+ * stay one agent each.
  */
 
 import { once } from "node:events";

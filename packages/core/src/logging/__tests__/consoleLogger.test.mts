@@ -51,7 +51,7 @@ describe("consoleLogger level routing", () => {
 
 	it("accepts plain string as first arg (no obj)", () => {
 		// No bindings and no merge object: prepending `{}` would render the line
-		// as `{} plain string message` (#133), so the string goes through alone.
+		// as `{} plain string message`, so the string goes through alone.
 		const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
 		consoleLogger.warn("plain string message");
 		expect(spy).toHaveBeenCalledWith("plain string message");
@@ -67,7 +67,7 @@ describe("consoleLogger level routing", () => {
 	});
 
 	it("object-first call keeps the leading object even when it is empty", () => {
-		// Only the string-first shape drops the empty prefix (#133); an explicit
+		// Only the string-first shape drops the empty prefix; an explicit
 		// object-first `{}` is passed through unchanged.
 		const spy = vi.spyOn(console, "info").mockImplementation(() => {});
 		consoleLogger.info({}, "object-first message");

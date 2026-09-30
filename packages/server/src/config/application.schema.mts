@@ -40,8 +40,9 @@ import {
 } from "./tokenAuthenticatorSelection.mjs";
 
 /**
- * Migration message for the wire keys removed in #134. Emitted by the schema
- * for parsed configs and by `createApp` for hand-built ones, so an operator
+ * Migration message for the removed `oauth.jwt` wire keys
+ * ({@link JWT_MODE_REMOVED_KEYS}). Emitted by the schema for parsed configs and
+ * by `createApp` for hand-built ones, so an operator
  * upgrading across the break always gets the same actionable pointer instead
  * of a puzzling "issuer is required" from a silently-defaulted mode.
  */
@@ -49,15 +50,13 @@ export const JWT_MODE_MIGRATION_MESSAGE =
 	'oauth.jwt.validate/allowInsecureDecode were replaced by oauth.jwt.mode; set mode = "verify" or the explicit "insecure-decode"';
 
 /**
- * The `oauth.jwt` keys removed in #134, refused by both boundaries with
+ * The removed `oauth.jwt` keys, refused by both boundaries with
  * {@link JWT_MODE_MIGRATION_MESSAGE}.
  *
- * Shared for the same reason the message is (#158): the schema refuses these
- * for parsed configs and `createApp` refuses them for hand-built ones, and a
- * key added to one list only would be rejected on one path and silently
- * accepted on the other — which is exactly the "reinterpreted as a defaulted
- * verify mode" failure #134 removed them to prevent. Two copies of a list
- * behind one shared message is a list that will drift.
+ * Shared for the same reason the message is: the schema refuses these for
+ * parsed configs and `createApp` for hand-built ones, and a key on one list
+ * only would be refused on one path and silently accepted on the other —
+ * reinterpreted as a defaulted verify mode.
  *
  * Not re-exported from the package index: this is how the two boundaries agree
  * with each other, whereas the message is what an operator reads.
@@ -66,27 +65,24 @@ export const JWT_MODE_REMOVED_KEYS = ["validate", "allowInsecureDecode"] as cons
 
 /**
  * One numeric knob, read at this boundary by the function that reads it at the
- * other one (#157).
+ * other one.
  *
  * `resolveBound` decides everything about the knob: the default when the key is
  * absent, the coercion of the string a HOCON env substitution delivers, the
  * range, and the wording of the refusal. This wrapper only carries the verdict
  * into zod's issue list at the path the operator wrote — see AGENTS.md,
- * "Two-Boundary Config Validation", which this boundary shares with
- * `checkJwksUri` for `jwksUri` and `checkHs256Rotation` for `previousSecrets`.
+ * "Two-Boundary Config Validation".
  *
  * `z.unknown().optional()` and not `z.coerce.number()`: the check must see the
- * value exactly as the operator wrote it. Anything narrower would have zod
- * reject a boolean in zod's words rather than in the shared one, and
- * `z.coerce` would have already turned it into a number before the check ran.
+ * value exactly as the operator wrote it, so that zod neither refuses it in
+ * its own words nor coerces it first.
  *
- * The issue is deliberately non-fatal (`z.NEVER` marks the value unusable
- * without aborting the parse), so two bad knobs in one block are both reported
- * rather than only the first. It buys no more than that: zod skips a block's
- * `superRefine` once any field in that block has failed, so a refused knob and a
- * missing `issuer` in the same `oauth.jwt` are still two round trips. A refused
- * knob in a *different* block — `http.port` — leaves `oauth.jwt`'s `superRefine`
- * running as usual. Both are pinned by tests.
+ * The issue is non-fatal (`z.NEVER` marks the value unusable without aborting
+ * the parse), so two bad knobs in one block are both reported. zod still skips
+ * a block's `superRefine` once any field in that block has failed, so a
+ * refused knob and a missing `issuer` in the same `oauth.jwt` are two round
+ * trips; a refused knob in a *different* block (`http.port`) leaves
+ * `oauth.jwt`'s `superRefine` running.
  *
  * @param path Config path of the block this knob sits in, as the operator wrote
  * it — `"oauth.jwt"`, `"http"`, `"verify"`. It is what makes the message here
@@ -116,17 +112,6 @@ const collectorSchema = z
 	.passthrough();
 
 /**
- * Zod schema for the HOCON-loaded application configuration. Validates the
- * shape of `http`, `oauth.jwt`, `attribute.collectors`, `rule.collectors`, and
- * `resource.parser`. `.passthrough()` on nested objects lets custom collector
- * and factory configs add their own fields without schema edits.
- *
- * Built-in JWT algorithms (HS256 / RS256 / ES256 / EdDSA) carry extra
- * `superRefine` validation for their required key material. Unknown algorithm
- * names pass schema validation and are expected to validate themselves in
- * their `KeyResolverFactory`.
- */
-/**
  * The built-in JWT authenticator's block, `oauth.jwt`. Parsed when
  * `oauth.authenticator` selects `"jwt"` — see the `oauth` transform below.
  * Under another authenticator the block is refused rather than carried, so
@@ -134,23 +119,26 @@ const collectorSchema = z
  */
 const OAuthJwtSchema = z
 	.object({
+		// Free-form, so a user-registered algorithm can be selected from config
+		// without editing the schema. The built-in ones (HS256 / RS256 / ES256 /
+		// EdDSA) have their key material checked in `superRefine` below; a custom
+		// one validates its own config in its `KeyResolverFactory`.
 		algorithm: z.string().default("HS256"),
 		/**
 		 * The HS256 shared secret. Required whenever the algorithm is
 		 * HS256 and the mode is `"verify"`, and held to the entropy floor
-		 * in `superRefine` below (#114): the same value verifies and
+		 * in `superRefine` below: the same value verifies and
 		 * signs, so a guessable one is not a read of tokens but the
 		 * ability to mint them. `.optional()` here because the asymmetric
 		 * algorithms have no use for it.
 		 */
 		secret: z.string().optional(),
 		/**
-		 * Names the HS256 secret the issuer signs with today (#112), the
-		 * same `kid` auth.provider stamps into every token it mints.
+		 * Names the HS256 secret the issuer currently signs with, the same
+		 * `kid` auth.provider stamps into every token it mints.
 		 *
-		 * Optional, and leaving it out is the shape every pre-#112
-		 * deployment has: no `kid` configured means the token header is
-		 * never consulted and the single `secret` verifies everything.
+		 * Optional: with no `kid` configured the token header is never
+		 * consulted and the single `secret` verifies everything.
 		 * Setting it starts pinning the header, and `previousSecrets`
 		 * requires it — nothing else tells the current secret apart from
 		 * the retired ones.
@@ -160,32 +148,26 @@ const OAuthJwtSchema = z
 		 */
 		kid: z.string().optional(),
 		/**
-		 * HS256 secrets a rotation retired but has not finished retiring
-		 * (#112), each with the moment its overlap window closes.
-		 *
-		 * Without this the default deployment cannot rotate at all: the
-		 * verifier holds exactly one secret, so the instant the provider
-		 * starts signing with a new one, every token still in flight is
-		 * refused until both services have restarted in lockstep. The
-		 * shape is auth.provider's `previousSecrets` verbatim, so an
-		 * operator moves the same pair of values on both sides.
+		 * HS256 secrets a rotation retired but has not finished retiring,
+		 * each with the moment its overlap window closes. Without them the
+		 * verifier holds one secret, and every token still in flight is
+		 * refused the instant the provider signs with a new one. The shape
+		 * is auth.provider's `previousSecrets` verbatim, so an operator
+		 * moves the same pair of values on both sides.
 		 *
 		 * Capped at `MAX_PREVIOUS_SECRETS` and checked again in
 		 * `config/hs256Rotation.mts`: a token carrying no `kid` is tried
 		 * against every configured secret, so the list length is the work
 		 * one unauthenticated request can force. Each entry's `secret`
-		 * clears the same entropy floor the current one does (#114) — a
-		 * retired secret verifies for its whole overlap window, so it can
-		 * mint tokens exactly as the current one can.
+		 * clears the same entropy floor the current one does — a retired
+		 * secret verifies for its whole overlap window, so it can mint
+		 * tokens exactly as the current one can.
 		 *
 		 * `.optional()` and not `.nullish()`: the only ways to say
-		 * "nothing is being rotated" are omitting the key and `[]`.
-		 * A `null` here is refused, at this boundary and identically in
-		 * `checkHs256Rotation` for hand-built configs — see the reasoning
-		 * on that function. Every other optional key in this block reads
-		 * the same way, and a `null` in a config was produced rather than
-		 * written (an unrendered template, a missing env var), which makes
-		 * "no rotation configured" the wrong thing to conclude from it.
+		 * "nothing is being rotated" are omitting the key and `[]`. A
+		 * `null` in a config was produced rather than written (an
+		 * unrendered template, a missing env var), so it is refused, here
+		 * and identically in `checkHs256Rotation` for hand-built configs.
 		 */
 		previousSecrets: z
 			.array(
@@ -199,33 +181,32 @@ const OAuthJwtSchema = z
 		/**
 		 * JWKS endpoint for the asymmetric algorithms. Must be https — or
 		 * http on a loopback host, the development carve-out documented in
-		 * `config/jwks.mts` (#109). The scheme is checked in `superRefine`
+		 * `config/jwks.mts`. The scheme is checked in `superRefine`
 		 * below so a plaintext endpoint fails at config-parse time, at boot,
 		 * rather than at the first request that misses the key cache.
 		 */
 		jwksUri: z.string().optional(),
 		// Bounds on the JWKS fetch, which happens inside a verify request
-		// whenever key resolution misses the cache (#109). Read through
-		// `resolveBound` — which also coerces the string a HOCON env
-		// substitution delivers — so this boundary and `resolveJwksFetchBounds`
-		// cannot disagree about what a value means (#157). What each admits is
-		// stated once, in `config/bounds.mts`.
+		// whenever key resolution misses the cache. Read through
+		// `resolveBound`, so this boundary and `resolveJwksFetchBounds` cannot
+		// disagree about what a value means. What each admits is stated once,
+		// in `config/bounds.mts`.
 		jwksTimeoutMs: boundedNumber(NUMERIC_BOUNDS.jwksTimeoutMs, "oauth.jwt"),
 		jwksCooldownMs: boundedNumber(NUMERIC_BOUNDS.jwksCooldownMs, "oauth.jwt"),
 		jwksCacheMaxAgeMs: boundedNumber(NUMERIC_BOUNDS.jwksCacheMaxAgeMs, "oauth.jwt"),
 		publicKey: z.string().optional(),
 		publicKeyPath: z.string().optional(),
 		/**
-		 * How the verifier treats bearer tokens (#134). `"verify"` (the default)
+		 * How the verifier treats bearer tokens. `"verify"` (the default)
 		 * fully verifies signature, iss, aud and typ; `"insecure-decode"` is the
-		 * test-only mode that decodes without signature verification (`exp` /
-		 * `nbf` are still enforced at request time). The value itself is the
+		 * test-only mode that decodes without checking any of those four. The
+		 * time claims are still enforced at request time, as in `"verify"`:
+		 * `exp` and `iat` required, `nbf` honoured, `maxTokenAgeSeconds`
+		 * applied, within `clockToleranceSeconds`. The value itself is the
 		 * consent: an accidental env-var flip can produce a stray boolean, but
-		 * never the literal string `"insecure-decode"` — which preserves the
-		 * intent of #106's double opt-in (one mistyped variable must never be
-		 * able to disable all token verification) in a single explicit knob.
-		 * The former pair `validate` / `allowInsecureDecode` is rejected below
-		 * with a migration message.
+		 * never the literal string `"insecure-decode"`, so one mistyped variable
+		 * cannot disable all token verification. The removed pair `validate` /
+		 * `allowInsecureDecode` is rejected below with a migration message.
 		 */
 		mode: z.enum(["verify", "insecure-decode"]).default("verify"),
 		// RFC 9068 §4 — a resource server validates iss and aud, not just the
@@ -235,31 +216,29 @@ const OAuthJwtSchema = z
 		// Accepted `typ` header. `at+jwt` is the RFC 9068 access-token type; pinning
 		// it rejects id_tokens, refresh tokens and logout tokens signed with the same key.
 		// The literal `"*"` pins nothing — any `typ`, or none — for issuers whose
-		// tokens carry no `typ` header (#219, `UNPINNED_TOKEN_TYPE`).
+		// tokens carry no `typ` header (`UNPINNED_TOKEN_TYPE`).
 		tokenType: z.string().default("at+jwt"),
 		/**
-		 * The claim the audience is read from (#219). `aud` (the default) is
-		 * jose's own check; `azp` binds a Clerk session token, `client_id` a
-		 * Cognito access token — the check moves, `audience` stays required.
+		 * The claim the audience is read from. `aud` (the default) is jose's
+		 * own check; `azp` binds a Clerk session token, `client_id` a Cognito
+		 * access token — the claim compared changes, `audience` stays required.
 		 * Read as `unknown` so the one shared function decides what a
 		 * well-formed name is at both boundaries; the `transform` below
 		 * writes the resolved name back.
 		 */
 		audienceClaim: z.unknown().optional(),
 		/**
-		 * Bounds on a presented token's own lifetime (#110). Both apply in
-		 * every mode: `insecure-decode` restates them by hand, so a
-		 * deployment cannot end up with the two modes disagreeing about the
-		 * same token. Read through `resolveBound` — which also coerces the
-		 * string a HOCON env substitution delivers — so this boundary and
-		 * `resolveJwtTimeClaimBounds` cannot disagree about what a value
-		 * means (#157).
+		 * Bounds on a presented token's own lifetime. Both apply in every
+		 * mode: `insecure-decode` restates them by hand, so the two modes
+		 * cannot disagree about the same token. Read through `resolveBound`,
+		 * so this boundary and `resolveJwtTimeClaimBounds` cannot disagree
+		 * about what a value means.
 		 *
 		 * `maxTokenAgeSeconds` is the ceiling on `now - iat` — what refuses a
-		 * token whose issuer set `exp` years out — and setting it makes `iat`
-		 * required (RFC 9068 §2.2 requires it anyway). `exp` itself is
-		 * required unconditionally and has no knob: a knob to accept tokens
-		 * that never expire is the bug, not the setting.
+		 * token whose issuer set `exp` years out — and because it always
+		 * applies, `iat` is required (RFC 9068 §2.2 requires it anyway). `exp`
+		 * itself is required unconditionally and has no knob: a knob to accept
+		 * tokens that never expire is the bug, not the setting.
 		 */
 		maxTokenAgeSeconds: boundedNumber(NUMERIC_BOUNDS.maxTokenAgeSeconds, "oauth.jwt"),
 		/**
@@ -274,9 +253,9 @@ const OAuthJwtSchema = z
 	})
 	.passthrough()
 	.superRefine((data, ctx) => {
-		// Hard-error on the wire keys removed in #134. `.passthrough()` would
-		// otherwise let them ride along silently — and a decode-only config
-		// written for 0.x (`validate=false` + `allowInsecureDecode=true`) would
+		// Hard-error on the removed wire keys. `.passthrough()` would otherwise
+		// let them ride along silently — and a decode-only config in the
+		// removed spelling (`validate=false` + `allowInsecureDecode=true`) would
 		// be reinterpreted as the defaulted verify mode, failing with an
 		// unrelated "issuer is required" instead of migration guidance.
 		let hasStaleKey = false;
@@ -293,8 +272,8 @@ const OAuthJwtSchema = z
 		if (hasStaleKey) {
 			return; // the operator's intended mode is unknowable; stop here
 		}
-		// #219: a config-shape check, so it applies in every mode — the
-		// guard reads it in both branches too.
+		// A config-shape check, so it applies in every mode — the guard
+		// reads it in both branches too.
 		const audienceClaim = checkAudienceClaim(data.audienceClaim);
 		if (!audienceClaim.ok) {
 			ctx.addIssue({
@@ -304,9 +283,9 @@ const OAuthJwtSchema = z
 			});
 		}
 		if (data.mode === "insecure-decode") {
-			// Decode-only mode: no signature check (exp/nbf are still enforced
-			// at request time, but nothing else is). The mode string itself is
-			// the explicit consent (#134) — see the `mode` doc comment.
+			// Decode-only mode: no signature, iss, aud or typ check; the time
+			// claims are still enforced at request time. The mode string itself
+			// is the explicit consent — see the `mode` doc comment.
 			return; // key-material checks below only apply when verifying
 		}
 		const issuers = Array.isArray(data.issuer) ? data.issuer : [data.issuer];
@@ -339,7 +318,7 @@ const OAuthJwtSchema = z
 			});
 		}
 		if (data.algorithm === "HS256") {
-			// #112 / #114. The HS256 secret contract — the rotation shape,
+			// The HS256 secret contract — the rotation shape,
 			// and the entropy floor over `secret` and every
 			// `previousSecrets[].secret` — is stated once, in
 			// `config/hs256Rotation.mts`, and spent twice: here for config
@@ -381,7 +360,7 @@ const OAuthJwtSchema = z
 				path: ["previousSecrets"],
 			});
 		}
-		// Transport security for the key source (#109): a plaintext JWKS
+		// Transport security for the key source: a plaintext JWKS
 		// endpoint lets anyone on the path substitute signing keys, so it
 		// must not survive to the first request. Checked inside the verify
 		// branch, like the key material above — in decode-only mode no key
@@ -399,7 +378,7 @@ const OAuthJwtSchema = z
 		}
 	})
 	.transform((data) => {
-		// Write the resolved claim back (#219), so the parsed config carries
+		// Write the resolved claim back, so the parsed config carries
 		// the default the operator relied on. The refinement above already
 		// refused a malformed value; the fallback only keeps the type honest.
 		const audienceClaim = checkAudienceClaim(data.audienceClaim);
@@ -421,26 +400,29 @@ export type OAuthConfig = {
 	jwt?: z.output<typeof OAuthJwtSchema>;
 } & Record<string, unknown>;
 
+/**
+ * Zod schema for the HOCON-loaded application configuration. `.passthrough()`
+ * on nested objects lets custom collector and factory configs add their own
+ * fields without schema edits.
+ */
 export const AppConfigSchema = z.object({
 	http: z
 		.object({
 			/**
-			 * Bind address. Defaults to loopback (#108) — the verifier answers with
+			 * Bind address. Defaults to loopback — the verifier answers with
 			 * authorization decisions, so a reachable port is a decision oracle.
 			 * A container deployment sets `0.0.0.0` explicitly; that is the opt-in.
 			 */
 			hostname: z.string().default(DEFAULT_HOSTNAME),
 			/**
-			 * Port to bind. A positive integer up to 65535 — the one numeric knob
-			 * that predated the two-boundary doctrine and carried no bound at all,
-			 * so `port = "abc"` reached `listen()` as NaN and `port = false` as 0,
-			 * both of which bind an arbitrary free port (#157, and the straggler
-			 * noted in #158).
+			 * Port to bind: an integer from 1 to 65535. Unbounded, `port = "abc"`
+			 * would reach `listen()` as NaN and `port = false` as 0, both of which
+			 * bind an arbitrary free port.
 			 */
 			port: boundedNumber(NUMERIC_BOUNDS.port, "http"),
 			pathPrefix: z.string().default(""),
 			/**
-			 * Optional shared credential the calling service must present (#108).
+			 * Optional shared credential the calling service must present.
 			 * Configured means required; absent (or present with no `token`) means
 			 * the decision endpoints accept any caller who can reach the port —
 			 * which `createApp` warns about when the bind is not loopback.
@@ -453,7 +435,7 @@ export const AppConfigSchema = z.object({
 					header: z.string().min(1).default(DEFAULT_CALLER_AUTH_HEADER),
 					// `.min(1)` and not `.optional()`-with-empty: `HTTP_CALLER_AUTH_TOKEN=`
 					// substitutes an empty string, and booting unauthenticated because a
-					// credential was exported empty is the silent failure #108 is about.
+					// credential was exported empty would be a silent failure.
 					token: z.string().min(1).optional(),
 				})
 				.optional(),
@@ -463,28 +445,23 @@ export const AppConfigSchema = z.object({
 		.default(() => ({ hostname: DEFAULT_HOSTNAME, port: DEFAULT_HTTP_PORT, pathPrefix: "" })),
 	/**
 	 * The credential layer: how this verifier authenticates the subject before
-	 * any rule runs. This module implements no OAuth flow, so the namespace
-	 * name is a mapping, not a claim of ownership — the keys live under
-	 * `oauth.jwt` (env: `OAUTH_JWT_*`) deliberately symmetric with
-	 * auth.provider's `oauth { jwt { … } }`, so one deployment addresses both
-	 * sides of the token boundary with one vocabulary. The claim-level half of
-	 * that boundary is specified in the umbrella's docs/claims-contract.md
-	 * (o3co/auth); the keys below are the key-distribution half.
+	 * any rule runs. This module implements no OAuth flow; the namespace mirrors
+	 * auth.provider's `oauth { jwt { … } }` (env: `OAUTH_JWT_*`), so one
+	 * deployment addresses both sides of the token boundary with one
+	 * vocabulary. The claim-level half of that boundary is specified in the
+	 * umbrella's docs/claims-contract.md (o3co/auth); the keys below are the
+	 * key-distribution half.
 	 */
 	oauth: z
 		.object({
 			/**
-			 * Which token authenticator establishes the subject (#219): `"jwt"`
+			 * Which token authenticator establishes the subject: `"jwt"`
 			 * (the default, the built-in bearer-JWT path configured by `jwt`
 			 * below) or a name a module registered. Read as `unknown` here so
 			 * the one shared function decides what a well-formed name is at both
 			 * boundaries; the `transform` below writes the resolved name back.
 			 */
 			authenticator: z.unknown().optional(),
-			// Algorithm names are free-form strings so user-registered algorithms can be selected
-			// from config without editing the schema enum. Built-in algorithms keep schema-level
-			// validation below (via superRefine) so misconfigurations fail at config-parse time.
-			// Custom algorithms are expected to validate their own config in their factory.
 			/**
 			 * The built-in authenticator's block. Read as `unknown` here and parsed
 			 * through `OAuthJwtSchema` in the transform below when `"jwt"` is
@@ -543,15 +520,13 @@ export const AppConfigSchema = z.object({
 			// Cap on `POST /verify/batch` entries. The batch endpoint exists so
 			// filtering a list of N resources is one round trip; the cap keeps one
 			// request from turning into an unbounded amount of pipeline work.
-			// `createVerifyRouter` holds a hand-built config to the same bound (#157).
+			// `createVerifyRouter` holds a hand-built config to the same bound.
 			maxBatchSize: boundedNumber(NUMERIC_BOUNDS.maxBatchSize, "verify"),
 			/*
-			 * What one decision request may carry (#118). The endpoint used to
-			 * rely on Express's unstated 100 KB default and on "non-empty string",
-			 * so a whitespace-only resource, an arbitrarily wide `context` and
-			 * unknown properties all passed. Each limit is stated here, defaulted
-			 * in `config/defaults.mts`, and held by `createVerifyRouter` through
-			 * the same `resolveBound` for hand-built configs.
+			 * What one decision request may carry. Each limit is stated here,
+			 * defaulted in `config/defaults.mts`, and held by
+			 * `createVerifyRouter` through the same `resolveBound` for
+			 * hand-built configs.
 			 */
 			maxBodyBytes: boundedNumber(NUMERIC_BOUNDS.maxBodyBytes, "verify"),
 			maxResourceLength: boundedNumber(NUMERIC_BOUNDS.maxResourceLength, "verify"),
@@ -560,9 +535,9 @@ export const AppConfigSchema = z.object({
 			maxContextValueLength: boundedNumber(NUMERIC_BOUNDS.maxContextValueLength, "verify"),
 			/**
 			 * Bounds on the collector fan-out both pipelines run for every
-			 * decision (#115). Collectors call databases and HTTP APIs, and before
-			 * these they ran under a bare `Promise.all`: one stalled collector
-			 * held the decision open for as long as its socket did.
+			 * decision. Collectors call databases and HTTP APIs; unbounded, one
+			 * stalled collector would hold the decision open for as long as its
+			 * socket did.
 			 *
 			 * `collectorTimeoutMs` is what one collector may take;
 			 * `collectorDeadlineMs` is what the whole wave may take, which a
@@ -571,27 +546,27 @@ export const AppConfigSchema = z.object({
 			 * a slow dependency from being handed more simultaneous work as it
 			 * slows. Read through `resolveBound` so `createApp` — which builds the
 			 * pipelines, and accepts hand-built configs this schema never saw —
-			 * refuses the same values in the same words (#157).
+			 * refuses the same values in the same words.
 			 *
 			 * Exceeding any of them **denies**: see `CollectorTimeoutError` in
 			 * core for why a partial answer is never the safe one.
 			 */
 			collectorTimeoutMs: boundedNumber(NUMERIC_BOUNDS.collectorTimeoutMs, "verify"),
-			/** How long one asynchronous rule may take to answer (#225); same bound as a collector. */
+			/** How long one asynchronous rule may take to answer; same bound as a collector. */
 			ruleTimeoutMs: boundedNumber(NUMERIC_BOUNDS.ruleTimeoutMs, "verify"),
 			/** How long all of a decision's asynchronous rules may take together; the rule phase's deadline. */
 			evaluateDeadlineMs: boundedNumber(NUMERIC_BOUNDS.evaluateDeadlineMs, "verify"),
 			collectorDeadlineMs: boundedNumber(NUMERIC_BOUNDS.collectorDeadlineMs, "verify"),
 			collectorConcurrency: boundedNumber(NUMERIC_BOUNDS.collectorConcurrency, "verify"),
 			/**
-			 * How many of a batch's entries are decided at once (#183). The
+			 * How many of a batch's entries are decided at once. The
 			 * three collector bounds above are per decision; this is what keeps
 			 * one `POST /verify/batch` from multiplying them by `maxBatchSize`.
 			 */
 			batchConcurrency: boundedNumber(NUMERIC_BOUNDS.batchConcurrency, "verify"),
 			/**
 			 * Whether collectors receive the raw credential as
-			 * `CollectorContext.credential` (#175). `"never"` (default): verified
+			 * `CollectorContext.credential`. `"never"` (default): verified
 			 * claims only — the credential is replayable and a collector that
 			 * logs its context would leak a live token. `"expose"`: for a
 			 * project-side collector that calls a downstream API as the subject
@@ -602,7 +577,7 @@ export const AppConfigSchema = z.object({
 			credentialToCollectors: z.enum(["never", "expose"]).default("never"),
 			/**
 			 * Whether the decision response carries each rule's `evaluation` —
-			 * its status and the policy revision (#244). `"omit"` (default):
+			 * its status and the policy revision. `"omit"` (default):
 			 * the `decision` event carries it, the response does not. `"include"`:
 			 * the response does too, for a consuming service that records which
 			 * policy revision authorized an operation. Read through the shared
@@ -623,19 +598,12 @@ export const AppConfigSchema = z.object({
 		 * Taken verbatim, like `http` above — zod does not parse a default back
 		 * through the shape, so **every key of the block has to be repeated here**.
 		 *
-		 * This object is the one place in the schema where an omission is silent.
-		 * A knob added to the shape above but not to this literal is simply
-		 * `undefined` for every config that has no `verify` block at all — which
-		 * is the ordinary deployment shape, since an overlay config only repeats
-		 * the sections it changes. Nothing throws; the bound just stops existing,
-		 * and for #115's knobs that means the collector deadlines quietly stop
-		 * applying. It has already nearly happened once, when #115 and #118 both
-		 * added knobs here and landed a day apart.
-		 *
-		 * So it is asserted rather than reviewed: `AppConfigSchema — the verify
-		 * block's default names every knob` walks the shape's own key list and
-		 * fails on any key this literal does not answer for. Add the knob to both,
-		 * and that test will tell you if you forgot.
+		 * A knob added to the shape above but not to this literal is silently
+		 * `undefined` for every config with no `verify` block — the ordinary
+		 * deployment shape, since an overlay config only repeats the sections it
+		 * changes — and its bound stops applying. The test `AppConfigSchema — the
+		 * verify block's default names every knob` walks the shape's own key list
+		 * and fails on any key this literal does not answer for.
 		 */
 		.default(() => ({
 			maxBatchSize: DEFAULT_MAX_BATCH_SIZE,

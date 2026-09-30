@@ -9,19 +9,17 @@
  * The verifying path (`jwtVerify`) and the decode-only path
  * (`decodeJwt` + `assertTimeClaims`) are two halves of one contract and are
  * deliberately co-located: the decode path restates by hand every request-time
- * check that survives without key material (today: the time claims), so any
- * validation option threaded to the verifying path must be weighed — and
- * usually threaded — into the decode path as well. Keeping both paths in this
- * one module is what keeps that coupling visible.
+ * check that survives without key material (the time claims), so any
+ * validation option threaded to the verifying path must be weighed, and usually
+ * threaded, into the decode path as well.
  *
- * #110 is what that warning was about. `jwtVerify` enforces `exp` and `nbf`
- * only when they are present, so a token minted — or forged — without `exp`
- * was accepted forever, in both modes. The fix is one pair of bounds resolved
- * once ({@link resolveJwtTimeClaimBounds}) and spent twice: as jose's
- * `requiredClaims` / `maxTokenAge` / `clockTolerance` on the verifying path,
- * and as the same three checks written out in {@link assertTimeClaims} on the
- * decode path. A change to either must land in both, or the two modes start
- * disagreeing about the same token.
+ * `jwtVerify` enforces `exp` and `nbf` only when they are present, so a token
+ * without `exp` would be accepted forever. The time claims are therefore one
+ * pair of bounds resolved once ({@link resolveJwtTimeClaimBounds}) and spent
+ * twice: as jose's `requiredClaims` / `maxTokenAge` / `clockTolerance` on the
+ * verifying path, and as the same three checks written out in
+ * {@link assertTimeClaims} on the decode path. A change to either must land in
+ * both, or the two modes start disagreeing about the same token.
  */
 
 import type { EventLogger } from "@o3co/auth.policy-verifier.core";
@@ -35,8 +33,8 @@ import {
 import { NUMERIC_BOUNDS, resolveBound } from "../config/bounds.mjs";
 
 /**
- * Bounds on a presented token's own lifetime (#110), settable in either mode
- * because both modes enforce them.
+ * Bounds on a presented token's own lifetime, settable in either mode because
+ * both modes enforce them.
  *
  * Each admits the string a HOCON env substitution delivers as well as a number,
  * for the same reason the JWKS fetch bounds in `config/jwks.mts` do: `createApp`
@@ -46,7 +44,8 @@ import { NUMERIC_BOUNDS, resolveBound } from "../config/bounds.mjs";
 export interface JwtTimeClaimConfig {
 	/**
 	 * Ceiling on `now - iat`, in seconds. Positive integer; defaults to
-	 * `DEFAULT_MAX_TOKEN_AGE_SECONDS`. Setting it makes `iat` required.
+	 * `DEFAULT_MAX_TOKEN_AGE_SECONDS`. `iat` is required because this bound
+	 * always applies.
 	 */
 	maxTokenAgeSeconds?: number | string;
 	/**
@@ -69,7 +68,7 @@ export interface JwtTimeClaimBounds {
 }
 
 /**
- * Claims every token must carry, whatever else the config says (#110).
+ * Claims every token must carry, whatever else the config says.
  *
  * `exp` is here rather than in a knob because a token with no stated expiry is
  * a permanent credential, and a fail-closed authorization service must not
@@ -83,14 +82,13 @@ const REQUIRED_CLAIMS = ["exp"] as const;
 /**
  * Resolves the time-claim bounds, falling back to the defaults for anything the
  * config omits, and refusing a stated bound that is not a whole number of
- * seconds in range. Hand-built configs never went through `AppConfigSchema`, so
- * the defaults and the validation both have to hold here too: an unparsed
- * string handed to jose is silently ignored in favour of *its* default, which
- * for `maxTokenAge` means no ceiling at all.
+ * seconds in range. Hand-built configs never went through `AppConfigSchema`,
+ * and an unparsed string handed to jose is silently ignored in favour of *its*
+ * default, which for `maxTokenAge` means no ceiling at all.
  *
- * The bounds themselves live in `config/bounds.mts` and are the very specs
- * `AppConfigSchema` reads a config file through (#157), so the two boundaries
- * cannot diverge on what a knob admits or on how it says so.
+ * The specs are the ones in `config/bounds.mts` that `AppConfigSchema` reads a
+ * config file through, so the two boundaries cannot diverge on what a knob
+ * admits or on how they say so.
  *
  * @param path Config path of the JWT block at the calling boundary.
  * `createTokenAuthenticator` sees it as `jwt`; `createApp` passes `oauth.jwt`,
@@ -127,12 +125,12 @@ export interface VerifyingJwtConfig extends JwtTimeClaimConfig {
 	/** Audience identifying this resource server. A token minted for another service is rejected. */
 	audience: string | string[];
 	/**
-	 * The claim the audience is read from (#219). Absent means `aud`, jose's
-	 * own check. Any other name — `azp` for a Clerk session token, `client_id`
-	 * for a Cognito access token — is compared against `audience` by the same
-	 * rule (a string equal to an accepted value, or an array containing one)
-	 * once the signature has verified, and `aud` is then not consulted. The
-	 * check moves; it never goes away.
+	 * The claim the audience is read from. Absent means `aud`, jose's own check.
+	 * Any other name — `azp` for a Clerk session token, `client_id` for a
+	 * Cognito access token — is compared against `audience` by the same rule (a
+	 * string equal to an accepted value, or an array containing one) once the
+	 * signature has verified, and `aud` is then not consulted. The check moves;
+	 * it never goes away.
 	 */
 	audienceClaim?: string;
 	/**
@@ -141,22 +139,21 @@ export interface VerifyingJwtConfig extends JwtTimeClaimConfig {
 	 * `id_token`, refresh token or logout token signed with the same key from passing.
 	 *
 	 * The literal `"*"` ({@link UNPINNED_TOKEN_TYPE}) pins nothing — any `typ`,
-	 * or none — for issuers whose tokens carry no `typ` header (#219). The
-	 * audience is then the only thing telling token kinds apart.
+	 * or none — for issuers whose tokens carry no `typ` header. The audience is
+	 * then the only thing telling token kinds apart.
 	 */
 	tokenType: string;
 }
 
 /**
  * Test-only shape: the token is decoded, never signature-verified. Its time
- * claims are still enforced in full (#106, #110) — `exp` and `iat` required,
- * `nbf` honoured, and the same age ceiling the verifying mode applies. On the
- * wire this shape is selected by the single self-documenting key
- * `oauth.jwt.mode = "insecure-decode"` (#134);
- * internally the interlock stays a two-key literal, and the acknowledgment is
- * re-checked at construction time — so building the authenticator directly
- * from a hand-built config is not a way around the explicit consent
- * `createApp` demands.
+ * claims are still enforced in full: `exp` and `iat` required, `nbf` honoured,
+ * and the same age ceiling the verifying mode applies. On the wire this shape
+ * is selected by the single self-documenting key
+ * `oauth.jwt.mode = "insecure-decode"`; internally the interlock is a two-key
+ * literal, re-checked at construction, so building the authenticator directly
+ * from a hand-built config is not a way around the explicit consent `createApp`
+ * demands.
  */
 export interface DecodingJwtConfig extends JwtTimeClaimConfig {
 	validate: false;
@@ -165,8 +162,8 @@ export interface DecodingJwtConfig extends JwtTimeClaimConfig {
 
 /**
  * The config {@link createTokenAuthenticator} takes, discriminated on
- * `validate`. Named for the `jwt` option `createVerifyRouter` took until #259;
- * the router now takes the built authenticator instead.
+ * `validate`. Despite the name, `createVerifyRouter` does not take it: the
+ * router takes the built authenticator.
  */
 export type VerifyRouterJwtConfig = VerifyingJwtConfig | DecodingJwtConfig;
 
@@ -209,8 +206,8 @@ export interface JwtConfigErrorContext {
 	 * sentence "<field> is required when <verifyCondition>". The
 	 * authenticator's internal union is discriminated on `validate`, so the default is
 	 * `"<path>.validate is true"`; `createApp` passes the wire spelling
-	 * `oauth.jwt.mode is "verify"`, because `validate` is no longer a wire key
-	 * (#134) and the message must name what the operator actually wrote.
+	 * `oauth.jwt.mode is "verify"`, because `validate` is not a wire key and the
+	 * message must name what the operator actually wrote.
 	 */
 	verifyCondition?: string;
 }
@@ -221,15 +218,12 @@ export interface JwtConfigErrorContext {
  * `tokenType: string` on {@link VerifyingJwtConfig}, where `issuer` and
  * `audience` may be lists because jose accepts lists for them.
  *
- * The distinction is load-bearing (#164). While `tokenType` shared the
- * list-tolerant {@link isPresent} with the other two, a hand-built
- * `tokenType: ["at+jwt"]` passed a guard the schema refuses — and the
- * deployment then booted and rejected *every* token, because jose lowercases
- * the `typ` option to compare it and threw a bare `TypeError` off the array on
- * each request. That escapes as a non-`JOSEError`, so
- * {@link isVerificationUnavailable} judged a config typo to be an
- * infrastructure outage and logged it as `jwt_verification_unavailable` — the
- * line #107 added to mean the opposite of an operator mistake.
+ * The distinction is load-bearing. A hand-built `tokenType: ["at+jwt"]` that
+ * passed this guard would boot a deployment that rejects *every* token: jose
+ * lowercases the `typ` option to compare it and throws a bare `TypeError` off
+ * the array on each request. That escapes as a non-`JOSEError`, so
+ * {@link isVerificationUnavailable} would log a config typo as the
+ * infrastructure outage `jwt_verification_unavailable`.
  */
 function isPresentString(value: unknown): boolean {
 	return typeof value === "string" && value !== "";
@@ -252,24 +246,21 @@ function isPresent(value: unknown): boolean {
  *    them; `tokenType` takes a non-empty string only — see
  *    {@link isPresentString}.
  * 2. `validate: false` requires the explicit `allowInsecureDecode: true`
- *    acknowledgment (#106): one mistyped flag must never be enough to disable
- *    all signature verification.
+ *    acknowledgment: one mistyped flag must never be enough to disable all
+ *    signature verification.
  *
- * Both boundaries enforce these — see AGENTS.md, "Two-Boundary Config
- * Validation" — and this is the pair named there as a departure from it, the
- * one place the two boundaries cannot share a check function. `AppConfigSchema`
- * reads the wire spelling: the presence checks via `superRefine`, the
- * decode-only consent via the `mode` enum whose `"insecure-decode"` value is
- * itself the acknowledgment (#134), every issue reported at once with zod
- * paths. This guard reads the internal two-key interlock, because #134 split
- * the two spellings. There is no one shape to check from both sides.
+ * Both boundaries enforce these (AGENTS.md, "Two-Boundary Config Validation"),
+ * and this pair is the departure named there, the one place the two boundaries
+ * cannot share a check function. `AppConfigSchema` reads the wire spelling: the
+ * presence checks via `superRefine`, the decode-only consent via the `mode`
+ * enum whose `"insecure-decode"` value is itself the acknowledgment. This guard
+ * reads the internal two-key interlock.
  *
- * What holds the two implementations in step is the burden the departure owes:
- * `__tests__/jwtConfigTwoBoundaryParity.test.mts` writes one configuration in
- * both spellings and asserts the two boundaries reach the same verdict and name
- * the same key. Add an invariant here and it is a row there, not a new test.
- * The one row where they deliberately differ is `tokenType`'s absence, carved
- * out and argued for in that AGENTS.md section.
+ * `__tests__/jwtConfigTwoBoundaryParity.test.mts` holds the two in step: it
+ * writes one configuration in both spellings and asserts the two boundaries
+ * reach the same verdict and name the same key. Add an invariant here and it is
+ * a row there, not a new test. The one row where they deliberately differ is
+ * `tokenType`'s absence, argued for in that AGENTS.md section.
  */
 export function assertVerifyRouterJwtConfig<T extends UncheckedJwtConfig>(
 	jwt: T,
@@ -279,7 +270,7 @@ export function assertVerifyRouterJwtConfig<T extends UncheckedJwtConfig>(
 	if (jwt.validate) {
 		const verifyCondition = context.verifyCondition ?? `${path}.validate is true`;
 		// One check per field rather than one for all three: `typ` is a single
-		// value where `iss`/`aud` are lists (#164). Order matches the schema's
+		// value where `iss`/`aud` are lists. Order matches the schema's
 		// `superRefine`, so a config with more than one missing key sends both
 		// boundaries to the same one first.
 		const presence = [
@@ -300,9 +291,9 @@ export function assertVerifyRouterJwtConfig<T extends UncheckedJwtConfig>(
 				`set ${path}.allowInsecureDecode=true to acknowledge, or use a verifying config`,
 		);
 	}
-	// #219: in both modes, through the one shared function the schema also
-	// calls — so this is not a second departure, only the guard's rendering of
-	// the same verdict with its own path in front.
+	// In both modes, through the one shared function the schema also calls: not
+	// a second departure, only the guard's rendering of the same verdict with its
+	// own path in front.
 	const audienceClaim = checkAudienceClaim(jwt.audienceClaim);
 	if (!audienceClaim.ok) {
 		throw new Error(`${caller}: ${path}.${audienceClaim.message}`);
@@ -329,7 +320,7 @@ export function audienceMatches(value: unknown, accepted: string | readonly stri
 }
 
 /**
- * The audience check for a claim other than `aud` (#219), in the words jose
+ * The audience check for a claim other than `aud`, in the words jose
  * uses for `aud` so the `jwt_token_rejected` line reads the same either way.
  * Thrown as a `JWTClaimValidationFailed`, which `isVerificationUnavailable`
  * judges token-side: a token bound to the wrong app is a bad token, not an
@@ -360,20 +351,20 @@ function assertAudienceClaim(
 
 /**
  * True when token verification could not be attempted or completed for reasons
- * unrelated to the presented token — the situation an operator must be able to
- * tell apart from a bad token (#107: a JWKS outage flips the whole fleet to
- * 401-deny while the verifier's own logs stay empty).
+ * unrelated to the presented token: the situation an operator must be able to
+ * tell apart from a bad token, since a JWKS outage flips the whole fleet to
+ * 401-deny.
  *
  * Infrastructure side: a JWKS fetch timeout, a malformed JWKS document, a bare
  * `JOSEError` (`ERR_JOSE_GENERIC` — jose reserves the base class for the JWKS
  * fetch path: its only two throw sites are a non-200 JWKS response and a body
  * that fails to parse as JSON), or any non-jose error escaping `jwtVerify`
  * (fetch/DNS failures from the remote key getter, a broken key resolver).
- * Every subclass jose throws about the token itself is judged token-side —
- * deliberately including `JWKSNoMatchingKey`, because the `kid` that failed to
- * match is attacker-controllable and must not open an error-level log-flooding
- * channel; its `err.code` in the warn line still identifies a stale-JWKS
- * rotation problem.
+ * Every subclass jose throws about the token itself is judged token-side,
+ * `JWKSNoMatchingKey` included: the `kid` that failed to match is
+ * attacker-controllable and must not open an error-level log-flooding channel.
+ * Its `err.code` in the warn line still identifies a stale-JWKS rotation
+ * problem.
  */
 export function isVerificationUnavailable(cause: unknown): boolean {
 	if (!(cause instanceof errors.JOSEError)) {
@@ -387,17 +378,17 @@ export function isVerificationUnavailable(cause: unknown): boolean {
 }
 
 /**
- * The rejection reason, projected onto the fields that explain it — and nothing
+ * The rejection reason, projected onto the fields that explain it, and nothing
  * else.
  *
  * `JWTExpired` and `JWTClaimValidationFailed` are thrown *after* the signature
  * verifies, and jose attaches the entire decoded token to each as an own
- * `payload` property. Logging the error object therefore writes the whole claim
- * set — `sub`, `email`, group membership, whatever else the issuer mints — into
- * the log on every expired token, which is a routine event rather than an
- * incident. {@link ../observability/decisionEvent.mts} states the rule this
- * keeps: a claim set is not needed to explain an outcome, and carrying one into
- * the log widens the blast radius of somebody else's data.
+ * `payload` property. Logging the error object would write the whole claim set
+ * (`sub`, `email`, group membership, whatever else the issuer mints) into the
+ * log on every expired token, a routine event rather than an incident.
+ * {@link ../observability/decisionEvent.mts} states the rule this keeps: a
+ * claim set is not needed to explain an outcome, and carrying one into the log
+ * widens the blast radius of somebody else's data.
  *
  * `code` and `claim` are what an operator acts on (`ERR_JWT_EXPIRED` vs
  * `ERR_JWS_SIGNATURE_VERIFICATION_FAILED` vs a `"iss"` mismatch), and jose's
@@ -443,28 +434,27 @@ function readTimeClaim(payload: JWTPayload, claim: TimeClaim): number | undefine
 }
 
 /**
- * Time-claim checks for the decode-only path (#106, #110). `decodeJwt`
- * performs no validation at all, so the authenticator enforces the token's own
- * lifetime here, restating `jwtVerify`'s semantics, error classes and rejection
- * order by hand: presence first (`iat` before `exp`, jose's own order), then
- * `nbf` against `now + tolerance`, `exp` against `now - tolerance`, and finally
- * the age of the token against {@link JwtTimeClaimBounds.maxTokenAge}, which
- * also refuses an `iat` in the future. Skipping the signature is an
- * (acknowledged, test-only) trust decision about the issuer; honouring an
- * expired — or unexpiring — token is simply wrong in every mode.
+ * Time-claim checks for the decode-only path. `decodeJwt` performs no
+ * validation at all, so the authenticator enforces the token's own lifetime
+ * here, restating `jwtVerify`'s semantics, error classes and rejection order by
+ * hand: presence first (`iat` before `exp`, jose's own order), then `nbf`
+ * against `now + tolerance`, `exp` against `now - tolerance`, and finally the
+ * age of the token against {@link JwtTimeClaimBounds.maxTokenAge}, which also
+ * refuses an `iat` in the future. Skipping the signature is an (acknowledged,
+ * test-only) trust decision about the issuer; honouring an expired, or
+ * unexpiring, token is wrong in every mode.
  *
- * `bounds` is a required argument rather than a defaulted one on purpose: the
- * whole failure #110 records is a validation option that reached `jwtVerify`
- * and never reached here, and a parameter that quietly defaults is how that
- * happens again.
+ * `bounds` is required rather than defaulted on purpose: a parameter that
+ * quietly defaults is how a validation option reaches `jwtVerify` and never
+ * reaches here.
  */
 export function assertTimeClaims(payload: JWTPayload, bounds: JwtTimeClaimBounds): void {
 	const now = Math.floor(Date.now() / 1000);
 	const { clockTolerance, maxTokenAge } = bounds;
 
-	// Presence for every required claim first, before any of them is read —
-	// jose's own order, and `iat` leads it because `maxTokenAge` is always set,
-	// which is what makes `iat` mandatory alongside the `exp` #110 requires.
+	// Presence for every required claim first, before any of them is read:
+	// jose's own order. `iat` leads it because `maxTokenAge` is always set,
+	// which is what makes `iat` mandatory alongside `exp`.
 	for (const claim of ["iat", ...REQUIRED_CLAIMS] as const) {
 		if (!Object.hasOwn(payload, claim)) {
 			throw new errors.JWTClaimValidationFailed(
@@ -523,13 +513,13 @@ export function assertTimeClaims(payload: JWTPayload, bounds: JwtTimeClaimBounds
  * accept tokens.
  *
  * This is the one edge that populates core's neutral `SubjectAttributes` bag
- * under this server (#170): the verified JWT's claims are spread in, so the
- * bag's keys are the token's claims. Core never learns that — the claim
- * vocabulary ends here and in the collectors that narrow it back out.
+ * under this server: the verified JWT's claims are spread in, so the bag's keys
+ * are the token's claims. Core never learns that; the claim vocabulary ends
+ * here and in the collectors that narrow it back out.
  *
  * `createApp` builds it from `oauth.jwt`; a consumer mounting
- * `createVerifyRouter` on their own app builds it here and hands it over as
- * the router's `authenticator` (#259).
+ * `createVerifyRouter` on their own app builds it here and hands it over as the
+ * router's `authenticator`.
  */
 export function createTokenAuthenticator(
 	jwt: VerifyRouterJwtConfig,
@@ -540,9 +530,9 @@ export function createTokenAuthenticator(
 	// than per request, and both branches below read the same resolved values —
 	// which is the only reason the two paths cannot drift on them.
 	const { maxTokenAge, clockTolerance } = resolveJwtTimeClaimBounds(jwt);
-	// #219, resolved once like the bounds: which claim carries the audience,
-	// and whether `typ` is pinned at all. Both are verify-mode questions — the
-	// decode path never checked the audience or the header, and still does not.
+	// Resolved once like the bounds: which claim carries the audience, and
+	// whether `typ` is pinned at all. Both are verify-mode questions; the decode
+	// path checks neither the audience nor the header.
 	const audienceClaim = checkAudienceClaim(jwt.validate ? jwt.audienceClaim : undefined);
 	const audienceFrom = audienceClaim.ok ? audienceClaim.claim : DEFAULT_AUDIENCE_CLAIM;
 	const pinTokenType = jwt.validate && jwt.tokenType !== UNPINNED_TOKEN_TYPE;
@@ -588,12 +578,12 @@ export function createTokenAuthenticator(
 					const result = await jwtVerify(token, jwt.key as Parameters<typeof jwtVerify>[1], {
 						algorithms: jwt.algorithms,
 						issuer: jwt.issuer,
-						// #219: jose checks `aud`; another claim is checked below,
+						// jose checks `aud`; another claim is checked below,
 						// after the signature, by the same rule. Absent `typ` is
 						// not pinned at all — see UNPINNED_TOKEN_TYPE.
 						...(audienceFrom === DEFAULT_AUDIENCE_CLAIM ? { audience: jwt.audience } : {}),
 						...(pinTokenType ? { typ: jwt.tokenType } : {}),
-						// #110. `requiredClaims` is what turns exp from "checked when
+						// `requiredClaims` is what turns exp from "checked when
 						// present" into "checked"; `maxTokenAge` bounds a token whose
 						// issuer chose a distant exp, and requires `iat` as a side
 						// effect. The decode branch below restates all three by hand.
@@ -637,19 +627,18 @@ export function createTokenAuthenticator(
 				};
 			}
 
-			// The JWT→subject mapping edge (#170): the verified claims are spread
-			// into the neutral bag here, plus `authScheme` — the `Authorization`
-			// scheme the token arrived under, as the caller wrote it (reported,
-			// not compared, so its casing is not normalized). `authScheme`, not
-			// `tokenType` (#158): `jwt.tokenType` a few lines up is the accepted
-			// `typ` header, an entirely different thing, and the two shared a name
-			// in the one module that mentions both.
+			// The JWT→subject mapping edge: the verified claims are spread into the
+			// neutral bag here, plus `authScheme`, the `Authorization` scheme the
+			// token arrived under as the caller wrote it (reported, not compared,
+			// so its casing is not normalized). `authScheme`, not `tokenType`:
+			// `jwt.tokenType` is the accepted `typ` header, an entirely different
+			// thing.
 			//
-			// #175: the raw credential rides the RESULT, not the subject bag. The
-			// bag reaches every collector; the credential reaches a collector
-			// only when the route was composed with `credentialToCollectors:
-			// "expose"` — that gate is the route's, so this module hands the
-			// credential back separately and attaches nothing to the claims.
+			// The raw credential rides the RESULT, not the subject bag. The bag
+			// reaches every collector; the credential reaches a collector only
+			// when the route was composed with `credentialToCollectors: "expose"`.
+			// That gate is the route's, so this module hands the credential back
+			// separately and attaches nothing to the claims.
 			return { ok: true, subject: { ...decoded, authScheme: scheme }, credential: token };
 		},
 	};

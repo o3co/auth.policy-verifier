@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Which claim carries the scopes, and how its value is read (#219).
+ * Which claim carries the scopes, and how its value is read.
  * `PayloadScopeCollector` and `ResourceActionScopeRuleCollector` share the
  * default claim name and refuse the same bad `claim` option; only
  * `PayloadScopeCollector` reads the value (`scopesFrom`), while the rule
@@ -33,9 +33,8 @@ export function resolveClaimName(collector: string, raw: unknown, fallback: stri
  * Reads a scope claim as a list. The OAuth `scope` claim is a space-delimited
  * string; Okta's `scp` and Auth0's `permissions` are arrays of strings. Either
  * shape yields the non-empty entries. Anything else — absent, a number, a list
- * carrying a non-string — asserts no capability at all, the way a non-string
- * `scope` never did: fail closed rather than pick the strings out of a value
- * that is not a scope list.
+ * carrying a non-string — asserts no capability at all: fail closed rather
+ * than pick the strings out of a value that is not a scope list.
  */
 export function scopesFrom(value: unknown): string[] {
 	if (typeof value === "string") return value.split(" ").filter(Boolean);

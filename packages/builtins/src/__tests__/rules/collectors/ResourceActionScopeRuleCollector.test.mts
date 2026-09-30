@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { ResourceActionScopeRuleCollector } from "#/rules/collectors/ResourceActionScopeRuleCollector.mjs";
 
 /**
- * `CollectorContext.signal` is required (#115): a pipeline supplies one per
+ * `CollectorContext.signal` is required: a pipeline supplies one per
  * collector, so a hand-built context carries one too. These fixtures are not
  * about cancellation, so it is a signal that never aborts.
  */
@@ -134,7 +134,7 @@ describe("ResourceActionScopeRuleCollector", () => {
 	});
 });
 
-describe("ResourceActionScopeRuleCollector — the claim option (#219)", () => {
+describe("ResourceActionScopeRuleCollector — the claim option", () => {
 	const withSubject = (subject: SubjectAttributes): CollectorContext => ({
 		subject,
 		resource: { raw: "document:1", resourceType: "document", resourceId: "1" },

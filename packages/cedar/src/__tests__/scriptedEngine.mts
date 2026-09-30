@@ -23,7 +23,7 @@ export type Answer = (request: CedarRequest, signal?: AbortSignal) => CedarDecis
 
 export interface ScriptedEngineOptions {
 	/**
-	 * Whether the engine vouches for what it evaluated (#244), the way the wasm
+	 * Whether the engine vouches for what it evaluated, the way the wasm
 	 * engine does: it declares `confirmsRevision`, and an answer that names no
 	 * revision of its own is stamped with the loaded source's. A case that needs
 	 * an answer to arrive unvouched, or vouching for something else, says so in

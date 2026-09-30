@@ -21,7 +21,7 @@ import {
 	describeRulePurityConformance,
 } from "./conformance/rulePurity.mjs";
 
-// `CollectorRequest`, not `CollectorContext`: the per-collector `signal` (#115)
+// `CollectorRequest`, not `CollectorContext`: the per-collector `signal`
 // belongs to the fan-out, and here the harness is the fan-out — it supplies a
 // revocable one of its own, for the same reason it wraps the rest.
 const scopeContext: CollectorRequest = {
@@ -78,12 +78,9 @@ describeRulePurityConformance({
 /*
  * The suite above only proves the builtins are clean. These cases prove the
  * check is capable of failing — a conformance helper that cannot reject a
- * violation is a green tick, not a guarantee.
- *
- * Both violating shapes below are lifted from real ones: the first is
- * `app.test.mts:50-53` as it stood before #152 (and `metrics.test.mts` before
- * #150), the second is the same mistake made one indirection deeper, where a
- * grep for `ctx.` inside `verify` would not see it.
+ * violation is a green tick, not a guarantee. The first violating shape reads
+ * the context itself; the second makes the same mistake one indirection
+ * deeper, where a grep for `ctx.` inside `verify` would not see it.
  */
 describe("rule purity conformance — the check itself", () => {
 	const attrs: Attributes = new Map([["scopes", ["read:project"]]]);
@@ -96,8 +93,8 @@ describe("rule purity conformance — the check itself", () => {
 				message: "Insufficient scope",
 				verify(attributes) {
 					const scopes = attributes.get("scopes");
-					// Reads `attrs` *and* the live request — the shape the old
-					// "while ignoring `attrs`" wording could not describe.
+					// Reads `attrs` *and* the live request: reading `attrs` too does
+					// not make it legal.
 					return (
 						Array.isArray(scopes) && scopes.includes(`${ctx.action}:${ctx.resource.resourceType}`)
 					);
@@ -110,7 +107,7 @@ describe("rule purity conformance — the check itself", () => {
 		);
 	});
 
-	it("accepts a rule that reports an equal evaluation each time, in a fresh object (#244)", async () => {
+	it("accepts a rule that reports an equal evaluation each time, in a fresh object", async () => {
 		// A report is compared by what it says, not by which object says it: a
 		// policy-backed rule builds one per call.
 		const collect = async (): Promise<Rule[]> => [
@@ -129,7 +126,7 @@ describe("rule purity conformance — the check itself", () => {
 		]);
 	});
 
-	it("rejects a report that moves while the pass/fail does not (#244)", async () => {
+	it("rejects a report that moves while the pass/fail does not", async () => {
 		// The evaluation is part of the answer. A rule reporting whichever
 		// revision it saw last is reading state the engine cannot see — exactly
 		// the shared "last decision" slot the provenance contract rules out.
@@ -153,7 +150,7 @@ describe("rule purity conformance — the check itself", () => {
 		);
 	});
 
-	it("rejects it when the rule rewrites ONE evaluation object and reports it again (#244)", async () => {
+	it("rejects it when the rule rewrites ONE evaluation object and reports it again", async () => {
 		// The shape a by-reference comparison cannot see: the rule keeps one
 		// object, mutates it on every call and hands the same object over each
 		// time. Compared by reference, the first report is overwritten by the
@@ -188,7 +185,7 @@ describe("rule purity conformance — the check itself", () => {
 	 * and never runs an accessor on the prototype — so a class-backed report
 	 * snapshots as `{}`, while core destructures it and runs every getter.
 	 */
-	it("rejects a getter-backed report whose revision moves (#244)", async () => {
+	it("rejects a getter-backed report whose revision moves", async () => {
 		let calls = 0;
 		class MovingEvaluation {
 			get status(): "completed" {
@@ -214,7 +211,7 @@ describe("rule purity conformance — the check itself", () => {
 		);
 	});
 
-	it("rejects a getter-backed report that reads the collector's context (#244)", async () => {
+	it("rejects a getter-backed report that reads the collector's context", async () => {
 		// The request, reached not from `verify` but from an accessor on what
 		// `verify` reports — read by core after the context is gone.
 		const collect = async (ctx: CollectorContext): Promise<Rule[]> => {
@@ -332,20 +329,16 @@ describe("rule purity conformance — the check itself", () => {
 	});
 
 	/*
-	 * The `signal` #115 put on `CollectorContext` is the first field a collector
-	 * is *expected* to hold live for the length of `collect` — it is a
-	 * cancellation handle, not a fact about the request, and the whole point is
-	 * to pass it to `fetch`. That pulls the harness in two directions at once,
-	 * and the three cases below pin both halves.
-	 *
-	 * It must stay revocable: a signal is a live view of request state (`aborted`
-	 * moves under the rule's feet), so a rule that kept one and read it inside
-	 * `verify` is the exact violation this suite exists to catch — and no less so
-	 * for the field being new. And it must stay *usable*: a plain revocable Proxy
-	 * over an `AbortSignal` fails every brand check on it (`addEventListener`,
-	 * `AbortSignal.any`, `fetch`), so wrapping it the way every other object is
-	 * wrapped would make honest collectors fail this suite for a reason that
-	 * exists only inside the harness.
+	 * `signal` is the one field of `CollectorContext` a collector is *expected*
+	 * to hold live for the length of `collect` — a cancellation handle, not a
+	 * fact about the request, there to be passed to `fetch`. The three cases
+	 * below pin both halves of what that asks of the harness. It must stay
+	 * revocable: `aborted` moves under the rule's feet, so a rule that kept the
+	 * signal and read it inside `verify` is the violation this suite catches.
+	 * And it must stay *usable*: a plain revocable Proxy over an `AbortSignal`
+	 * fails every brand check on it (`addEventListener`, `AbortSignal.any`,
+	 * `fetch`), which would fail honest collectors for a reason that exists only
+	 * inside the harness.
 	 */
 	it("rejects a rule that kept the collector's AbortSignal and read it at verify time", async () => {
 		const collect = async (ctx: CollectorContext): Promise<Rule[]> => {
@@ -480,9 +473,10 @@ describe("rule purity conformance — the check itself", () => {
 
 // CedarPolicyRuleCollector (packages/cedar): the policy set is compiled at
 // boot and the rule builds its Cedar request from `attrs` inside `verify`, so
-// the suite proves exactly the property #185 claims — discard the request,
-// the answer stands. The mapping reads `department` / `suspended` out of the
-// attribute map, never out of the context.
+// the suite proves exactly the property `CedarPolicyRuleCollector` is built
+// on — discard the request, the answer stands. The mapping reads
+// `department` / `suspended` out of the attribute map, never out of the
+// context.
 const cedarContext: CollectorRequest = {
 	subject: { sub: "user-1" },
 	resource: { raw: "document:42", resourceType: "document", resourceId: "42" },
@@ -535,7 +529,7 @@ describeRulePurityConformance({
 });
 
 /*
- * #225: an asynchronous rule is held to the same property as a synchronous
+ * An asynchronous rule is held to the same property as a synchronous
  * one, through the same harness. The collector below is the shape a Cedar
  * HTTP rule takes — what it looks for is copied out at collect time, the
  * answer comes from `attrs` (here without the network, which is not what the
@@ -581,7 +575,7 @@ describeRulePurityConformance({
 	],
 });
 
-describe("rule purity conformance — an asynchronous rule that keeps the request is caught too (#225)", () => {
+describe("rule purity conformance — an asynchronous rule that keeps the request is caught too", () => {
 	it("reports a decide that reads the collector's context after it is gone", async () => {
 		const collect = async (context: CollectorContext) => [
 			{

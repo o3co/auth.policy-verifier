@@ -15,8 +15,9 @@ services:
       # and it is why HTTP_CALLER_AUTH_TOKEN is worth setting in .env: past the
       # container boundary, anyone who can reach the port can ask for decisions.
       - HTTP_HOSTNAME=0.0.0.0
-      # Where the Cedar http engine finds the `cedar-engine` profile below — read
-      # only when the app composes cedarPolicyModule without the wasm package.
+      # Where the Cedar http engine finds the `cedar-engine` service below
+      # (profile `cedar`) — read only when the app composes cedarPolicyModule
+      # without the wasm package.
       # The engine has no default address (a missing one refuses to start,
       # naming this variable and the wasm package), so it is stated here, as an
       # interpolation default: an `environment` entry outranks `env_file`, so a

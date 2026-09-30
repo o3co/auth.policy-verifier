@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * #219: the operator-declared way to turn an external IdP's claims into
+ * The operator-declared way to turn an external IdP's claims into
  * attributes the rules can see — Clerk's org role under `o.rol`, Auth0's
  * namespaced `https://example.com/roles`, Okta's groups — without a bespoke
  * collector. Same declaration shape as `RequestContextAttributeCollector`;
@@ -36,7 +36,7 @@ const makeContext = (
 		: {}),
 });
 
-describe("PayloadClaimAttributeCollector (#219)", () => {
+describe("PayloadClaimAttributeCollector", () => {
 	it("promotes a declared claim under the operator's own key", async () => {
 		const collector = new PayloadClaimAttributeCollector({
 			attributes: [{ from: "org_id", to: "tenantId" }],

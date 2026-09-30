@@ -120,14 +120,14 @@ function stalledBody(status: number, head: string, statusText?: string) {
 	};
 }
 
-/** The id the inline set's one policy is pushed under — this load's mark on it (#283). */
+/** The id the inline set's one policy is pushed under — this load's mark on it. */
 const OURS = agentPolicyId("policies", inline(PERMIT_ALL).revision);
 
 const ALLOW = { decision: "Allow", diagnostics: { reason: [OURS], errors: [] } };
 
 /**
  * A fetch that answers the policy push with 200 and the set, as cedar-agent
- * does; a read of the set (GET) with what was last pushed (#286); and every
+ * does; a read of the set (GET) with what was last pushed; and every
  * authorization call from `answer`.
  */
 function agent(answer: (call: Record<string, unknown>) => Response = () => json(200, ALLOW)) {
@@ -148,7 +148,7 @@ function agent(answer: (call: Record<string, unknown>) => Response = () => json(
 
 const NEVER_ABORTS = new AbortController().signal;
 
-/** The pushes among `calls` — boot also reads the set back once (#286). */
+/** The pushes among `calls` — boot also reads the set back once. */
 const pushes = <Call extends { init: RequestInit }>(calls: Call[]) =>
 	calls.filter((call) => call.init.method === "PUT");
 
@@ -200,11 +200,11 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 			["20-forbid.cedar", forbid],
 		]);
 		await loadAsync(engine, source);
-		// The push, then the set read back as the agent accepted it (#286).
+		// The push, then the set read back as the agent accepted it.
 		expect(calls.map((call) => call.init.method)).toEqual(["PUT", "GET"]);
 		expect(calls[0].url).toBe(`${AGENT}/v1/policies`);
 		expect(calls[0].init.method).toBe("PUT");
-		// Named after the file, under this load's mark (#283).
+		// Named after the file, under this load's mark.
 		expect(JSON.parse(String(calls[0].init.body))).toEqual([
 			{ id: agentPolicyId("10-permit", source.revision), content: PERMIT_ALL },
 			{ id: agentPolicyId("20-forbid", source.revision), content: forbid },
@@ -248,7 +248,7 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 		expect(headersOf(pushes(calls)[1]).authorization).toBe("from-config");
 	});
 
-	it("names the token when the agent refuses the load as unauthenticated (v0.10.0 audit)", async () => {
+	it("names the token when the agent refuses the load as unauthenticated", async () => {
 		// The template's agent is started with CEDAR_AGENT_AUTHENTICATION from
 		// CEDAR_AUTHENTICATION, so a deployment that forgot to set it gets a 401.
 		// The agent's own 401 body says nothing about which variable to set.
@@ -330,7 +330,7 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 		expect(attempts).toBeGreaterThan(1);
 	});
 
-	it("says no answer came in time when the load deadline passes on the first attempt — not that the agent is reachable (#271)", async () => {
+	it("says no answer came in time when the load deadline passes on the first attempt — not that the agent is reachable", async () => {
 		// A timeout proves only that nothing answered: a host that drops packets
 		// never completes the connection, and times out the same way.
 		let attempts = 0;
@@ -352,7 +352,7 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 		expect(attempts).toBe(1);
 	});
 
-	it("names the refusal before it when the deadline lands on a later attempt, and does not call the agent reachable (#271)", async () => {
+	it("names the refusal before it when the deadline lands on a later attempt, and does not call the agent reachable", async () => {
 		// The retry after a refusal runs on what is left of the deadline — a
 		// millisecond, when a timer overshoots — and can time out before its own
 		// refusal arrives. Scripted: refused, then no answer until the deadline.
@@ -424,10 +424,10 @@ describe("cedarHttpEngine — load pushes the policy set", () => {
 		);
 	});
 
-	it("treats two spellings of one loopback agent as the same agent (v0.10.0 audit)", async () => {
-		// The guard was keyed on the endpoint string, so `127.0.0.1` and
-		// `localhost` were two keys for one agent, and the second collector
-		// replaced the first's policy set — the outcome the guard exists to stop.
+	it("treats two spellings of one loopback agent as the same agent", async () => {
+		// Keyed on the endpoint string, the guard would take `127.0.0.1` and
+		// `localhost` for two agents, and the second collector would replace the
+		// first's policy set — the outcome the guard exists to stop.
 		const { doFetch } = agent();
 		const engine = createCedarHttpEngine({ fetch: doFetch, env: {} });
 		await loadAsync(engine, inline(PERMIT_ALL), { endpoint: "http://127.0.0.1:8180" });
@@ -483,12 +483,12 @@ describe("cedarHttpEngine — where the agent is", () => {
 		]);
 	});
 
-	it("refuses to start with no endpoint at all, naming both ways out, before any request (v0.10.0 audit)", async () => {
-		// A v0.9.0 deployment that upgrades without the wasm package is resolved
-		// to this engine. With a loopback default it spent ten seconds on
-		// "cedar engine at http://127.0.0.1:8180 is unreachable", which names
-		// neither the cause nor the fix — or, if something answered there, booted
-		// against an evaluator nobody chose. #225 specified a config error.
+	it("refuses to start with no endpoint at all, naming both ways out, before any request", async () => {
+		// A deployment without the wasm package is resolved to this engine. A
+		// loopback default would spend ten seconds on "cedar engine at
+		// http://127.0.0.1:8180 is unreachable", which names neither the cause
+		// nor the fix — or, if something answered there, boot against an
+		// evaluator nobody chose. So a missing endpoint is a config error.
 		const { doFetch, calls } = agent();
 		await expect(
 			createCedarHttpEngine({ fetch: doFetch, env: {} }).load(inline(PERMIT_ALL), loadContext()),
@@ -574,11 +574,9 @@ describe("cedarHttpEngine — where the agent is", () => {
 
 	// `fetch` refuses a header value that holds an ASCII control character other
 	// than a tab once the whitespace around it is trimmed, or a character
-	// above U+00FF. For a line break or a NUL its error quotes the whole
-	// value, which the load then logged on every retry; for the others it
-	// does not. Either way the load called the agent unreachable and retried
-	// for ten seconds (#271). Refused at load instead, naming where the token
-	// came from, never the token.
+	// above U+00FF; for a line break or a NUL its error quotes the whole value.
+	// Such a token is refused at load, naming where it came from and never the
+	// token, rather than failing every attempt as an unreachable agent.
 	it.each([
 		["a line break inside", "s3cr3t-1\ns3cr3t-2"],
 		["a header smuggled after CRLF", "s3cr3t\r\nX-Other: y"],
@@ -587,35 +585,32 @@ describe("cedarHttpEngine — where the agent is", () => {
 		["a form feed after it, which is not trimmed", "s3cr3t\u000c"],
 		["a vertical tab inside", "s3c\u000br3t"],
 		["a character above U+00FF", "s3cr€t"],
-	])(
-		"refuses a token fetch cannot send — %s — without repeating it (#271)",
-		async (_label, token) => {
-			const { doFetch, calls } = agent();
-			for (const [config, env, source] of [
-				[{ authentication: token }, AGENT_ENV, "authentication"],
-				[{}, { ...AGENT_ENV, [CEDAR_AUTHENTICATION_ENV]: token }, CEDAR_AUTHENTICATION_ENV],
-			] as const) {
-				let message = "";
-				try {
-					await createCedarHttpEngine({ fetch: doFetch, env }).load(
-						inline(PERMIT_ALL),
-						loadContext(config),
-					);
-				} catch (error) {
-					expect(error).toBeInstanceOf(CedarEngineError);
-					message = (error as CedarEngineError).message;
-				}
-				expect(message).toMatch(
-					new RegExp(
-						`^${source} is not a valid HTTP header value — it holds an ASCII control character other than a tab, or a character above U\\+00FF`,
-					),
+	])("refuses a token fetch cannot send — %s — without repeating it", async (_label, token) => {
+		const { doFetch, calls } = agent();
+		for (const [config, env, source] of [
+			[{ authentication: token }, AGENT_ENV, "authentication"],
+			[{}, { ...AGENT_ENV, [CEDAR_AUTHENTICATION_ENV]: token }, CEDAR_AUTHENTICATION_ENV],
+		] as const) {
+			let message = "";
+			try {
+				await createCedarHttpEngine({ fetch: doFetch, env }).load(
+					inline(PERMIT_ALL),
+					loadContext(config),
 				);
-				expect(message).not.toContain(token);
-				expect(message).not.toContain(token.slice(0, 4));
+			} catch (error) {
+				expect(error).toBeInstanceOf(CedarEngineError);
+				message = (error as CedarEngineError).message;
 			}
-			expect(calls).toEqual([]);
-		},
-	);
+			expect(message).toMatch(
+				new RegExp(
+					`^${source} is not a valid HTTP header value — it holds an ASCII control character other than a tab, or a character above U\\+00FF`,
+				),
+			);
+			expect(message).not.toContain(token);
+			expect(message).not.toContain(token.slice(0, 4));
+		}
+		expect(calls).toEqual([]);
+	});
 
 	it("still sends a tab or a Latin-1 character inside a token, as fetch does", async () => {
 		const { doFetch, calls } = agent();
@@ -643,13 +638,13 @@ describe("cedarHttpEngine — where the agent is", () => {
 });
 
 /*
- * #283: cedar-agent evaluates whatever set it holds, which anyone with its
+ * cedar-agent evaluates whatever set it holds, which anyone with its
  * token can replace, and names no revision. The one thing an answer carries
  * back is the ids of the policies that determined it — so the engine pushes
  * each policy under an id carrying its load's mark, and an answer naming any
  * other id did not come from the set this verifier loaded.
  */
-describe("cedarHttpEngine — whose policies an answer names (#283)", () => {
+describe("cedarHttpEngine — whose policies an answer names", () => {
 	const source = inline(PERMIT_ALL);
 	const ours = agentPolicyId("policies", source.revision);
 	const answering = (reason: unknown[]) =>
@@ -928,7 +923,7 @@ describe("cedarHttpEngine — whose policies an answer names (#283)", () => {
 	});
 });
 
-describe("cedarHttpEngine — reading the agent's set back (#286)", () => {
+describe("cedarHttpEngine — reading the agent's set back", () => {
 	const source = inline(PERMIT_ALL);
 
 	/**
@@ -1475,15 +1470,14 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		});
 	});
 
-	it("reads structured diagnostics rather than refusing the answer (v0.10.0 audit, #199)", async () => {
+	it("reads structured diagnostics rather than refusing the answer", async () => {
 		// cedar-agent 0.2.x rides cedar-policy 2.5, which reports errors as
-		// strings; Cedar 3.x+ serialises them as objects. Refusing every
-		// non-string turned an agent image bump into every request denied, with
-		// a message about "well-formed diagnostics". The rule only logs errors and
-		// decides on whether there are any, so their text is enough. A reason is a
-		// policy id a decision names (#199), read out of its object, and so is the
-		// policy an error names; an item with none to read is no policy of this
-		// load's (#283, see above).
+		// strings; Cedar 3.x+ serialises them as objects. Both are read: refusing
+		// every non-string would turn an agent image bump into every request
+		// denied. The rule only logs errors and decides on whether there are any,
+		// so their text is enough. A reason is a policy id a decision names, read
+		// out of its object, and so is the policy an error names; an item with
+		// none to read is no policy of this load's (see above).
 		const structured = { policyId: OURS, error: { message: "attribute `dept` missing" } };
 		const loaded = await loadAsync(
 			createCedarHttpEngine({
@@ -1567,7 +1561,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 	});
 
 	// The real `fetch` rejects with "fetch failed" whatever happened; what did
-	// happen is on `cause` (#271). The shapes below are the ones undici gives.
+	// happen is on `cause`. The shapes below are the ones undici gives.
 	const transportFailures: Array<[string, unknown, RegExp]> = [
 		[
 			"a refusal, whose message carries its code",
@@ -1622,7 +1616,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 	];
 
 	it.each(transportFailures)(
-		"names the transport failure: %s (#271)",
+		"names the transport failure: %s",
 		async (_label, thrown, expected) => {
 			const { doFetch } = agent(() => {
 				throw thrown;
@@ -1637,7 +1631,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		},
 	);
 
-	it("bounds what a cause adds: each link cut short, a cycle followed once (#271)", async () => {
+	it("bounds what a cause adds: each link cut short, a cycle followed once", async () => {
 		const looping = failure("x".repeat(1000), "ELOOP_TEST");
 		looping.cause = looping;
 		const { doFetch } = agent(() => {
@@ -1674,8 +1668,8 @@ describe("cedarHttpEngine — isAuthorized", () => {
 	});
 
 	// Whatever a `fetch` rejects with, describing it must not throw: a throw
-	// there escaped as something other than a CedarEngineError, and at load
-	// it skipped the retry loop.
+	// there would escape as something other than a CedarEngineError, and at
+	// load would skip the retry loop.
 	it.each([
 		[
 			"an AggregateError that holds itself",
@@ -1730,7 +1724,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 			},
 			/is unreachable: fetch failed: a failure that could not be described$/,
 		],
-	])("describes %s without throwing (#271)", async (_label, make, expected) => {
+	])("describes %s without throwing", async (_label, make, expected) => {
 		const thrown = make();
 		const { doFetch } = agent(() => {
 			throw thrown;
@@ -1748,12 +1742,12 @@ describe("cedarHttpEngine — isAuthorized", () => {
 	// faulty agent — or a proxy in front of it — streaming a large body would
 	// hold memory for the whole rule deadline, per concurrent call, and an
 	// exhausted process takes every route down with it, not only the ones
-	// Cedar gates (#271). Over the bound, the call fails closed.
-	it("bounds an answer at 1 MiB by default (#271)", () => {
+	// Cedar gates. Over the bound, the call fails closed.
+	it("exports CEDAR_ANSWER_MAX_BYTES as 1 MiB", () => {
 		expect(CEDAR_ANSWER_MAX_BYTES).toBe(MIB);
 	});
 
-	it("refuses an answer that declares more than CEDAR_ANSWER_MAX_BYTES, before reading it (#271)", async () => {
+	it("refuses an answer that declares more than CEDAR_ANSWER_MAX_BYTES, before reading it", async () => {
 		let pulled = 0;
 		const body = new ReadableStream<Uint8Array>({
 			pull(controller) {
@@ -1779,7 +1773,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		expect(pulled).toBeLessThanOrEqual(1);
 	});
 
-	it("refuses an answer that streams past CEDAR_ANSWER_MAX_BYTES without declaring a length (#271)", async () => {
+	it("refuses an answer that streams past CEDAR_ANSWER_MAX_BYTES without declaring a length", async () => {
 		// Four times the bound, then the end: finite, so an engine without the
 		// bound reads it all and fails on the parse instead.
 		let sent = 0;
@@ -1833,9 +1827,8 @@ describe("cedarHttpEngine — isAuthorized", () => {
 
 	// A decision can be larger than the default bound and still be the
 	// agent's honest answer: the determining-policy and error lists grow with
-	// the policy set. Through 0.13.0 such an answer was read; under the default
-	// it is refused, and `maxAnswerBytes` in the collector's config entry is the
-	// way out. Found by the v0.14.0 release audit.
+	// the policy set. Under the default it is refused, and `maxAnswerBytes` in
+	// the collector's config entry is the way out.
 	it("refuses a valid decision larger than the default bound, saying how to raise it", async () => {
 		const answer = largeAllow(40_000);
 		expect(answer.length).toBeGreaterThan(MIB);
@@ -1867,7 +1860,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		);
 		const answer = await loaded.isAuthorized(request(), NEVER_ABORTS);
 		expect(answer.decision).toBe("allow");
-		// Read whole, and each of this load's policies named once (#283).
+		// Read whole, and each of this load's policies named once.
 		expect(answer.reason).toEqual(["policies"]);
 	});
 
@@ -1997,14 +1990,14 @@ describe("cedarHttpEngine — isAuthorized", () => {
 	);
 
 	// The status can arrive before the body does, and an abort can land in
-	// between (#271): the body read then fails, and that is the signal's doing,
+	// between: the body read then fails, and that is the signal's doing,
 	// not the agent's. Here the body errors with a failure of its own, as a
 	// `fetch` need not reject a body read with the signal's reason.
 	it.each([
 		["an answer", 200],
 		["an error", 500],
 	])(
-		"rejects with the signal's reason when the deadline passes while %s's body is read (%i) (#271)",
+		"rejects with the signal's reason when the deadline passes while %s's body is read (%i)",
 		async (_label, status) => {
 			const stalled = stalledBody(status, '{"decision":"Allow",');
 			const loaded = await loadAsync(
@@ -2022,7 +2015,7 @@ describe("cedarHttpEngine — isAuthorized", () => {
 		},
 	);
 
-	it("says the agent broke off its answer when the body stops without an abort, not that it answered garbage (#271)", async () => {
+	it("says the agent broke off its answer when the body stops without an abort, not that it answered garbage", async () => {
 		const stalled = stalledBody(200, '{"decision":"Allow",');
 		const loaded = await loadAsync(
 			createCedarHttpEngine({ fetch: agent(() => stalled.response).doFetch, env: AGENT_ENV }),
@@ -2135,7 +2128,7 @@ describe("CedarPolicyRuleCollector on the http engine", () => {
 		);
 	});
 
-	it("leaves nothing behind when abstain is refused — the same process can start with deny (review)", async () => {
+	it("leaves nothing behind when abstain is refused — the same process can start with deny", async () => {
 		const { doFetch, calls } = agent();
 		vi.stubGlobal("fetch", doFetch);
 		const config = { engine: "http", endpoint: "http://127.0.0.1:18299", policies: PERMIT_ALL };
@@ -2147,7 +2140,7 @@ describe("CedarPolicyRuleCollector on the http engine", () => {
 		await expect(CedarPolicyRuleCollector.create(config)).resolves.toBeDefined();
 	});
 
-	it("reports what it pushed as loaded, never as evaluated — the agent does not say what it ran (#244)", async () => {
+	it("reports what it pushed as loaded, never as evaluated — the agent does not say what it ran", async () => {
 		// cedar-agent answers `{ decision, diagnostics }` and nothing else, and a
 		// restarted agent comes back empty: the set pushed at boot is not proof
 		// of the set that answered.
@@ -2188,7 +2181,7 @@ describe("CedarPolicyRuleCollector on the http engine", () => {
 		});
 	});
 
-	it("refuses requireConfirmedRevision at boot, before anything is pushed (#244)", async () => {
+	it("refuses requireConfirmedRevision at boot, before anything is pushed", async () => {
 		const { doFetch, calls } = agent();
 		vi.stubGlobal("fetch", doFetch);
 		const config = { engine: "http", endpoint: "http://127.0.0.1:18206", policies: PERMIT_ALL };

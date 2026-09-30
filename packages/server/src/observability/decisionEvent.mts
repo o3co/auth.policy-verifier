@@ -2,13 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * The per-decision audit line (#111).
+ * The per-decision audit line.
  *
  * An authorization service that cannot answer "why was this request denied?"
  * from its own output is undiagnosable during the incident it is at the centre
- * of. The engine already computes the answer — every `Decision` carries a
- * structured `reason` — and this module projects it onto a flat, structured log
- * record.
+ * of. Every `Decision` carries a structured `reason`, and this module projects
+ * it onto a flat, structured log record.
  *
  * What is in the record is chosen twice over: once for what an operator needs,
  * and once for what must never leave the process. See {@link decisionEvent}.
@@ -40,19 +39,19 @@ export interface DenyingGroup {
 }
 
 /**
- * What one rule reported about the evaluation behind its answer (#244): the
- * rule, named the way this line names a rule; which way it answered; and the
+ * What one rule reported about the evaluation behind its answer: the rule,
+ * named the way this line names a rule; which way it answered; and the
  * evaluation, as core carries it.
  *
  * `passed` is here because a group is an OR. A Cedar rule that forbade,
- * followed by another that permitted, is an allow whose line lists both — and
- * without `passed` the first would read as a revision standing behind the
- * allow when it is the one that refused. Two collectors in one group share
- * `ruleType` and `code`, so it is also what tells their entries apart.
+ * followed by another that permitted, is an allow whose line lists both, and
+ * without `passed` the first would read as a revision standing behind the allow
+ * when it is the one that refused. Two collectors in one group share `ruleType`
+ * and `code`, so it is also what tells their entries apart.
  *
  * `evaluation` is nested, the way the response nests it on an outcome, and not
- * spread beside the name: a key it carries — the determining policy ids
- * (#199) among them — cannot then collide with `ruleType`, `code` or `passed`.
+ * spread beside the name, so a key it carries (the determining policy ids among
+ * them) cannot collide with `ruleType`, `code` or `passed`.
  */
 export interface ReportedEvaluation extends NamedRule {
 	passed: boolean;
@@ -64,15 +63,15 @@ export interface ReportedEvaluation extends NamedRule {
  *
  * All of them, not only the deciding rule's: a decision that ran two policy
  * sources was decided under both revisions, and the revision of a group that
- * passed is as much part of "what configuration produced this" as the one
- * that refused. A rule that reported nothing is not listed — it has no policy
- * source to name, and an entry for it would have to invent one.
+ * passed is as much part of "what configuration produced this" as the one that
+ * refused. A rule that reported nothing is not listed; it has no policy source
+ * to name, and an entry for it would have to invent one.
  *
  * Each entry is the outcome the response carries under
- * `verify.evaluationInResponse = "include"` — `code`, `passed`, `evaluation` —
+ * `verify.evaluationInResponse = "include"` (`code`, `passed`, `evaluation`),
  * with the group's `ruleType` in place of the rule's `message`, read off the
- * same `Decision`: two projections of one value, which is what makes the audit
- * record and the caller's copy agree.
+ * same `Decision`: two projections of one value, so the audit record and the
+ * caller's copy agree.
  */
 function reportedEvaluations(decision: Decision): ReportedEvaluation[] {
 	return decision.reason.groups.flatMap((group) =>
@@ -91,7 +90,10 @@ function reportedEvaluations(decision: Decision): ReportedEvaluation[] {
 	);
 }
 
-/** Everything the router knows about one decision at the moment it emits the line. */
+/**
+ * What `createDecider` (`decision/decide.mts`) knows about one decision at the
+ * moment it emits the line.
+ */
 export interface DecisionEventInput {
 	decision: Decision;
 	/**
@@ -104,7 +106,7 @@ export interface DecisionEventInput {
 	action: string;
 	/**
 	 * `x-request-id` as sent, when the caller sent one the router carries —
-	 * `acceptRequestId` in `http/requestId.mts` (#200) refuses an empty, overlong
+	 * `acceptRequestId` in `http/requestId.mts` refuses an empty, overlong
 	 * or unsafe value before it gets here. See {@link present} for why an empty
 	 * value is dropped rather than carried.
 	 */
@@ -117,19 +119,18 @@ export interface DecisionEventInput {
  * A value fit to be reported, or `undefined` when the key should be omitted
  * entirely.
  *
- * Empty counts as absent, and neither empty value is hypothetical. A proxy that
- * stamps `x-request-id` unconditionally sends the header with nothing in it
- * whenever it has nothing to put there, and Express hands that through as `""`;
- * an issuer can mint `"sub": ""` just as easily. Carrying either would be worse
- * than dropping it: `sub: ""` in an audit record reads as a subject that
- * exists, and `requestId: ""` is a correlation key that every such record
- * shares — so grouping by it collapses unrelated decisions into one apparent
- * trace, which is precisely the question the field exists to answer.
+ * Empty counts as absent, and neither empty value is hypothetical: a proxy that
+ * stamps `x-request-id` unconditionally sends the header empty when it has
+ * nothing to put there, and Express hands that through as `""`; an issuer can
+ * mint `"sub": ""` just as easily. `sub: ""` in an audit record reads as a
+ * subject that exists, and `requestId: ""` is a correlation key every such
+ * record shares, so grouping by it collapses unrelated decisions into one
+ * apparent trace.
  *
- * Exported because the verify route applies it to the same `sub` before putting
- * it on the wire (#158). The audit line and the decision response describe one
- * decision; the empty subject had to be absent from both or from neither, and
- * one function is what makes that structural rather than remembered.
+ * Exported because `createDecider` (`decision/decide.mts`) applies it to the
+ * `sub` once and hands the result to both this line and the decision response.
+ * The two describe one decision, so the empty subject is absent from both or
+ * from neither, and one function makes that structural rather than remembered.
  */
 export function present(value: string | undefined): string | undefined {
 	return value !== undefined && value !== "" ? value : undefined;
@@ -137,10 +138,9 @@ export function present(value: string | undefined): string | undefined {
 
 /** `satisfiedBy` for a passing group; `undefined` for a group that is not one. */
 function satisfyingRule(group: RuleGroupOutcome): NamedRule | undefined {
-	// #135 split the outcome: `evaluated` is what ran, `satisfiedBy` is what
-	// decided, and it exists only on the pass arm. Reading `evaluated.at(-1)`
-	// instead would happen to give the same rule and would silently start
-	// naming the wrong one the moment the group semantics change.
+	// `evaluated` is what ran, `satisfiedBy` is what decided, and it exists only
+	// on the pass arm. `evaluated.at(-1)` happens to give the same rule, and
+	// would silently name the wrong one the moment the group semantics change.
 	return group.passed ? { ruleType: group.ruleType, code: group.satisfiedBy.code } : undefined;
 }
 
@@ -148,31 +148,30 @@ function satisfyingRule(group: RuleGroupOutcome): NamedRule | undefined {
  * Builds the structured fields of one `decision` log line.
  *
  * **Carried:** subject (`sub`), resource, action, the decision, the deny
- * `code`, the deciding rule, the request id, and how long the decision took.
- * That is the set an operator needs to answer "why was this denied" and to
- * join the answer to the caller's own trace. And, when any rule reported one,
- * `evaluations` (#244): which policy revision each policy-backed rule
- * evaluated, whether it evaluated at all, and which way it answered — see
- * {@link reportedEvaluations}.
- * A revision is a bounded `scheme:encoded` reference by the time it is on a
- * `Decision` (core checks it), never a path and never policy text.
+ * `code`, the deciding rule, the request id, and how long the decision took:
+ * the set an operator needs to answer "why was this denied" and to join the
+ * answer to the caller's own trace. And, when any rule reported one,
+ * `evaluations`: which policy revision each policy-backed rule evaluated,
+ * whether it evaluated at all, and which way it answered (see
+ * {@link reportedEvaluations}). A revision is a bounded `scheme:encoded`
+ * reference by the time it is on a `Decision` (core checks it), never a path
+ * and never policy text.
  *
- * **Deliberately absent**, because this line is written on every request —
- * including the ones that succeed — and shipped somewhere with a different
+ * **Deliberately absent**, because this line is written on every request,
+ * including the ones that succeed, and shipped somewhere with a different
  * blast radius from the token itself:
  *
  * - the raw bearer token, and the claim set as a whole. Only `sub` crosses,
- *   because only `sub` is the answer to "who". A token may carry `email`, group
- *   membership or anything else the issuer chose to mint, and none of it is
- *   needed to explain a decision.
+ *   because only `sub` is the answer to "who"; nothing else the issuer mints
+ *   (`email`, group membership) is needed to explain a decision.
  * - the caller's `context` object. It is free-form and forwarded verbatim to
- *   collectors, so it is exactly where a calling service's own request payload
- *   ends up; logging it turns the audit stream into a copy of that payload.
+ *   collectors, so it is where a calling service's own request payload ends
+ *   up; logging it turns the audit stream into a copy of that payload.
  * - rule `message` text. It is derived from the resource and action already on
  *   the line, so it adds length rather than information.
  *
- * The rule name is `ruleType` + `code` rather than free text, which is also
- * what keeps it usable as a metric label — see `observability/metrics.mts`.
+ * The rule name is `ruleType` + `code` rather than free text, which also keeps
+ * it usable as a metric label (see `observability/metrics.mts`).
  */
 export function decisionEvent({
 	decision,
@@ -197,9 +196,9 @@ export function decisionEvent({
 		durationMs: Math.round(durationMs * 1000) / 1000,
 	};
 
-	// #244: absent rather than empty when no rule reported one, so a deployment
-	// with no policy-backed rule writes the line it always wrote. A decision the
-	// router built itself — a timeout, a conflict — has no groups and so none.
+	// Absent rather than empty when no rule reported one, so a deployment with
+	// no policy-backed rule writes no `evaluations` key. A deny `createDecider`
+	// built itself — a timeout, a conflict — has no groups and so none.
 	const evaluations = reportedEvaluations(decision);
 	if (evaluations.length > 0) event.evaluations = evaluations;
 

@@ -2,23 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Which token authenticator a deployment runs (#219), read once for both
- * boundaries — see AGENTS.md, "Two-Boundary Config Validation".
+ * Which token authenticator a deployment runs, read once for both boundaries
+ * (AGENTS.md, "Two-Boundary Config Validation").
  *
  * `oauth.authenticator` names an entry in the server's token-authenticator
  * registry, the way `oauth.jwt.algorithm` names a key resolver and
- * `attribute.collectors[].collector` names a collector. The built-in entry is
- * `"jwt"`, and it is the default, so every config written before this knob
- * existed reads exactly as it did. Whether the name is *registered* is the
- * registry's verdict at boot; what this function decides is the part both
- * boundaries can see: that the name is well-formed, and that the `jwt` block
- * is present whenever the built-in authenticator is the one selected — a
- * deployment running another authenticator has no use for it and must not be
- * made to write one.
+ * `attribute.collectors[].collector` names a collector. The built-in entry,
+ * `"jwt"`, is the default. Whether the name is *registered* is the registry's
+ * verdict at boot; this function decides what both boundaries can see: that the
+ * name is well-formed, and that the `jwt` block is present whenever the
+ * built-in authenticator is the one selected. A deployment running another
+ * authenticator has no use for it and must not be made to write one.
  *
- * Dependency-free on purpose, like `checkJwksUri` and `resolveBound`:
- * `AppConfigSchema` imports it, so anything it reached back for would arrive
- * as a cycle.
+ * Dependency-free: `AppConfigSchema` imports it, so anything it reached back
+ * for would arrive as a cycle.
  */
 
 /** The name the built-in JWT authenticator is registered under, and the default selection. */

@@ -20,15 +20,12 @@ import type { AttributeCollector, Attributes, CollectorRequest } from "./types.m
 /**
  * Fan-out aggregator that runs every `AttributeCollector` concurrently — up to
  * `CollectorLimits.concurrency` at a time, the rest queued behind them — and
- * merges their results into a single `Attributes` map.
+ * merges their results into a single `Attributes` map: array-valued entries
+ * concatenate (in collector order); a non-array value may be written once, or
+ * re-written with the identical value, and two collectors writing different
+ * values to it throw {@link AttributeConflictError} — see `merge` below.
  *
- * Merge semantics: when the same key is produced by multiple collectors,
- * array-valued entries concatenate (in collector order); a non-array value may
- * be written once, or re-written with the identical value, and two collectors
- * writing different values to it throw {@link AttributeConflictError} (#174) —
- * see `merge` below.
- *
- * The fan-out is bounded (#115): each collector gets its own timeout and an
+ * The fan-out is bounded: each collector gets its own timeout and an
  * `AbortSignal`, the wave as a whole gets a deadline, and only so many
  * collectors run at once. A bound that trips **fails the collect** — see
  * {@link CollectorLimits} and `collectorLimits.mts` for why a partial map is
@@ -48,7 +45,7 @@ export class AttributePipeline {
 
 	/**
 	 * Runs every collector under the pipeline's bounds and returns the merged
-	 * map. `options.failures` records where a failure came from (#200).
+	 * map. `options.failures` records where a failure came from.
 	 */
 	async collect(request: CollectorRequest, options?: CollectOptions): Promise<Attributes> {
 		return merge(
@@ -62,34 +59,25 @@ export class AttributePipeline {
  * in input order. A non-array value may be written once — or re-written with
  * the **identical** value (same primitive, or same object reference); two
  * maps writing *different* values to the same scalar key throw
- * {@link AttributeConflictError}, which the transport answers as a deny
- * (#174). Last-writer-wins let a collector-ordering mistake silently weaken
- * decisions (#126 item 2); an ambiguous attribute map is not something to
- * authorize from.
+ * {@link AttributeConflictError}, which the transport answers as a deny: an
+ * ambiguous attribute map is not something to authorize from.
  *
  * A scalar write still resets any array accumulation for its key, and a later
- * array still replaces an earlier scalar — the mixed-type semantics are
- * unchanged (and pinned by tests); only the scalar-vs-scalar disagreement is
- * a conflict.
- *
- * Array fragments are collected per key and concatenated once at the end
- * (#126 item 3): the previous shape re-copied the whole accumulated array for
- * every contributing map (`[...existing, ...value]`), which is quadratic in
- * collector count for a repeatedly-contributed key like roles or permissions.
+ * array still replaces an earlier scalar (pinned by tests); only the
+ * scalar-vs-scalar disagreement is a conflict. Array fragments are collected
+ * per key and concatenated once at the end, so a key many maps contribute to
+ * (roles, permissions) is not re-copied per map.
  *
  * **The trap the union sets for collector authors.** Two collectors writing
  * the same scalar key disagree loudly; two writing the same *array* key never
- * disagree at all — the second one's entries are simply added. That is the
- * point for `roles` and `permissions`, which several collectors are meant to
- * contribute to, and it must not change. But it means a collector promoting
- * caller-supplied data onto an engine-owned key does not overwrite the
- * deployment's value and lose the argument: it EXTENDS it, silently, and the
- * decision looks exactly like one the issuer granted. So a collector reading
- * untrusted input owes its destination keys a guard — see
- * `RESERVED_ATTRIBUTE_KEYS` in `keys.mts`, and
- * `RequestContextAttributeCollector` in builtins for the worked example. The
- * union is not the bug; writing to a shared bucket from an unverified source
- * is, and the union is why it is quiet.
+ * disagree at all — the second one's entries are added. That is the point for
+ * `roles` and `permissions`, which several collectors are meant to contribute
+ * to. But a collector promoting caller-supplied data onto an engine-owned key
+ * does not overwrite the deployment's value and lose the argument: it EXTENDS
+ * it, silently, and the decision looks exactly like one the issuer granted.
+ * So a collector reading untrusted input owes its destination keys a guard —
+ * see `RESERVED_ATTRIBUTE_KEYS` in `keys.mts`, and
+ * `RequestContextAttributeCollector` in builtins for the worked example.
  */
 function merge(maps: Attributes[]): Attributes {
 	const merged: Attributes = new Map();

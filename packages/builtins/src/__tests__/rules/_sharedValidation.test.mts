@@ -53,10 +53,9 @@ describe("requireAttrName", () => {
 	});
 
 	it("throws when value contains ':' (reserved as ruleType separator)", () => {
-		// Regression guard for an authorization-weakening bug: with ':' allowed,
-		// (a="x:y", b="z") and (a="x", b="y:z") would both produce the same
-		// `attr_pair_equal:x:y:z` default ruleType and be silently OR-combined
-		// by the evaluator. Fail-fast at construction instead.
+		// With ':' allowed, (a="x:y", b="z") and (a="x", b="y:z") would both
+		// produce the default ruleType `attr_pair_equal:x:y:z` and be silently
+		// OR-combined by the evaluator.
 		expect(() => requireAttrName("MyClass", "a", "name:space")).toThrow(
 			/must not contain ':'.*got 'name:space'/,
 		);
@@ -97,10 +96,8 @@ describe("requireLiteralValue", () => {
 	});
 
 	it("throws on NaN (NaN === NaN is false; would invert Equal/NotEqual rules)", () => {
-		// Regression guard for an authorization-weakening bug: with NaN accepted,
-		// AttrLiteralNotEqual({ v: NaN }) would always pass for any numeric
-		// attribute because `x !== NaN` is always true. Must fail-fast in
-		// construction instead.
+		// With NaN accepted, AttrLiteralNotEqual({ v: NaN }) would pass for any
+		// numeric attribute, because `x !== NaN` is always true.
 		expect(() => requireLiteralValue("MyClass", "v", Number.NaN)).toThrow(/must not be NaN/);
 	});
 });
@@ -201,10 +198,10 @@ describe("requireHomogeneousLiteralArray", () => {
 		);
 	});
 
-	it("throws when an element is NaN (would silently mismatch AttrLiteralIn/NotIn)", () => {
-		// Regression guard: AttrLiteralIn uses strict equality against each element;
-		// a NaN element could never match any attribute value because NaN !== NaN.
-		// Must fail-fast at construction rather than ship an always-false element.
+	it("throws when an element is NaN (AttrLiteralIn's Set.has would match a NaN attribute)", () => {
+		// AttrLiteralIn tests membership with `Set.has`, under which a NaN
+		// element matches a NaN attribute: something that is not a number
+		// would satisfy the set.
 		expect(() => requireHomogeneousLiteralArray("MyClass", [1, Number.NaN, 3])).toThrow(
 			/must not contain NaN/,
 		);
@@ -324,10 +321,8 @@ describe("fnv1a64", () => {
 	});
 
 	it("does not collide on the 32-bit FNV-1a counterexample ('v0jxp73609' vs 'jtrl7v0818102')", () => {
-		// These two short strings collide under FNV-1a 32-bit (both → 0x832c03b4),
-		// which was the empirical evidence used during code review to reject the
-		// 32-bit variant. Pin that they remain distinct under the 64-bit hash so
-		// any future width regression is caught immediately.
+		// These two short strings collide under FNV-1a 32-bit (both → 0x832c03b4);
+		// they must stay distinct under the 64-bit hash.
 		expect(fnv1a64("v0jxp73609")).not.toBe(fnv1a64("jtrl7v0818102"));
 	});
 });
@@ -379,13 +374,10 @@ describe("computeValuesKey", () => {
 	});
 
 	it("separator collision guard: ['a,b', 'c'] !== ['a', 'b,c'] (values containing commas do not collide)", () => {
-		// Regression guard: a naive implementation of the form
-		//   values.map(String).sort().join(",")
-		// would produce the same string "a,b,c" for both inputs and thus the
-		// same ruleType. That would cause the evaluator to OR what the caller
-		// meant as two independent set constraints, weakening authorization.
-		// The canonical form JSON.stringify-es each element before joining,
-		// so quotes/escapes disambiguate the element boundary.
+		// `values.map(String).sort().join(",")` would give "a,b,c" for both
+		// inputs, so one ruleType, and the evaluator would OR what the caller
+		// meant as two independent set constraints. The canonical form
+		// JSON-encodes each element, so quotes and escapes mark its boundary.
 		expect(computeValuesKey(["a,b", "c"])).not.toBe(computeValuesKey(["a", "b,c"]));
 	});
 

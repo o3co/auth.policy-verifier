@@ -111,7 +111,7 @@ describe("evaluate", () => {
 	});
 });
 
-describe("evaluate — structured decision reason (#124)", () => {
+describe("evaluate — structured decision reason", () => {
 	it("reports every group on an allow, naming the rule that satisfied each", async () => {
 		const attrs: Attributes = new Map();
 		const result = await evaluate(attrs, [
@@ -162,8 +162,8 @@ describe("evaluate — structured decision reason (#124)", () => {
 	});
 
 	it("evaluates later groups even after an earlier one fails", async () => {
-		// The old evaluator returned on the first failing group, so a deny could
-		// not say whether anything after it would also have failed.
+		// Every group runs, so a deny can say whether a later group would also
+		// have failed.
 		const attrs: Attributes = new Map();
 		const result = await evaluate(attrs, [
 			makeRule("scope", "invalid_scope", false),
@@ -172,7 +172,7 @@ describe("evaluate — structured decision reason (#124)", () => {
 
 		expect(result.reason.groups).toHaveLength(2);
 		expect(result.reason.groups.every((g) => !g.passed)).toBe(true);
-		// The deny still names the FIRST failing group, as before.
+		// The deny names the first failing group.
 		expect(result).toMatchObject({ decision: "deny", code: "invalid_scope" });
 	});
 
@@ -182,10 +182,10 @@ describe("evaluate — structured decision reason (#124)", () => {
 	});
 });
 
-describe("evaluate — RuleGroupOutcome.evaluated means what ran (#135)", () => {
+describe("evaluate — RuleGroupOutcome.evaluated means what ran", () => {
 	it("on a pass, evaluated lists the tried-and-failed alternatives before the passing rule", async () => {
-		// The old `rules` field held only the passing rule here, so a consumer
-		// aggregating "rules evaluated" undercounted the two failed attempts.
+		// `evaluated` lists every rule that ran, the failed attempts included, so
+		// a consumer counting "rules evaluated" counts them too.
 		const attrs: Attributes = new Map();
 		const result = await evaluate(attrs, [
 			makeRule("scope", "first_failed", false),
@@ -258,9 +258,8 @@ describe("evaluate — RuleGroupOutcome.evaluated means what ran (#135)", () => 
 	});
 
 	it("still takes the deny code from the first alternative of the first failing group", async () => {
-		// The representative rule on a deny was `rules[0]` and is now
-		// `evaluated[0]` — same rule, since a failing group ran all alternatives
-		// in order.
+		// The deny's representative rule is `evaluated[0]`: a failing group ran
+		// all its alternatives in order.
 		const attrs: Attributes = new Map();
 		const result = await evaluate(attrs, [
 			makeRule("scope", "first_failed", false),

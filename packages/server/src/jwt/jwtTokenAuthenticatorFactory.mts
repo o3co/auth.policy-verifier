@@ -25,25 +25,25 @@ import {
 export { JWT_TOKEN_AUTHENTICATOR };
 
 /**
- * The built-in token authenticator: bearer JWTs verified against `oauth.jwt`
- * (#219). `createApp` registers it under {@link JWT_TOKEN_AUTHENTICATOR}
- * before any module runs, so it is always selectable and never replaceable —
- * a deployment that authenticates some other way registers its own factory
- * under its own name and selects it with `oauth.authenticator`.
+ * The built-in token authenticator: bearer JWTs checked against `oauth.jwt`,
+ * signature-verified unless `oauth.jwt.mode` is `"insecure-decode"`.
+ * `createApp` registers it under {@link JWT_TOKEN_AUTHENTICATOR} before any
+ * module runs, so it is always selectable and never replaceable; a deployment
+ * that authenticates some other way registers its own factory under its own
+ * name and selects it with `oauth.authenticator`.
  *
  * This is the step that maps the wire `oauth.jwt.mode` onto the
- * authenticator's internal discriminated union (#134), moved behind the port unchanged.
- * `AppConfigSchema` already enforces the wire invariants (the mode enum,
- * iss/aud/typ presence, rejection of the removed keys) for schema-validated
- * configs; everything is re-checked here (#106) — see AGENTS.md, "Two-Boundary
- * Config Validation" — with the `oauth.jwt.*` paths the operator actually
- * wrote. The messages keep naming `createApp`, because that is the boundary
- * running this factory.
+ * authenticator's internal discriminated union. `AppConfigSchema` enforces the
+ * wire invariants (the mode enum, iss/aud/typ presence, rejection of the
+ * removed keys) for schema-validated configs; everything is re-checked here
+ * (AGENTS.md, "Two-Boundary Config Validation") with the `oauth.jwt.*` paths
+ * the operator actually wrote. The messages name `createApp`, because that is
+ * the boundary running this factory.
  *
  * Shape first: a hand-built config can carry anything at these paths, and the
  * key checks below reach into the block with `in` and object spread, which
- * throw a bare TypeError on a primitive. Report a malformed block like every
- * other boundary failure instead of leaking that TypeError.
+ * throw a bare TypeError on a primitive; so both blocks are shape-checked
+ * first, and a malformed one is reported like every other boundary failure.
  */
 export const JwtTokenAuthenticatorFactory: TokenAuthenticatorFactory = async (
 	oauth,
@@ -54,24 +54,23 @@ export const JwtTokenAuthenticatorFactory: TokenAuthenticatorFactory = async (
 	const jwtWire = oauth.jwt;
 	for (const staleKey of JWT_MODE_REMOVED_KEYS) {
 		if (staleKey in jwtWire) {
-			// A pre-#134 config must not be silently reinterpreted: a defaulted
-			// mode would mean verify even where the operator had opted into
-			// decode-only. Fail with the same migration message the schema emits.
+			// A config with a removed key must not be silently reinterpreted: a
+			// defaulted mode would mean verify even where the operator had opted
+			// into decode-only. Fail with the same migration message the schema
+			// emits.
 			throw new Error(`createApp: ${JWT_MODE_MIGRATION_MESSAGE}`);
 		}
 	}
 	// Hand-built configs may omit `mode`; they get the schema's default (verify).
 	const mode: unknown = jwtWire.mode ?? "verify";
-	// Ahead of the mode split, because the token lifetime bounds (#110) apply in
-	// both modes — the decode path restates them by hand rather than skipping
-	// them — and resolving here is what lets a bad value be reported against the
-	// `oauth.jwt.*` key the operator actually wrote.
+	// Ahead of the mode split, because the token lifetime bounds apply in both
+	// modes (the decode path restates them by hand rather than skipping them),
+	// and resolving here reports a bad value against the `oauth.jwt.*` key the
+	// operator actually wrote.
 	const timeClaims = resolveJwtTimeClaimBounds(jwtWire, "oauth.jwt");
-	// Likewise ahead of the split (#219 release audit): the schema checks
-	// `audienceClaim` in every mode, and the guard only runs on the verify
-	// branch — so without this line a decode-only config the schema refused
-	// booted through createApp, a second, undocumented departure from
-	// "Two-Boundary Config Validation".
+	// Likewise ahead of the split: the schema checks `audienceClaim` in every
+	// mode, and the guard runs only on the verify branch, so without this line a
+	// decode-only config the schema refuses would boot through createApp.
 	const audienceClaim = checkAudienceClaim(jwtWire.audienceClaim);
 	if (!audienceClaim.ok) {
 		throw new Error(`createApp: oauth.jwt.${audienceClaim.message}`);
@@ -99,7 +98,7 @@ export const JwtTokenAuthenticatorFactory: TokenAuthenticatorFactory = async (
 			algorithms: keyResolver.algorithms,
 			issuer: verifying.issuer,
 			audience: verifying.audience,
-			// #219: validated by the guard above; `undefined` means `aud`.
+			// Validated by the guard above; `undefined` means `aud`.
 			audienceClaim: jwtWire.audienceClaim as string | undefined,
 			tokenType: verifying.tokenType,
 			...bounds,
@@ -108,7 +107,7 @@ export const JwtTokenAuthenticatorFactory: TokenAuthenticatorFactory = async (
 		// The mode string is the consent — see the schema's `mode` doc comment.
 		jwt = { validate: false, allowInsecureDecode: true, ...bounds };
 		// error, not warn: a deployment that reaches this line accepts unsigned
-		// tokens, and a fleet filtering at level=error must still see it (#106).
+		// tokens, and a fleet filtering at level=error must still see it.
 		logger.error({ mode: "insecure-decode" }, "jwt_validation_disabled");
 	} else {
 		throw new Error(

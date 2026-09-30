@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { StaticRoleCollector } from "#/collectors/StaticRoleCollector.mjs";
 
 /**
- * `CollectorContext.signal` is required (#115): a pipeline supplies one per
+ * `CollectorContext.signal` is required: a pipeline supplies one per
  * collector, so a hand-built context carries one too. These fixtures are not
  * about cancellation, so it is a signal that never aborts.
  */
@@ -21,7 +21,7 @@ const stubContext: CollectorContext = {
 };
 
 describe("StaticRoleCollector", () => {
-	it("copies a malformed array entry as an array, keeping its shape (#255)", async () => {
+	it("copies a malformed array entry as an array, keeping its shape", async () => {
 		const malformed = ["admin", "read"] as unknown as Role;
 		const collector = new StaticRoleCollector({ roles: [malformed] });
 		const attrs = await collector.collect(stubContext);
@@ -30,7 +30,7 @@ describe("StaticRoleCollector", () => {
 		expect(entry).toEqual(["admin", "read"]);
 	});
 
-	// #264: only an array is accepted. A string is iterable, so a copy by
+	// Only an array is accepted. A string is iterable, so a copy by
 	// spread would split it into characters rather than refuse it.
 	it.each([
 		["missing", undefined],
@@ -40,7 +40,7 @@ describe("StaticRoleCollector", () => {
 		["a string", "posts.*"],
 		["a lone wildcard string", "*"],
 	])(
-		"refuses at construction a `roles` that is %s, with a TypeError naming the field (#264)",
+		"refuses at construction a `roles` that is %s, with a TypeError naming the field",
 		(_label, value) => {
 			const construct = () => new StaticRoleCollector({ roles: value } as never);
 			expect(construct).toThrow(TypeError);
@@ -64,7 +64,7 @@ describe("StaticRoleCollector", () => {
 		expect(attrs.get(ATTR_ROLES)).toEqual([]);
 	});
 
-	// #255: the collector answers from what it was given at construction — the
+	// The collector answers from what it was given at construction — the
 	// list and every role in it. A host that keeps the config and changes it
 	// afterwards changes nothing.
 	it.each<[string, (config: { roles: Role[] }) => void]>([
@@ -89,7 +89,7 @@ describe("StaticRoleCollector", () => {
 				c.roles[0].permissions = ["*"];
 			},
 		],
-	])("%s after construction changes nothing it collects (#255)", async (_name, mutate) => {
+	])("%s after construction changes nothing it collects", async (_name, mutate) => {
 		const config = { roles: [{ name: "viewer", permissions: ["project:*.perm:read"] }] };
 		const collector = new StaticRoleCollector(config);
 

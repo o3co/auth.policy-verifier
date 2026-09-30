@@ -35,11 +35,9 @@ export interface AttrPairNotEqualConfig {
  *
  * ## Configuration is copied at construction
  *
- * The constructor reads each field of `config` once, validates it, and keeps
- * the validated value in a field of its own; the object is not retained (#255).
- * A caller that mutates the config afterwards changes nothing: the rule answers
- * from the values it validated, and `ruleType` and `message` keep describing
- * them.
+ * The constructor validates each field of `config` once and keeps the
+ * validated value; the object is not retained, so mutating it afterwards
+ * changes neither the rule's answers nor its `ruleType` and `message`.
  */
 export class AttrPairNotEqual implements Rule {
 	readonly ruleType: string;

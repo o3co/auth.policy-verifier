@@ -2,25 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * The shape guard run before indexing into a config block. It runs only where
- * it is called: `createApp` calls it on `oauth` and `http`, and the built-in
- * JWT authenticator factory on `oauth` and `oauth.jwt`. Those calls run on
- * every config — schema-validated or hand-built — since a hand-built config
- * can put anything in those blocks.
+ * The shape guard run before indexing into a config block. `createApp` calls it
+ * on `oauth` and `http`, the built-in JWT authenticator factory on `oauth` and
+ * `oauth.jwt`, for every config, schema-validated or hand-built.
  */
 
 /**
- * Asserts that a config block a hand-built config supplies is actually an
- * object, so the checks that follow can index into it. `createApp` accepts
- * config objects that never went through `AppConfigSchema`, and a JavaScript
- * caller can put anything at a given path; without this the first `in` test or
- * object spread throws a bare `TypeError` naming neither the boundary nor the
- * path the operator wrote. Arrays are rejected too: indexable, but never a
- * valid config block.
+ * Asserts that a config block is an object, so the checks that follow can
+ * index into it. A hand-built config never went through `AppConfigSchema` and
+ * can put anything at a path; without this the first `in` test or spread throws
+ * a bare `TypeError` naming neither the boundary nor the path. Arrays are
+ * refused too.
  *
- * `caller` is the boundary named in the message — `createApp` by default,
- * which is also what the built-in JWT authenticator factory reports as, since
- * `createApp` is the boundary that runs it.
+ * `caller` is the boundary the message names: `createApp` by default, which the
+ * built-in JWT authenticator factory reports as too, since `createApp` runs it.
  */
 export function assertConfigObject(
 	value: unknown,

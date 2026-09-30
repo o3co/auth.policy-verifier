@@ -7,9 +7,9 @@
  * These read the real files under templates/standalone/config/, so they cover
  * the shipped layering rather than a hand-built object: an env overlay that
  * contains only comments is an empty HOCON document, and it must fall back to
- * application.conf instead of failing to parse. Nothing else in the suite
- * exercises parseFile, so a HOCON parser regression is otherwise invisible
- * until the container fails to start.
+ * application.conf instead of failing to parse. The smoke test boots from the
+ * development overlay too; only this file asserts what each shipped overlay
+ * resolves to.
  */
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,7 +22,7 @@ const configDirPath = fileURLToPath(new URL("../../config/", import.meta.url));
 
 /**
  * 64 hex characters — 32 decoded bytes, the entropy floor the schema enforces
- * on every HS256 secret (#114). A short value now fails to load at all.
+ * on every HS256 secret. A shorter value fails to load.
  */
 const TEST_SECRET = "11".repeat(32);
 
@@ -43,10 +43,7 @@ const envKeys = [
 	"OAUTH_JWT_CLOCK_TOLERANCE_SECONDS",
 	"VERIFY_MAX_BATCH_SIZE",
 	// Every VERIFY_* the cases below set has to be listed, or it leaks into the
-	// tests after it. Only `VERIFY_MAX_BATCH_SIZE` was here while the #118 cases
-	// set five more, and the leak was invisible for as long as no later case
-	// loaded the shipped config and asserted on `verify` — the first one that
-	// did got a boot failure from an env var a test three screens up had set.
+	// tests after it.
 	"VERIFY_MAX_BODY_BYTES",
 	"VERIFY_MAX_RESOURCE_LENGTH",
 	"VERIFY_MAX_ACTION_LENGTH",
@@ -82,7 +79,7 @@ describe("loadAppConfig", () => {
 
 			const config = loadAppConfig(configDirPath, env);
 
-			// Loopback by default (#108): the shipped config is a sidecar config,
+			// Loopback by default: the shipped config is a sidecar config,
 			// and reaching the port from another host is an explicit opt-in. The
 			// callerAuth block exists but carries no token, which means the gate is off.
 			expect(config.http).toEqual({
@@ -110,7 +107,7 @@ describe("loadAppConfig", () => {
 			"PayloadScopeCollector",
 			"PayloadSubjectIdCollector",
 		]);
-		// Scope-only, and the two lists are one decision (#113). Rule groups are
+		// Scope-only, and the two lists are one decision. Rule groups are
 		// ANDed, so a rule reading an attribute no collector above produces is a
 		// group nothing satisfies — which is a verifier that denies every request.
 		// A permission rule may only join this list together with its supplier.
@@ -137,7 +134,7 @@ describe("loadAppConfig", () => {
 		});
 	});
 
-	it("enables caller authentication from the environment (#108)", () => {
+	it("enables caller authentication from the environment", () => {
 		setRequiredEnv();
 		process.env.HTTP_CALLER_AUTH_TOKEN = "caller-secret";
 
@@ -165,7 +162,7 @@ describe("loadAppConfig", () => {
 		expect(() => loadAppConfig(configDirPath, "development")).toThrow(/callerAuth[.,\s\S]*token/);
 	});
 
-	it("selects insecure-decode mode via OAUTH_JWT_MODE, requiring no key material (#134)", () => {
+	it("selects insecure-decode mode via OAUTH_JWT_MODE, requiring no key material", () => {
 		// The value is the consent: only the literal string "insecure-decode"
 		// selects the decode-only path, so a stray boolean-ish env value cannot.
 		process.env.OAUTH_JWT_MODE = "insecure-decode";
@@ -175,7 +172,7 @@ describe("loadAppConfig", () => {
 		expect(config.oauth.jwt?.mode).toBe("insecure-decode");
 	});
 
-	it("rejects a boolean-ish OAUTH_JWT_MODE left over from the removed OAUTH_JWT_VALIDATE", () => {
+	it('rejects a boolean-ish OAUTH_JWT_MODE such as "false"', () => {
 		setRequiredEnv();
 		process.env.OAUTH_JWT_MODE = "false";
 
@@ -190,9 +187,9 @@ describe("loadAppConfig", () => {
 
 	it.each([
 		["a one-character OAUTH_JWT_SECRET", "s"],
-		["the README's old example value", "your-secret"],
+		["a placeholder value", "your-secret"],
 		["32 hex characters — 16 decoded bytes", "ab".repeat(16)],
-	])("refuses to load %s (#114)", (_label, secret) => {
+	])("refuses to load %s", (_label, secret) => {
 		// The floor applies to the shipped config as loaded, not only to
 		// hand-built objects: `secret = ${?OAUTH_JWT_SECRET}` is where a weak
 		// value actually enters a deployment.
@@ -209,7 +206,7 @@ describe("loadAppConfig", () => {
 	});
 });
 
-describe("loadAppConfig — RFC 9068 requirements (#105)", () => {
+describe("loadAppConfig — RFC 9068 requirements", () => {
 	it("fails to load when the issuer is not supplied", () => {
 		process.env.OAUTH_JWT_SECRET = TEST_SECRET;
 		process.env.OAUTH_JWT_AUDIENCE = "https://api.test";
@@ -225,13 +222,12 @@ describe("loadAppConfig — RFC 9068 requirements (#105)", () => {
 	});
 });
 
-describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#157)", () => {
-	// The knobs are read by `resolveBound` at both boundaries now, and this is the
-	// path that proves the schema half still works where it actually runs: HOCON
+describe("loadAppConfig — numeric knobs through the real 3-tier resolution", () => {
+	// The knobs are read by `resolveBound` at both boundaries, and this is the
+	// path that proves the schema half works where it actually runs: HOCON
 	// substitutes `${?VAR}` as a STRING, and the ts.hocon zod adapter's coercion
 	// walk only rewrites fields it recognises as numbers. A knob it cannot see
-	// through must therefore coerce the string itself — which is exactly what
-	// `resolveBound` does, and what a hand-built config already relied on.
+	// through must coerce the string itself, which `resolveBound` does.
 
 	it("takes the numbers application.conf states when nothing overrides them", () => {
 		setRequiredEnv();
@@ -245,7 +241,7 @@ describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#1
 		expect(config.oauth.jwt?.maxTokenAgeSeconds).toBe(86_400);
 		expect(config.oauth.jwt?.clockToleranceSeconds).toBe(0);
 		expect(config.verify.maxBatchSize).toBe(50);
-		// The request limits (#118) travel the same path.
+		// The request limits travel the same path.
 		expect(config.verify.maxBodyBytes).toBe(65_536);
 		expect(config.verify.maxResourceLength).toBe(512);
 		expect(config.verify.maxActionLength).toBe(64);
@@ -341,21 +337,18 @@ describe("loadAppConfig — numeric knobs through the real 3-tier resolution (#1
 	});
 });
 
-describe("loadAppConfig — a config with no verify block at all (#115, #118)", () => {
+describe("loadAppConfig — a config with no verify block at all", () => {
 	/*
 	 * The shipped `application.conf` writes out every `verify` knob, so loading
 	 * it exercises the schema's per-key defaults and never the block-level one.
-	 * The block-level default is what serves the OTHER shape, and it is the
-	 * common one: an overlay config repeats only the sections it changes, and a
-	 * deployment that has no opinion about batch sizes or collector deadlines
-	 * simply never writes a `verify` block.
+	 * The block-level default serves the common shape: an overlay config that
+	 * repeats only the sections it changes and never writes a `verify` block.
 	 *
 	 * zod takes `.default(() => ({…}))` verbatim rather than parsing it back
-	 * through the shape, so a knob missing from that literal is `undefined` for
-	 * exactly this shape — silently, with nothing failing. That is why it is
-	 * proved here through the real loader (`parseFile` → `withFallback` →
-	 * `validate`) rather than inferred from the schema unit tests, which all
-	 * write a `verify` block and would go on passing.
+	 * through the shape, so a knob missing from that literal is silently
+	 * `undefined` for exactly this shape. The schema unit tests all write a
+	 * `verify` block, so it is proved here through the real loader
+	 * (`parseFile` → `withFallback` → `validate`).
 	 */
 	const withoutVerify = (): string => {
 		const dir = mkdtempSync(path.join(tmpdir(), "policy-verifier-config-"));

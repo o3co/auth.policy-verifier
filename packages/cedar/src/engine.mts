@@ -15,26 +15,25 @@ import type { PolicySource } from "./policySource.mjs";
 /**
  * What one authorization call answered — Cedar's own `Response`, engine-neutral.
  *
- * `reason` is the determining policies' ids, and a decision records them as
- * `determiningPolicies` (#199), so an engine names its policies with
- * `namePolicies` and reads its evaluator's items as ids.
- * `errors` is rendered text rather than an evaluator's objects, because the
- * rule only logs it. What the rule *decides* on is whether each list is empty:
- * a non-empty `errors` is a deny whatever `decision` reads — see the
- * collector's answer table. Both must be lists; the rule fails an answer
- * whose either is not one.
+ * `reason` is the determining policies' ids, which a decision records as
+ * `determiningPolicies`, so an engine names its policies with `namePolicies`
+ * and reads its evaluator's items as ids. `errors` is rendered text rather
+ * than an evaluator's objects, because the rule only logs it. What the rule
+ * *decides* on is whether each list is empty: a non-empty `errors` is a deny
+ * whatever `decision` reads — see the collector's answer table. Both must be
+ * lists; the rule fails an answer whose either is not one.
  */
 export interface CedarDecision {
 	decision: "allow" | "deny";
 	/**
 	 * The ids of the determining policies (`10-permit-eng`) — what a
-	 * decision's `determiningPolicies` names (#199). Empty: no policy
-	 * determined the request — which only a `deny` can say: Cedar allows only
-	 * on a permit, so an `allow` naming none is refused as not a decision
-	 * (#283). An entry the engine cannot read as an id stays
-	 * in the list — its emptiness decides an answer — as a string no id can be
-	 * (one holding a control character), so the decision counts it in
-	 * `determiningPoliciesOmitted` rather than naming it.
+	 * decision's `determiningPolicies` names. Empty: no policy determined the
+	 * request — which only a `deny` can say: Cedar allows only on a permit, so
+	 * an `allow` naming none is refused as not a decision. An item the http
+	 * engine cannot read as an id means it cannot say which set answered: that
+	 * answer is `foreign`, with `reason` empty, and the collector fails it
+	 * closed (labelled `"unreadable policy"` when that item is the first it
+	 * cannot place).
 	 */
 	reason: readonly string[];
 	/**
@@ -44,40 +43,37 @@ export interface CedarDecision {
 	errors: readonly string[];
 	/**
 	 * The revision of the policy set this answer was evaluated against, when
-	 * the engine can vouch for it (#244) — the confirmation contract of the
-	 * port. It is per answer, not per load, because that is the only moment the
-	 * claim is true: a remote engine's set can be replaced or lost after `load`
-	 * returned.
+	 * the engine can vouch for it — the confirmation contract of the port. It
+	 * is per answer, not per load, because that is the only moment the claim is
+	 * true: a remote engine's set can be replaced or lost after `load` returned.
 	 *
 	 * An engine names `PolicySource.revision` here only if the answer provably
 	 * came from the set compiled from that source. In-process that holds by
-	 * construction. Over a network it holds when the evaluator itself reports
-	 * what it evaluated — cedar-agent 0.2.x does not, so the http engine leaves
-	 * this absent, and the collector reports the revision as not established
-	 * rather than assuming the set it pushed at boot is still the one answering.
-	 *
-	 * Naming anything other than the loaded revision is an answer from a policy
-	 * set this verifier did not load; the collector fails it closed.
+	 * construction; over a network, only when the evaluator itself reports what
+	 * it evaluated. cedar-agent 0.2.x does not, so the http engine leaves this
+	 * absent and the collector reports the revision as not established. Naming
+	 * anything other than the loaded revision is an answer from a policy set
+	 * this verifier did not load; the collector fails it closed.
 	 */
 	revision?: string;
 	/**
 	 * Present when the engine can tell this answer did **not** come from the
-	 * set it loaded, though it cannot vouch for one that did (#283) — the http
-	 * engine, whose agent names no revision but answers with policy ids — of
-	 * the policies that determined it, and in each evaluation error: an id it
-	 * never pushed under this load's mark is somebody else's policy; and one
-	 * that reads the agent's set back finds it changed (#286). The
-	 * collector fails it closed and logs it on the fault logger — an answer's
-	 * label as it logs a foreign revision, a read-back's on a line of its own.
-	 * `reason` is then empty: another set's ids are not this verifier's to
-	 * record. Any value other than `undefined` or `null` is taken as foreign —
-	 * `false` included — so a malformed mark fails closed.
+	 * set it loaded, though it cannot vouch for one that did — the http engine,
+	 * whose agent names no revision but answers with the ids of the policies
+	 * that determined it, and in each evaluation error: an id it never pushed
+	 * under this load's mark is somebody else's policy; and one that reads the
+	 * agent's set back finds it changed. The collector fails it closed and logs
+	 * it on the fault logger — an answer's label as it logs a foreign revision,
+	 * a read-back's on a line of its own. `reason` is then empty: another set's
+	 * ids are not this verifier's to record. Any value other than `undefined`
+	 * or `null` is taken as foreign — `false` included — so a malformed mark
+	 * fails closed.
 	 */
 	foreign?: ForeignAnswer;
 }
 
 /**
- * Why an engine takes an answer for another set's (#283): a fixed label, and
+ * Why an engine takes an answer for another set's: a fixed label, and
  * the other load's mark when the id it could not place carried one — both
  * safe to log, since neither is text the evaluator chose.
  */
@@ -88,11 +84,11 @@ export interface ForeignAnswer {
 	 * `"unreadable policy"`: an item that is no policy id at all — an agent
 	 * reporting in a shape this engine does not read, which it cannot attribute.
 	 * `"altered policy set"`: the engine read the set back and found it is not
-	 * the one it loaded (#286); it answers so without asking, until it is.
+	 * the one it loaded; it answers so without asking, until it is.
 	 * `"unverifiable policy set"`: the agent answered reading its set back in a
 	 * way that cannot be compared — an error, a set past the answer bound,
 	 * something else, nothing in time — or answered calls while a read of its
-	 * set could not connect (#286); answered so until it can be read.
+	 * set could not connect; answered so until it can be read.
 	 */
 	readonly why:
 		| "unknown policy"
@@ -155,13 +151,12 @@ export class CedarEngineError extends Error {
  *
  * `@o3co/auth.policy-verifier.cedar` owns everything up to this line: policy
  * loading, the attribute-to-entity mapping, the request, and the rule that
- * interprets the answer. What actually evaluates the policy set is an engine
- * behind this interface, and which engine a deployment runs is a deployment
- * decision — in-process wasm (`@o3co/auth.policy-verifier.cedar-wasm`) where
- * the policy set is small and the hop is not worth paying, an out-of-process
- * agent where it is (#225). Engines register themselves with
- * {@link registerCedarEngine}; the collector picks one by its config `engine`
- * key, or by preference when the key is absent.
+ * interprets the answer. What evaluates the policy set is an engine behind
+ * this interface, chosen per deployment — in-process wasm
+ * (`@o3co/auth.policy-verifier.cedar-wasm`) where the policy set is small and
+ * the hop is not worth paying, an out-of-process agent where it is. Engines
+ * register themselves with {@link registerCedarEngine}; the collector picks
+ * one by its config `engine` key, or by preference when the key is absent.
  */
 export interface CedarEngine {
 	/** The registry key and the config value that selects it: `"wasm"`, `"http"`. */
@@ -176,7 +171,7 @@ export interface CedarEngine {
 	readonly async: boolean;
 	/**
 	 * Whether every answer of this engine's policy sets names the revision it
-	 * was evaluated against ({@link CedarDecision.revision}, #244). Declared up
+	 * was evaluated against ({@link CedarDecision.revision}). Declared up
 	 * front for the reason `async` is: `requireConfirmedRevision` is refused at
 	 * boot over an engine that does not, instead of denying every request once
 	 * it is serving. Absent means `false`. The collector still checks each
@@ -212,11 +207,11 @@ export interface CedarEngineLoadContext {
 }
 
 /**
- * The registry, in one process-wide slot rather than this module's own scope
- * (v0.10.0 audit). `cedar-wasm` registers into whichever copy of this package
- * it resolves; with two copies on the dependency graph, a module-scope map was
- * two registries, and a collector reading the other one never saw wasm and
- * fell through to the http engine — a different process deciding
+ * The registry, in one process-wide slot rather than this module's own scope.
+ * `cedar-wasm` registers into whichever copy of this package it resolves; with
+ * two copies on the dependency graph, a module-scope map would be two
+ * registries, and a collector reading the other one would never see wasm and
+ * fall through to the http engine — a different process deciding
  * authorization, with nothing failing. `Symbol.for` names the same slot from
  * every copy, so the refusal of a different engine under a taken name holds
  * across copies too.
@@ -239,13 +234,12 @@ const ENGINE_PACKAGES: Readonly<Record<string, string>> = {
 
 /**
  * Registers an engine under its name. Called at module scope by the package
- * that ships the engine, so that importing that package is all a deployment
- * does to make the engine selectable — the same shape as the attribute key
- * reservation in `keys.mts`, for the same reason: it is then in place before
- * any collector of any package is constructed. Registering the same object
- * twice is a no-op; a different object under a taken name is refused, because
- * silently replacing an evaluator is how two copies of a package would fight
- * without anyone noticing.
+ * that ships the engine, so importing that package is all a deployment does to
+ * make the engine selectable, and it is in place before any collector of any
+ * package is constructed (as the attribute key reservation in `keys.mts` is).
+ * Registering the same object twice is a no-op; a different object under a
+ * taken name is refused, because silently replacing an evaluator is how two
+ * copies of a package would fight without anyone noticing.
  */
 export function registerCedarEngine(engine: CedarEngine): void {
 	if (typeof engine?.name !== "string" || engine.name.length === 0) {

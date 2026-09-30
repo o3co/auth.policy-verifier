@@ -5,12 +5,10 @@
  * The engine-neutral request shape every conformance suite is written against.
  *
  * `(subject, resource, action, context)` is deliberately a superset of what any
- * one engine needs: OPA takes an input document, OpenFGA takes
+ * one engine needs — OPA takes an input document, OpenFGA takes
  * `check(user, relation, object)`, Cedar takes a principal/action/resource
- * quadruple. A contract carrying all four can be satisfied by an adapter for any
- * of them, which is what makes a later engine change a swap rather than a
- * rewrite. Baking a narrower shape — scope-only, say — into the wire is exactly
- * what would force the rewrite.
+ * quadruple — so an adapter for any of them can satisfy it, and an engine
+ * change is a swap rather than a rewrite.
  */
 export interface AuthorizationRequest {
 	subject: string;

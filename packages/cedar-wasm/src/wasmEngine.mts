@@ -42,29 +42,26 @@ let policySetCounter = 0;
  *
  * `load` parses every file on its own — so a syntax error names the file that
  * contains it — splits it into its policies, and names each for its file
- * (`namePolicies`, #199): the file's name for a file that holds one, numbered
- * `#1`, `#2`… for one that holds several. Those are the ids Cedar answers with
- * in `diagnostics.reason` and names in `errors`, and the ids the http engine
+ * (`namePolicies`): the file's name for a file that holds one, numbered `#1`,
+ * `#2`… for one that holds several. Those are the ids Cedar answers with in
+ * `diagnostics.reason` and names in `errors`, and the ids the http engine
  * gives cedar-agent, so a corpus laid out one policy per file reads the same
  * under both. Refused at load: two policies that would share an id (`a.cedar`
  * holding two, beside `a#1.cedar`), a policy in a file named only `.cedar`,
- * and a template. The set is then compiled once, at boot, into
- * wasm memory under a per-load id. `isAuthorized` references that id per
- * request and re-parses nothing; the call is synchronous, deterministic, and a
- * few tens of microseconds, so the policy set answers as a plain `Rule`.
+ * and a template. The set is then compiled once, at boot, into wasm memory
+ * under a per-load id. `isAuthorized` references that id per request and
+ * re-parses nothing; the call is synchronous, deterministic, and a few tens of
+ * microseconds, so the policy set answers as a plain `Rule`.
  *
- * What this engine costs is paid at import: the wasm module (about 12 MB on
- * disk) is instantiated when the bindings load. That is why it lives in its
- * own package — a deployment that evaluates out of process never carries it.
+ * The wasm module (about 12 MB on disk) is instantiated when the bindings
+ * load, which is why this engine lives in its own package: a deployment that
+ * evaluates out of process never carries it.
  *
- * It vouches for the revision it evaluated (`confirmsRevision`, #244), and can:
- * the set is compiled here, from the source `load` was handed, under an id
- * minted here and known to nothing else. An answer through that id cannot have
- * come from any other policies, so every answer names the revision of that
- * source — read once, at `load`, beside the compile. `PolicySource` is a plain
- * object the caller still holds; reading `source.revision` when answering would
- * be reading "the current revision", which is a claim about the object and not
- * about the policies that were compiled.
+ * It vouches for the revision it evaluated (`confirmsRevision`): the set is
+ * compiled here, under an id known to nothing else, so an answer through that
+ * id comes from the source `load` was handed and names that source's revision,
+ * read once at `load`. Reading `source.revision` when answering would describe
+ * the caller's object as it is now, not the policies that were compiled.
  */
 export const cedarWasmEngine: CedarWasmEngine = {
 	name: CEDAR_WASM_ENGINE_NAME,

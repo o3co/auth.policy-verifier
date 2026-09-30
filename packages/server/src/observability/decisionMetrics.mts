@@ -2,16 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * The seam decisions are counted through (#111, #200), apart from any one way
- * of counting them (#258).
- *
- * The decision and the verify router report through `DecisionMetrics` and
- * nothing more; `observability/metrics.mts` implements it with prom-client and
- * serves it over express. The port is its own module so that everything which
- * only reports — the decision above all, which must reach neither express nor
- * prom-client (`decision/__tests__/dependencies.test.mts`) — imports no part of
- * the implementation, not even a type: the dependency runs from the
- * implementation to the port and never back.
+ * The port decisions are counted through; `observability/metrics.mts`
+ * implements it with prom-client and serves it over express. It is its own
+ * module so that code which only reports — above all the decision, which must
+ * reach neither express nor prom-client (`decision/__tests__/dependencies.test.mts`)
+ * — imports nothing of the implementation, not even a type.
  */
 
 import type { ClassifiedFailure, CollectorFailureCategory } from "./failure.mjs";
@@ -29,7 +24,7 @@ export interface DecisionObservation {
 	durationSeconds: number;
 }
 
-/** One collector failure that kept a decision from being made, as the metrics seam sees it (#200). */
+/** One collector failure that kept a decision from being made, as the metrics seam sees it. */
 export interface CollectorFailureObservation {
 	/**
 	 * `attribute.collectors[1] (EntitlementStoreCollector)`, or the list itself
@@ -50,16 +45,17 @@ export interface CollectorFailureObservation {
 export interface DecisionMetrics {
 	observe(observation: DecisionObservation): void;
 	/**
-	 * Called once per collector failure the router logs (#200) — a
-	 * `collector_timeout` deny, or a `verify_internal_error` a collector threw.
-	 * Optional, so an implementation written against the seam before it
-	 * existed still satisfies it and simply does not count them.
+	 * Called once per collector failure logged — a `collector_timeout` deny (by
+	 * `createDecider`) or a `verify_internal_error` a collector threw (by the
+	 * route).
+	 * Optional: an implementation without it still satisfies the seam and does
+	 * not count them.
 	 */
 	observeCollectorFailure?(observation: CollectorFailureObservation): void;
 }
 
 /**
- * Counts a failure a collector is answerable for (#200). Called beside each
+ * Counts a failure a collector is answerable for. Called beside each
  * log line that reports one, and only there, so the counter and the log
  * stream agree on how many there were: a timed-out batch entry is one line
  * and one count, and a batch that failed with a 500 — which speaks for the

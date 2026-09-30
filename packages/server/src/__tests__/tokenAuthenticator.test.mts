@@ -2,15 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Unit tests for the construction-time JWT config guard (#132).
- *
- * The guard is the single runtime enforcement point for the two config
- * invariants ("iss/aud/typ present when validating", "decode-only requires the
- * explicit acknowledgment"). Before the extraction the same invariants were
- * restated in three places, and the `createApp` copy had drifted: a bare falsy
- * check that accepted `issuer: []` and `issuer: [""]` and never looked at
- * `tokenType`. The drift cases are pinned here so the one guard can never
- * regress to the weak form.
+ * Unit tests for the construction-time JWT config guard, the single runtime
+ * enforcement point for the two config invariants ("iss/aud/typ present when
+ * validating", "decode-only requires the explicit acknowledgment"). Pinned
+ * here: `issuer: []` and `issuer: [""]`, which a bare falsy check lets
+ * through, and a missing `tokenType`, which a check that never reads it lets
+ * through.
  */
 import { errors, type JWTPayload, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
@@ -78,15 +75,15 @@ describe("assertVerifyRouterJwtConfig — verifying configs (RFC 9068 §4 presen
 		);
 	});
 
-	// Drift case: the drifted createApp copy's bare `!issuer` check (now a call
-	// to this guard) accepted [] — an empty array is truthy, yet pins no issuer.
+	// A bare `!issuer` check would accept [] — an empty array is truthy, yet
+	// pins no issuer.
 	it("rejects an empty issuer array", () => {
 		expect(() => assertVerifyRouterJwtConfig({ ...VALID_VERIFYING, issuer: [] })).toThrow(
 			/jwt\.issuer is required/,
 		);
 	});
 
-	// Drift case: [""] is a non-empty array, but its only entry pins nothing.
+	// [""] is a non-empty array, but its only entry pins nothing.
 	it("rejects an issuer array containing an empty string", () => {
 		expect(() => assertVerifyRouterJwtConfig({ ...VALID_VERIFYING, issuer: [""] })).toThrow(
 			/jwt\.issuer is required/,
@@ -108,8 +105,8 @@ describe("assertVerifyRouterJwtConfig — verifying configs (RFC 9068 §4 presen
 		);
 	});
 
-	// Drift case: the drifted createApp copy never looked at tokenType, so a
-	// hand-built config could pin issuer and audience yet accept id_tokens.
+	// Without it, a hand-built config could pin issuer and audience yet accept
+	// id_tokens.
 	it("rejects a missing tokenType", () => {
 		expect(() => assertVerifyRouterJwtConfig({ ...VALID_VERIFYING, tokenType: undefined })).toThrow(
 			/jwt\.tokenType is required when jwt\.validate is true/,
@@ -122,12 +119,11 @@ describe("assertVerifyRouterJwtConfig — verifying configs (RFC 9068 §4 presen
 		);
 	});
 
-	// Drift case, found by the two-boundary parity table (#164): `tokenType` is
-	// the accepted `typ` header, a single value the schema types `z.string()`,
-	// where `issuer` and `audience` take lists because jose does. While all
-	// three shared one list-tolerant check, this passed the guard, and jose then
-	// threw a bare TypeError off the array on every request — a deployment that
-	// booted and rejected every token, blaming its own infrastructure in the log.
+	// `tokenType` is the accepted `typ` header, a single value the schema types
+	// `z.string()`, where `issuer` and `audience` take lists because jose does.
+	// Past a list-tolerant check, jose would throw a bare TypeError off the
+	// array on every request — a deployment that boots and rejects every
+	// token, blaming its own infrastructure in the log.
 	it.each([
 		["a one-element array", ["at+jwt"]],
 		["a multi-element array", ["at+jwt", "JWT"]],
@@ -145,7 +141,7 @@ describe("assertVerifyRouterJwtConfig — verifying configs (RFC 9068 §4 presen
 	);
 });
 
-describe("assertVerifyRouterJwtConfig — decode-only configs (double opt-in, #106)", () => {
+describe("assertVerifyRouterJwtConfig — decode-only configs (double opt-in)", () => {
 	it("accepts validate=false with the explicit acknowledgment", () => {
 		expect(() =>
 			assertVerifyRouterJwtConfig({ validate: false, allowInsecureDecode: true }),
@@ -170,7 +166,7 @@ describe("assertVerifyRouterJwtConfig — caller-facing error context", () => {
 	it("names the caller and the caller's config path so operators find the field they wrote", () => {
 		// createApp's boundary speaks the wire config, where verifying mode is
 		// selected by `oauth.jwt.mode = "verify"` — not by the internal `validate`
-		// discriminant, which no longer exists as a wire key (#134). The caller
+		// discriminant, which is not a wire key. The caller
 		// supplies its own phrasing of the gating condition.
 		expect(() =>
 			assertVerifyRouterJwtConfig(
@@ -244,11 +240,9 @@ describe("createTokenAuthenticator — construction and bearer parsing", () => {
 		expect(result).toMatchObject({ ok: false, code: "missing_token" });
 	});
 
-	// #158: the subject-bag field carrying the `Authorization` scheme used to
-	// be called `tokenType`, which is also the config key for the accepted `typ`
-	// header — two unrelated meanings under one name, one of them right beside
-	// the other in this very module. The scheme is now `authScheme`, and this
-	// pins the split so the collision cannot be reintroduced by either side.
+	// The subject-bag field carrying the `Authorization` scheme is `authScheme`,
+	// not `tokenType`, which is the config key for the accepted `typ` header:
+	// one name must not carry two unrelated meanings in one module.
 	it("names the authorization scheme `authScheme`, distinct from the accepted `typ`", async () => {
 		const authenticator = createTokenAuthenticator(SIGNING_CONFIG, silentLogger);
 		const result = await authenticator.authenticate(`Bearer ${await signToken()}`);
@@ -261,14 +255,10 @@ describe("createTokenAuthenticator — construction and bearer parsing", () => {
 		expect(result.subject.tokenType).toBeUndefined();
 	});
 
-	// The other half of the rename, and the part a migrating consumer has to see:
-	// the verifier used to write `tokenType` *after* spreading the claims, so a
-	// token carrying a claim of that name had it silently overwritten by
-	// `"Bearer"`. Nothing writes that slot now, so the claim reaches the subject
-	// bag like any other custom claim. A consumer still reading `subject.tokenType`
-	// is therefore reading the token, not the verifier — which is the opposite of
-	// what it read before.
-	it("no longer shadows a `tokenType` claim the token itself carries", async () => {
+	// The verifier writes no `tokenType` slot, so a claim of that name reaches
+	// the subject bag like any other custom claim: `subject.tokenType` is the
+	// token's, not the verifier's.
+	it("keeps a `tokenType` claim the token itself carries on the subject, beside `authScheme`", async () => {
 		const authenticator = createTokenAuthenticator(SIGNING_CONFIG, silentLogger);
 		const token = await signToken({ tokenType: "from-the-token" });
 		const result = await authenticator.authenticate(`Bearer ${token}`);
@@ -276,14 +266,14 @@ describe("createTokenAuthenticator — construction and bearer parsing", () => {
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
 		expect(result.subject.tokenType).toBe("from-the-token");
-		// The scheme is unaffected: it has its own slot now, so a claim cannot
-		// displace it and it cannot displace a claim.
+		// The scheme has its own slot, so a claim cannot displace it and it
+		// cannot displace a claim.
 		expect(result.subject.authScheme).toBe("Bearer");
 	});
 
 	// The time-claim bounds are resolved once at construction, so a config that
 	// cannot state them never gets to serve a request with jose silently applying
-	// its own semantics instead (#110).
+	// its own semantics instead.
 	it("resolves the time-claim bounds at construction, so an unusable bound cannot serve", () => {
 		expect(() =>
 			createTokenAuthenticator(
@@ -305,10 +295,10 @@ describe("createTokenAuthenticator — construction and bearer parsing", () => {
 });
 
 /*
- * #110: the time-claim bounds and the decode-path checks that restate jose's
+ * The time-claim bounds and the decode-path checks that restate jose's
  * semantics for them. Two knobs, and both must reach both paths — a bound
- * threaded only into `jwtVerify` would leave decode-only mode accepting the
- * eternal token this issue is about.
+ * threaded only into `jwtVerify` would leave decode-only mode accepting an
+ * eternal token.
  */
 
 describe("resolveJwtTimeClaimBounds", () => {
@@ -336,7 +326,7 @@ describe("resolveJwtTimeClaimBounds", () => {
 		expect(resolveJwtTimeClaimBounds({ clockToleranceSeconds: 0 }).clockTolerance).toBe(0);
 	});
 
-	// Bounded above on purpose (#110): tolerance extends the life of every token
+	// Bounded above on purpose: tolerance extends the life of every token
 	// the deployment accepts, so an unbounded knob is a way to spell "never expires".
 	it.each([-1, 301, 86_400, 1.5])("rejects %o as a clockToleranceSeconds", (value) => {
 		expect(() => resolveJwtTimeClaimBounds({ clockToleranceSeconds: value })).toThrow(
@@ -374,8 +364,8 @@ describe("assertTimeClaims — decode-path parity with jwtVerify", () => {
 		expect(() => assertTimeClaims(fresh(), BOUNDS)).not.toThrow();
 	});
 
-	// The whole of #110: jwtVerify checks exp only when present, which left a
-	// token minted (or forged) without one valid forever.
+	// jwtVerify checks exp only when present, which would leave a token minted
+	// (or forged) without one valid forever.
 	it("rejects a token carrying no exp claim", () => {
 		const cause = refusal({ iat: now() });
 		expect(cause).toBeInstanceOf(errors.JWTClaimValidationFailed);
@@ -430,7 +420,7 @@ describe("assertTimeClaims — decode-path parity with jwtVerify", () => {
 	});
 });
 
-describe("createTokenAuthenticator — audienceClaim (#219)", () => {
+describe("createTokenAuthenticator — audienceClaim", () => {
 	const silentLogger = { info() {}, warn() {}, error() {} };
 	const APP = "https://app.test";
 
@@ -455,7 +445,8 @@ describe("createTokenAuthenticator — audienceClaim (#219)", () => {
 		expect(
 			await authenticator.authenticate(bearer(await sign({ typ: "at+jwt" }, { azp: APP }))),
 		).toMatchObject({ ok: true, subject: { azp: APP } });
-		// A matching `aud` does not rescue a mismatched `azp`: the check moved.
+		// A matching `aud` does not rescue a mismatched `azp`: the audience is
+		// read from `azp` alone.
 		expect(
 			await authenticator.authenticate(
 				bearer(await sign({ typ: "at+jwt" }, { azp: "https://other.test", aud: APP })),
@@ -539,7 +530,7 @@ describe("createTokenAuthenticator — audienceClaim (#219)", () => {
 	});
 });
 
-describe('createTokenAuthenticator — tokenType "*" (#219)', () => {
+describe('createTokenAuthenticator — tokenType "*"', () => {
 	const silentLogger = { info() {}, warn() {}, error() {} };
 
 	async function sign(

@@ -37,16 +37,16 @@ import { countCollectorFailure, type DecisionMetrics } from "../observability/de
 import { type ClassifiedFailure, correlation, loggableError } from "../observability/failure.mjs";
 
 // The wire types of one decision, defined beside the decision that produces
-// them (#251) and re-exported here, beside the router that serves them. They
+// them and re-exported here, beside the router that serves them. They
 // are not exported from the package index.
 export type { DecisionRequest, DecisionResponse } from "../decision/decide.mjs";
 
 /** Config for `createVerifyRouter`. */
 export interface VerifyRouterConfig {
 	/**
-	 * How the subject is authenticated: a built {@link TokenAuthenticator}
-	 * (#219). The router runs it and builds none of its own (#259) — it
-	 * depends on the authentication contract, never on an implementation.
+	 * How the subject is authenticated: a built {@link TokenAuthenticator}.
+	 * The router runs it and builds none of its own — it depends on the
+	 * authentication contract, never on an implementation.
 	 * `createApp` hands in the one `oauth.authenticator` selects; a library
 	 * consumer passes `createTokenAuthenticator(jwt, logger)` for the
 	 * built-in bearer-JWT path, or its own over a subject established some
@@ -61,14 +61,14 @@ export interface VerifyRouterConfig {
 	 * empty rule set). The rule deadlines are not among them: `ruleTimeoutMs` and
 	 * `evaluateDeadlineMs` are this config's own fields, and carrying either here
 	 * is refused at construction rather than silently overridden, as is
-	 * `failures`, which the router keeps one of per decision (#200). A `signal` is
+	 * `failures`, which the router keeps one of per decision. A `signal` is
 	 * combined with the caller's, never replaced by it.
 	 */
 	evaluateOptions?: Omit<EvaluateOptions, "ruleTimeoutMs" | "evaluateDeadlineMs" | "failures">;
 	/**
 	 * Most entries `POST /verify/batch` will decide in one request. Defaults to
 	 * 50, and is held to the same bound `AppConfigSchema` holds
-	 * `verify.maxBatchSize` to (#157) — a positive integer.
+	 * `verify.maxBatchSize` to — a positive integer.
 	 *
 	 * The string form is admitted for the reason `JwksFetchConfig` admits it:
 	 * this is also the boundary a hand-built config reaches, and a caller
@@ -76,7 +76,7 @@ export interface VerifyRouterConfig {
 	 */
 	maxBatchSize?: number | string;
 	/**
-	 * How many of a batch's entries are decided at once (#183). Defaults to 8
+	 * How many of a batch's entries are decided at once. Defaults to 8
 	 * (`DEFAULT_BATCH_CONCURRENCY`), and admits the string form for the reason
 	 * `maxBatchSize` does. The collector concurrency cap is per decision, so
 	 * this is the other factor in what one `POST /verify/batch` may hold in
@@ -84,7 +84,7 @@ export interface VerifyRouterConfig {
 	 */
 	batchConcurrency?: number | string;
 	/**
-	 * How long one asynchronous rule may take to answer (#225). Defaults to
+	 * How long one asynchronous rule may take to answer. Defaults to
 	 * `DEFAULT_RULE_TIMEOUT_MS` and is held to the same bound `AppConfigSchema`
 	 * holds `verify.ruleTimeoutMs` to; admits the string form for the reason
 	 * `maxBatchSize` does. A rule that overruns it denies with `rule_timeout`.
@@ -99,14 +99,13 @@ export interface VerifyRouterConfig {
 	evaluateDeadlineMs?: number | string;
 	/**
 	 * Ceiling on the JSON body, in bytes — the `limit` handed to
-	 * `express.json()`. Defaults to 64 KiB (`DEFAULT_MAX_BODY_BYTES`), below
-	 * Express's unstated 100 KB default, and is the outer envelope: it is what
-	 * binds first on a large batch, since the per-field limits below bound one
-	 * entry rather than N of them.
+	 * `express.json()`. Defaults to 64 KiB (`DEFAULT_MAX_BODY_BYTES`). The
+	 * outer envelope: it binds first on a large batch, since the per-field
+	 * limits below bound one entry rather than N of them.
 	 *
 	 * This and the four limits after it are held to the same bounds
-	 * `AppConfigSchema` holds `verify.*` to (#118, #157), and admit the string
-	 * form for the same reason `maxBatchSize` does.
+	 * `AppConfigSchema` holds `verify.*` to, and admit the string form for the
+	 * same reason `maxBatchSize` does.
 	 */
 	maxBodyBytes?: number | string;
 	/** Ceiling on the `resource` string, in characters. Defaults to 512. */
@@ -125,41 +124,42 @@ export interface VerifyRouterConfig {
 	 */
 	maxContextValueLength?: number | string;
 	/**
-	 * Sink for the router's failure events (`jwt_token_rejected`,
-	 * `jwt_verification_unavailable`, `verify_internal_error`, and the
-	 * `collector_timeout` / `rule_timeout` / `attribute_conflict` denies — the
-	 * last four carrying a `category`, #200) and for the per-decision `decision`
-	 * audit line (#111). Defaults to the console-backed
-	 * logger so neither is ever silent in a deployment that wires nothing.
-	 *
-	 * The decision line is emitted at `info`, so `logging.level` is the switch
-	 * that turns the stream off — one knob, no separate flag to forget.
+	 * Sink for the router's failure events (`verify_internal_error` and the
+	 * `collector_timeout` / `rule_timeout` / `attribute_conflict` denies, all
+	 * four carrying a `category`), for `verify_caller_gone`, and for the
+	 * per-decision `decision` audit line. `jwt_token_rejected` and
+	 * `jwt_verification_unavailable` are the authenticator's and go to the
+	 * logger it was built with (`createTokenAuthenticator(jwt, logger)`;
+	 * `createApp` hands both the same one). Defaults to the console-backed
+	 * logger so none of the router's lines is ever silent in a deployment that
+	 * wires nothing (the authenticator's logger is a required argument).
+	 * The decision line is emitted at `info`, so `logging.level` is the one
+	 * switch that turns it off.
 	 */
 	logger?: EventLogger;
 	/**
-	 * Optional counter seam for decisions (#111). Omitted means decisions are
+	 * Optional counter seam for decisions. Omitted means decisions are
 	 * logged but not counted; `createApp` wires the Prometheus implementation.
 	 */
 	metrics?: DecisionMetrics;
 	/**
 	 * Whether the raw credential reaches collectors as
-	 * `CollectorContext.credential` (#175). Defaults to `"never"`: collectors
-	 * get verified claims only, because the credential is replayable and a
+	 * `CollectorContext.credential`. Defaults to `"never"`: collectors get
+	 * verified claims only, because the credential is replayable and a
 	 * collector that logs its context would leak a live token. `"expose"` is
 	 * for the deployment whose project-side collector calls a downstream API
-	 * *as the subject* (token forwarding/exchange) — a decision that belongs
-	 * in config, where it is greppable, not in ambient behavior.
+	 * *as the subject* (token forwarding/exchange).
 	 *
-	 * An enum rather than a boolean on purpose: `${?ENV}` substitution hands
-	 * schemas strings, and a string survives an enum unharmed where a bare
-	 * boolean invites the coercion-path drift o3co/auth.provider#288 documents.
+	 * An enum rather than a boolean: `${?ENV}` substitution hands schemas
+	 * strings, which an enum takes unharmed where a boolean depends on how each
+	 * path coerces them.
 	 */
 	credentialToCollectors?: "never" | "expose";
 	/**
 	 * Whether a decision response carries each rule's `evaluation` — its status
-	 * and the policy revision it concerns (#244). `"omit"` (default): the
-	 * `decision` event carries it and the response does not, so the response is
-	 * key-for-key what it was. `"include"`: the response carries it as well.
+	 * and the policy revision it concerns. `"omit"` (default): the `decision`
+	 * event carries it and the response does not. `"include"`: the response
+	 * carries it as well.
 	 * Refused when it is neither, in `AppConfigSchema`'s words — see
 	 * `config/evaluationInResponse.mts` for why the opt-in is the deployment's.
 	 */
@@ -185,7 +185,7 @@ type ParsedDecisionRequest =
 	| { ok: false; error: string };
 
 /**
- * The bounds one decision request is held to (#118), resolved once at router
+ * The bounds one decision request is held to, resolved once at router
  * construction. Body bytes are not here: that limit is spent by `express.json()`
  * before a body is ever an object.
  */
@@ -196,7 +196,7 @@ interface RequestLimits {
 	maxContextValueLength: number;
 }
 
-/** Properties a decision request may carry. Anything else is refused (#118). */
+/** Properties a decision request may carry. Anything else is refused. */
 const DECISION_REQUEST_KEYS = new Set(["resource", "action", "context"]);
 
 /** How many unknown property names a refusal names before it stops listing them. */
@@ -209,21 +209,15 @@ const MAX_RENDERED_KEYS = 3;
 const MAX_RENDERED_KEY_LENGTH = 32;
 
 /**
- * Renders unknown property names for an error message.
+ * Renders unknown property names for an error message. The names are the
+ * caller's own text, so what reaches the response is bounded here: at most
+ * {@link MAX_RENDERED_KEYS} names, each at most {@link MAX_RENDERED_KEY_LENGTH}
+ * characters *including* the ellipsis that stands in for the tail.
  *
- * The names are the caller's own text, so what reaches the response is bounded
- * here rather than by whatever they sent: at most {@link MAX_RENDERED_KEYS}
- * names, each at most {@link MAX_RENDERED_KEY_LENGTH} characters *including*
- * the ellipsis that stands in for the tail. The truncation is stated that way,
- * and spelled `MAX_RENDERED_KEY_LENGTH - 1`, because a bound whose own error
- * path runs one character past what it documents is the shape this whole change
- * is against.
- *
- * Quoting happens after: each name goes through `JSON.stringify`, so one
- * carrying quotes or control characters cannot reshape the message. That adds
- * the two quotes and any escape expansion on top of the length above — the
- * bound is on the name, not on its JSON rendering, which is the only honest way
- * to state it when a single character can escape to six.
+ * Each name then goes through `JSON.stringify`, so one carrying quotes or
+ * control characters cannot reshape the message. The quotes and any escape
+ * expansion come on top: the bound is on the name, not on its JSON rendering,
+ * where a single character can escape to six.
  */
 function describeUnknownKeys(keys: readonly string[]): string {
 	const shown = keys
@@ -243,16 +237,13 @@ function describeUnknownKeys(keys: readonly string[]): string {
  * or carries whitespace. Returns the string once it is known to be one, so the
  * caller reads a `string` rather than re-narrowing the `unknown` it passed in.
  *
- * **Whitespace is refused, not trimmed**, which is the doctrine
- * `DotNotationResourceParser` already applies to `resource` (#117), applied here
- * so it also covers `action` and a deployment that registered its own parser.
- * Both strings are structural identifiers rather than free text: they are echoed
- * back in the decision, and `ResourceActionScopeRuleCollector` concatenates them
- * into the `{action}:{resourceType}` scope an issuer has to have granted — and
- * RFC 6749 §3.3 makes space the delimiter between scope values, so a value
- * carrying whitespace names something no issuer could grant. Trimming would
- * instead make `"read "` and `"read"` one action here while a collector reading
- * the raw string still saw two.
+ * Whitespace is refused, not trimmed, as `DotNotationResourceParser` refuses it
+ * in `resource`; here it also covers `action` and a deployment that registered
+ * its own parser. `ResourceActionScopeRuleCollector` concatenates both into the
+ * `{action}:{resourceType}` scope an issuer has to have granted, and RFC 6749
+ * §3.3 makes space the delimiter between scope values. Trimming would make
+ * `"read "` and `"read"` one action here while a collector reading the raw
+ * string still saw two.
  *
  * The value is never echoed: the message names the field. These strings are
  * chosen by the caller and end up in logs and pasted bug reports.
@@ -283,15 +274,13 @@ function checkIdentifier(
  * broke.
  *
  * Nesting is counted rather than forbidden: `RequestContextAttributeCollector`
- * reads dot paths such as `tenant.id`, so a flat-only rule would break a
- * documented feature. Every property and every array element counts, at every
- * depth, which is also what keeps this walk finite — a context inside
- * `maxContextEntries` can be at most that deep, so no separate depth bound is
- * needed and the traversal is iterative regardless.
+ * reads dot paths such as `tenant.id`. Every property and every array element
+ * counts, at every depth, so a context inside `maxContextEntries` is at most
+ * that deep and needs no separate depth bound; the traversal is iterative
+ * regardless.
  *
- * Neither message echoes a key or a value. The whole object is caller-supplied,
- * which is exactly why it is bounded, and a message that quoted part of it would
- * hand the size back to the caller.
+ * Neither message echoes a key or a value: the object is caller-supplied, and
+ * a message that quoted part of it would hand the size back to the caller.
  */
 function checkContext(
 	context: Record<string, unknown>,
@@ -329,14 +318,12 @@ function checkContext(
  * is unusable, phrased with `label` so a batch can name the offending index.
  *
  * The resource string is parsed here rather than at decision time: a string the
- * parser refuses is a malformed request, not a server fault, and it belongs
- * with the other body validation so a batch names the offending index and no
- * entry is decided before the whole batch is known to be usable.
+ * parser refuses is a malformed request, not a server fault, and no entry is
+ * decided before the whole batch is known to be usable.
  *
- * Unknown properties are refused rather than ignored (#118). A caller sending
- * `subject` was being told nothing while believing it had been honoured — and
- * the subject comes from the verified token, never from the body. The same
- * reasoning covers a misspelled `contxt`, which used to be dropped in silence.
+ * Unknown properties are refused rather than ignored: the subject comes from
+ * the verified token, never from the body, and a caller sending `subject` — or
+ * a misspelled `contxt` — must not believe it was honoured.
  */
 function parseDecisionRequest(
 	raw: unknown,
@@ -408,7 +395,7 @@ function parseDecisionRequest(
 
 /**
  * A signal that aborts when the response closes before it was finished — the
- * caller went away (v0.10.0 audit). Handed to the collectors and the evaluator
+ * caller went away. Handed to the collectors and the evaluator
  * as the caller's signal, so a caller that timed out and retried does not leave
  * an out-of-process engine call, or a collector's fetch, running to its budget.
  */
@@ -430,36 +417,31 @@ function callerSignal(res: express.Response): AbortSignal {
  * `POST /verify/batch` — body `{ decisions: [{ resource, action, context? }, …] }`;
  * answers `200 { decisions: DecisionResponse[] }` in request order. The status
  * reports whether the batch was decided, not what it decided, so a batch of
- * denials is still 200 — the caller reads each entry. Filtering a list of N
- * resources is one round trip rather than N.
+ * denials is still 200 — the caller reads each entry.
  *
  * Both answer 400 for a malformed body — including a `resource` the configured
- * `ResourceParser` refuses, which is the caller's syntax error rather than a
- * server fault — 401 for authentication failures, 413 for a body over
- * `maxBodyBytes`, 415 for a content type the parser cannot read, and 500 for
- * anything unexpected. Every one of those answers is the deny envelope
- * `{ decision: "deny", code, message }`, the body-parser failures included
- * (#118): a caller that parses only decision JSON must never be handed
- * Express's HTML error page.
+ * `ResourceParser` refuses — 401 for authentication failures, 413 for a body
+ * over `maxBodyBytes`, 415 for a content type the parser cannot read, and 500
+ * for anything unexpected. Every one of those answers is the deny envelope
+ * `{ decision: "deny", code, message }`, the body-parser failures included:
+ * a caller that parses only decision JSON is never handed Express's HTML error
+ * page.
  *
- * **The body is validated before the token is verified** (#118), which is why a
- * malformed unauthenticated request is answered 400 rather than 401. It is the
- * order the costs argue for: the body checks are bounded by the limits above,
- * while verifying a token is the half that can reach the network — an
- * attacker-chosen `kid` sends the JWKS path to the provider, and an HS256
- * rotation tries every configured secret — so doing it first let an
- * unauthenticated caller spend it on a body that was never usable. What it
- * costs is that an anonymous caller now learns whether a body was well-formed,
- * the resource grammar included; `http.callerAuth` (#108) is the gate for
- * deployments that must not disclose even that, and it stays ahead of this
- * router and of `express.json()`.
+ * **The body is validated before the token is verified**, so a malformed
+ * unauthenticated request is answered 400 rather than 401. The body checks are
+ * bounded by the limits above, while verifying a token can reach the network —
+ * an attacker-chosen `kid` sends the JWKS path to the provider, and an HS256
+ * rotation tries every configured secret — so an unauthenticated caller cannot
+ * spend that on a body that was never usable. In exchange an anonymous caller
+ * learns whether a body was well-formed, the resource grammar included;
+ * `http.callerAuth` is the gate for deployments that must not disclose even
+ * that, and it stays ahead of this router and of `express.json()`.
  *
  * A decision that could not be made is answered according to its failure
- * category, which `observability/failure.mts` assigns (#200):
+ * category, which `observability/failure.mts` assigns:
  *
  * - `collector_timeout`, `rule_timeout`, `attribute_conflict` — a deny with that
- *   code (#115, #225, #174): `403` from `/verify`, and that entry's answer
- *   inside a batch's `200`.
+ *   code: `403` from `/verify`, and that entry's answer inside a batch's `200`.
  * - `collector_threw`, `rule_threw`, `internal` — `500 internal_error`, one for
  *   the whole request, a batch included.
  * - `body_rejected` — `500 internal_error`, from the router's terminal error
@@ -470,30 +452,32 @@ function callerSignal(res: express.Response): AbortSignal {
  *
  * Every decision — one per `/verify` call, one per entry of a batch — emits a
  * `decision` event at info and, when `metrics` is wired, increments the
- * decision counters (#111). Requests that never reached the evaluator (401,
- * 400) emit neither, so the log stream and the metric agree on what a decision
- * is. See `observability/decisionEvent.mts` for what the line does and does not
- * carry.
+ * decision counters. The deny answered for a collector timeout, rule timeout or
+ * attribute conflict is a decision and emits both; a request refused before
+ * any decision (400, 401, 413, 415, and the 500 for a body the parser
+ * rejects) emits neither, nor does a decision that could not be made (a 500)
+ * or whose caller left, so the log stream and the metric agree on what a
+ * decision is. See `observability/decisionEvent.mts` for what the line does and
+ * does not carry.
  *
- * A caller-sent `x-request-id` (#200) is echoed on every response the router
- * writes and carried on the `decision` line, on every failure line and to
- * collectors on `CollectorContext.headers` — when it is a bounded token of a
- * safe charset (`acceptRequestId`). Any other value is treated as absent, and
- * none is minted.
+ * A caller-sent `x-request-id` is echoed on every response the router
+ * writes and carried on the `decision` line, on `verify_internal_error`, on the
+ * three deny lines and to collectors on `CollectorContext.headers` — when it is
+ * a bounded token of a safe charset (`acceptRequestId`). Any other value is
+ * treated as absent, and none is minted.
  */
 export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
-	// Resolved rather than defaulted with `??` (#157): this is the boundary a
+	// Resolved rather than defaulted with `??`: this is the boundary a
 	// hand-built config reaches, so it must refuse what `AppConfigSchema` refuses
-	// and in the same words. `??` read `null` as "unset" — a 50-entry cap where
-	// the schema refused to boot — and let a `0` through as a cap that rejects
-	// every batch there is.
+	// and in the same words. `??` would read `null` as unset and let a `0`
+	// through as a cap that rejects every batch.
 	const maxBatchSize = resolveBound(config.maxBatchSize, NUMERIC_BOUNDS.maxBatchSize, "verify");
 	const batchConcurrency = resolveBound(
 		config.batchConcurrency,
 		NUMERIC_BOUNDS.batchConcurrency,
 		"verify",
 	);
-	// The request limits (#118), read the same way and at the same boundary.
+	// The request limits, read the same way and at the same boundary.
 	const maxBodyBytes = resolveBound(config.maxBodyBytes, NUMERIC_BOUNDS.maxBodyBytes, "verify");
 	// The evaluator reads its deadlines from here only. Spread under the
 	// resolved values below, a deadline in `evaluateOptions` would be overridden
@@ -505,7 +489,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			);
 		}
 	}
-	// #200: the router keeps one failure record per decision. One handed in here
+	// The router keeps one failure record per decision. One handed in here
 	// would be shared by every decision the router makes, which is exactly the
 	// cross-talk a per-decision record exists to rule out.
 	if (config.evaluateOptions !== undefined && "failures" in config.evaluateOptions) {
@@ -541,23 +525,21 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	// One binding for the metrics seam, read once here and handed to the decider
 	// and to the three fault paths alike, so all four count into the same sink.
 	const metrics = config.metrics;
-	// The router runs an authenticator and builds none (#259). Checked at
-	// runtime as well as in the type: this is the boundary a hand-built config
-	// reaches. A config still carrying the removed `jwt` option is refused by
-	// name, with the migration — alongside an authenticator it would otherwise
-	// be silently ignored, and the caller would believe a JWT config was in
-	// force that is not.
-	// Key presence, not value: a spread of an old config whose jwt was unset
-	// still names the removed option.
+	// The router runs an authenticator and builds none. Checked at runtime as
+	// well as in the type: this is the boundary a hand-built config reaches. A
+	// `jwt` key is refused by name, with the migration: beside an authenticator
+	// it would be silently ignored while the caller believed a JWT config was in
+	// force. Key presence, not value: a spread config whose `jwt` is unset is
+	// refused too.
 	if (Object.hasOwn(config, "jwt")) {
 		throw new Error(
 			"createVerifyRouter: jwt is no longer accepted (#259) — pass an authenticator " +
 				"(createTokenAuthenticator(jwt, logger) builds the bearer-JWT one), or use createApp",
 		);
 	}
-	// `null` is refused like an omission rather than read as a choice — the
-	// rule the `previousSecrets` contract set (#147): a `null` in a hand-built
-	// config was produced rather than written.
+	// `null` is refused like an omission rather than read as a choice, the rule
+	// `previousSecrets` follows too: a `null` in a hand-built config was
+	// produced rather than written.
 	const candidate: unknown = config.authenticator;
 	if (
 		typeof candidate !== "object" ||
@@ -570,9 +552,9 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 		);
 	}
 	const authenticator = candidate as TokenAuthenticator;
-	// #175: resolved once — the per-request cost is a spread, not a branch tree.
+	// Resolved once: the per-request cost is a spread, not a branch tree.
 	const exposeCredential = config.credentialToCollectors === "expose";
-	// #244: resolved through the check the schema uses, and thrown rather than
+	// Resolved through the check the schema uses, and thrown rather than
 	// read leniently — a misspelt "include" running as "omit" would silently
 	// withhold the revisions a consuming service turned this on to record.
 	const evaluationInResponse = checkEvaluationInResponse(config.evaluationInResponse);
@@ -581,7 +563,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	}
 	const includeEvaluation = evaluationInResponse.value === "include";
 
-	// One decision, with nothing of the transport in it (#251): what `/verify`
+	// One decision, with nothing of the transport in it: what `/verify`
 	// runs once and `/verify/batch` runs per entry. Everything resolved above is
 	// handed over once; per request, only the input below crosses.
 	const decide = createDecider({
@@ -597,9 +579,9 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 
 	/**
 	 * What every decision of one request shares: the subject the authenticator
-	 * established; the credential only under the stated opt-in (#175); the
+	 * established; the credential only under the stated opt-in; the
 	 * request id, both as the one header collectors may read and as the
-	 * correlation of every line about the decision (#200); and the caller's
+	 * correlation of every line about the decision; and the caller's
 	 * signal. Built once per request, so a batch's entries share it.
 	 */
 	const decisionInput = (
@@ -619,7 +601,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	};
 
 	const router = express.Router();
-	// #200: the caller's request id goes back on every response this router
+	// The caller's request id goes back on every response this router
 	// writes — decisions, refusals and the 500 alike — so a denial can be
 	// matched to the enforcing service's own log. First, ahead of the body
 	// parser, so its refusals carry it too. An id `acceptRequestId` refuses is
@@ -629,7 +611,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 		if (requestId !== undefined) res.setHeader(REQUEST_ID_HEADER, requestId);
 		next();
 	});
-	// An explicit limit, not Express's unstated 100 KB default (#118). It is the
+	// An explicit limit, not Express's unstated 100 KB default. It is the
 	// only one of the five spent here: a body over it never becomes an object,
 	// and `bodyParserFailure` below turns the refusal into the deny envelope.
 	router.use(express.json({ limit: maxBodyBytes }));
@@ -637,9 +619,8 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	router.post("/verify", async (req: express.Request, res: express.Response) => {
 		const signal = callerSignal(res);
 		try {
-			// Body first, token second (#118) — see the ordering paragraph on
-			// `createVerifyRouter`. This is what makes a malformed unauthenticated
-			// request a 400 rather than a 401.
+			// Body first, token second — see the ordering paragraph on
+			// `createVerifyRouter`.
 			const parsed = parseDecisionRequest(req.body, "body", config.resourceParser, limits);
 			if (!parsed.ok) {
 				res.status(400).json(errorBody("invalid_request", parsed.error));
@@ -740,14 +721,11 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 			}
 
 			// Decided in lanes, batchConcurrency wide, not under a bare
-			// `Promise.all` (#183): the collector concurrency cap is per
-			// decision, so starting every entry at once multiplied it by the
-			// batch size — one request at the default caps could hold
-			// 50 × 8 collectors in flight per pipeline against a dependency
-			// that had just started to slow down. The same shared-cursor shape
-			// as core's runCollectors; each lane writes into the entry's own
-			// slot, so the answer order is the request order however the lanes
-			// interleave.
+			// `Promise.all`: the collector concurrency cap is per decision, so
+			// starting every entry at once would multiply it by the batch size.
+			// The same shared-cursor shape as core's runCollectors; each lane
+			// writes into the entry's own slot, so the answer order is the
+			// request order however the lanes interleave.
 			const decisions = new Array<DecisionResponse>(entries.length);
 			const input = decisionInput(req, auth, signal);
 			let next = 0;
@@ -766,8 +744,7 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 				// A decide that throws is a genuine fault — denials are answered
 				// inside it — and the 500 below speaks for the whole batch, so
 				// the lanes stop pulling entries nobody will read. What is
-				// already in flight settles on its own, exactly as it did under
-				// Promise.all.
+				// already in flight settles on its own.
 				abandoned = true;
 				throw cause;
 			}
@@ -793,19 +770,16 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	});
 
 	/*
-	 * Terminal error handler (#118, and item 6 of #126).
+	 * Terminal error handler. `express.json()` rejects before either route runs,
+	 * so its failures never reach the try/catch above; without this they would
+	 * fall through to Express's default handler — an HTML page, carrying a stack
+	 * trace outside production — and "every non-allow answer is a deny" would
+	 * not hold.
 	 *
-	 * `express.json()` rejects before either route runs, so its failures never
-	 * reached the try/catch above and fell through to Express's default handler
-	 * — an HTML page, carrying a stack trace outside production. A client that
-	 * parses only decision JSON has no way to read that, and "every non-allow
-	 * answer is a deny" stops being something the endpoint actually does.
-	 *
-	 * It is mounted on the router rather than on the app so that
-	 * `createVerifyRouter` is self-contained: a consumer mounting it on their own
-	 * Express app gets the envelope without wiring anything, and `createApp`
-	 * inherits it. Four arguments, because that is how Express tells an error
-	 * handler from a middleware.
+	 * Mounted on the router rather than on the app so that `createVerifyRouter`
+	 * is self-contained: a consumer mounting it on their own Express app gets the
+	 * envelope without wiring anything. Four arguments, because that is how
+	 * Express tells an error handler from a middleware.
 	 */
 	const denyOnBodyFailure: express.ErrorRequestHandler = (err, req, res, next) => {
 		// A failure after the response started is not ours to rewrite; handing it
@@ -846,13 +820,10 @@ export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 
 /**
  * Maps a body-parser failure onto a status and a deny code, or `undefined` when
- * the error is not one.
- *
- * body-parser tags every failure it raises with a stable `type`, which is what
- * is matched here — `err.message` carries a fragment of the caller's body and
+ * the error is not one. Matched on the stable `type` body-parser tags every
+ * failure with: `err.message` carries a fragment of the caller's body, and
  * `err.status` alone would not tell an oversized body from an unreadable
- * charset. None of the messages echo anything the caller sent: a parse failure
- * is reported as a parse failure, not by quoting the bytes that caused it.
+ * charset. None of the messages echo anything the caller sent.
  */
 function bodyParserFailure(
 	err: unknown,

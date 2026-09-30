@@ -2,26 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * The decision's dependency boundary (#251), held rather than stated.
+ * The decision's dependency boundary, held rather than stated.
  *
  * `decision/README.md` says the decision reaches neither express nor the
  * metrics implementation nor any of the router's own layers. A check over the
- * *direct* imports of `decide.mts` would have passed while `countCollectorFailure`
- * was a value import out of `observability/metrics.mts` — which loads express
- * and prom-client at its top level — and that is what the review found. So
- * this walks value imports transitively, from the source, and proves on the
- * router that the walk fires.
+ * *direct* imports of `decide.mts` would not see express or prom-client loaded
+ * through a module it imports, so this walks value imports transitively, from
+ * the source, and proves on the router that the walk fires.
  *
- * The metrics port (#258) is held the same way, and more strictly: it is walked
+ * The metrics port is held the same way, and more strictly: it is walked
  * through every import, type-only included. A type-only import loads nothing at
- * runtime, but it is still a direction — a port that names a type out of its
- * implementation's module, or a decision that does, depends on that module in
- * every sense but the loader's.
+ * runtime, but a port that names a type out of its implementation's module, or
+ * a decision that does, depends on that module in every sense but the loader's.
  *
  * The same walk holds two server-wide directions the source map
  * (`src/README.md`) states: the authentication contract in `auth/` reaches no
- * implementation, and neither `routes/` nor `config/` reaches `jwt/` (#259,
- * #260). Each is shown to fire on the side that is meant to depend.
+ * implementation, and neither `routes/` nor `config/` reaches `jwt/`. Each is
+ * shown to fire on the side that is meant to depend.
  */
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -145,7 +142,7 @@ const CORE = "@o3co/auth.policy-verifier.core";
 const METRICS = join(SRC, "observability/metrics.mts");
 const PORT = join(SRC, "observability/decisionMetrics.mts");
 
-describe("the decision's dependency boundary (#251)", () => {
+describe("the decision's dependency boundary", () => {
 	const decision = reach([join(SRC, "decision/decide.mts")]);
 
 	it("reaches core and nothing else outside the package — no express, no prom-client", () => {
@@ -166,7 +163,7 @@ describe("the decision's dependency boundary (#251)", () => {
 	});
 });
 
-describe("the metrics port, apart from its prom-client implementation (#258)", () => {
+describe("the metrics port, apart from its prom-client implementation", () => {
 	it("the port reaches core and nothing else outside the package, not even for a type", () => {
 		const port = reach([PORT], allImports);
 		expect([...port.packages]).toEqual([CORE]);
@@ -217,7 +214,7 @@ function declaringDirectories(name: string): string[] {
 	);
 }
 
-describe("the authentication contract, apart from the JWT implementation (#259)", () => {
+describe("the authentication contract, apart from the JWT implementation", () => {
 	it.each([
 		"TokenAuthenticator",
 		"AuthenticationResult",
@@ -256,7 +253,7 @@ describe("the authentication contract, apart from the JWT implementation (#259)"
 	});
 });
 
-describe("config/ and jwt/ have one direction: jwt/ → config/ (#260)", () => {
+describe("config/ and jwt/ have one direction: jwt/ → config/", () => {
 	it("no file in config/ reaches jwt/ through any import, type-only included", () => {
 		const config = reach(sourcesIn("config"), allImports);
 		expect(within(config.files, "jwt")).toEqual([]);

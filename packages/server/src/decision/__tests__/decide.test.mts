@@ -2,15 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * One decision, without Express (#251).
- *
- * `createDecider` is what `POST /verify` runs once and `POST /verify/batch`
- * runs per entry: the two collects, the evaluation, the sorting of a failure
- * into a deny or a fault, the `decision` line and the counters. These tests
- * hold that contract through the function alone — no router, no request, no
- * response — so what the HTTP layer owns (wire validation, authentication,
- * status codes, the fault line) is deliberately not here. The router's own
- * suites still pin the wire.
+ * One decision, without Express. `createDecider` is what `POST /verify` runs
+ * once and `POST /verify/batch` runs per entry: the two collects, the
+ * evaluation, the sorting of a failure into a deny or a fault, the `decision`
+ * line and the counters. These tests hold that contract through the function
+ * alone, with no router, request or response; what the HTTP layer owns (wire
+ * validation, authentication, status codes, the fault line) is pinned by the
+ * router's own suites.
  */
 import { DotNotationResourceParser } from "@o3co/auth.policy-verifier.builtins";
 import {
@@ -141,7 +139,7 @@ const settled = (promise: Promise<unknown>): Promise<unknown> =>
 		(error: unknown) => error,
 	);
 
-describe("createDecider — one decision without Express (#251)", () => {
+describe("createDecider — one decision without Express", () => {
 	it("answers allow, naming subject, resource, action and reason, and reports it exactly once", async () => {
 		const { decide, events, metrics } = decider();
 		const answer = await decide(entry(), input());
@@ -331,7 +329,7 @@ describe("createDecider — one decision without Express (#251)", () => {
 		expect(unwrapFault(other)).toEqual({ cause: other, failure: { category: "internal" } });
 	});
 
-	it("the credential reaches the collector context only when it is handed in (#175)", async () => {
+	it("the credential reaches the collector context only when it is handed in", async () => {
 		const seen: CollectorContext[] = [];
 		const { decide } = decider({
 			attributeCollectors: [
@@ -371,7 +369,7 @@ describe("createDecider — one decision without Express (#251)", () => {
 		expect(seen[1].requestContext).toBeUndefined();
 	});
 
-	it("each decision gets its own copy of the shared headers: a collector's write does not reach the next decision (#251)", async () => {
+	it("each decision gets its own copy of the shared headers: a collector's write does not reach the next decision", async () => {
 		const seen: Array<Record<string, string> | undefined> = [];
 		const { decide } = decider({
 			attributeCollectors: [
@@ -388,7 +386,7 @@ describe("createDecider — one decision without Express (#251)", () => {
 		expect(shared.headers).toEqual({ "x-request-id": "req-1" });
 	});
 
-	it("the request id is on the decision line when there is one, and absent — not undefined — when there is none (#200)", async () => {
+	it("the request id is on the decision line when there is one, and absent — not undefined — when there is none", async () => {
 		const { decide, events } = decider();
 		await decide(entry(), input({ requestId: "req-1" }));
 		await decide(entry(), input());
@@ -398,7 +396,7 @@ describe("createDecider — one decision without Express (#251)", () => {
 		expect("requestId" in lines[1].obj).toBe(false);
 	});
 
-	it("a subject without a sub — or with an empty one — is named on neither the response nor the line (#158)", async () => {
+	it("a subject without a sub — or with an empty one — is named on neither the response nor the line", async () => {
 		const { decide, events } = decider();
 		const noSub = await decide(entry(), input({ subject: {} }));
 		const emptySub = await decide(entry(), input({ subject: { sub: "" } }));
@@ -409,7 +407,7 @@ describe("createDecider — one decision without Express (#251)", () => {
 		for (const line of lines) expect("sub" in line.obj).toBe(false);
 	});
 
-	it("what a rule reported is on the line always, and on the response only when the composition includes it (#244)", async () => {
+	it("what a rule reported is on the response only when the composition includes it, and on the line even when it does not", async () => {
 		const REVISION = `sha256:${"a".repeat(64)}`;
 		const reporting: AnyRule = {
 			ruleType: "cedar",

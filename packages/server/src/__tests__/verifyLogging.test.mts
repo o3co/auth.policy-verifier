@@ -2,12 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Failure-path observability for the verify router (#107).
- *
- * Before these tests the service logged nothing on any failure path: a JWKS
- * outage was returned as the same bare `401 invalid_token` as a garbage token,
- * and every pipeline error became a `500` with the cause discarded. The router
- * now emits one structured event per failure through an injected `EventLogger`:
+ * Failure-path observability for the verify router: one structured event per
+ * failure through an injected `EventLogger`.
  *
  *   - `jwt_token_rejected`            (warn)  — the token itself failed
  *     verification: bad signature, expired, claim mismatch, malformed.
@@ -15,10 +11,10 @@
  *     attempted/completed for reasons unrelated to the token: JWKS fetch
  *     timeout or any non-jose infrastructure error.
  *   - `verify_internal_error`         (error) — a collector/parser/pipeline
- *     error swallowed into a 500; carries the discarded cause.
+ *     error answered 500; carries the cause the response does not.
  *
- * The wire contract is unchanged: callers still see 401/500. What changes is
- * that the operator can now tell the three situations apart from the log.
+ * Callers see only 401/500; the log is where the operator tells the three
+ * situations apart.
  */
 import {
 	DotNotationResourceParser,
@@ -44,7 +40,7 @@ import {
 } from "#/jwt/index.mjs";
 import { createVerifyRouter } from "#/routes/verify.mjs";
 
-/** 64 hex characters each — 32 decoded bytes, the entropy floor #114 enforces. */
+/** 64 hex characters each — 32 decoded bytes, the HS256 secret's entropy floor. */
 const JWT_SECRET = "11".repeat(32);
 const hs256Key = await HS256KeyResolverFactory({ secret: JWT_SECRET });
 const wrongKey = await HS256KeyResolverFactory({ secret: "22".repeat(32) });
@@ -62,10 +58,9 @@ interface CapturedEvent {
  * EventLogger implementation that records every FAILURE event for assertion.
  *
  * `info` is discarded on purpose: the router also emits a per-decision audit
- * line at that level (#111), and this file is about the failure channel. A
- * failure event that regressed to `info` would still be caught — it would stop
- * appearing in `events` at all. The decision line has its own suite in
- * `decisionLogging.test.mts`.
+ * line at that level, and this file is about the failure channel. A failure
+ * event emitted at `info` would still be caught — it would be missing from
+ * `events`. The decision line has its own suite in `decisionLogging.test.mts`.
  */
 function captureEvents(): { events: CapturedEvent[]; logger: EventLogger } {
 	const events: CapturedEvent[] = [];
@@ -91,7 +86,7 @@ interface SignOptions {
 	issuedAt?: number;
 	/** Keep the payload's own `iat` instead of stamping a numeric one. */
 	skipIssuedAt?: boolean;
-	/** Omit `exp` entirely — the eternal token #110 is about. */
+	/** Omit `exp` entirely — the eternal token. */
 	skipExpiration?: boolean;
 }
 
@@ -103,7 +98,7 @@ async function signToken(payload: Record<string, unknown>, options: SignOptions 
 	if (!options.skipIssuedAt) {
 		jwt.setIssuedAt(options.issuedAt);
 	}
-	// `exp` is mandatory (#110), so an unremarkable token has to carry one: the
+	// `exp` is mandatory, so an unremarkable token has to carry one: the
 	// cases that omit it are the ones asserting it is refused.
 	if (!options.skipExpiration) {
 		jwt.setExpirationTime(options.expiresAt ?? Math.floor(Date.now() / 1000) + 3600);
@@ -178,7 +173,7 @@ describe("verify router failure logging: token rejections (warn)", () => {
 		const app = createTestApp({ logger });
 		// jose throws JWTExpired *after* the signature verifies and hangs the whole
 		// decoded token off the error as `payload`, so logging the error object
-		// wrote every claim — here an email — to the log on a routine expiry.
+		// would write every claim — here an email — to the log on a routine expiry.
 		const token = await signToken(
 			{ scope: "read:project", email: "victim@example.com" },
 			{ expiresAt: Math.floor(Date.now() / 1000) - 3600 },
@@ -389,7 +384,7 @@ describe("verify router failure logging: default sink and quiet paths", () => {
 		expect(events).toHaveLength(0);
 	});
 
-	it("logs nothing when the parser refuses the caller's resource string (#117)", async () => {
+	it("logs nothing when the parser refuses the caller's resource string", async () => {
 		// `verify_internal_error` is a page-the-operator event. A resource string
 		// outside the parser's grammar is the caller's mistake, answered 400, and
 		// must not enter that channel — otherwise a client looping on a typo
@@ -427,7 +422,7 @@ describe("verify router failure logging: default sink and quiet paths", () => {
 	});
 });
 
-describe("decode-only path time-claim enforcement (#106)", () => {
+describe("decode-only path time-claim enforcement", () => {
 	// decodeJwt performs no validation at all; the route must enforce exp/nbf
 	// itself with jwtVerify's semantics so a leaked expired token is not a
 	// permanent credential in decode-only deployments.
@@ -490,7 +485,7 @@ describe("decode-only path time-claim enforcement (#106)", () => {
 		expect(events[0]).toMatchObject({ level: "warn", msg: "jwt_token_rejected" });
 	});
 
-	// #110: the decode path must refuse the eternal token, not merely honour an
+	// The decode path must refuse the eternal token, not merely honour an
 	// exp when the issuer bothered to set one. A rejection here that the
 	// verifying path also makes is the whole point of keeping the two coupled.
 	it.each([
