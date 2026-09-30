@@ -73,6 +73,17 @@ export function parseRangePath(path: string): RangeElement[] | null {
 }
 
 /**
+ * The requested path — the raw resource, then the action — or `null` when the
+ * action is not one action of the grammar. The action is checked on its own
+ * before the join: an action of several elements (`report.delete`) would
+ * re-split the joined path, so a request on the parent `project:p1` would
+ * read as one on `project:p1.report`, which a range may contain.
+ */
+export function requestedRangePath(resource: string, action: string): string | null {
+	return NAME.test(action) ? `${resource}.${action}` : null;
+}
+
+/**
  * Whether the range entry `entry` contains the requested `path`: a
  * segment-wise prefix of it, each element of the same type, and an element
  * that names no id containing the same type with any id. Either side outside

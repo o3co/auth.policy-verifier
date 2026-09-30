@@ -11,6 +11,7 @@ import { resolveClaimName } from "../../collectors/_claims.mjs";
 import {
 	DEFAULT_AUTHORIZATION_DETAILS_CLAIM,
 	entriesOfType,
+	requestedRangePath,
 	resolveRangeType,
 } from "../../delegation/range.mjs";
 import { WithinDelegationRange } from "../WithinDelegationRange.mjs";
@@ -28,7 +29,9 @@ export interface DelegationRangeRuleCollectorConfig {
 
 /**
  * Emits one `WithinDelegationRange` rule for the requested path — the raw
- * resource, then the action, joined by `.` — when the token carries an
+ * resource, then the action, joined by `.` (`requestedRangePath`, which
+ * refuses an action that is not one action of the grammar, so the rule
+ * fails) — when the token carries an
  * `authorization_details` entry of the configured type, and none otherwise.
  * The rule is a group of its own, so it is decided together with the
  * policies: a delegated token is allowed only what both allow, and a token
@@ -53,6 +56,6 @@ export class DelegationRangeRuleCollector implements RuleCollector {
 
 	async collect(context: CollectorContext): Promise<Rule[]> {
 		if (entriesOfType(context.subject[this.claim], this.type) === null) return [];
-		return [new WithinDelegationRange(`${context.resource.raw}.${context.action}`)];
+		return [new WithinDelegationRange(requestedRangePath(context.resource.raw, context.action))];
 	}
 }

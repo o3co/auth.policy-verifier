@@ -121,7 +121,7 @@ rule { collectors = [
 ```
 
 - `DelegationRangeCollector` はエントリのパスを `ATTR_DELEGATION_RANGE`（`"delegationRange"`、このパッケージが予約）に書きます。文法外のパスは除外され、range が狭まる方向に働きます。その type のエントリはあるが読めるパスがないトークンは空の range になり、何も含みません。
-- `DelegationRangeRuleCollector` は、トークンがその type のエントリを持つとき、リクエストのパス（`<resource.raw>.<action>`。`resource: "project:p1.report:r7"` と `action: "run"` なら `project:p1.report:r7.run`）について [`WithinDelegationRange`](#withindelegationrange) ルールを 1 つ生成し、持たないときは何も生成しません。このルールは独立したグループなので、委任トークンは range とポリシーの両方が許すものだけを許され、range のないトークンはこの 2 つがない場合と同じく判定されます。
+- `DelegationRangeRuleCollector` は、トークンがその type のエントリを持つとき、リクエストのパス（`<resource.raw>.<action>`。`resource: "project:p1.report:r7"` と `action: "run"` なら `project:p1.report:r7.run`）について [`WithinDelegationRange`](#withindelegationrange) ルールを 1 つ生成し、持たないときは何も生成しません。action は文法上の 1 つの action でなければなりません。複数の要素からなる action（`report.delete`）は結合したパスの区切りを変えてしまい、親へのリクエストが range に含まれる子へのリクエストとして読めてしまうので、その場合ルールは fail します。このルールは独立したグループなので、委任トークンは range とポリシーの両方が許すものだけを許され、range のないトークンはこの 2 つがない場合と同じく判定されます。
 - 2 つには同じ `type` と `claim`（既定 `authorization_details`）を与えてください。食い違うとルールは生成されるのに range が見つからず、リクエストは deny されます。
 - リクエストが名指すリソースは、親の連鎖も含めて呼び出し元の主張です。連鎖に依拠するポリシー（包含、`in`）は、その連鎖を保存しているストアを読む独自の collector で、使う前に確かめる必要があります（[docs/extending.md](../../docs/extending.md#writing-a-custom-attributecollector)）。
 
