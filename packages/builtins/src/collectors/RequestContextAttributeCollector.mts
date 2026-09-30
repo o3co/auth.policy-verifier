@@ -111,8 +111,9 @@ function refusal(index: number, reservation: AttributeKeyReservation): string {
 			: `RequestContextAttributeCollector: attributes[${index}] maps onto the reserved attribute "${key}", ` +
 				`which belongs to ${owner}${reason === undefined ? "" : ` — ${reason}`}. ` +
 				"That package writes the key from what the deployment established, while requestContext is " +
-				"caller-supplied: where both write it the values collide and every such request is denied, and " +
-				"where that package writes nothing for a given request the caller's value stands unopposed as " +
-				"the one the deployment was supposed to supply. ";
+				"caller-supplied: where both write a scalar key the values collide and every such request is " +
+				"denied, where both write a list key the caller's entries join the package's, and where that " +
+				"package writes nothing for a given request the caller's value stands unopposed as the one the " +
+				"deployment was supposed to supply. ";
 	return `${head}Promote the field under a key of your own (for example "${suggestUnreservedAttributeKey(key)}").`;
 }
