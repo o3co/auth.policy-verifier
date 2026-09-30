@@ -1,6 +1,6 @@
 # auth.policy-verifier
 
-最終更新: 2026-09-30
+最終更新: 2026-10-01
 
 [![CI](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth.policy-verifier.core)](https://www.npmjs.com/package/@o3co/auth.policy-verifier.core)
@@ -242,6 +242,7 @@ create-app  ── templates/standalone をコピーする。どのパッケー�
 `no_applicable_rule` で拒否する (OPA / OpenFGA / Cedar の implicit deny と同じ挙動)。
 `rule.onEmptyRuleSet = "allow"` を明示するとこの既定を opt-out して fail-open にできるが、認可を別レイヤで
 担保している場合に限る。RuleCollector が 1 つも設定されていない場合は起動時に失敗する。
+`restricts` の付いたルールは、ほかのルールが許すものを絞るだけで、それ自体は認可にならない。絞るルールしか集まらないリクエストも同じく拒否され、`"allow"` のときはそれらに従う。
 
 ### 組み込みルール
 

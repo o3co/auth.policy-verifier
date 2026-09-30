@@ -1,9 +1,16 @@
 // SPDX-FileCopyrightText: 2026 1o1 Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { evaluate } from "../evaluate.mjs";
-import type { Attributes, Rule } from "../types.mjs";
+import { FailureRecord } from "../failureSource.mjs";
+import {
+	type AnyRule,
+	type AsyncRule,
+	type Attributes,
+	isRestrictingRule,
+	type Rule,
+} from "../types.mjs";
 
 const makeRule = (ruleType: string, code: string, result: boolean): Rule => ({
 	ruleType,
@@ -267,5 +274,166 @@ describe("evaluate — RuleGroupOutcome.evaluated means what ran", () => {
 		]);
 
 		expect(result).toMatchObject({ decision: "deny", code: "first_failed" });
+	});
+});
+
+/*
+ * A restricting rule narrows what the granting rules allow and is never a
+ * reason to allow on its own: a request that only restricting rules apply to
+ * has no applicable rule, whatever they answer.
+ */
+describe("evaluate — restricting rules", () => {
+	const restricting = (ruleType: string, code: string, result: boolean): Rule => ({
+		...makeRule(ruleType, code, result),
+		restricts: true,
+	});
+
+	it("denies a request only restricting rules apply to, without asking them", async () => {
+		const verify = vi.fn(() => true);
+		const rules: Rule[] = [{ ...restricting("range", "outside_range", true), verify }];
+
+		const result = await evaluate(new Map(), rules);
+
+		expect(result).toEqual({
+			decision: "deny",
+			code: "no_applicable_rule",
+			message: "No applicable rule was collected for this request",
+			reason: { groups: [] },
+		});
+		expect(verify).not.toHaveBeenCalled();
+	});
+
+	it("still holds such a request to its restrictions under onEmptyRuleSet allow", async () => {
+		const passing = await evaluate(new Map(), [restricting("range", "outside_range", true)], {
+			onEmptyRuleSet: "allow",
+		});
+		expect(passing.decision).toBe("allow");
+		expect(passing.reason.groups.map((group) => group.ruleType)).toEqual(["range"]);
+
+		const failing = await evaluate(new Map(), [restricting("range", "outside_range", false)], {
+			onEmptyRuleSet: "allow",
+		});
+		expect(failing).toMatchObject({ decision: "deny", code: "outside_range" });
+	});
+
+	it.each([
+		[true, true, "allow", undefined],
+		[true, false, "deny", "outside_range"],
+		[false, true, "deny", "invalid_scope"],
+	] as const)(
+		"decides a granting group (%s) and a restricting group (%s) together: %s",
+		async (grants, within, decision, code) => {
+			const result = await evaluate(new Map(), [
+				makeRule("scope", "invalid_scope", grants),
+				restricting("range", "outside_range", within),
+			]);
+
+			expect(result.decision).toBe(decision);
+			if (code !== undefined) expect(result).toMatchObject({ code });
+		},
+	);
+
+	it("refuses a group that mixes restricting and granting rules, before any rule runs", async () => {
+		// A group is an OR: a restricting alternative that passed would satisfy
+		// the group in place of the grant that failed.
+		const verify = vi.fn(() => false);
+		const rules: Rule[] = [
+			{ ...makeRule("scope", "invalid_scope", false), verify },
+			restricting("scope", "outside_range", true),
+		];
+
+		const failures = new FailureRecord();
+		const error = await evaluate(new Map(), rules, { failures }).catch((cause: unknown) => cause);
+
+		expect(error).toBeInstanceOf(TypeError);
+		expect(verify).not.toHaveBeenCalled();
+		// The group is named by the failure source, which the server checks
+		// before it logs a ruleType, and not by the message, which it logs as is.
+		expect(failures.sourceOf(error)).toEqual({
+			kind: "rule",
+			ruleType: "scope",
+			code: "invalid_scope",
+		});
+		expect((error as Error).message).not.toContain("scope");
+	});
+
+	it("names the refused group by the ruleType it was grouped under, read once", async () => {
+		let reads = 0;
+		const granting = makeRule("scope", "invalid_scope", false);
+		Object.defineProperty(granting, "ruleType", {
+			get() {
+				reads += 1;
+				return reads === 1 ? "scope" : "elsewhere";
+			},
+		});
+		const failures = new FailureRecord();
+
+		const error = await evaluate(
+			new Map(),
+			[granting, restricting("scope", "outside_range", true)],
+			{
+				failures,
+			},
+		).catch((cause: unknown) => cause);
+
+		expect(failures.sourceOf(error)).toMatchObject({ kind: "rule", ruleType: "scope" });
+	});
+
+	it("reads each rule's marker once, so a rule cannot be restricting to one check and granting to the next", async () => {
+		let reads = 0;
+		const rule = makeRule("range", "outside_range", true);
+		Object.defineProperty(rule, "restricts", {
+			get() {
+				reads += 1;
+				return reads === 1 ? true : undefined;
+			},
+		});
+
+		const result = await evaluate(new Map(), [rule]);
+
+		expect(result).toMatchObject({ decision: "deny", code: "no_applicable_rule" });
+		expect(reads).toBe(1);
+	});
+
+	it("names the strict reading isRestrictingRule", () => {
+		expect(isRestrictingRule(restricting("range", "outside_range", true))).toBe(true);
+		expect(isRestrictingRule(makeRule("scope", "invalid_scope", true))).toBe(false);
+		expect(
+			isRestrictingRule({
+				...makeRule("scope", "invalid_scope", true),
+				restricts: 1,
+			} as unknown as Rule),
+		).toBe(false);
+	});
+
+	it("reads only `restricts: true` as restricting", async () => {
+		// The same strict discriminant as `async: true`: anything else is the
+		// granting rule every rule was before.
+		const rule = {
+			...makeRule("scope", "invalid_scope", true),
+			restricts: "yes",
+		} as unknown as Rule;
+
+		expect((await evaluate(new Map(), [rule])).decision).toBe("allow");
+	});
+
+	it("treats an asynchronous restricting rule as it treats a synchronous one", async () => {
+		const decide = vi.fn(async () => true);
+		const rule: AsyncRule = {
+			ruleType: "range",
+			code: "outside_range",
+			message: "Failed: outside_range",
+			async: true,
+			restricts: true,
+			decide,
+		};
+
+		const alone = await evaluate(new Map(), [rule]);
+		expect(alone).toMatchObject({ decision: "deny", code: "no_applicable_rule" });
+		expect(decide).not.toHaveBeenCalled();
+
+		const beside: AnyRule[] = [makeRule("scope", "invalid_scope", true), rule];
+		expect((await evaluate(new Map(), beside)).decision).toBe("allow");
+		expect(decide).toHaveBeenCalledTimes(1);
 	});
 });

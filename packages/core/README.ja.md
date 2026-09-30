@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.core
 
-最終更新: 2026-09-25
+最終更新: 2026-10-01
 
 auth.policy-verifier の型定義・評価エンジン・モジュール基盤。コレクター、ルール、モジュールが実装すべきインターフェースを定義するパッケージです。
 
@@ -32,7 +32,7 @@ npm install @o3co/auth.policy-verifier.core
 
 収集した属性をルールセットに対して評価します。ルールは `ruleType` でグループ化され、グループ内はいずれかのルールが通れば満足（OR）、すべてのグループが満たされた場合に許可（グループ間 AND）となります。結果は `Decision` で、`reason` 付きの allow か、`code`・`message`・`reason` 付きの deny のどちらかです。
 
-**ルールが 1 つも集まらなかった場合は deny** (`code: "no_applicable_rule"`) です。どのルールも適用されなかったリクエストは認可されていないためです。第 3 引数に `{ onEmptyRuleSet: "allow" }` を渡すと、この既定を deployment 単位で opt-out できます。
+**許可するルールが 1 つも集まらなかった場合は deny** (`code: "no_applicable_rule"`) です。どのルールも適用されなかったリクエストは認可されていないためです。第 3 引数に `{ onEmptyRuleSet: "allow" }` を渡すと、この既定を deployment 単位で opt-out できます。`restricts: true` の付いたルールは、許可するルールが許すものを絞るだけで、ここでは数えません。絞るルールしか適用されないリクエストは、それらを評価せずに deny され、`"allow"` のときはそれらに従います。2 種類が混在した `ruleType` グループは `TypeError` で拒否されます。
 
 すべての決定は構造化された `reason` を伴います。`reason.groups` は評価順に各ルールグループを並べ、`passed` と、
 そのグループで実際に走ったルールを評価順に列挙した `evaluated` を持ちます。失敗グループは全代替ルールを

@@ -116,7 +116,8 @@ export interface AttributeCollector {
 /**
  * A single authorization rule. `verify` runs against the merged attributes and
  * returns whether the rule passes; `ruleType` groups alternative rules (OR within
- * a group), and `code` / `message` surface on deny.
+ * a group), and `code` / `message` surface on deny. A rule grants unless it is
+ * marked `restricts`.
  *
  * `verify` must be a deterministic, side-effect-free function of `attrs`: equal
  * attributes give equal answers, and nothing the engine cannot see may decide
@@ -128,6 +129,15 @@ export interface Rule {
 	ruleType: string;
 	code: string;
 	message: string;
+	/**
+	 * `true` for a rule that only narrows what the granting rules allow: it can
+	 * deny a request and is never a reason to allow one. `evaluate()` counts
+	 * only granting rules — every rule without this marker — when it asks
+	 * whether any rule applied, so a request that only restricting rules apply
+	 * to goes to `onEmptyRuleSet`. Only `true` restricts, and a `ruleType`
+	 * group holds one kind or the other.
+	 */
+	readonly restricts?: true;
 	/**
 	 * Answers a boolean. `report` is there for a rule that fronts a policy
 	 * evaluator — see `ReportRuleEvaluation`; every other rule ignores it.
@@ -370,6 +380,8 @@ export interface AsyncRule {
 	 * `decide` method is not sent down the asynchronous path.
 	 */
 	readonly async: true;
+	/** As on `Rule`: a rule that narrows what the granting rules allow. */
+	readonly restricts?: true;
 	/** `report` as on `Rule.verify` — see `ReportRuleEvaluation`. */
 	decide(
 		attrs: ReadonlyAttributes,
@@ -384,6 +396,11 @@ export type AnyRule = Rule | AsyncRule;
 /** Tells the two kinds apart by the `async` discriminant. */
 export function isAsyncRule(rule: AnyRule): rule is AsyncRule {
 	return (rule as Partial<AsyncRule>).async === true;
+}
+
+/** Whether `rule` only narrows what the granting rules allow: `restricts` is exactly `true`. */
+export function isRestrictingRule(rule: AnyRule): boolean {
+	return (rule as { restricts?: unknown }).restricts === true;
 }
 
 /**

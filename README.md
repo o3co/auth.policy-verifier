@@ -1,6 +1,6 @@
 # auth.policy-verifier
 
-Last updated: 2026-09-30
+Last updated: 2026-10-01
 
 [![CI](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth.policy-verifier.core)](https://www.npmjs.com/package/@o3co/auth.policy-verifier.core)
@@ -247,7 +247,9 @@ Empty rule set → **deny**. A request that collects no rule was never authorize
 engine denies it with `no_applicable_rule` — matching the implicit-deny semantics of OPA / OpenFGA /
 Cedar. `rule.onEmptyRuleSet = "allow"` is an explicit per-deployment opt-out that makes the engine
 fail-open; set it only when authorization is enforced elsewhere. Booting with no rule collector
-configured at all is rejected.
+configured at all is rejected. A rule marked `restricts` only narrows what the other rules
+allow and is no authorization by itself: a request that collects only restricting rules is
+denied the same way, and under `"allow"` is held to them.
 
 ### Built-in Rule Types
 

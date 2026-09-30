@@ -32,6 +32,7 @@ interface Rule {
   ruleType: string;
   code: string;
   message: string;
+  restricts?: true;
   verify(attrs: ReadonlyAttributes, report?: ReportRuleEvaluation): boolean;
 }
 ```
@@ -41,6 +42,7 @@ interface Rule {
 - `ruleType` は評価器が Rule をグループ化するのに使います。同じ `ruleType` の Rule は OR 結合されます（いずれか 1 つ通ればグループ通過）。異なる `ruleType` の Rule はグループ間 AND 結合されます（全グループ通過が必要）。**既定の `ruleType` は、暗黙の衝突を避けるためにルール設定を十分にエンコードしてください。** 例えば `AttrLiteralEqual` は `attr_literal_equal:${a}:${typeof v}:${String(v)}` を使います — `typeof v` セグメントは `v=true` と `v="true"` が同じ `ruleType` に畳み込まれて意図に反して OR 結合されるのを防ぎます。
 - `code` は短く安定した識別子（例: `"no_permission"`、`"attr_not_equal"`）で、下流のプログラム的ハンドリングに適した文字列にしてください。**1 つの Rule が生成しうる code の集合は小さく固定に保つこと。** `code` は `auth_denials_total` メトリクスの `code` ラベルと decision ログ行の `deniedBy` になるため、リクエストごとに導出される code（例えばリソース ID を畳み込んだもの）は有界でないメトリクスラベルになります。これは、監視すべき対象を監視する仕組みそのものをメトリクスエンドポイントが落とす経路です。サーバー側は異なる値 32 個で打ち止め、それ以降を `code="other"` に潰すので、最悪でも「Prometheus が死ぬ」ではなく「メトリクスが役に立たなくなる」で済みますが、変動する部分はラベルにならない `message` に入れてください。
 - `message` は人間可読な denial メッセージです。有益な情報を載せつつ、機微な属性値は漏らさないこと。
+- `restricts: true` は、ほかの Rule が許すものを絞るだけの Rule（テナント一致、「停止中でない」の確認、委任トークンの range など）に付けます。Cedar の `forbid` が `permit` を絞るのと同じです。評価器は、適用される Rule があるかを判断するとき、印のない許可する Rule だけを数えます。絞る Rule しか適用されないリクエストは、それらを評価せずに `no_applicable_rule` で deny され、`rule.onEmptyRuleSet = "allow"` のときはそれらに従います。許可の根拠になる Rule、つまり絞るために書いたのでないすべての Rule には付けないでください。1 つの `ruleType` グループにはどちらか一方だけを入れます。混在したグループは `TypeError` で拒否され、request は `500` で答えます。通過した絞る Rule が、許可する Rule の代わりにグループを満たしてしまうからです。同じ `ruleType` の絞る Rule も、ほかと同じく選択肢（OR）なので、両方が成り立つべき 2 つの制約にはそれぞれ別の `ruleType` を与えてください。`forbid` との類比は Rule ごとではなく、グループごとに成り立ちます。core が使う厳密な判定は `isRestrictingRule` です。
 
 ### 実例: `UserLevelAtLeast`
 
@@ -205,6 +207,7 @@ interface AsyncRule {
   code: string;
   message: string;
   readonly async: true; // 判別子 — isAsyncRule は decide の有無ではなくこれを読む
+  readonly restricts?: true; // Rule と同じ
   decide(attrs: ReadonlyAttributes, signal: AbortSignal, report?: ReportRuleEvaluation): Promise<boolean>;
 }
 ```

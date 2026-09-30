@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.core
 
-Last updated: 2026-09-25
+Last updated: 2026-10-01
 
 Types, evaluation engine, and module infrastructure for auth.policy-verifier. This package defines the interfaces that collectors, rules, and modules implement.
 
@@ -45,7 +45,7 @@ Everything the package exports is listed in [`src/index.mts`](src/index.mts). Ea
 
 Evaluates collected attributes against a set of rules. Rules are grouped by `ruleType`; within a group, any passing rule satisfies the group (OR); all groups must be satisfied for an allow decision (AND across groups). It resolves to a `Decision`: an allow with a `reason`, or a deny with a `code`, a `message` and a `reason`.
 
-An **empty rule set is denied** (`code: "no_applicable_rule"`): a request no rule spoke to was never authorized. Pass `{ onEmptyRuleSet: "allow" }` as the third argument to opt a deployment out of that default.
+A **request no granting rule applies to is denied** (`code: "no_applicable_rule"`): a request no rule spoke to was never authorized. Pass `{ onEmptyRuleSet: "allow" }` as the third argument to opt a deployment out of that default. A rule marked `restricts: true` only narrows what the granting rules allow and does not count here: a request that only restricting rules apply to is denied without asking them, and under `"allow"` is held to them. A `ruleType` group that mixes the two kinds is refused with a `TypeError`.
 
 Every decision carries a structured `reason`: `reason.groups` lists each rule group in evaluation order with `passed` and `evaluated` — the rules that group actually ran, in order. A failing group ran every alternative, so `evaluated` lists them all; a passing group is an OR and stops at its first passing rule, so `evaluated` holds the alternatives that were tried and failed followed by that rule, and `satisfiedBy` (present only on a passing group) names it as the one that decided. All groups are evaluated, including groups after the first failing one, because stopping early cannot report which of the rest would also have failed. The `code` / `message` on a deny still come from the first failing group.
 
