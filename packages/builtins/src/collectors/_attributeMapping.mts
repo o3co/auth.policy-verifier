@@ -13,6 +13,9 @@
 
 import type { AttributeKeyReservation, Attributes } from "@o3co/auth.policy-verifier.core";
 import { attributeKeyReservation } from "@o3co/auth.policy-verifier.core";
+// This package's own keys are reserved by loading their module, which a
+// mapping collector must not depend on the package entry to have done.
+import "../keys.mjs";
 
 /** Types a field may be promoted as. */
 export type AttributeMappingType = "string" | "number" | "boolean" | "string[]";

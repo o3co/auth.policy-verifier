@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.builtins
 
-Last updated: 2026-09-24
+Last updated: 2026-10-01
 
 Built-in attribute collectors, rule collectors, and resource parser for auth.policy-verifier.
 
@@ -16,8 +16,9 @@ a host such as the server's `createApp`. It depends on `@o3co/auth.policy-verifi
 
 - **Owns** what these implementations read, write and match: the mapping from JWT claims
   (`sub`, `azp`, `scope`, declared claims) to attribute keys (#170), the matching rules of
-  `HasScope` / `HasPermission` and the comparison rules, and the dot-notation resource
-  grammar.
+  `HasScope` / `HasPermission` and the comparison rules, the dot-notation resource
+  grammar, and the implementation of the claims contract's delegation-range grammar and
+  containment rule (the contract itself is the umbrella repository's).
 - **Does not own** the pipelines, the grouping or the decision (core), authentication or HTTP
   (`server`), policy engines or `AsyncRule`s (`cedar`), or collectors that do I/O — those are
   the consumer's to write ([docs/extending.md](../../docs/extending.md)).
@@ -51,6 +52,7 @@ All collectors implement `AttributeCollector`.
 | `StaticRoleCollector` | — | `ATTR_ROLES: Role[]` | `{ roles: Role[] }` |
 | `RequestContextAttributeCollector` | declared fields of `requestContext` | the operator's own keys | `{ attributes: Mapping[] }` |
 | `PayloadClaimAttributeCollector` | declared claims of the verified `subject` | the operator's own keys, or core's five | `{ attributes: Mapping[] }` (#219) |
+| `DelegationRangeCollector` | the paths of the token's `authorization_details` entries of the configured type | `ATTR_DELEGATION_RANGE: string[]` | `{ type: string, claim?: string }` — [Delegated tokens](#delegated-tokens-range-and-actor) |
 
 `StaticPermissionCollector` and `StaticRoleCollector` always emit the values supplied at construction time, regardless of request context. They copy what they were given at construction — the array, and for `StaticRoleCollector` each `Role` and its `permissions` — so mutating the config afterwards changes nothing they emit (#255). `permissions` and `roles` must be arrays: anything else, a string included (`permissions = "posts.*"` where `["posts.*"]` was meant), is refused with a `TypeError` at construction, so the deployment fails at boot (#264).
 
@@ -67,7 +69,7 @@ Promotes declared claims of the **verified subject** into attributes (#219) — 
   ] }
 ```
 
-Same mapping shape as `RequestContextAttributeCollector` (`{ from, to?, type? }`, an exact key winning over a dot path, own properties only). What differs is the source, and therefore the trust: the subject bag is what the authenticator verified, so a mapping **may** land on core's five keys — `scopes`, `permissions`, `roles`, `userId`, `clientId` — where the request-context collector refuses them. Two collectors writing one list key union it; that is the deployment composing two issuer-derived sources, and it says so in config. A *scalar* key written by two collectors with different values throws `AttributeConflictError` and denies every request — do not map onto `userId` / `clientId` while `PayloadSubjectIdCollector` also writes them. Keys another package reserved (cedar's `request*`) stay refused, because they are derived from the request, not from the subject. And map only claims the IdP populates from its own registration or admin data: a claim minted from user-editable metadata (Clerk's `unsafe_metadata`, Auth0's `user_metadata`) is signed, not trusted.
+Same mapping shape as `RequestContextAttributeCollector` (`{ from, to?, type? }`, an exact key winning over a dot path, own properties only). What differs is the source, and therefore the trust: the subject bag is what the authenticator verified, so a mapping **may** land on core's five keys — `scopes`, `permissions`, `roles`, `userId`, `clientId` — where the request-context collector refuses them. Two collectors writing one list key union it; that is the deployment composing two issuer-derived sources, and it says so in config. A *scalar* key written by two collectors with different values throws `AttributeConflictError` and denies every request — do not map onto `userId` / `clientId` while `PayloadSubjectIdCollector` also writes them. Keys another package reserved stay refused, because that package writes them with a collector of its own — cedar's `request*` from the request, this package's `delegationRange` from the claim `DelegationRangeCollector` narrows — and a claim mapped onto one would be a second writer. And map only claims the IdP populates from its own registration or admin data: a claim minted from user-editable metadata (Clerk's `unsafe_metadata`, Auth0's `user_metadata`) is signed, not trusted.
 
 For the scope claim specifically, prefer `PayloadScopeCollector { claim = "scp" }`, which also reads the space-delimited string form and pairs with `ResourceActionScopeRuleCollector { claim = "scp" }` — set on both, since each keeps its own `claim` and nothing checks they match — so both look at the same claim. The rule collector checks only that the claim is present: a claim holding no usable scope list (`""`, a number) yields no scopes but still counts as scoped under `scopeless = "skip"`.
 
@@ -104,13 +106,42 @@ A mapping's `to` may not name a **reserved attribute key**. Naming one is a **co
 { from = "scopes", to = "requestedScopes", type = "string[]" }
 ```
 
-The reserved set is **not a list this package keeps**. It is core's registry (`RESERVED_ATTRIBUTE_KEYS`, `reserveAttributeKeys`, `attributeKeyReservation`): core reserves its own five — `scopes`, `permissions`, `roles`, `userId`, `clientId` — and every package that owns attribute vocabulary reserves its own at module load. `@o3co/auth.policy-verifier.cedar` reserves `requestAction`, `requestResourceType`, `requestResourceId` and `requestResourceRaw`; a project-side collector should reserve the keys it writes the same way. A composition that can name a package's collectors in config has already imported that package, so its keys are registered before this collector is constructed — which is why the guard covers vocabulary core cannot see. The refusal names the owning package, and suggests a rename that is not itself reserved.
+The reserved set is **not a list this package keeps**. It is core's registry (`RESERVED_ATTRIBUTE_KEYS`, `reserveAttributeKeys`, `attributeKeyReservation`): core reserves its own five — `scopes`, `permissions`, `roles`, `userId`, `clientId` — and every package that owns attribute vocabulary reserves its own at module load. `@o3co/auth.policy-verifier.cedar` reserves `requestAction`, `requestResourceType`, `requestResourceId` and `requestResourceRaw`, and this package reserves `delegationRange` (`ATTR_DELEGATION_RANGE`); a project-side collector should reserve the keys it writes the same way. A composition that can name a package's collectors in config has already imported that package, so its keys are registered before this collector is constructed — which is why the guard covers vocabulary core cannot see. The refusal names the owning package, and suggests a rename that is not itself reserved.
 
 `context` is the caller's, and those keys are the deployment's. Under the default server `scopes`, `userId` and `clientId` are read out of the **signature-verified token**, `permissions` / `roles` carry the entitlements the builtin rules decide from, and cedar's four carry the parsed request — so the two sides of such a mapping carry entirely different trust, and the request body must not join them in one bucket.
 
 What makes it worth refusing rather than documenting is the merge: `AttributePipeline` **unions** array-valued attributes across collectors. A mapping onto `scopes` therefore does not overwrite what `PayloadScopeCollector` produced and lose an argument with it — it *extends* it. A caller sending `context.groups = ["admin:write"]` would be authorized for a scope its token never carried, and nothing in the decision, the logs or the metrics would tell that apart from an issuer that granted it. See `AttributePipeline`'s merge doc comment.
 
 A scalar key is no safer, in two ways. Where both sides write it the values disagree and `AttributeConflictError` denies the request — fail-closed, but an unannounced denial rather than a refusal at boot. And where the owning collector writes its key only *sometimes* there is no second writer at all: cedar's `RequestFactsCollector` omits `requestResourceId` for an id-less resource such as `"document"`, so `{ from = "rid", to = "requestResourceId" }` would land unopposed and the Cedar resource entity would be built from the caller's own request body.
+
+### Delegated tokens: range and actor
+
+A token a delegation grant issued — a client acting for a subject — carries its range as RFC 9396 `authorization_details` entries of one type, each `{ "type": <that type>, "path": "<path>" }`, and the acting client as `act.sub` (RFC 8693 §4.1). The path grammar and the containment rule are the provider–verifier [claims contract](https://github.com/o3co/auth/blob/develop/docs/claims-contract.md)'s:
+
+- a path is `(type(:id)?.)*action`: `type` and `action` are `[a-z][a-z0-9_]*`, and `id` is `[A-Za-z0-9_~-]`, anything else percent-encoded in upper-case hex. An id is compared as written, so `%41` and `A` are two ids: the issuer and the resource must encode alike;
+- an entry contains a path when it is a segment-wise prefix of it, and an entry segment that names no id contains the same type with any id: `project:p1.report` contains `project:p1.report:r7.run`. The entry's last element is compared as a type even when it names an action, so `project:p1.run` contains `project:p1.run.more`: keep action names apart from type names.
+
+To decide the range together with the policies, configure the pair with the same `type`, read from one place:
+
+```hocon
+attribute { collectors = [
+  { collector = "PayloadScopeCollector" }
+  # the issuer's delegation type; unset, both entries lack `type` and boot is refused
+  { collector = "DelegationRangeCollector", type = ${?DELEGATION_TYPE} }
+  # the acting client, for policies that name it
+  { collector = "PayloadClaimAttributeCollector", attributes = [ { from = "act.sub", to = "actorId" } ] }
+] }
+rule { collectors = [
+  { collector = "ResourceActionScopeRuleCollector" }
+  { collector = "DelegationRangeRuleCollector", type = ${?DELEGATION_TYPE} }
+] }
+```
+
+- `DelegationRangeCollector` writes the entries' paths to `ATTR_DELEGATION_RANGE` (`"delegationRange"`, reserved by this package). A path outside the grammar is left out, which narrows the range; a token with entries of the type but no readable path gets an empty range, which contains nothing, and so does a token whose claim is there in another shape — not a list, or a list holding something other than entry objects — whatever types its entries name: a token that shares `authorization_details` with other RFC 9396 types must carry it as a list of entry objects, or it is denied everything.
+- `DelegationRangeRuleCollector` emits one [`WithinDelegationRange`](#withindelegationrange) rule for the requested path — `<resource.raw>.<action>`, so `resource: "project:p1.report:r7"` with `action: "run"` is `project:p1.report:r7.run` — when the token carries a range (an entry of the type, or the claim in another shape), and no rule otherwise. The action must be one action of the grammar: one of several elements (`report.delete`) would re-split the joined path, so a request on the parent would read as one on a child the range contains, and the rule fails instead. The rule is a group of its own and restricts (`restricts: true`), so a delegated token is allowed only what the range and the policies both allow: one no policy rule applies to is decided by `rule.onEmptyRuleSet` (`no_applicable_rule` by default), never by its range alone. A token without a range is decided as it is without the pair.
+- Give both the same `type` and `claim` (default `authorization_details`); nothing checks that they agree. Configured apart, the pair fails one of two ways. Where the rule collector finds the token's entries and the attribute collector does not, the rule finds no range and the request is denied. The other way round, no rule is emitted and **the range is not enforced**.
+- The requested path is built from the resource string the caller sent, whatever resource parser is configured. Resources written in another grammar (`projects/p1/reports/r7`) parse as no path, and every delegated request is denied.
+- The resource a request names is the caller's claim, its parent chain included. A policy that relies on the chain — containment, `in` — needs it confirmed first, by a collector of your own that reads the store it lives in ([docs/extending.md](../../docs/extending.md#writing-a-custom-attributecollector)).
 
 ## Rules
 
@@ -155,6 +186,10 @@ new AttrMatchRule({ a: string, b: string, group?: string })
 - Passes when `attrs.get(a)` and `attrs.get(b)` are both non-empty strings and equal. Any other case returns `false` (fail closed).
 - Pure predicate — does not read `CollectorContext`. Consuming projects provide the two values to compare through upstream `AttributeCollector`s and wire the rule through their own `RuleCollector`.
 - `ruleType` defaults to `"attr_match:${a}:${b}"`. The evaluator ORs rules within a `ruleType` and ANDs across different `ruleType`s, so the default ensures two independent comparisons are AND-combined (required together). Pass `group` explicitly when you want two comparisons to be OR-combined (for example, "identify by DID or by email") — both rules then share the provided `group` as their `ruleType`.
+
+### WithinDelegationRange
+
+Passes when an entry of `ATTR_DELEGATION_RANGE` contains the requested path, by the claims contract's containment rule ([Delegated tokens](#delegated-tokens-range-and-actor)). A range that is absent, or holds no string that contains the path, fails, and so does a requested path outside the grammar. `ruleType` is `delegation_range` and `code` is `outside_delegation_range`. It restricts: it narrows what the other rules allow and is no reason to allow on its own. `DelegationRangeRuleCollector` builds it. A deployment that needs another containment rule writes its own rule over `ATTR_DELEGATION_RANGE`, and a rule collector that emits it, in place of `DelegationRangeRuleCollector`.
 
 ## Attribute Comparison Rules
 
@@ -263,13 +298,15 @@ Every attribute comparison rule reads each field of its config once, validates i
 | --- | --- | --- |
 | `ResourceActionPermissionRuleCollector` | `"<resource.raw>.perm:<action>"` | `[HasPermission(...)]` |
 | `ResourceActionScopeRuleCollector` | `"<action>:<resource.resourceType>"` | `[HasScope(...)]` |
+| `DelegationRangeRuleCollector` | `"<resource.raw>.<action>"`, for a token with a range | `[WithinDelegationRange(...)]`, or `[]` |
 
-`ResourceActionPermissionRuleCollector` takes no constructor arguments.
+`ResourceActionPermissionRuleCollector` takes no constructor arguments. `DelegationRangeRuleCollector` takes `{ type: string, claim?: string }` — [Delegated tokens](#delegated-tokens-range-and-actor).
 `ResourceActionScopeRuleCollector` accepts `{ scopeless?: "deny" | "skip", allowBareScopeRewrite?: boolean, claim?: string }` — `claim` names the claim whose presence says the token asserted scopes (default `scope`; set it to what `PayloadScopeCollector` reads, e.g. `scp`).
 
 - `scopeless` (default `"deny"`): it emits the `HasScope` rule for every request, so a token carrying no scope
-  claim (`scope`, or the claim `claim` names) fails it. `"skip"` emits no rule for a scopeless token — only use it in a pipeline where another rule
-  group authorizes the request, since a request that collects no rule at all is denied.
+  claim (`scope`, or the claim `claim` names) fails it. `"skip"` emits no rule for a scopeless token — only use it in a pipeline where another granting
+  rule group authorizes the request, since a request that collects no granting rule is denied: a restricting rule such as
+  [`WithinDelegationRange`](#withindelegationrange) does not authorize it.
 - `allowBareScopeRewrite` (default `false`): forwarded to [`HasScope`](#hasscope). Set it to `true` only if your
   issuer emits bare resource names (`project`) rather than `{action}:{resourceType}` scopes (`read:project`).
 
@@ -344,8 +381,10 @@ Registrations as of this writing; the source of truth is [`src/module.mts`](src/
 | `attributeCollector` | `"StaticRoleCollector"` | `(config) => new StaticRoleCollector(config)` |
 | `attributeCollector` | `"RequestContextAttributeCollector"` | `(config) => new RequestContextAttributeCollector(config)` |
 | `attributeCollector` | `"PayloadClaimAttributeCollector"` | `(config) => new PayloadClaimAttributeCollector(config)` |
+| `attributeCollector` | `"DelegationRangeCollector"` | `(config) => new DelegationRangeCollector(config)` |
 | `ruleCollector` | `"ResourceActionScopeRuleCollector"` | `(config) => new ResourceActionScopeRuleCollector(config)` |
 | `ruleCollector` | `"ResourceActionPermissionRuleCollector"` | `() => new ResourceActionPermissionRuleCollector()` |
+| `ruleCollector` | `"DelegationRangeRuleCollector"` | `(config) => new DelegationRangeRuleCollector(config)` |
 | `resourceParser` | `"DotNotationResourceParser"` | `() => new DotNotationResourceParser()` |
 
 ## See Also

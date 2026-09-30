@@ -5,6 +5,8 @@
 import "@o3co/auth.policy-verifier.cedar-wasm";
 
 import {
+	ATTR_DELEGATION_RANGE,
+	DelegationRangeRuleCollector,
 	ResourceActionPermissionRuleCollector,
 	ResourceActionScopeRuleCollector,
 } from "@o3co/auth.policy-verifier.builtins";
@@ -71,6 +73,41 @@ describeRulePurityConformance({
 			name: "a request the collected rule denies",
 			context: permissionContext,
 			attrs: new Map<string, unknown>([["permissions", ["project:1.perm:write"]]]),
+		},
+	],
+});
+
+const delegationContext: CollectorRequest = {
+	subject: {
+		sub: "user-1",
+		authorization_details: [{ type: "delegation", path: "project:p1.report" }],
+	},
+	resource: {
+		raw: "project:p1.report:r7",
+		resourceType: "report",
+		resourceId: "r7",
+	},
+	action: "run",
+};
+
+describeRulePurityConformance({
+	name: "DelegationRangeRuleCollector",
+	collect: (context) => new DelegationRangeRuleCollector({ type: "delegation" }).collect(context),
+	cases: [
+		{
+			name: "a range that contains the request",
+			context: delegationContext,
+			attrs: new Map<string, unknown>([[ATTR_DELEGATION_RANGE, ["project:p1.report"]]]),
+		},
+		{
+			name: "a range that does not",
+			context: delegationContext,
+			attrs: new Map<string, unknown>([[ATTR_DELEGATION_RANGE, ["project:p2"]]]),
+		},
+		{
+			name: "attributes the rule cannot read at all",
+			context: delegationContext,
+			attrs: new Map<string, unknown>(),
 		},
 	],
 });

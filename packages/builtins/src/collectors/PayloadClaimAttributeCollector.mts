@@ -45,9 +45,11 @@ export type PayloadClaimAttributeCollectorConfig = AttributeMappingCollectorConf
  * built-in one, a signature-verified token unless `oauth.jwt.mode` is
  * `"insecure-decode"` — not the caller's `requestContext`, so a mapping may land
  * on core's keys (`scopes`, `permissions`, `roles`, `userId`, `clientId`).
- * Keys another package reserved (cedar's `request*`) stay refused: they are
- * derived from the parsed request, not from the subject, and a claim landing
- * on one would be a second writer with a different meaning.
+ * Keys another package reserved stay refused: that package writes them with a
+ * collector of its own — cedar's `request*` from the parsed request, this
+ * package's `delegationRange` from the claim `DelegationRangeCollector`
+ * narrows — and a claim landing on one would be a second writer with a
+ * different meaning.
  *
  * Two cautions the trust argument depends on. Map only claims the IdP
  * populates from its own registration or admin data, never from user-editable
@@ -85,8 +87,8 @@ function refusal(index: number, reservation: AttributeKeyReservation): string {
 	return (
 		`PayloadClaimAttributeCollector: attributes[${index}] maps onto the reserved attribute "${key}", ` +
 		`which belongs to ${owner}${reason === undefined ? "" : ` — ${reason}`}. ` +
-		"That package derives the key from the request, not from the subject, so a verified claim " +
-		"landing on it would be a second writer with a different meaning. " +
+		"That package writes the key with a collector of its own, so a verified claim landing on it " +
+		"would be a second writer with a different meaning. " +
 		`Promote the claim under a key of your own (for example "${suggestUnreservedAttributeKey(key)}").`
 	);
 }

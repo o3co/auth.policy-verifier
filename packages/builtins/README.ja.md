@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.builtins
 
-最終更新: 2026-09-24
+最終更新: 2026-10-01
 
 auth.policy-verifier 向けの組み込み attribute collector、rule collector、および resource parser です。
 
@@ -10,7 +10,7 @@ auth.policy-verifier 向けの組み込み attribute collector、rule collector�
 
 core のインターフェースを実装した、小さな既製のセットです: attribute collector、rule、rule collector、resource parser、そしてそれらを server の `createApp` などのホストに登録する `builtinCollectorsModule`。依存は `@o3co/auth.policy-verifier.core` だけです。`templates/standalone` がこれを組み込み、`server` はテストでのみ使います（`devDependencies`）。
 
-- **所有するもの:** これらの実装が何を読み、何を書き、どう照合するか — JWT クレーム（`sub`、`azp`、`scope`、宣言したクレーム）から属性キーへの対応（#170）、`HasScope` / `HasPermission` と比較ルールの照合規則、ドット記法のリソース文法。
+- **所有するもの:** これらの実装が何を読み、何を書き、どう照合するか — JWT クレーム（`sub`、`azp`、`scope`、宣言したクレーム）から属性キーへの対応（#170）、`HasScope` / `HasPermission` と比較ルールの照合規則、ドット記法のリソース文法、クレーム契約の委任 range の文法と包含ルールの実装（契約そのものは umbrella リポジトリのもの）。
 - **所有しないもの:** パイプライン、グルーピング、判定（core）、認証や HTTP（`server`）、ポリシーエンジンや `AsyncRule`（`cedar`）、I/O を行う collector（利用側が書くもの。[docs/extending.ja.md](../../docs/extending.ja.md)）。
 - **core と別パッケージである理由:** core はエンジン中立の契約で、subject のフィールドを一切名指ししません（#170）。クレームの語彙と具体的な照合はその線の反対側、つまりここに置きます（[AGENTS.md — Core Vocabulary Scope](../../AGENTS.md#core-vocabulary-scope)）。また任意導入でもあります: builtins は意図的に基本セットであってカタログではない（[docs/extending.ja.md](../../docs/extending.ja.md)）ので、collector と rule を自前で書くデプロイメントはインストール不要で、core もこれに合わせて肥大化しません。
 
@@ -36,6 +36,7 @@ npm install @o3co/auth.policy-verifier.builtins
 | `StaticRoleCollector` | — | `ATTR_ROLES: Role[]` | `{ roles: Role[] }` |
 | `RequestContextAttributeCollector` | `requestContext` の宣言済みフィールド | 運用者が決めたキー | `{ attributes: Mapping[] }` |
 | `PayloadClaimAttributeCollector` | 検証済み `subject` の宣言済みクレーム | 運用者が決めたキー、または core の 5 キー | `{ attributes: Mapping[] }` (#219) |
+| `DelegationRangeCollector` | トークンの `authorization_details` のうち、設定した type のエントリのパス | `ATTR_DELEGATION_RANGE: string[]` | `{ type: string, claim?: string }` — [委任トークン](#委任トークン-range-と-actor) |
 
 `StaticPermissionCollector` と `StaticRoleCollector` は、リクエストのコンテキストに関わらず、コンストラクタに渡した値を常に出力します。渡された値は構築時にコピーされます — 配列、そして `StaticRoleCollector` では各 `Role` とその `permissions` も — ので、構築後に config を変更しても出力は変わりません（#255）。`permissions` と `roles` は配列でなければなりません。それ以外の値は、文字列も含めて（`["posts.*"]` のつもりで `permissions = "posts.*"` と書いた場合など）構築時に `TypeError` で拒否され、デプロイは起動時に失敗します（#264）。
 
@@ -52,7 +53,7 @@ npm install @o3co/auth.policy-verifier.builtins
   ] }
 ```
 
-マッピングの形は `RequestContextAttributeCollector` と同じです（`{ from, to?, type? }`、完全一致するキーが dot path より優先、own property のみ）。違うのは読み取り元であり、したがって信頼度です: subject バッグは authenticator が検証したものなので、request-context コレクターが拒否する core の 5 キー — `scopes`、`permissions`、`roles`、`userId`、`clientId` — にもマッピングを着地させて**かまいません**。2 つのコレクターが 1 つのリストキーに書けば union されます。それはデプロイが issuer 由来の 2 つのソースを合成しているということであり、config にそう書かれています。一方、2 つのコレクターが異なる値で書いた*スカラー*キーは `AttributeConflictError` を投げ、すべてのリクエストを deny します — `PayloadSubjectIdCollector` も `userId` / `clientId` を書いている間は、そこへマッピングしないでください。別のパッケージが予約したキー（cedar の `request*`）は引き続き拒否されます。それらは subject ではなくリクエストから導出されるものだからです。そして、マッピングするのは IdP が自身の登録データや管理データから埋めるクレームだけにしてください: ユーザーが編集できるメタデータ（Clerk の `unsafe_metadata`、Auth0 の `user_metadata`）から発行されたクレームは、署名されてはいても信頼できるものではありません。
+マッピングの形は `RequestContextAttributeCollector` と同じです（`{ from, to?, type? }`、完全一致するキーが dot path より優先、own property のみ）。違うのは読み取り元であり、したがって信頼度です: subject バッグは authenticator が検証したものなので、request-context コレクターが拒否する core の 5 キー — `scopes`、`permissions`、`roles`、`userId`、`clientId` — にもマッピングを着地させて**かまいません**。2 つのコレクターが 1 つのリストキーに書けば union されます。それはデプロイが issuer 由来の 2 つのソースを合成しているということであり、config にそう書かれています。一方、2 つのコレクターが異なる値で書いた*スカラー*キーは `AttributeConflictError` を投げ、すべてのリクエストを deny します — `PayloadSubjectIdCollector` も `userId` / `clientId` を書いている間は、そこへマッピングしないでください。別のパッケージが予約したキーは引き続き拒否されます。そのパッケージが自分の collector で書くキーだからです（cedar の `request*` はリクエストから、このパッケージの `delegationRange` は `DelegationRangeCollector` が絞り込むクレームから）。クレームをそこへマッピングすると、2 つ目の書き手になります。そして、マッピングするのは IdP が自身の登録データや管理データから埋めるクレームだけにしてください: ユーザーが編集できるメタデータ（Clerk の `unsafe_metadata`、Auth0 の `user_metadata`）から発行されたクレームは、署名されてはいても信頼できるものではありません。
 
 scope クレームについては `PayloadScopeCollector { claim = "scp" }` を優先してください。こちらはスペース区切り文字列の形も読み、`ResourceActionScopeRuleCollector { claim = "scp" }` と組にすることで、両者が同じ claim を見ます（それぞれが自分の `claim` を持ち、一致は検査されないので両方に設定してください）。rule collector は claim の有無だけを見ます — 使える scope リストを持たない claim（`""`、数値）は scope を生まない一方、`scopeless = "skip"` では scope ありとして扱われます。
 
@@ -89,13 +90,42 @@ scope クレームについては `PayloadScopeCollector { claim = "scp" }` を�
 { from = "scopes", to = "requestedScopes", type = "string[]" }
 ```
 
-予約集合は**このパッケージが保持するリストではありません**。core のレジストリ（`RESERVED_ATTRIBUTE_KEYS` / `reserveAttributeKeys` / `attributeKeyReservation`）です。core は自身の 5 キー — `scopes`、`permissions`、`roles`、`userId`、`clientId` — を予約し、属性語彙を持つ各パッケージはモジュールロード時に自分の語彙を予約します。`@o3co/auth.policy-verifier.cedar` は `requestAction` / `requestResourceType` / `requestResourceId` / `requestResourceRaw` を予約します。プロジェクト側の Collector も、書き込むキーを同じ方法で予約してください。設定でそのパッケージの Collector 名を書ける構成は、すでにそのパッケージを import しているため、このコレクターが構築される前にキーは登録済みです — core から見えない語彙まで guard が効くのはこのためです。拒否メッセージは所有パッケージ名を示し、それ自体が予約されていない代替名を提案します。
+予約集合は**このパッケージが保持するリストではありません**。core のレジストリ（`RESERVED_ATTRIBUTE_KEYS` / `reserveAttributeKeys` / `attributeKeyReservation`）です。core は自身の 5 キー — `scopes`、`permissions`、`roles`、`userId`、`clientId` — を予約し、属性語彙を持つ各パッケージはモジュールロード時に自分の語彙を予約します。`@o3co/auth.policy-verifier.cedar` は `requestAction` / `requestResourceType` / `requestResourceId` / `requestResourceRaw` を予約し、このパッケージは `delegationRange`（`ATTR_DELEGATION_RANGE`）を予約します。プロジェクト側の Collector も、書き込むキーを同じ方法で予約してください。設定でそのパッケージの Collector 名を書ける構成は、すでにそのパッケージを import しているため、このコレクターが構築される前にキーは登録済みです — core から見えない語彙まで guard が効くのはこのためです。拒否メッセージは所有パッケージ名を示し、それ自体が予約されていない代替名を提案します。
 
 `context` は呼び出し側のもので、これらのキーはデプロイ側のものです。既定のサーバーでは `scopes` / `userId` / `clientId` は**署名検証済みトークン**から読まれ、`permissions` / `roles` は builtin の Rule が判断に使う権限を、cedar の 4 キーはパース済みリクエストを運びます。信頼レベルがまったく異なり、リクエストボディがそれらと同じバケツに合流してはなりません。
 
 ドキュメントで注意喚起するのではなく拒否する価値があるのはマージの挙動ゆえです。`AttributePipeline` はコレクター間で配列値の attribute を**union** します。したがって `scopes` へのマッピングは `PayloadScopeCollector` の出力を上書きして競合するのではなく、*追加*します。`context.groups = ["admin:write"]` を送った呼び出し側は、トークンが一度も持たなかった scope で認可され、判定・ログ・メトリクスのいずれにも issuer が付与した場合との区別は現れません。`AttributePipeline` の merge の doc コメントを参照してください。
 
 スカラーキーなら安全というわけでもなく、理由は 2 つあります。双方が書けば値が食い違い、`AttributeConflictError` でそのリクエストは拒否されます — fail-closed ではありますが、起動時の拒否ではなく予告のない拒否です。そして所有側のコレクターが*条件付きでしか*書かないキーには、そもそも競合相手がいません。cedar の `RequestFactsCollector` は `"document"` のような id を持たないリソースでは `requestResourceId` を書かないため、`{ from = "rid", to = "requestResourceId" }` は誰とも競合せずに着地し、Cedar の resource エンティティが呼び出し側のリクエストボディから組み立てられてしまいます。
+
+### 委任トークン: range と actor
+
+委任 grant が発行したトークン（subject のために client が動くもの）は、その range を 1 種類の type の RFC 9396 `authorization_details` エントリ（各 `{ "type": <その type>, "path": "<パス>" }`）として、動いている client を `act.sub`（RFC 8693 §4.1）として持ちます。パスの文法と包含ルールは、provider–verifier の[クレーム契約](https://github.com/o3co/auth/blob/develop/docs/claims-contract.md)のものです:
+
+- パスは `(type(:id)?.)*action`。`type` と `action` は `[a-z][a-z0-9_]*`、`id` は `[A-Za-z0-9_~-]` で、それ以外の文字は大文字の 16 進でパーセントエンコードします。id は書かれたとおりに比較されるので、`%41` と `A` は別の id です。issuer とリソースは同じようにエンコードしてください。
+- エントリがパスの先頭からセグメント単位の接頭辞になっていれば、そのエントリはパスを含みます。id を持たないエントリのセグメントは、同じ type の任意の id を含みます。`project:p1.report` は `project:p1.report:r7.run` を含みます。エントリの最後の要素は、action を名指すときも type として比較されるので、`project:p1.run` は `project:p1.run.more` を含みます。action の名前と type の名前は分けてください。
+
+range をポリシーと合わせて判定するには、1 か所から読んだ同じ `type` で 2 つを設定します:
+
+```hocon
+attribute { collectors = [
+  { collector = "PayloadScopeCollector" }
+  # issuer の委任 type。未設定なら両方のエントリに `type` がなく、起動が拒否される
+  { collector = "DelegationRangeCollector", type = ${?DELEGATION_TYPE} }
+  # 動いている client。ポリシーから参照する場合
+  { collector = "PayloadClaimAttributeCollector", attributes = [ { from = "act.sub", to = "actorId" } ] }
+] }
+rule { collectors = [
+  { collector = "ResourceActionScopeRuleCollector" }
+  { collector = "DelegationRangeRuleCollector", type = ${?DELEGATION_TYPE} }
+] }
+```
+
+- `DelegationRangeCollector` はエントリのパスを `ATTR_DELEGATION_RANGE`（`"delegationRange"`、このパッケージが予約）に書きます。文法外のパスは除外され、range が狭まる方向に働きます。その type のエントリはあるが読めるパスがないトークンは空の range になり、何も含みません。クレームが別の形（リストでない、またはエントリのオブジェクト以外を含むリスト）で存在するトークンも、エントリがどの type を名指すかにかかわらず同じです。`authorization_details` をほかの RFC 9396 の type と共有するトークンは、エントリのオブジェクトのリストとして持たないと、すべて deny されます。
+- `DelegationRangeRuleCollector` は、トークンが range を持つとき（その type のエントリがあるか、クレームが別の形で存在するとき）、リクエストのパス（`<resource.raw>.<action>`。`resource: "project:p1.report:r7"` と `action: "run"` なら `project:p1.report:r7.run`）について [`WithinDelegationRange`](#withindelegationrange) ルールを 1 つ生成し、持たないときは何も生成しません。action は文法上の 1 つの action でなければなりません。複数の要素からなる action（`report.delete`）は結合したパスの区切りを変えてしまい、親へのリクエストが range に含まれる子へのリクエストとして読めてしまうので、その場合ルールは fail します。このルールは独立したグループで、絞るルール（`restricts: true`）なので、委任トークンは range とポリシーの両方が許すものだけを許されます。ポリシーのルールが 1 つも適用されない委任トークンは、range だけで判定されることはなく、`rule.onEmptyRuleSet`（既定では `no_applicable_rule`）で判定されます。range のないトークンは、この 2 つがない場合と同じく判定されます。
+- 2 つには同じ `type` と `claim`（既定 `authorization_details`）を与えてください。一致しているかを確かめる仕組みはありません。食い違うと、2 通りに壊れます。ルール collector がトークンのエントリを見つけ、属性 collector が見つけない場合は、ルールが range を見つけられず、リクエストは deny されます。逆の場合はルールが生成されず、**range は適用されません**。
+- リクエストのパスは、設定したリソースパーサーにかかわらず、呼び出し元が送ったリソース文字列から作られます。別の文法で書かれたリソース（`projects/p1/reports/r7`）はパスとして読めず、委任されたリクエストはすべて deny されます。
+- リクエストが名指すリソースは、親の連鎖も含めて呼び出し元の主張です。連鎖に依拠するポリシー（包含、`in`）は、その連鎖を保存しているストアを読む独自の collector で、使う前に確かめる必要があります（[docs/extending.md](../../docs/extending.md#writing-a-custom-attributecollector)）。
 
 ## Rules
 
@@ -140,6 +170,10 @@ new AttrMatchRule({ a: string, b: string, group?: string })
 - `attrs.get(a)` と `attrs.get(b)` がいずれも非空文字列かつ等しいときに `true` を返します。それ以外はすべて `false`（fail closed）。
 - 純粋な述語です。`CollectorContext` を参照しません。比較対象の値はプロジェクト側の上流 `AttributeCollector` が attrs に格納し、プロジェクト側の `RuleCollector` でこの Rule を構築します。
 - `ruleType` の既定値は `"attr_match:${a}:${b}"` です。評価器は `ruleType` 内で OR、`ruleType` 間で AND を取るので、この既定値により異なる2つの比較は AND（両方必要）として扱われます。2つの比較を OR 結合したい場合（例「DID または email で一致」）は、両方の Rule に同じ `group` を指定してください。その `group` 値が `ruleType` として使われます。
+
+### WithinDelegationRange
+
+`ATTR_DELEGATION_RANGE` のエントリのどれかが、クレーム契約の包含ルール（[委任トークン](#委任トークン-range-と-actor)）でリクエストのパスを含むとき pass します。range がない場合や、パスを含む文字列が 1 つもない場合は fail し、文法外のリクエストパスも fail します。`ruleType` は `delegation_range`、`code` は `outside_delegation_range` です。絞るルールなので、ほかのルールが許すものを絞るだけで、それ自体は許可の根拠になりません。`DelegationRangeRuleCollector` が生成します。別の包含ルールが必要なデプロイは、`ATTR_DELEGATION_RANGE` を読む独自のルールと、それを生成するルール collector を書き、`DelegationRangeRuleCollector` の代わりに使います。
 
 ## Attribute Comparison Rules
 
@@ -248,13 +282,15 @@ new AttrPairCompare({ a: string, op: "lt" | "le" | "gt" | "ge", b: string, group
 | --- | --- | --- |
 | `ResourceActionPermissionRuleCollector` | `"<resource.raw>.perm:<action>"` | `[HasPermission(...)]` |
 | `ResourceActionScopeRuleCollector` | `"<action>:<resource.resourceType>"` | `[HasScope(...)]` |
+| `DelegationRangeRuleCollector` | `"<resource.raw>.<action>"`（range を持つトークンのとき） | `[WithinDelegationRange(...)]` または `[]` |
 
-`ResourceActionPermissionRuleCollector` にコンストラクタ引数はありません。
+`ResourceActionPermissionRuleCollector` にコンストラクタ引数はありません。`DelegationRangeRuleCollector` は `{ type: string, claim?: string }` を受け取ります — [委任トークン](#委任トークン-range-と-actor)。
 `ResourceActionScopeRuleCollector` は `{ scopeless?: "deny" | "skip", allowBareScopeRewrite?: boolean, claim?: string }` を受け取ります — `claim` はトークンが scope を主張していることを示す claim の名前です（既定 `scope`。`PayloadScopeCollector` が読むもの、例えば `scp` に合わせる）。
 
 - `scopeless`（既定 `"deny"`）: 既定ではリクエストごとに必ず `HasScope` ルールを生成するため、scope claim（`scope`、または `claim` が指す claim）を持たない
-  トークンはこのルールに落ちます。`"skip"` は scopeless トークンに対してルールを生成しませんが、ルールが 1 つも集まらない
-  リクエストは deny されるため、別のルールグループが認可を担うパイプラインでのみ使ってください。
+  トークンはこのルールに落ちます。`"skip"` は scopeless トークンに対してルールを生成しませんが、許可するルールが 1 つも集まらない
+  リクエストは deny されるため、許可する別のルールグループが認可を担うパイプラインでのみ使ってください。
+  [`WithinDelegationRange`](#withindelegationrange) のような絞るルールは認可になりません。
 - `allowBareScopeRewrite`（既定 `false`）: [`HasScope`](#hasscope) へそのまま渡されます。issuer が `{action}:{resourceType}`
   形式（`read:project`）ではなくプレフィックスなしのリソース名（`project`）を発行する場合にのみ `true` にしてください。
 
@@ -327,8 +363,10 @@ import { builtinCollectorsModule } from "@o3co/auth.policy-verifier.builtins";
 | `attributeCollector` | `"StaticRoleCollector"` | `(config) => new StaticRoleCollector(config)` |
 | `attributeCollector` | `"RequestContextAttributeCollector"` | `(config) => new RequestContextAttributeCollector(config)` |
 | `attributeCollector` | `"PayloadClaimAttributeCollector"` | `(config) => new PayloadClaimAttributeCollector(config)` |
+| `attributeCollector` | `"DelegationRangeCollector"` | `(config) => new DelegationRangeCollector(config)` |
 | `ruleCollector` | `"ResourceActionScopeRuleCollector"` | `(config) => new ResourceActionScopeRuleCollector(config)` |
 | `ruleCollector` | `"ResourceActionPermissionRuleCollector"` | `() => new ResourceActionPermissionRuleCollector()` |
+| `ruleCollector` | `"DelegationRangeRuleCollector"` | `(config) => new DelegationRangeRuleCollector(config)` |
 | `resourceParser` | `"DotNotationResourceParser"` | `() => new DotNotationResourceParser()` |
 
 ## 関連

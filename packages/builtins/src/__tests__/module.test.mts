@@ -34,6 +34,7 @@ describe("builtinCollectorsModule", () => {
 		expect(attributeCollectorRegistry.has("StaticRoleCollector")).toBe(true);
 		expect(attributeCollectorRegistry.has("RequestContextAttributeCollector")).toBe(true);
 		expect(attributeCollectorRegistry.has("PayloadClaimAttributeCollector")).toBe(true);
+		expect(attributeCollectorRegistry.has("DelegationRangeCollector")).toBe(true);
 	});
 
 	it("registers all builtin rule collector factories", async () => {
@@ -51,6 +52,7 @@ describe("builtinCollectorsModule", () => {
 
 		expect(ruleCollectorRegistry.has("ResourceActionScopeRuleCollector")).toBe(true);
 		expect(ruleCollectorRegistry.has("ResourceActionPermissionRuleCollector")).toBe(true);
+		expect(ruleCollectorRegistry.has("DelegationRangeRuleCollector")).toBe(true);
 	});
 
 	it("registers DotNotationResourceParser factory", async () => {

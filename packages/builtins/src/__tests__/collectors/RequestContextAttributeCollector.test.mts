@@ -14,6 +14,7 @@ import {
 } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 import { RequestContextAttributeCollector } from "#/collectors/RequestContextAttributeCollector.mjs";
+import { ATTR_DELEGATION_RANGE, BUILTINS_ATTRIBUTE_KEY_OWNER } from "#/keys.mjs";
 
 /**
  * `CollectorContext.signal` is required: a pipeline supplies one per
@@ -279,6 +280,17 @@ describe("RequestContextAttributeCollector — vocabulary another package reserv
 		expect(message).toContain('"pluginResourceId"');
 		expect(message).toContain("@example/policy-plugin");
 		expect(message).toContain("written by the plugin's own request-facts collector");
+	});
+
+	it("refuses a mapping onto this package's delegation range, and says a list key would join it", () => {
+		// The caller's paths would not collide with the token's range; they
+		// would be added to it.
+		const message = refusalFor(ATTR_DELEGATION_RANGE);
+
+		expect(message).toContain(BUILTINS_ATTRIBUTE_KEY_OWNER);
+		expect(message).toContain(
+			"where both write a list key the caller's entries join the package's",
+		);
 	});
 
 	it("does not call another package's key core's own", () => {

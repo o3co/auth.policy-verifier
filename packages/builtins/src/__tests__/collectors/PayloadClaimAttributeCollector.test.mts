@@ -20,6 +20,7 @@ import {
 } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
 import { PayloadClaimAttributeCollector } from "#/collectors/PayloadClaimAttributeCollector.mjs";
+import { ATTR_DELEGATION_RANGE, BUILTINS_ATTRIBUTE_KEY_OWNER } from "#/keys.mjs";
 
 const NEVER_CANCELLED = new AbortController().signal;
 
@@ -153,10 +154,11 @@ describe("PayloadClaimAttributeCollector — core's vocabulary is a valid destin
 });
 
 describe("PayloadClaimAttributeCollector — vocabulary another package reserved", () => {
-	// Another package's keys are derived from something other than the subject
-	// (cedar's `request*` come from the parsed request), so a claim landing on
-	// one would still be a second writer with a different meaning. Refused, as
-	// the request-context collector refuses them.
+	// Another package's keys are written by that package's own collector —
+	// cedar's `request*` from the parsed request, this package's range from the
+	// claim `DelegationRangeCollector` narrows — so a claim landing on one would
+	// still be a second writer with a different meaning. Refused, as the
+	// request-context collector refuses them.
 	it("refuses a mapping onto a key another package owns, and names that package", () => {
 		reserveAttributeKeys({
 			owner: "@example/claims-plugin",
@@ -169,6 +171,22 @@ describe("PayloadClaimAttributeCollector — vocabulary another package reserved
 					attributes: [{ from: "anything", to: "pluginFact" }],
 				}),
 		).toThrow(/pluginFact.*@example\/claims-plugin.*plugin's own facts collector/s);
+	});
+
+	it("refuses a mapping onto this package's delegation range, which it would widen", () => {
+		// A list key unions across collectors: a second claim mapped here would
+		// add paths to the range the delegated token was narrowed to.
+		expect(
+			() =>
+				new PayloadClaimAttributeCollector({
+					attributes: [{ from: "extra_paths", to: ATTR_DELEGATION_RANGE, type: "string[]" }],
+				}),
+		).toThrow(
+			new RegExp(
+				`"${ATTR_DELEGATION_RANGE}".*${BUILTINS_ATTRIBUTE_KEY_OWNER.replaceAll(".", "\\.")}.*writes the key with a collector of its own`,
+				"s",
+			),
+		);
 	});
 
 	it("refuses such a key reached through the `to` default", () => {

@@ -78,6 +78,7 @@ That test is executable, not rhetorical. `describeRulePurityConformance` in [`te
 | `azp` | `PayloadSubjectIdCollector` (builtins) | `ATTR_CLIENT_ID` |
 | `scope` (or the configured `claim`, e.g. `scp`) | `PayloadScopeCollector`, `ResourceActionScopeRuleCollector` (builtins) | `ATTR_SCOPES` |
 | any declared claim (#219) | `PayloadClaimAttributeCollector` (builtins) | the operator's own keys, or core's five |
+| `authorization_details` entries of the configured delegation type | `DelegationRangeCollector`, `DelegationRangeRuleCollector` (builtins) | `ATTR_DELEGATION_RANGE` — the builtins' own key, not core's: the range's grammar is this stack's claims contract, not a standard |
 
 `iss` / `aud` / `exp` / `iat` are enforced inside the authenticator before the bag is built and are read by nothing downstream. `KeyResolver` / `KeyResolverFactory` are server types for the same reason: token-credential plumbing, not engine vocabulary.
 
