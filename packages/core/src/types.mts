@@ -398,6 +398,11 @@ export function isAsyncRule(rule: AnyRule): rule is AsyncRule {
 	return (rule as Partial<AsyncRule>).async === true;
 }
 
+/** Whether `rule` only narrows what the granting rules allow: `restricts` is exactly `true`. */
+export function isRestrictingRule(rule: AnyRule): boolean {
+	return (rule as { restricts?: unknown }).restricts === true;
+}
+
 /**
  * Produces rules for a request. A rule collector may return zero or more rules;
  * the `RulePipeline` flattens results from all collectors before evaluation.

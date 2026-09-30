@@ -88,6 +88,7 @@ export type {
 export {
 	DETERMINING_POLICIES_MAX,
 	isAsyncRule,
+	isRestrictingRule,
 	POLICY_ID_FORBIDDEN_RANGES,
 	POLICY_ID_MAX_LENGTH,
 	POLICY_REVISION_MAX_LENGTH,

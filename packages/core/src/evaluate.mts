@@ -22,12 +22,13 @@ import {
 	type Attributes,
 	type Decision,
 	isAsyncRule,
+	isRestrictingRule,
 	type Rule,
 	type RuleGroupOutcome,
 	type RuleOutcome,
 } from "./types.mjs";
 
-/** Deny returned when no rule group applied to the request. */
+/** Deny returned when no granting rule applied to the request. */
 const NO_APPLICABLE_RULE: Omit<Decision & { decision: "deny" }, "reason"> = {
 	decision: "deny",
 	code: "no_applicable_rule",
@@ -134,11 +135,11 @@ export async function evaluate(
 
 	// Group rules by ruleType — rules within a group are alternatives (OR).
 	const groups = Map.groupBy(rules, (rule) => rule.ruleType);
-	refuseMixedGroups(groups);
+	const granting = anyGrantingGroup(groups, options?.failures);
 
 	// No granting rule → default-deny unless the deployment opted out. One that
 	// opted out is still held to the restricting rules, evaluated below.
-	if (!rules.some((rule) => !restricts(rule)) && options?.onEmptyRuleSet !== "allow") {
+	if (!granting && options?.onEmptyRuleSet !== "allow") {
 		return { ...NO_APPLICABLE_RULE, reason: { groups: [] } };
 	}
 
@@ -157,26 +158,32 @@ export async function evaluate(
 	return conclude(outcomes);
 }
 
-/** Whether `rule` only narrows what the granting rules allow. */
-function restricts(rule: AnyRule): boolean {
-	return (rule as { restricts?: unknown }).restricts === true;
-}
-
 /**
- * A group is an OR, so a restricting rule that passed would satisfy it in
- * place of the grant beside it.
+ * Whether any group grants, reading each rule's marker once. A group that
+ * mixes the two kinds is refused: it is an OR, so a restricting rule that
+ * passed would satisfy it in place of the grant beside it. The group is named
+ * by the failure source, not the message — a `ruleType` may be derived from
+ * the request, and the message is logged as it is.
  */
-function refuseMixedGroups(groups: Map<string, AnyRule[]>): void {
-	for (const [ruleType, groupRules] of groups) {
-		const restricting = groupRules.filter(restricts).length;
+function anyGrantingGroup(
+	groups: Map<string, AnyRule[]>,
+	failures: FailureRecord | undefined,
+): boolean {
+	let granting = false;
+	for (const groupRules of groups.values()) {
+		const restricting = groupRules.filter(isRestrictingRule).length;
 		if (restricting > 0 && restricting < groupRules.length) {
-			throw new TypeError(
-				`evaluate: rule group "${ruleType}" mixes restricting rules with granting ones. A group is an OR, ` +
-					"so a restricting rule that passed would satisfy it in place of the grant; give the " +
-					"restricting rules a ruleType of their own.",
+			const error = new TypeError(
+				"evaluate: a rule group mixes restricting rules with granting ones. A group is an OR, so a " +
+					"restricting rule that passed would satisfy it in place of the grant; give the restricting " +
+					"rules a ruleType of their own.",
 			);
+			failures?.record(error, ruleSource(groupRules[0]));
+			throw error;
 		}
+		if (restricting === 0) granting = true;
 	}
+	return granting;
 }
 
 /** A deny names the FIRST failing group; reason carries all. */
