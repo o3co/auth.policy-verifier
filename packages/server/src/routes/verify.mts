@@ -429,9 +429,9 @@ function callerSignal(res: express.Response): AbortSignal {
  *
  * Both answer 400 for a malformed body — including a `resource` the configured
  * `ResourceParser` refuses — 401 for authentication failures, 503 for
- * credentials that could not be verified, 413 for a body
- * over `maxBodyBytes`, 415 for a content type the parser cannot read, and 500
- * for anything unexpected. Every one of those answers is the deny envelope
+ * credentials that could not be verified, 413 for a body over `maxBodyBytes`,
+ * 415 for a content type the parser cannot read, and 500 for anything
+ * unexpected. Every one of those answers is the deny envelope
  * `{ decision: "deny", code, message }`, the body-parser failures included:
  * a caller that parses only decision JSON is never handed Express's HTML error
  * page.
@@ -465,9 +465,9 @@ function callerSignal(res: express.Response): AbortSignal {
  * decision counters. The deny answered for a collector timeout, rule timeout or
  * attribute conflict is a decision and emits both; a request refused before
  * any decision (400, 401, 413, 415, the 503 for credentials that could not
- * be verified, and the 500 for a body the parser rejects) emits neither, nor does a decision that could not be made (a 500)
- * or whose caller left, so the log stream and the metric agree on what a
- * decision is. See `observability/decisionEvent.mts` for what the line does and
+ * be verified, and the 500 for a body the parser rejects) emits neither, nor
+ * does a decision that could not be made (a 500) or whose caller left, so the
+ * log stream and the metric agree on what a decision is. See `observability/decisionEvent.mts` for what the line does and
  * does not carry.
  *
  * A caller-sent `x-request-id` is echoed on every response the router

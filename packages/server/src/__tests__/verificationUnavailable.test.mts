@@ -84,8 +84,8 @@ describe("verification_unavailable over a real remote key set", () => {
 		return `http://127.0.0.1:${port}/.well-known/jwks.json`;
 	};
 
-	const authenticatorFor = async (jwksUri: string) => {
-		const resolver = await RS256KeyResolverFactory({ algorithm: "RS256", jwksUri });
+	const authenticatorFor = async (jwksUri: string, jwksCooldownMs?: number) => {
+		const resolver = await RS256KeyResolverFactory({ algorithm: "RS256", jwksUri, jwksCooldownMs });
 		return createTokenAuthenticator(
 			{
 				validate: true,
@@ -123,6 +123,24 @@ describe("verification_unavailable over a real remote key set", () => {
 
 		expect(res.status).toBe(401);
 		expect(res.body.code).toBe("invalid_token");
+	});
+
+	// Past the cooldown an unknown kid fetches the set again, and a fetch that
+	// fails is the keys being unavailable, not the token being bad.
+	it("answers 503 when an unknown kid refetches past the cooldown and the refetch fails", async () => {
+		const jwk = { ...(await exportJWK(publicKey)), kid: "k1", alg: "RS256", use: "sig" };
+		const jwksUri = await jwksAt([jwk]);
+		const authenticator = await authenticatorFor(jwksUri, 0);
+		expect((await verify(authenticator, "k1")).status).toBe(200);
+		for (const server of servers.splice(0)) {
+			server.closeAllConnections();
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+		}
+
+		const res = await verify(authenticator, "k2");
+
+		expect(res.status).toBe(503);
+		expect(res.body.code).toBe("verification_unavailable");
 	});
 
 	it("allows a token whose key the fetched set carries", async () => {
