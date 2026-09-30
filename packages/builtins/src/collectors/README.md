@@ -47,8 +47,10 @@ helpers are internal to the package. Options and examples:
 
 ## Dependencies
 
-`@o3co/auth.policy-verifier.core` and files in this directory only — nothing from `../rules/`
-or `../resource/`. The one edge into this directory from elsewhere in the package, besides
+`@o3co/auth.policy-verifier.core`, files in this directory, [`../keys.mts`](../keys.mts)
+(the package's own attribute key) and [`../delegation/range.mts`](../delegation/range.mts)
+(the range grammar, which `DelegationRangeCollector` shares with the range rule). Nothing
+from `../rules/` or `../resource/`. The one edge into this directory from elsewhere in the package, besides
 `../index.mts` and `../module.mts`, is `../rules/collectors/` importing `_claims.mts`.
 
 ## Invariants
@@ -67,9 +69,12 @@ or `../resource/`. The one edge into this directory from elsewhere in the packag
   collector reads nothing but `requestContext` (documented, not tested).
 - Nothing undeclared, mistyped or inherited is promoted — the two mapping collectors' tests.
 - A claim that is not a non-empty string is not an identity; a scope claim that is not a
-  scope list asserts no capability —
+  scope list asserts no capability; an `authorization_details` claim that is not a list of
+  entry objects is a range that contains nothing, since a range narrows and a token must not
+  shed one by misspelling it —
   [`PayloadSubjectIdCollector.test.mts`](../__tests__/collectors/PayloadSubjectIdCollector.test.mts),
-  [`PayloadScopeCollector.test.mts`](../__tests__/collectors/PayloadScopeCollector.test.mts).
+  [`PayloadScopeCollector.test.mts`](../__tests__/collectors/PayloadScopeCollector.test.mts),
+  [`DelegationRangeCollector.test.mts`](../__tests__/collectors/DelegationRangeCollector.test.mts).
 - A collector holds nothing of the request past `collect` — no context, no `signal` — and
   writes nothing into its input (`subject` is read-only by type); documented, not tested.
   Configuration a collector keeps is its own copy, taken at construction, so a host that

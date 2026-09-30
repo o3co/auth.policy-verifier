@@ -37,24 +37,28 @@ function of `attrs` that retains nothing of the `CollectorContext` — is
 ## Inputs and outputs
 
 A rule takes the merged `ReadonlyAttributes` and answers a boolean. A rule collector takes a
-`CollectorContext` and returns a rule built fresh for that request — or, for the scope
-collector under `scopeless: "skip"` with no scope claim, no rule at all. `ruleType` and `code`
-reach the wire and the failure lines. No rule here reports an evaluation.
+`CollectorContext` and returns a rule built fresh for that request — or no rule at all: the
+scope collector under `scopeless: "skip"` for a token with no scope claim, the range collector
+for a token that carries no range. `ruleType` and `code` reach the wire and the failure lines.
+No rule here reports an evaluation.
 
 ## Dependencies
 
-`@o3co/auth.policy-verifier.core`, files in this directory, and one file of
-[`../collectors/`](../collectors/README.md): the scope rule collector imports `_claims.mts` so
-that it and `PayloadScopeCollector` share the default claim name and the refusal of a bad
-`claim` option. That is the only edge from `rules/` into `collectors/`; none runs the other
-way, and nothing here imports `../resource/`. Inside, the rule collectors depend on the rules,
-never the reverse.
+`@o3co/auth.policy-verifier.core`, files in this directory, [`../keys.mts`](../keys.mts) (the
+package's own attribute key), [`../delegation/range.mts`](../delegation/range.mts) (the range
+grammar and containment, which the range rule and its collector share with
+`DelegationRangeCollector`), and one file of [`../collectors/`](../collectors/README.md): the
+scope and range rule collectors import `_claims.mts` so that each shares the refusal of a bad
+`claim` option with its attribute collector, and the scope one the default claim name too.
+That is the only edge from `rules/` into `collectors/`; none runs the other way, and nothing
+here imports `../resource/`. Inside, the rule collectors depend on the rules, never the
+reverse.
 
 ## Invariants
 
 - Collect the rule, discard the request, ask again: the answer is unchanged. The rule-purity
   suite, [`rulePurity.mts`](../../../../tests/integration/src/conformance/rulePurity.mts), is
-  applied to both rule collectors in
+  applied to every rule collector here in
   [`rule-purity-conformance.test.mts`](../../../../tests/integration/src/rule-purity-conformance.test.mts);
   apply it to every rule collector you add. The CI step "Assert no verify() body reads a
   collector context" in [`ci.yml`](../../../../.github/workflows/ci.yml) greps `verify`
