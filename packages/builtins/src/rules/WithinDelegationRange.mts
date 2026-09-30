@@ -7,7 +7,8 @@
  */
 
 import type { ReadonlyAttributes, Rule } from "@o3co/auth.policy-verifier.core";
-import { ATTR_DELEGATION_RANGE, rangeContains } from "../delegation/range.mjs";
+import { rangeContains } from "../delegation/range.mjs";
+import { ATTR_DELEGATION_RANGE } from "../keys.mjs";
 
 /**
  * Rule that passes when an entry of `ATTR_DELEGATION_RANGE` contains the

@@ -27,11 +27,12 @@ export { StaticPermissionCollector } from "./collectors/StaticPermissionCollecto
 export { StaticRoleCollector } from "./collectors/StaticRoleCollector.mjs";
 // Delegation range
 export {
-	ATTR_DELEGATION_RANGE,
 	parseRangePath,
 	type RangeElement,
 	rangeContains,
 } from "./delegation/range.mjs";
+// Attribute keys
+export { ATTR_DELEGATION_RANGE, BUILTINS_ATTRIBUTE_KEY_OWNER } from "./keys.mjs";
 // Module
 export { builtinCollectorsModule } from "./module.mjs";
 // Resource

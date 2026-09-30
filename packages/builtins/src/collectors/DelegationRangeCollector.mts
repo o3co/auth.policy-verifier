@@ -12,12 +12,12 @@ import type {
 	CollectorContext,
 } from "@o3co/auth.policy-verifier.core";
 import {
-	ATTR_DELEGATION_RANGE,
 	DEFAULT_AUTHORIZATION_DETAILS_CLAIM,
 	entriesOfType,
 	rangePaths,
 	resolveRangeType,
 } from "../delegation/range.mjs";
+import { ATTR_DELEGATION_RANGE } from "../keys.mjs";
 import { resolveClaimName } from "./_claims.mjs";
 
 /** Config entry accepted by `DelegationRangeCollector`. */

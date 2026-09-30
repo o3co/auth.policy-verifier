@@ -10,29 +10,11 @@
  * the token, `DelegationRangeRuleCollector`, which decides whether a token
  * has one, and `WithinDelegationRange`, which decides containment. Nothing is
  * normalized: a path is compared as written, as `HasScope` compares scopes.
+ * The attribute key the range travels under is `../keys.mts`'s.
  */
-
-import { reserveAttributeKeys } from "@o3co/auth.policy-verifier.core";
-
-/** The npm package name the builtins reserve their own attribute keys under. */
-export const BUILTINS_ATTRIBUTE_KEY_OWNER = "@o3co/auth.policy-verifier.builtins" as const;
-
-/**
- * The paths of a delegated token's range, as a `string[]`. The delegation
- * range is not core vocabulary — its grammar and containment rule are this
- * stack's, not a standard's — so the builtins own the key.
- */
-export const ATTR_DELEGATION_RANGE = "delegationRange" as const;
 
 /** The claim RFC 9396 carries the entries in, and the default. */
 export const DEFAULT_AUTHORIZATION_DETAILS_CLAIM = "authorization_details";
-
-reserveAttributeKeys({
-	owner: BUILTINS_ATTRIBUTE_KEY_OWNER,
-	keys: [ATTR_DELEGATION_RANGE],
-	reason:
-		"a delegated token's range, written by DelegationRangeCollector from the signature-verified token and read by WithinDelegationRange",
-});
 
 /** One element of a path: a type, and an id when the path names one. */
 export interface RangeElement {

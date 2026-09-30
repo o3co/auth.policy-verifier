@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { ATTR_DELEGATION_RANGE } from "../../delegation/range.mjs";
+import { ATTR_DELEGATION_RANGE } from "../../keys.mjs";
 import { WithinDelegationRange } from "../../rules/WithinDelegationRange.mjs";
 
 const attrsWith = (range: unknown) =>

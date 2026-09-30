@@ -3,7 +3,7 @@
 
 import type { CollectorContext } from "@o3co/auth.policy-verifier.core";
 import { describe, expect, it } from "vitest";
-import { ATTR_DELEGATION_RANGE } from "../../../delegation/range.mjs";
+import { ATTR_DELEGATION_RANGE } from "../../../keys.mjs";
 import { DelegationRangeRuleCollector } from "../../../rules/collectors/DelegationRangeRuleCollector.mjs";
 
 const TYPE = "delegation";
