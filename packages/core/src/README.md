@@ -1,6 +1,6 @@
 # Core
 
-Last updated: 2026-09-25
+Last updated: 2026-10-01
 
 The engine's contract and the two things that run it — the collector pipelines and
 `evaluate()`. Nothing here is a transport or a policy engine.
@@ -49,8 +49,9 @@ Everything exported from [`index.mts`](index.mts) — the entry point; the contr
   scalars under one key are an `AttributeConflictError`. `RulePipeline.collect` concatenates.
 - `evaluate(attrs, rules, options)` returns a `Decision`: allow, or deny with the `code` /
   `message` of the first rule of the first failing group; `reason` accounts for every group,
-  each outcome carrying what its rule reported. An empty rule set is the one deny in core's
-  own words — `no_applicable_rule` — under the default `onEmptyRuleSet: "deny"`.
+  each outcome carrying what its rule reported. A request no granting rule applies to is the
+  one deny in core's own words — `no_applicable_rule` — under the default
+  `onEmptyRuleSet: "deny"`; a rule marked `restricts` only narrows and does not count.
 
 ## Dependencies
 
@@ -66,8 +67,10 @@ documented, not tested.
   at construction —
   [`__tests__/collectorLimits.test.mts`](__tests__/collectorLimits.test.mts).
 - OR within a `ruleType` group, AND across; every group is evaluated even after one fails;
-  `evaluated` is what ran, `satisfiedBy` what decided; an empty rule set is a deny unless
-  `onEmptyRuleSet: "allow"` — [`__tests__/evaluate.test.mts`](__tests__/evaluate.test.mts).
+  `evaluated` is what ran, `satisfiedBy` what decided; a request no granting rule applies to
+  is a deny unless `onEmptyRuleSet: "allow"`, which still holds it to its restricting rules; a
+  group mixing the two kinds is refused before any rule runs —
+  [`__tests__/evaluate.test.mts`](__tests__/evaluate.test.mts).
 - An `AsyncRule` runs under `ruleTimeoutMs` and the phase's `evaluateDeadlineMs`, whichever
   ends first, and none starts once the phase is spent; a synchronous rule is not timed; the
   caller's `signal` aborts the rule in flight with the caller's reason —
