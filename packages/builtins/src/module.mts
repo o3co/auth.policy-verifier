@@ -7,6 +7,7 @@
  */
 
 import type { Module } from "@o3co/auth.policy-verifier.core";
+import { DelegationRangeCollector } from "./collectors/DelegationRangeCollector.mjs";
 import { PayloadClaimAttributeCollector } from "./collectors/PayloadClaimAttributeCollector.mjs";
 import { PayloadScopeCollector } from "./collectors/PayloadScopeCollector.mjs";
 import { PayloadSubjectIdCollector } from "./collectors/PayloadSubjectIdCollector.mjs";
@@ -14,6 +15,7 @@ import { RequestContextAttributeCollector } from "./collectors/RequestContextAtt
 import { StaticPermissionCollector } from "./collectors/StaticPermissionCollector.mjs";
 import { StaticRoleCollector } from "./collectors/StaticRoleCollector.mjs";
 import { DotNotationResourceParser } from "./resource/DotNotationResourceParser.mjs";
+import { DelegationRangeRuleCollector } from "./rules/collectors/DelegationRangeRuleCollector.mjs";
 import { ResourceActionPermissionRuleCollector } from "./rules/collectors/ResourceActionPermissionRuleCollector.mjs";
 import { ResourceActionScopeRuleCollector } from "./rules/collectors/ResourceActionScopeRuleCollector.mjs";
 
@@ -50,6 +52,10 @@ export const builtinCollectorsModule: Module = {
 			"PayloadClaimAttributeCollector",
 			(config) => new PayloadClaimAttributeCollector(config),
 		);
+		context.attributeCollectorRegistry.register(
+			"DelegationRangeCollector",
+			(config) => new DelegationRangeCollector(config),
+		);
 
 		// Rule collector factories
 		context.ruleCollectorRegistry.register(
@@ -59,6 +65,10 @@ export const builtinCollectorsModule: Module = {
 		context.ruleCollectorRegistry.register(
 			"ResourceActionPermissionRuleCollector",
 			() => new ResourceActionPermissionRuleCollector(),
+		);
+		context.ruleCollectorRegistry.register(
+			"DelegationRangeRuleCollector",
+			(config) => new DelegationRangeRuleCollector(config),
 		);
 
 		// Resource parser factories

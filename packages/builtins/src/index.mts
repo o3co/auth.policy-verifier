@@ -3,6 +3,10 @@
 
 // Collectors
 export {
+	DelegationRangeCollector,
+	type DelegationRangeCollectorConfig,
+} from "./collectors/DelegationRangeCollector.mjs";
+export {
 	PayloadClaimAttributeCollector,
 	type PayloadClaimAttributeCollectorConfig,
 	type PayloadClaimAttributeMapping,
@@ -21,6 +25,13 @@ export {
 } from "./collectors/RequestContextAttributeCollector.mjs";
 export { StaticPermissionCollector } from "./collectors/StaticPermissionCollector.mjs";
 export { StaticRoleCollector } from "./collectors/StaticRoleCollector.mjs";
+// Delegation range
+export {
+	ATTR_DELEGATION_RANGE,
+	parseRangePath,
+	type RangeElement,
+	rangeContains,
+} from "./delegation/range.mjs";
 // Module
 export { builtinCollectorsModule } from "./module.mjs";
 // Resource
@@ -38,6 +49,10 @@ export { AttrMatchRule, type AttrMatchRuleConfig } from "./rules/AttrMatchRule.m
 export { AttrPairCompare, type AttrPairCompareConfig } from "./rules/AttrPairCompare.mjs";
 export { AttrPairEqual, type AttrPairEqualConfig } from "./rules/AttrPairEqual.mjs";
 export { AttrPairNotEqual, type AttrPairNotEqualConfig } from "./rules/AttrPairNotEqual.mjs";
+export {
+	DelegationRangeRuleCollector,
+	type DelegationRangeRuleCollectorConfig,
+} from "./rules/collectors/DelegationRangeRuleCollector.mjs";
 export { ResourceActionPermissionRuleCollector } from "./rules/collectors/ResourceActionPermissionRuleCollector.mjs";
 export {
 	ResourceActionScopeRuleCollector,
@@ -46,3 +61,4 @@ export {
 } from "./rules/collectors/ResourceActionScopeRuleCollector.mjs";
 export { HasPermission } from "./rules/HasPermission.mjs";
 export { HasScope, type HasScopeOptions } from "./rules/HasScope.mjs";
+export { WithinDelegationRange } from "./rules/WithinDelegationRange.mjs";
