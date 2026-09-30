@@ -118,6 +118,7 @@
 		"callerUnauthenticated": 401,
 		"payloadTooLarge": 413,
 		"unsupportedMediaType": 415,
+		"verificationUnavailable": 503,
 		"internalError": 500
 	},
 	"codes": {
@@ -130,6 +131,7 @@
 		"collectorTimeout": "collector_timeout",
 		"attributeConflict": "attribute_conflict",
 		"callerUnauthenticated": "caller_unauthenticated",
+		"verificationUnavailable": "verification_unavailable",
 		"internalError": "internal_error"
 	},
 	"requestId": {
