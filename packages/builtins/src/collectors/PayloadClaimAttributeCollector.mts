@@ -41,11 +41,13 @@ export type PayloadClaimAttributeCollectorConfig = AttributeMappingCollectorConf
  * is the declaration `RequestContextAttributeCollector` takes, pointed at
  * `CollectorContext.subject` instead of the caller's body.
  *
- * The source is the signature-verified token, so a mapping may land on core's
- * keys (`scopes`, `permissions`, `roles`, `userId`, `clientId`). Keys another
- * package reserved (cedar's `request*`) stay refused: they are derived from
- * the parsed request, not from the subject, and a claim landing on one would
- * be a second writer with a different meaning.
+ * The source is the subject the configured authenticator accepted — under the
+ * built-in one, a signature-verified token unless `oauth.jwt.mode` is
+ * `"insecure-decode"` — not the caller's `requestContext`, so a mapping may land
+ * on core's keys (`scopes`, `permissions`, `roles`, `userId`, `clientId`).
+ * Keys another package reserved (cedar's `request*`) stay refused: they are
+ * derived from the parsed request, not from the subject, and a claim landing
+ * on one would be a second writer with a different meaning.
  *
  * Two cautions the trust argument depends on. Map only claims the IdP
  * populates from its own registration or admin data, never from user-editable

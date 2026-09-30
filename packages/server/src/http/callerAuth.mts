@@ -4,9 +4,10 @@
 /*
  * Caller authentication for the decision endpoints.
  *
- * The bearer token on `/verify` establishes the *subject* a decision is about,
- * not which service supplied `resource` / `action` / `context`. An endpoint that
- * checks only the subject token is a decision oracle: anyone who can route to
+ * The subject credential on `/verify` (a bearer token under the built-in
+ * authenticator) establishes the *subject* a decision is about, not which
+ * service supplied `resource` / `action` / `context`. An endpoint that checks
+ * only the subject credential is a decision oracle: anyone who can route to
  * the port can probe which tokens, scopes and resources this deployment accepts,
  * and make it do pipeline work while they do.
  *

@@ -23,7 +23,8 @@ import {
  * Promotes the parsed request — `action` and the `Resource` fields — into
  * attributes. `CedarPolicyRuleCollector`'s rule builds the Cedar
  * `(principal, action, resource, context)` request from the merged attribute
- * map inside `verify`, where the request no longer exists. Only primitives are
+ * map inside `verify` (or `decide`, over an asynchronous engine), where the
+ * request no longer exists. Only primitives are
  * copied — string values out of the context, never a reference into it —
  * which is the legal side of the line the rule-purity conformance suite draws.
  *

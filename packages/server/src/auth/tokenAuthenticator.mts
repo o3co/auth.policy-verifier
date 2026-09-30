@@ -19,15 +19,19 @@ import type { KeyResolverFactory } from "./keyResolver.mjs";
  * authenticator's.
  *
  * `subject` is core's neutral `SubjectAttributes` bag, and the authenticator
- * is the one edge that populates it — the built-in one spreads the verified
- * JWT's claims into it. `credential` is the raw credential, carried beside the
+ * is the one edge that populates it — the built-in one spreads the claims of
+ * the JWT it accepted into it (signature-verified unless `oauth.jwt.mode` is
+ * `"insecure-decode"`). `credential` is the raw credential, carried beside the
  * bag rather than in it: the route decides whether a collector ever sees it.
  */
 export type AuthenticationResult =
 	| { ok: true; subject: SubjectAttributes; credential: string }
 	| { ok: false; code: "missing_token" | "unsupported_scheme" | "invalid_token"; message: string };
 
-/** Authenticates one `Authorization` header value into verified subject attributes. */
+/**
+ * Authenticates one `Authorization` header value into the subject attributes
+ * it accepts.
+ */
 export interface TokenAuthenticator {
 	authenticate(authorizationHeader: string | undefined): Promise<AuthenticationResult>;
 }

@@ -25,7 +25,8 @@ import {
 export { JWT_TOKEN_AUTHENTICATOR };
 
 /**
- * The built-in token authenticator: bearer JWTs verified against `oauth.jwt`.
+ * The built-in token authenticator: bearer JWTs checked against `oauth.jwt`,
+ * signature-verified unless `oauth.jwt.mode` is `"insecure-decode"`.
  * `createApp` registers it under {@link JWT_TOKEN_AUTHENTICATOR} before any
  * module runs, so it is always selectable and never replaceable; a deployment
  * that authenticates some other way registers its own factory under its own

@@ -63,8 +63,9 @@ export interface Logger {
  *
  * `info` is here because the per-decision audit line is written on the
  * successful path; without a non-failure level it would have to be `warn`,
- * and `warn` would stop meaning "something is wrong". Every logger that has
- * `warn` and `error` has `info`, so the port stays narrow.
+ * and `warn` would stop meaning "something is wrong". The port asks only for
+ * the three levels these seams use; the loggers a host passes (console, pino
+ * and the like) have all three.
  */
 export interface EventLogger {
 	info(obj: Record<string, unknown>, msg: string): void;
