@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.builtins
 
-Last updated: 2026-09-24
+Last updated: 2026-10-01
 
 Built-in attribute collectors, rule collectors, and resource parser for auth.policy-verifier.
 
@@ -16,8 +16,8 @@ a host such as the server's `createApp`. It depends on `@o3co/auth.policy-verifi
 
 - **Owns** what these implementations read, write and match: the mapping from JWT claims
   (`sub`, `azp`, `scope`, declared claims) to attribute keys (#170), the matching rules of
-  `HasScope` / `HasPermission` and the comparison rules, and the dot-notation resource
-  grammar.
+  `HasScope` / `HasPermission` and the comparison rules, the dot-notation resource
+  grammar, and the delegation-range grammar and containment rule of the claims contract.
 - **Does not own** the pipelines, the grouping or the decision (core), authentication or HTTP
   (`server`), policy engines or `AsyncRule`s (`cedar`), or collectors that do I/O — those are
   the consumer's to write ([docs/extending.md](../../docs/extending.md)).
@@ -51,6 +51,7 @@ All collectors implement `AttributeCollector`.
 | `StaticRoleCollector` | — | `ATTR_ROLES: Role[]` | `{ roles: Role[] }` |
 | `RequestContextAttributeCollector` | declared fields of `requestContext` | the operator's own keys | `{ attributes: Mapping[] }` |
 | `PayloadClaimAttributeCollector` | declared claims of the verified `subject` | the operator's own keys, or core's five | `{ attributes: Mapping[] }` (#219) |
+| `DelegationRangeCollector` | the paths of the token's `authorization_details` entries of the configured type | `ATTR_DELEGATION_RANGE: string[]` | `{ type: string, claim?: string }` — [Delegated tokens](#delegated-tokens-range-and-actor) |
 
 `StaticPermissionCollector` and `StaticRoleCollector` always emit the values supplied at construction time, regardless of request context. They copy what they were given at construction — the array, and for `StaticRoleCollector` each `Role` and its `permissions` — so mutating the config afterwards changes nothing they emit (#255). `permissions` and `roles` must be arrays: anything else, a string included (`permissions = "posts.*"` where `["posts.*"]` was meant), is refused with a `TypeError` at construction, so the deployment fails at boot (#264).
 
@@ -112,6 +113,33 @@ What makes it worth refusing rather than documenting is the merge: `AttributePip
 
 A scalar key is no safer, in two ways. Where both sides write it the values disagree and `AttributeConflictError` denies the request — fail-closed, but an unannounced denial rather than a refusal at boot. And where the owning collector writes its key only *sometimes* there is no second writer at all: cedar's `RequestFactsCollector` omits `requestResourceId` for an id-less resource such as `"document"`, so `{ from = "rid", to = "requestResourceId" }` would land unopposed and the Cedar resource entity would be built from the caller's own request body.
 
+### Delegated tokens: range and actor
+
+A token a delegation grant issued — a client acting for a subject — carries its range as RFC 9396 `authorization_details` entries of one type, each `{ "type": <that type>, "path": "<path>" }`, and the acting client as `act.sub` (RFC 8693 §4.1). The path grammar and the containment rule are the provider–verifier [claims contract](https://github.com/o3co/auth/blob/develop/docs/claims-contract.md)'s:
+
+- a path is `(type(:id)?.)*action`: `type` and `action` are `[a-z][a-z0-9_]*`, and `id` is `[A-Za-z0-9_~-]`, anything else percent-encoded in upper-case hex;
+- an entry contains a path when it is a segment-wise prefix of it, and an entry segment that names no id contains the same type with any id: `project:p1.report` contains `project:p1.report:r7.run`.
+
+To decide the range together with the policies, configure the pair with the same `type`:
+
+```hocon
+attribute { collectors = [
+  { collector = "PayloadScopeCollector" }
+  { collector = "DelegationRangeCollector", type = "<the issuer's delegation type>" }
+  # the acting client, for policies that name it
+  { collector = "PayloadClaimAttributeCollector", attributes = [ { from = "act.sub", to = "actorId" } ] }
+] }
+rule { collectors = [
+  { collector = "ResourceActionScopeRuleCollector" }
+  { collector = "DelegationRangeRuleCollector", type = "<the issuer's delegation type>" }
+] }
+```
+
+- `DelegationRangeCollector` writes the entries' paths to `ATTR_DELEGATION_RANGE` (`"delegationRange"`, reserved by this package). A path outside the grammar is left out, which narrows the range; a token with entries of the type but no readable path gets an empty range, which contains nothing.
+- `DelegationRangeRuleCollector` emits one [`WithinDelegationRange`](#withindelegationrange) rule for the requested path — `<resource.raw>.<action>`, so `resource: "project:p1.report:r7"` with `action: "run"` is `project:p1.report:r7.run` — when the token carries an entry of the type, and no rule otherwise. The rule is a group of its own, so a delegated token is allowed only what the range and the policies both allow, and a token without a range is decided as it is without the pair.
+- Give both the same `type` and `claim` (default `authorization_details`). Configured apart, the rule is emitted and finds no range, and the request is denied.
+- The resource a request names is the caller's claim, its parent chain included. A policy that relies on the chain — containment, `in` — needs it confirmed first, by a collector of your own that reads the store it lives in ([docs/extending.md](../../docs/extending.md#writing-a-custom-attributecollector)).
+
 ## Rules
 
 ### HasPermission
@@ -155,6 +183,10 @@ new AttrMatchRule({ a: string, b: string, group?: string })
 - Passes when `attrs.get(a)` and `attrs.get(b)` are both non-empty strings and equal. Any other case returns `false` (fail closed).
 - Pure predicate — does not read `CollectorContext`. Consuming projects provide the two values to compare through upstream `AttributeCollector`s and wire the rule through their own `RuleCollector`.
 - `ruleType` defaults to `"attr_match:${a}:${b}"`. The evaluator ORs rules within a `ruleType` and ANDs across different `ruleType`s, so the default ensures two independent comparisons are AND-combined (required together). Pass `group` explicitly when you want two comparisons to be OR-combined (for example, "identify by DID or by email") — both rules then share the provided `group` as their `ruleType`.
+
+### WithinDelegationRange
+
+Passes when an entry of `ATTR_DELEGATION_RANGE` contains the requested path, by the claims contract's containment rule ([Delegated tokens](#delegated-tokens-range-and-actor)). A range that is absent, or holds no string that contains the path, fails, and so does a requested path outside the grammar. `ruleType` is `delegation_range` and `code` is `outside_delegation_range`. `DelegationRangeRuleCollector` builds it.
 
 ## Attribute Comparison Rules
 
@@ -263,8 +295,9 @@ Every attribute comparison rule reads each field of its config once, validates i
 | --- | --- | --- |
 | `ResourceActionPermissionRuleCollector` | `"<resource.raw>.perm:<action>"` | `[HasPermission(...)]` |
 | `ResourceActionScopeRuleCollector` | `"<action>:<resource.resourceType>"` | `[HasScope(...)]` |
+| `DelegationRangeRuleCollector` | `"<resource.raw>.<action>"`, for a token with a range | `[WithinDelegationRange(...)]`, or `[]` |
 
-`ResourceActionPermissionRuleCollector` takes no constructor arguments.
+`ResourceActionPermissionRuleCollector` takes no constructor arguments. `DelegationRangeRuleCollector` takes `{ type: string, claim?: string }` — [Delegated tokens](#delegated-tokens-range-and-actor).
 `ResourceActionScopeRuleCollector` accepts `{ scopeless?: "deny" | "skip", allowBareScopeRewrite?: boolean, claim?: string }` — `claim` names the claim whose presence says the token asserted scopes (default `scope`; set it to what `PayloadScopeCollector` reads, e.g. `scp`).
 
 - `scopeless` (default `"deny"`): it emits the `HasScope` rule for every request, so a token carrying no scope
@@ -344,8 +377,10 @@ Registrations as of this writing; the source of truth is [`src/module.mts`](src/
 | `attributeCollector` | `"StaticRoleCollector"` | `(config) => new StaticRoleCollector(config)` |
 | `attributeCollector` | `"RequestContextAttributeCollector"` | `(config) => new RequestContextAttributeCollector(config)` |
 | `attributeCollector` | `"PayloadClaimAttributeCollector"` | `(config) => new PayloadClaimAttributeCollector(config)` |
+| `attributeCollector` | `"DelegationRangeCollector"` | `(config) => new DelegationRangeCollector(config)` |
 | `ruleCollector` | `"ResourceActionScopeRuleCollector"` | `(config) => new ResourceActionScopeRuleCollector(config)` |
 | `ruleCollector` | `"ResourceActionPermissionRuleCollector"` | `() => new ResourceActionPermissionRuleCollector()` |
+| `ruleCollector` | `"DelegationRangeRuleCollector"` | `(config) => new DelegationRangeRuleCollector(config)` |
 | `resourceParser` | `"DotNotationResourceParser"` | `() => new DotNotationResourceParser()` |
 
 ## See Also

@@ -1,6 +1,6 @@
 # Collectors
 
-Last updated: 2026-09-24
+Last updated: 2026-10-01
 
 The built-in attribute collectors: the layer that reads the request and writes the
 attributes the rules decide from.
@@ -14,7 +14,8 @@ attributes the rules decide from.
 - **Owns.** The reading of each source and the narrowing of what is promoted. This is where
   claim vocabulary lives: `SubjectAttributes` is a bag of unknowns to core, and these
   collectors turn `sub`, `azp` and `scope` into `ATTR_USER_ID`, `ATTR_CLIENT_ID` and
-  `ATTR_SCOPES` — the table in
+  `ATTR_SCOPES`, and a delegated token's `authorization_details` into the builtins'
+  own `ATTR_DELEGATION_RANGE` — the table in
   [AGENTS.md — Core Vocabulary Scope](../../../../AGENTS.md#core-vocabulary-scope).
 - **Does not own.** The merge, the bounds or the decision (core's); the rules
   ([`../rules/`](../rules/README.md)); anything that needs I/O — a collector that reaches a

@@ -1,8 +1,8 @@
 # Rules
 
-Last updated: 2026-09-24
+Last updated: 2026-10-01
 
-The built-in rules — predicates over attributes — and, under `collectors/`, the two rule
+The built-in rules — predicates over attributes — and, under `collectors/`, the rule
 collectors that build them from the request.
 
 ## Responsibility
