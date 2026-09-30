@@ -64,7 +64,8 @@ export interface EvaluateOptions {
 	signal?: AbortSignal;
 	/**
 	 * Where this decision's failures are recorded — which rule threw,
-	 * rejected or overran a rule budget. The same record the decision's two
+	 * rejected or overran a rule budget, or which group mixed restricting and
+	 * granting rules. The same record the decision's two
 	 * collects were handed; see `FailureRecord`. Omitted, nothing is recorded.
 	 */
 	failures?: FailureRecord;
@@ -114,7 +115,8 @@ export interface EvaluateOptions {
  *   reports an evaluation that does not read — see `beginRuleInvocation`.
  *   Attributed to the rule in `failures`, like a throw.
  * @throws {TypeError} when a `ruleType` group mixes restricting and granting
- *   rules, before any rule runs.
+ *   rules, before any rule runs. Attributed in `failures` to the group: its
+ *   `ruleType`, and the `code` of its first rule.
  * @throws {RangeError} for an unusable `ruleTimeoutMs` or `evaluateDeadlineMs`,
  *   before any rule runs.
  */
@@ -135,7 +137,7 @@ export async function evaluate(
 
 	// Group rules by ruleType — rules within a group are alternatives (OR).
 	const groups = Map.groupBy(rules, (rule) => rule.ruleType);
-	const granting = anyGrantingGroup(groups, options?.failures);
+	const granting = refuseMixedGroupsAndFindGrant(groups, options?.failures);
 
 	// No granting rule → default-deny unless the deployment opted out. One that
 	// opted out is still held to the restricting rules, evaluated below.
@@ -159,18 +161,18 @@ export async function evaluate(
 }
 
 /**
- * Whether any group grants, reading each rule's marker once. A group that
- * mixes the two kinds is refused: it is an OR, so a restricting rule that
+ * Refuses a group that mixes the two kinds and answers whether any group
+ * grants, reading each rule's marker once. A mixed group is refused: it is an OR, so a restricting rule that
  * passed would satisfy it in place of the grant beside it. The group is named
  * by the failure source, not the message — a `ruleType` may be derived from
  * the request, and the message is logged as it is.
  */
-function anyGrantingGroup(
+function refuseMixedGroupsAndFindGrant(
 	groups: Map<string, AnyRule[]>,
 	failures: FailureRecord | undefined,
 ): boolean {
 	let granting = false;
-	for (const groupRules of groups.values()) {
+	for (const [ruleType, groupRules] of groups) {
 		const restricting = groupRules.filter(isRestrictingRule).length;
 		if (restricting > 0 && restricting < groupRules.length) {
 			const error = new TypeError(
@@ -178,7 +180,8 @@ function anyGrantingGroup(
 					"restricting rule that passed would satisfy it in place of the grant; give the restricting " +
 					"rules a ruleType of their own.",
 			);
-			failures?.record(error, ruleSource(groupRules[0]));
+			// The group's own key: the rule's `ruleType` read again could name another.
+			failures?.record(error, { kind: "rule", ruleType, code: groupRules[0].code });
 			throw error;
 		}
 		if (restricting === 0) granting = true;

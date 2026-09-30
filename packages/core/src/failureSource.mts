@@ -36,6 +36,8 @@ import type { CollectorPipeline } from "./collectorLimits.mjs";
  *   collector is answerable, so none is named.
  * - `rule` — one rule: its `verify` threw, its `decide` rejected, or it overran
  *   a rule budget. Named by `ruleType` and `code` as the rule declared them.
+ *   Also a `ruleType` group that mixed restricting and granting rules, named
+ *   by that `ruleType` and the `code` of its first rule.
  *
  * Every source is recorded by the runner or the evaluator itself, never read
  * off the error, so a collector cannot claim to be something else by throwing
