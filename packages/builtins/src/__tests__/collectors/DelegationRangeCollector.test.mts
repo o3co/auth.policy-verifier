@@ -67,6 +67,20 @@ describe("DelegationRangeCollector", () => {
 		expect(attrs.has(ATTR_DELEGATION_RANGE)).toBe(false);
 	});
 
+	it.each([
+		["an object", { type: TYPE, path: "a.run" }],
+		["a string", "a.run"],
+		["a list of non-objects", ["a.run"]],
+	])(
+		"writes an empty range for an authorization_details claim that is %s",
+		async (_label, claim) => {
+			const attrs = await new DelegationRangeCollector({ type: TYPE }).collect(
+				contextWith({ authorization_details: claim }),
+			);
+			expect(attrs.get(ATTR_DELEGATION_RANGE)).toEqual([]);
+		},
+	);
+
 	it("reads the configured claim", async () => {
 		const collector = new DelegationRangeCollector({ type: TYPE, claim: "ad" });
 

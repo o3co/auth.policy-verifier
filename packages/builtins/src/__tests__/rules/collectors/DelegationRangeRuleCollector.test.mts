@@ -85,4 +85,17 @@ describe("DelegationRangeRuleCollector", () => {
 			);
 		},
 	);
+
+	// RFC 9396 carries the entries as a list. A claim present in another shape
+	// is malformed, not absent: the token keeps a range, and it contains nothing.
+	it.each([
+		["an object", { type: TYPE, path: "a.run" }],
+		["a string", "a.run"],
+		["a list of non-objects", ["a.run"]],
+	])("emits the rule for an authorization_details claim that is %s", async (_label, claim) => {
+		const rules = await new DelegationRangeRuleCollector({ type: TYPE }).collect(
+			contextWith({ authorization_details: claim }),
+		);
+		expect(rules).toHaveLength(1);
+	});
 });
