@@ -32,6 +32,10 @@ describe("WithinDelegationRange", () => {
 		expect(new WithinDelegationRange("A:1.run").verify(attrsWith(["A"]))).toBe(false);
 	});
 
+	it("restricts: it narrows what the policies allow and is no reason to allow", () => {
+		expect(new WithinDelegationRange("a:1.run").restricts).toBe(true);
+	});
+
 	it("names itself and the requested path", () => {
 		const rule = new WithinDelegationRange("a:1.run");
 		expect(rule.ruleType).toBe("delegation_range");

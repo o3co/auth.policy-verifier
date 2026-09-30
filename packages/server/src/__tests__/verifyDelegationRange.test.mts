@@ -7,7 +7,8 @@
  * beside the scope rule): a token that carries a range is allowed only a
  * request whose path — the resource, then the action — lies within one of its
  * entries, and a token without a range is decided as it would be without
- * them.
+ * them. The range restricts and never allows on its own: a delegated token no
+ * policy rule applies to is denied.
  */
 import {
 	DelegationRangeCollector,
@@ -30,31 +31,31 @@ const TYPE = "delegation";
 const key = await HS256KeyResolverFactory({ secret: "11".repeat(32) });
 const quiet = { ...consoleLogger, info: () => {}, warn: () => {}, error: () => {} };
 
-const app = express().use(
-	createVerifyRouter({
-		authenticator: createTokenAuthenticator(
-			{
-				validate: true,
-				key: key.key,
-				algorithms: key.algorithms,
-				issuer: ISSUER,
-				audience: AUDIENCE,
-				tokenType: "at+jwt",
-			},
-			quiet,
-		),
-		logger: quiet,
-		resourceParser: new DotNotationResourceParser(),
-		attributePipeline: new AttributePipeline([
-			new PayloadScopeCollector(),
-			new DelegationRangeCollector({ type: TYPE }),
-		]),
-		rulePipeline: new RulePipeline([
-			new ResourceActionScopeRuleCollector(),
-			new DelegationRangeRuleCollector({ type: TYPE }),
-		]),
-	}),
-);
+const appWith = (scopeRule: ResourceActionScopeRuleCollector) =>
+	express().use(
+		createVerifyRouter({
+			authenticator: createTokenAuthenticator(
+				{
+					validate: true,
+					key: key.key,
+					algorithms: key.algorithms,
+					issuer: ISSUER,
+					audience: AUDIENCE,
+					tokenType: "at+jwt",
+				},
+				quiet,
+			),
+			logger: quiet,
+			resourceParser: new DotNotationResourceParser(),
+			attributePipeline: new AttributePipeline([
+				new PayloadScopeCollector(),
+				new DelegationRangeCollector({ type: TYPE }),
+			]),
+			rulePipeline: new RulePipeline([scopeRule, new DelegationRangeRuleCollector({ type: TYPE })]),
+		}),
+	);
+
+const app = appWith(new ResourceActionScopeRuleCollector());
 
 const tokenWith = (claims: Record<string, unknown>) =>
 	new SignJWT({ sub: "user-1", scope: "run:project.report", ...claims })
@@ -106,6 +107,21 @@ describe("/verify with a delegated token's range", () => {
 
 		expect(res.status).toBe(403);
 		expect(res.body.code).toBe("outside_delegation_range");
+	});
+
+	it("denies a delegated token no policy rule applies to, though its range contains the request", async () => {
+		// `scopeless: "skip"` emits no scope rule for a token without `scope`,
+		// which leaves the range as the only rule collected.
+		const res = await request(appWith(new ResourceActionScopeRuleCollector({ scopeless: "skip" })))
+			.post("/verify")
+			.set(
+				"Authorization",
+				`Bearer ${await tokenWith({ scope: undefined, authorization_details: [{ type: TYPE, path: "project:p1.report" }] })}`,
+			)
+			.send({ resource: "project:p1.report:r7", action: "run" });
+
+		expect(res.status).toBe(403);
+		expect(res.body.code).toBe("no_applicable_rule");
 	});
 
 	it("decides a token without a range as the policies alone do", async () => {
