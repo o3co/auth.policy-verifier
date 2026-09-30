@@ -406,6 +406,28 @@ describe("evaluate — restricting rules", () => {
 		).toBe(false);
 	});
 
+	it("marks a restricting group's outcome, so an allow can be told apart from a granted one", async () => {
+		const granted = await evaluate(new Map(), [
+			makeRule("scope", "invalid_scope", true),
+			restricting("range", "outside_range", true),
+		]);
+		expect(granted.reason.groups).toEqual([
+			expect.not.objectContaining({ restricts: expect.anything() }),
+			expect.objectContaining({ ruleType: "range", restricts: true }),
+		]);
+
+		const restrictedOnly = await evaluate(
+			new Map(),
+			[restricting("range", "outside_range", false)],
+			{
+				onEmptyRuleSet: "allow",
+			},
+		);
+		expect(restrictedOnly.reason.groups).toEqual([
+			expect.objectContaining({ ruleType: "range", passed: false, restricts: true }),
+		]);
+	});
+
 	it("reads only `restricts: true` as restricting", async () => {
 		// The same strict discriminant as `async: true`: anything else is the
 		// granting rule every rule was before.
