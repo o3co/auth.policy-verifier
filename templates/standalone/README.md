@@ -253,7 +253,7 @@ scrape_configs:
 
 `HTTP_PATH_PREFIX` moves the endpoint with everything else: with `HTTP_PATH_PREFIX=/pdp` the path is `/pdp/metrics`, and `metrics_path` in the scrape config has to match.
 
-**Not published yet:** a per-dependency `up` gauge (auth.provider has one for its backing stores). The equivalent here is the JWKS endpoint, and there is no readiness-probe registry to sample — a gauge built from a second, hand-maintained list of dependencies is exactly the drift auth.provider avoided by sampling its probes. Until such a registry exists, a JWKS outage is visible as the `jwt_verification_unavailable` log event, which is emitted at `error` precisely so it can be alerted on.
+**Not published yet:** a per-dependency `up` gauge (auth.provider has one for its backing stores). The equivalent here is the JWKS endpoint, and there is no readiness-probe registry to sample — a gauge built from a second, hand-maintained list of dependencies is exactly the drift auth.provider avoided by sampling its probes. Until such a registry exists, a JWKS outage is visible as the `jwt_verification_unavailable` log event, which is emitted at `error` precisely so it can be alerted on, and as `503` responses on the HTTP request histogram.
 
 ## Default Collectors
 

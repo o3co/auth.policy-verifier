@@ -251,7 +251,7 @@ scrape_configs:
 
 `HTTP_PATH_PREFIX` は他のエンドポイントと同様にこのパスも動かします。`HTTP_PATH_PREFIX=/pdp` なら `/pdp/metrics` になり、scrape config の `metrics_path` も合わせる必要があります。
 
-**まだ公開していないもの:** 依存先ごとの `up` ゲージ（auth.provider はバックエンドストア向けに持っています）。ここでの相当物は JWKS エンドポイントですが、サンプリング対象になる readiness probe のレジストリがありません。依存先の一覧を別途手で持つゲージは、auth.provider が probe をサンプリングすることで避けた drift そのものです。そのレジストリができるまで、JWKS 障害は `jwt_verification_unavailable` ログイベントとして見えます — アラートを張れるようにこれは `error` で出力されています。
+**まだ公開していないもの:** 依存先ごとの `up` ゲージ（auth.provider はバックエンドストア向けに持っています）。ここでの相当物は JWKS エンドポイントですが、サンプリング対象になる readiness probe のレジストリがありません。依存先の一覧を別途手で持つゲージは、auth.provider が probe をサンプリングすることで避けた drift そのものです。そのレジストリができるまで、JWKS 障害は `jwt_verification_unavailable` ログイベントとして見えます — アラートを張れるようにこれは `error` で出力されています。HTTP リクエストのヒストグラムにも `503` の応答として現れます。
 
 ## デフォルトコレクター
 

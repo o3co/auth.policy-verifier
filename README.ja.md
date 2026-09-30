@@ -527,7 +527,7 @@ oauth.jwt {
 
 jose の `createRemoteJWKSet` により公開鍵を自動取得・キャッシュする。取得は `jwksTimeoutMs` / `jwksCooldownMs` / `jwksCacheMaxAgeMs` で上限が付く。
 
-**鍵を取得できない間、トークンには `401 invalid_token` ではなく `503 verification_unavailable` で応答する。** 取得の失敗やタイムアウト、エンドポイントが JWKS でないものを返したこと、そのほかトークン自体とは関係のない失敗は、いずれも verifier がトークンの良し悪しを判断できなかったことを意味する。`invalid_token` を返すと、クライアントは問題のないかもしれないトークンを捨てて、たいていは停止しているそのプロバイダーに再ログインしようとする。そこで enforcement 層には別のコードを返し、「検証できなかった」として応答できるようにする。どちらの場合も許可はしない。取得できた鍵セットにトークンの `kid` に一致する鍵がない場合は応答が得られているので、そのトークンは再取得のクールダウン中も含めて `401 invalid_token` である。前者は `jwt_verification_unavailable`（error）、後者は `jwt_token_rejected`（warn）としてログに出す。
+**トークンに必要な鍵がキャッシュになく取得もできない場合、そのトークンには `401 invalid_token` ではなく `503 verification_unavailable` で応答する。** 鍵がまだキャッシュにあるトークンは、障害中も検証できる。 取得の失敗やタイムアウト、エンドポイントが JWKS でないものを返したこと、そのほかトークン自体とは関係のない失敗は、いずれも verifier がトークンの良し悪しを判断できなかったことを意味する。`invalid_token` を返すと、クライアントは問題のないかもしれないトークンを捨てて、たいていは停止しているそのプロバイダーに再ログインしようとする。そこで enforcement 層には別のコードを返し、「検証できなかった」として応答できるようにする。どちらの場合も許可はしない。取得できた鍵セットにトークンの `kid` に一致する鍵がない場合は応答が得られているので、再取得のクールダウン中はそのトークンは `401 invalid_token` である。クールダウンを過ぎると未知の `kid` で鍵セットを取得し直し、その取得に失敗すれば `503` になる。前者は `jwt_verification_unavailable`（error）、後者は `jwt_token_rejected`（warn）としてログに出す。
 
 **JWKS URI は `https://` 必須。** そのエンドポイントが返す鍵はすべてこの deployment が受け入れるトークンを検証できる — つまりエンドポイントの同一性がトラストアンカーそのものであり、それを確立するのが TLS である。平文であれば経路上の第三者（あるいは DNS 応答を握る者）が自分の署名鍵を差し込み、検証を通るトークンを発行できる。平文 `http://` はループバックホスト（`localhost`, `127.0.0.0/8`, `[::1]`）に限って許可する — そこには攻撃者が座れる経路が存在しないためで、ローカル開発とテストのための例外である。コンテナ名や DNS 名で到達するサービス（`http://auth-provider:3000`）はループバックでは**ない**ので config パース時に拒否される。プロバイダーの前段に TLS 終端を置くか、`publicKey` / `publicKeyPath` で公開鍵を直接渡すこと。
 
@@ -658,7 +658,7 @@ policy の更新後や rolling deployment の最中は、決定の結果と rule
 
 Cedar の Rule グループはこれを報告し、id は policy ファイルの名前から作られます（`30-forbid-contractors`、複数の policy を持つファイルの 2 つ目なら `20-rules#2`） — [`packages/cedar`](packages/cedar/README.md#policy-revision-which-policies-decided) を参照。
 
-参照は報告した Rule の outcome に載るので、2 つの policy source の下で下された決定は 2 つの revision を持ち、1 つが両方を代表することはありません。batch では entry ごとに自分のものを持ちます。batch は snapshot を固定しませんし、policy set が boot 時に 1 回だけ load される間は固定する必要もありません。各 replica は *自分が* 評価した snapshot を報告するので、rolling deployment 中に同じ request への 2 つの答えを見分けられます。policy の評価なしに作られた deny — router の `collector_timeout`、`rule_timeout`、`attribute_conflict` と、evaluator の `no_applicable_rule` — は group を持たないので evaluation も無く、評価前に拒否された request（`400`、`401`）はそもそも決定ではありません。どちらも「policy が決めた」と記録されることはありません。
+参照は報告した Rule の outcome に載るので、2 つの policy source の下で下された決定は 2 つの revision を持ち、1 つが両方を代表することはありません。batch では entry ごとに自分のものを持ちます。batch は snapshot を固定しませんし、policy set が boot 時に 1 回だけ load される間は固定する必要もありません。各 replica は *自分が* 評価した snapshot を報告するので、rolling deployment 中に同じ request への 2 つの答えを見分けられます。policy の評価なしに作られた deny — router の `collector_timeout`、`rule_timeout`、`attribute_conflict` と、evaluator の `no_applicable_rule` — は group を持たないので evaluation も無く、評価前に拒否された request（`400`、`401`、`503`）はそもそも決定ではありません。どちらも「policy が決めた」と記録されることはありません。
 
 **どこに出るか。** `decision` イベントには常に `evaluations` として載ります（決めた policy も含みます）。response に載るのは `verify.evaluationInResponse = "include"` のときだけです（既定は `"omit"` で、その場合 response はキー単位でこれまでと同一）。XACML の `ReturnPolicyIdList` や OPA の `?provenance=true` と違って opt-in が呼び出し側ではなくデプロイ側にあるのは、これが「policy set がいつ変わったか」「deny が policy によるものか engine の失敗か」「各 answer をどの policy が決めたか」を、受理される token の保持者全員に伝えるからです。それが問題になる環境では [`http.callerAuth`](#設定) と併用してください。
 

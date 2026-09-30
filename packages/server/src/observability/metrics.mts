@@ -181,7 +181,7 @@ export interface Metrics {
  * readiness-probe registry to sample, and a gauge fed from a hand-maintained
  * list of dependencies would drift. A JWKS outage shows as the
  * `jwt_verification_unavailable` log event, emitted at error so it can be
- * alerted on.
+ * alerted on, and as `503` responses on the HTTP histogram.
  *
  * Each call builds its own registry, so several apps can be constructed in one
  * process without colliding on metric names.

@@ -118,6 +118,13 @@ export interface VerifyingJwtConfig extends JwtTimeClaimConfig {
 	// The `key` is produced by a KeyResolverFactory; its concrete type depends on
 	// the algorithm (e.g. KeyObject for HS256, JWTVerifyGetKey for JWKS, etc.).
 	// The authenticator narrows it via cast when calling jwtVerify.
+	//
+	// A get-key function that refuses a token must throw a jose error about the
+	// token — `JWKSNoMatchingKey` for a `kid` it does not hold — and anything
+	// else only when it could not look the key up. Any other throw is read as
+	// the keys being unavailable, answered 503 and logged at error, and the
+	// token's header chooses what reaches the function, so a plain `Error` for
+	// an unknown `kid` would let any caller produce both.
 	key: unknown;
 	algorithms: string[];
 	/** Issuer(s) this deployment accepts. A token minted by anyone else is rejected. */
@@ -352,9 +359,11 @@ function assertAudienceClaim(
 
 /**
  * True when token verification could not be attempted or completed for reasons
- * unrelated to the presented token: the situation an operator must be able to
- * tell apart from a bad token, since a JWKS outage flips the whole fleet to
- * 401-deny.
+ * unrelated to the presented token: the situation a caller and an operator
+ * must be able to tell apart from a bad token. It decides both what the caller
+ * is answered — `verification_unavailable` (503) rather than `invalid_token`
+ * (401) — and that the line is `jwt_verification_unavailable` at error rather
+ * than `jwt_token_rejected` at warn.
  *
  * Infrastructure side: a JWKS fetch timeout, a malformed JWKS document, a bare
  * `JOSEError` (`ERR_JOSE_GENERIC` — jose reserves the base class for the JWKS

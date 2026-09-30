@@ -830,7 +830,7 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 			);
 		});
 
-		describe("the code the table names without a request case", () => {
+		describe("the codes the table names without a request case", () => {
 			it("names the caller-auth gate's refusal: code caller_unauthenticated, status 401", () => {
 				// The optional `http.callerAuth` gate sits IN FRONT of the pinned
 				// surface — it answers before the body is parsed, so it is not one
