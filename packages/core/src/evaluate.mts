@@ -37,11 +37,12 @@ const NO_APPLICABLE_RULE: Omit<Decision & { decision: "deny" }, "reason"> = {
 /** Options controlling evaluator semantics that a deployment may override. */
 export interface EvaluateOptions {
 	/**
-	 * Decision returned when the rule set is empty — no collector produced a rule
-	 * for this request. Defaults to `"deny"`.
+	 * Decision returned when no granting rule applies — no collector produced
+	 * one for this request. Defaults to `"deny"`.
 	 *
 	 * `"allow"` is an explicit, per-deployment opt-out of default-deny and turns
-	 * the engine fail-open: any request that collects no rules is permitted. Only
+	 * the engine fail-open: any request that collects no granting rule is
+	 * permitted, provided it passes the restricting rules it collected. Only
 	 * set it for a pipeline whose authorization is enforced elsewhere.
 	 */
 	onEmptyRuleSet?: "deny" | "allow";
@@ -77,11 +78,15 @@ export interface EvaluateOptions {
  * supplies the `code` and `message`. Every decision carries a structured
  * `reason` naming each rule group and how it came out.
  *
- * An empty rule set is **denied by default**: "no rule applied" means the
- * request was never authorized, not that it needs no authorization — the
- * implicit-deny semantics of OPA / OpenFGA / Cedar, so an engine swapped in
- * behind the same decision contract does not change the outcome.
- * `onEmptyRuleSet: "allow"` opts a deployment out of it.
+ * A request no rule applies to is **denied by default**: "no rule applied"
+ * means the request was never authorized, not that it needs no authorization —
+ * the implicit-deny semantics of OPA / OpenFGA / Cedar, so an engine swapped
+ * in behind the same decision contract does not change the outcome.
+ * `onEmptyRuleSet: "allow"` opts a deployment out of it. Only a granting rule
+ * applies in this sense: a rule marked `restricts` narrows what a grant
+ * allows, as a Cedar `forbid` does, and is no reason to allow on its own. A
+ * request that only restricting rules apply to is denied without asking them,
+ * and under `"allow"` it is held to them.
  *
  * A rule list may carry either kind of rule. A synchronous `Rule` is asked
  * through `verify`; an `AsyncRule` is awaited through `decide`, under the
@@ -107,6 +112,8 @@ export interface EvaluateOptions {
  * @throws {TypeError} when a rule answers something other than a boolean, or
  *   reports an evaluation that does not read — see `beginRuleInvocation`.
  *   Attributed to the rule in `failures`, like a throw.
+ * @throws {TypeError} when a `ruleType` group mixes restricting and granting
+ *   rules, before any rule runs.
  * @throws {RangeError} for an unusable `ruleTimeoutMs` or `evaluateDeadlineMs`,
  *   before any rule runs.
  */
@@ -127,9 +134,13 @@ export async function evaluate(
 
 	// Group rules by ruleType — rules within a group are alternatives (OR).
 	const groups = Map.groupBy(rules, (rule) => rule.ruleType);
+	refuseMixedGroups(groups);
 
-	// Nothing to evaluate → default-deny unless the deployment opted out.
-	if (groups.size === 0) return emptyDecision(options);
+	// No granting rule → default-deny unless the deployment opted out. One that
+	// opted out is still held to the restricting rules, evaluated below.
+	if (!rules.some((rule) => !restricts(rule)) && options?.onEmptyRuleSet !== "allow") {
+		return { ...NO_APPLICABLE_RULE, reason: { groups: [] } };
+	}
 
 	// Each group must have at least one passing rule (AND across groups). Every
 	// group is evaluated, including groups after the first failing one, so a
@@ -146,12 +157,26 @@ export async function evaluate(
 	return conclude(outcomes);
 }
 
-/** An empty rule set is a deny unless the deployment opted out. */
-function emptyDecision(options?: EvaluateOptions): Decision {
-	const reason = { groups: [] };
-	return options?.onEmptyRuleSet === "allow"
-		? { decision: "allow", reason }
-		: { ...NO_APPLICABLE_RULE, reason };
+/** Whether `rule` only narrows what the granting rules allow. */
+function restricts(rule: AnyRule): boolean {
+	return (rule as { restricts?: unknown }).restricts === true;
+}
+
+/**
+ * A group is an OR, so a restricting rule that passed would satisfy it in
+ * place of the grant beside it.
+ */
+function refuseMixedGroups(groups: Map<string, AnyRule[]>): void {
+	for (const [ruleType, groupRules] of groups) {
+		const restricting = groupRules.filter(restricts).length;
+		if (restricting > 0 && restricting < groupRules.length) {
+			throw new TypeError(
+				`evaluate: rule group "${ruleType}" mixes restricting rules with granting ones. A group is an OR, ` +
+					"so a restricting rule that passed would satisfy it in place of the grant; give the " +
+					"restricting rules a ruleType of their own.",
+			);
+		}
+	}
 }
 
 /** A deny names the FIRST failing group; reason carries all. */
