@@ -72,6 +72,9 @@ describe("rangeContains", () => {
 		// Compared as written: an id's encoding is part of it.
 		["doc:x%2Fy.read", "doc:x%2Fy.read", true],
 		["doc:x%2Fy.read", "doc:x/y.read", false],
+		// An unreserved character encoded is another spelling, and another id.
+		["a:%41.run", "a:A.run", false],
+		["a:A.run", "a:%41.run", false],
 	])("%j contains %j: %s", (entry, path, contained) => {
 		expect(rangeContains(entry, path)).toBe(contained);
 	});
