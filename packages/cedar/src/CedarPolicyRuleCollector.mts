@@ -182,16 +182,18 @@ export interface CedarPolicyRuleCollectorOptions {
  * the merged attributes the policies decide over; the rule runs after both
  * pipelines, with that map. The request is built from `attrs` alone, and the
  * policy set and mapping are fixed at boot with nothing of `CollectorContext`
- * retained, so equal attributes give equal answers. The rule object is built
- * once, in `create`.
+ * retained, so the answer depends on nothing of the request but `attrs`:
+ * in-process, equal attributes give equal answers; over http, the agent's set
+ * and the read-back's state can change one. The rule object is built once, in
+ * `create`.
  *
- * The rule also logs, and no log line changes an answer: the decision remains
- * a pure function of `attrs`. A request that could not be built, a failed
- * call and an evaluation error are logged unless `logEvaluationErrors = false`.
- * Faults of the deployment are always logged: an answer from a revision or
- * policies this collector did not load, an `allow` naming no policy, an
- * unvouched answer under `requireConfirmedRevision` — and, once, that knob set
- * on a rule asked without a reporter.
+ * The rule also logs, and no log line changes an answer. A request that could
+ * not be built, a failed call and an evaluation error are logged unless
+ * `logEvaluationErrors = false`. Faults of the deployment are always logged:
+ * an answer from a revision or policies this collector did not load, an
+ * `allow` naming no policy, an unvouched answer under
+ * `requireConfirmedRevision` — and, once, that knob set on a rule asked
+ * without a reporter.
  *
  * ## Which kind of rule
  *

@@ -140,9 +140,13 @@ interface AgentAuthorizationCall {
  * refused at boot. Each is pushed under the id `namePolicies` makes of its
  * file's name, as the wasm engine names a one-policy file, and the load's mark
  * ({@link agentPolicyId}), by which an answer from a set this verifier did not
- * load is told apart. `PUT /v1/policies` replaces the agent's whole set, so a
- * second `load` against the same agent is refused rather than silently
- * overwriting the first.
+ * load is told apart. `PUT /v1/policies` replaces the agent's whole set, so
+ * run one collector per agent: this engine refuses a second `load` against an
+ * endpoint it has loaded or is loading (loopback spellings and the default
+ * port read as one; the path is part of the endpoint). The same agent reached
+ * under another base path or host name, or pushed to by another process, is
+ * not refused here; the read-back then finds the set changed and refuses
+ * answers.
  *
  * Failure is loud and closed. Boot retries a connection refusal for
  * {@link CEDAR_LOAD_TIMEOUT_MS} (a compose sibling may be a few hundred

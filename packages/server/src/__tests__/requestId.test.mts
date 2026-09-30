@@ -3,9 +3,10 @@
 
 /*
  * Request correlation for the decision endpoints. The `x-request-id` the
- * caller sent is on the `decision` line and every failure line, and echoed on
- * every response the router writes, so a 500 can be matched to the enforcing
- * service's own log. Two things are refused on purpose:
+ * caller sent is on the `decision` line, on `verify_internal_error` and on the
+ * three deny lines, and echoed on every response the router writes, so a 500
+ * can be matched to the enforcing service's own log. Two things are refused on
+ * purpose:
  *
  * - **Minting one.** An id the server made up and logged, but never returned,
  *   correlates with nothing the caller has. No id sent, no id anywhere.

@@ -54,10 +54,11 @@ export interface Logger {
  *
  * `Logger` is the interface this project logs *through*; `EventLogger` is the
  * one it *demands* of a caller. A host logger that omits `trace` / `fatal` /
- * `child`, or whose methods require a message argument, satisfies neither
- * `Logger` nor `Pick<Logger, "error">` (a picked method keeps its
- * two-overload shape). Seams that only emit a named structured event take
- * this instead; use `Logger` where the full surface is used.
+ * `child` does not satisfy `Logger`; one whose methods require a message
+ * argument satisfies neither `Logger` nor `Pick<Logger, "error">` (a picked
+ * method keeps its two-overload shape). Seams that only emit a named
+ * structured event take this instead; use `Logger` where the full surface is
+ * used.
  *
  * `info` is here because the per-decision audit line is written on the
  * successful path; without a non-failure level it would have to be `warn`,

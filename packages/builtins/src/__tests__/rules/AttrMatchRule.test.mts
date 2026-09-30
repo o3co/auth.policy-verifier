@@ -63,9 +63,9 @@ describe("AttrMatchRule", () => {
 
 	it("preserves the legacy ruleType prefix 'attr_match:' for backward compatibility", () => {
 		// AttrMatchRule is a deprecated wrapper around AttrPairEqual. To keep
-		// downstream consumers (e.g. dplaas.auth) working without code changes
-		// across this release, the default ruleType must remain `attr_match:{a}:{b}`
-		// rather than adopting AttrPairEqual's `attr_pair_equal:...` form.
+		// downstream consumers (e.g. dplaas.auth) working without code changes,
+		// the default ruleType stays `attr_match:{a}:{b}` rather than adopting
+		// AttrPairEqual's `attr_pair_equal:...` form.
 		const r = new AttrMatchRule({ a: "userId", b: "sub" });
 		expect(r.ruleType).toBe("attr_match:userId:sub");
 	});

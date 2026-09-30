@@ -33,8 +33,9 @@ import { ATTR_PERMISSIONS, ATTR_ROLES } from "@o3co/auth.policy-verifier.core";
  * no-normalization rule: a wildcard is match structure the policy author
  * **wrote into the grant**, not a rewrite of both sides behind their back. The
  * literal halves around the `*` still compare exactly and case-sensitively.
- * Multiple wildcards are rejected outright because the two-part split would
- * silently drop segments and over-grant.
+ * A grant with more than one `*` is not read as a pattern (only an exact
+ * match passes it), because the two-part split would silently drop segments
+ * and over-grant.
  *
  * The two halves must not overlap in the required permission: a grant
  * of `"posts.*.read"` does not match `"posts.read"`, where the single `.`
@@ -76,9 +77,10 @@ export class HasPermission implements Rule {
 		if (permission === required) return true;
 
 		if (permission.includes("*")) {
-			// A grant with more than one wildcard never matches: the two-part
-			// split below would drop everything after the second segment ("a*c*b"
-			// read as "a*c") and over-grant.
+			// A grant with more than one wildcard is not read as a pattern; only
+			// the exact match above passes it. The two-part split below would drop
+			// everything after the second segment ("a*c*b" read as "a*c") and
+			// over-grant.
 			if ((permission.match(/\*/g) ?? []).length > 1) return false;
 
 			const [prefix, suffix] = permission.split("*");

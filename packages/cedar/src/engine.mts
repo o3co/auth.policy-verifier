@@ -29,10 +29,10 @@ export interface CedarDecision {
 	 * The ids of the determining policies (`10-permit-eng`) — what a
 	 * decision's `determiningPolicies` names. Empty: no policy determined the
 	 * request — which only a `deny` can say: Cedar allows only on a permit, so
-	 * an `allow` naming none is refused as not a decision. An entry the engine
-	 * cannot read as an id stays in the list — its emptiness decides an answer
-	 * — as a string no id can be (one holding a control character), so the
-	 * decision counts it in `determiningPoliciesOmitted` rather than naming it.
+	 * an `allow` naming none is refused as not a decision. An item the http
+	 * engine cannot read as an id means it cannot say which set answered: that
+	 * answer is `foreign` (`"unreadable policy"`) with `reason` empty, and the
+	 * collector fails it closed.
 	 */
 	reason: readonly string[];
 	/**

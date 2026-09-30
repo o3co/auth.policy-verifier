@@ -7,8 +7,9 @@
  * These read the real files under templates/standalone/config/, so they cover
  * the shipped layering rather than a hand-built object: an env overlay that
  * contains only comments is an empty HOCON document, and it must fall back to
- * application.conf instead of failing to parse. Nothing else in the suite
- * exercises parseFile.
+ * application.conf instead of failing to parse. The smoke test boots from the
+ * development overlay too; only this file asserts what each shipped overlay
+ * resolves to.
  */
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

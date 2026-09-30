@@ -12,10 +12,11 @@
  * This one pins the seam ABOVE it: the HTTP surface itself. Status codes, the
  * exact key set of each response body, which refusal wins when a request is
  * wrong in two ways at once. `VerifierEndpoint` — the interface an enforcement
- * layer codes against — lives in o3co/protobuf.interceptors, and this suite
- * checks that the wire shape this repository publishes is the one that
- * repository implements. An engine swap is invisible to a caller; a field
- * rename here breaks every caller at once, silently, at runtime.
+ * layer codes against — lives in o3co/protobuf.interceptors; this suite holds
+ * this repository's endpoint to the table (`fixtures/wireContract/`) that an
+ * enforcement layer implements against. An engine swap is invisible to a
+ * caller; a field rename here breaks every caller at once, silently, at
+ * runtime.
  *
  * So the adapter here is a TRANSPORT, not an engine: it puts bytes on the wire
  * and reports the raw answer. An adapter for the OPA or Cedar deployment of

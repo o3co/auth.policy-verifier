@@ -79,9 +79,10 @@ function toSecretKey(secret: string): KeyObject {
  * second opinion about base64url decoding or constant-time comparison lives
  * here.
  *
- * `algorithms` is pinned although `jwtVerify` has already refused anything but
- * HS256 before calling the resolver, so this function cannot become the one
- * place where a token talks its way into a different algorithm.
+ * `algorithms` is pinned to HS256 here even though `jwtVerify` has already
+ * refused any other algorithm before calling the resolver: this function must
+ * not become the one place where a token talks its way into a different
+ * algorithm.
  */
 async function signedWith(token: FlattenedJWSInput, candidate: KeyObject): Promise<boolean> {
 	try {

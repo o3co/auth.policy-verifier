@@ -473,9 +473,10 @@ describe("rule purity conformance — the check itself", () => {
 
 // CedarPolicyRuleCollector (packages/cedar): the policy set is compiled at
 // boot and the rule builds its Cedar request from `attrs` inside `verify`, so
-// the suite proves exactly the property it claims — discard the request,
-// the answer stands. The mapping reads `department` / `suspended` out of the
-// attribute map, never out of the context.
+// the suite proves exactly the property `CedarPolicyRuleCollector` is built
+// on — discard the request, the answer stands. The mapping reads
+// `department` / `suspended` out of the attribute map, never out of the
+// context.
 const cedarContext: CollectorRequest = {
 	subject: { sub: "user-1" },
 	resource: { raw: "document:42", resourceType: "document", resourceId: "42" },

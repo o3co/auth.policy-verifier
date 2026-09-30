@@ -4,9 +4,10 @@
 /*
  * Unit tests for the construction-time JWT config guard, the single runtime
  * enforcement point for the two config invariants ("iss/aud/typ present when
- * validating", "decode-only requires the explicit acknowledgment"). The cases
- * a bare falsy check would let through (`issuer: []`, `issuer: [""]`, no
- * `tokenType`) are pinned here.
+ * validating", "decode-only requires the explicit acknowledgment"). Pinned
+ * here: `issuer: []` and `issuer: [""]`, which a bare falsy check lets
+ * through, and a missing `tokenType`, which a check that never reads it lets
+ * through.
  */
 import { errors, type JWTPayload, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";

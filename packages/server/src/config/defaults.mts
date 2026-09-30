@@ -102,8 +102,9 @@ export const DEFAULT_MAX_CONTEXT_VALUE_LENGTH = 1_024;
  * reason nothing heavier may be reached for from here.
  *
  * `MAX_TIMER_MS` is a fact about `setTimeout`, defined once beside the engine's
- * own timer use, and the ceiling every millisecond knob here is held to, the
- * JWKS fetch timeout included.
+ * own timer use, and the ceiling the JWKS fetch timeout and the collector and
+ * rule budgets are held to; `jwksCooldownMs` and `jwksCacheMaxAgeMs` have no
+ * ceiling.
  */
 export {
 	DEFAULT_COLLECT_DEADLINE_MS,

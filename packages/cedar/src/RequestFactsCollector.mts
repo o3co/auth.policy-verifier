@@ -24,8 +24,8 @@ import {
  * attributes. `CedarPolicyRuleCollector`'s rule builds the Cedar
  * `(principal, action, resource, context)` request from the merged attribute
  * map inside `verify`, where the request no longer exists. Only primitives are
- * copied — string values out of the context, never a reference into it — as
- * the rule-purity conformance suite requires.
+ * copied — string values out of the context, never a reference into it —
+ * which is the legal side of the line the rule-purity conformance suite draws.
  *
  * `requestResourceId` is written only when the resource parser produced one;
  * an absent id stays absent rather than becoming `""`, so downstream mapping

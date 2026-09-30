@@ -6,10 +6,11 @@
  * entry, with nothing of the transport in it. The two collects, the evaluation,
  * sorting a failure into a deny the caller gets or a fault the route answers,
  * the `decision` line and the counters are here. The router owns everything on
- * either side (wire validation, caller and subject authentication, turning the
- * caller's disconnect into a signal, status codes and headers) and the one line
- * a fault produces, because a fault speaks for the request: a batch's 500 is one
- * line for the whole batch.
+ * either side (wire validation, subject authentication, turning the caller's
+ * disconnect into a signal, status codes and headers) and the one line a fault
+ * produces, because a fault speaks for the request: a batch's 500 is one line
+ * for the whole batch. Caller authentication is mounted ahead of the router, by
+ * `createApp`.
  *
  * A decision that was *made* (allow, deny, or one of the three denies a failure
  * is answered with) is reported here, once, at the moment it is made. A

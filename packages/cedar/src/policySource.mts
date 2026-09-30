@@ -171,7 +171,10 @@ export function namePolicies(
  * policy set refuses to start, it does not serve denials.
  *
  * A directory with zero `.cedar` files is allowed and yields the empty policy
- * set: the collector can be mounted, abstaining on every request, before the
+ * set, under which no policy determines any request: the collector's rule
+ * fails every request under the default `onNoDeterminingPolicy = "deny"`, and
+ * passes every one Cedar is asked under `"abstain"` (refused over an
+ * asynchronous engine) — the posture for mounting the collector before the
  * first policy lands.
  *
  * Relative paths resolve against the working directory, matching how the

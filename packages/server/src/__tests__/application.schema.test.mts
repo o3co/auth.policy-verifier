@@ -1238,12 +1238,12 @@ describe("AppConfigSchema — the verify block's default names every knob", () =
 	});
 });
 
-describe("AppConfigSchema — millisecond knobs are bounded above", () => {
+describe("AppConfigSchema — the JWKS fetch timeout and the collector budgets are bounded above", () => {
 	// Node clamps a `setTimeout` delay above 2^31 - 1 to ~1 ms. Without the
 	// ceiling, a collectorTimeoutMs of 3_000_000_000 would pass validation and
-	// become a ~1 ms timer: every decision denied with collector_timeout, and
-	// every JWKS fetch aborted — a validated configuration producing a total
-	// outage.
+	// become a ~1 ms timer that denies every decision with collector_timeout,
+	// and a jwksTimeoutMs past it would abort every JWKS fetch — a validated
+	// configuration producing a total outage.
 	const MAX_TIMER = 2_147_483_647;
 	const validJwt = { algorithm: "HS256", secret: SECRET, mode: "verify", ...rfc9068 };
 	const rs256 = {
@@ -1253,7 +1253,7 @@ describe("AppConfigSchema — millisecond knobs are bounded above", () => {
 		...rfc9068,
 	};
 
-	it("accepts each millisecond knob at the timer ceiling", () => {
+	it("accepts each of them at the timer ceiling", () => {
 		const result = AppConfigSchema.safeParse({
 			oauth: { jwt: { ...rs256, jwksTimeoutMs: MAX_TIMER } },
 			...baseBody,

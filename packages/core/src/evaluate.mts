@@ -84,8 +84,10 @@ export interface EvaluateOptions {
  * `onEmptyRuleSet: "allow"` opts a deployment out of it.
  *
  * A rule list may carry either kind of rule. A synchronous `Rule` is asked
- * through `verify`; an `AsyncRule` is awaited through `decide`, under
- * `ruleTimeoutMs`. Both are asked one at a time, in collection order, and the
+ * through `verify`; an `AsyncRule` is awaited through `decide`, under the
+ * shorter of `ruleTimeoutMs` and what is left of `evaluateDeadlineMs`. Both are
+ * asked one at a time, group by group — groups in the order their `ruleType`
+ * first appears, each group's rules in collection order — and the
  * alternatives after a group's first pass never run, whichever kind they are.
  * The evaluator is asynchronous for that reason alone — a list of synchronous
  * rules answers in the same turn, with nothing awaited but the promise itself.

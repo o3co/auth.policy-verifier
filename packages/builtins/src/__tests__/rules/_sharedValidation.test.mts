@@ -199,8 +199,9 @@ describe("requireHomogeneousLiteralArray", () => {
 	});
 
 	it("throws when an element is NaN (would silently mismatch AttrLiteralIn/NotIn)", () => {
-		// AttrLiteralIn compares each element strictly, so a NaN element could
-		// never match any attribute value (NaN !== NaN).
+		// AttrLiteralIn tests membership with `Set.has`, under which a NaN
+		// element matches a NaN attribute: something that is not a number
+		// would satisfy the set.
 		expect(() => requireHomogeneousLiteralArray("MyClass", [1, Number.NaN, 3])).toThrow(
 			/must not contain NaN/,
 		);

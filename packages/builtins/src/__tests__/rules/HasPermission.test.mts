@@ -90,9 +90,10 @@ describe("HasPermission", () => {
 
 	describe("multi-star wildcard rejection", () => {
 		it("does NOT match when granted permission has 2+ wildcards — over-granting via dropped suffix", () => {
-			// A grant with two or more wildcards never matches. Split into
-			// [prefix, suffix], "resource*action*required" would drop "required"
-			// and match "resourceXaction".
+			// A grant with two or more wildcards is not read as a pattern; only
+			// an exact match passes it. Split into [prefix, suffix],
+			// "resource*action*required" would drop "required" and match
+			// "resourceXaction".
 			const rule = new HasPermission("resourceXaction");
 			const attrs: Attributes = new Map([["permissions", ["resource*action*required"]]]);
 			expect(rule.verify(attrs)).toBe(false);

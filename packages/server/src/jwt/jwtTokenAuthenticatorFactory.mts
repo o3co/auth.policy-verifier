@@ -41,7 +41,8 @@ export { JWT_TOKEN_AUTHENTICATOR };
  *
  * Shape first: a hand-built config can carry anything at these paths, and the
  * key checks below reach into the block with `in` and object spread, which
- * throw a bare TypeError on a primitive.
+ * throw a bare TypeError on a primitive; so both blocks are shape-checked
+ * first, and a malformed one is reported like every other boundary failure.
  */
 export const JwtTokenAuthenticatorFactory: TokenAuthenticatorFactory = async (
 	oauth,

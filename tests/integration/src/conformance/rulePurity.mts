@@ -188,9 +188,9 @@ function isRevokedProxyError(error: unknown): boolean {
  * the evaluator reads out of it. A reading of this suite's own would be a
  * second opinion that can err in the rule's favour: holding the reported object
  * lets a rule that rewrites and re-reports one object compare equal to itself,
- * and `structuredClone` never runs an accessor, so a class-backed report
- * snapshots as `{}`. Through `evaluate()` there is one reading: core's, taken
- * when the report is made, copied and frozen.
+ * and `structuredClone` never runs an accessor on the prototype, so a report a
+ * class serves through getters snapshots as `{}`. Through `evaluate()` there is
+ * one reading: core's, taken when the report is made, copied and frozen.
  *
  * So a rule core refuses fails here too — an answer that is not a boolean, a
  * report that does not read, a pass reporting its evaluator `failed` — and

@@ -110,11 +110,10 @@ export type ClassifiedFailure =
  * a decision: a fault anywhere else is `internal`, and `body_rejected` is the
  * router's terminal handler's to decide.
  *
- * The three deny errors are recognised by class first, as the router
- * recognises them to answer a deny, so a collector that rethrows a nested
- * pipeline's `CollectorTimeoutError` is still a timeout. The name is always the
- * record's, never the error's: a collector cannot log or label itself as
- * anything but its own position by throwing a timeout it built.
+ * The three deny errors are recognised by class first, so a collector that
+ * rethrows a nested pipeline's `CollectorTimeoutError` is still a timeout. The
+ * name is always the record's, never the error's: a collector cannot log or
+ * label itself as anything but its own position by throwing a timeout it built.
  */
 export function classifyFailure(cause: unknown, failures?: FailureRecord): ClassifiedFailure {
 	const source = failures?.sourceOf(cause);

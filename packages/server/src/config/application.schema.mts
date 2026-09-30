@@ -235,10 +235,10 @@ const OAuthJwtSchema = z
 		 * about what a value means.
 		 *
 		 * `maxTokenAgeSeconds` is the ceiling on `now - iat` — what refuses a
-		 * token whose issuer set `exp` years out — and setting it makes `iat`
-		 * required (RFC 9068 §2.2 requires it anyway). `exp` itself is
-		 * required unconditionally and has no knob: a knob to accept tokens
-		 * that never expire is the bug, not the setting.
+		 * token whose issuer set `exp` years out — and because it always
+		 * applies, `iat` is required (RFC 9068 §2.2 requires it anyway). `exp`
+		 * itself is required unconditionally and has no knob: a knob to accept
+		 * tokens that never expire is the bug, not the setting.
 		 */
 		maxTokenAgeSeconds: boundedNumber(NUMERIC_BOUNDS.maxTokenAgeSeconds, "oauth.jwt"),
 		/**

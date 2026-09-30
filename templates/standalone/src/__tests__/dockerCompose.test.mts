@@ -14,8 +14,7 @@ describe("docker-compose.yml — the cedar profile's agent is authenticated", ()
 		// reads, so the two cannot disagree.
 		expect(compose).toMatch(/- CEDAR_AGENT_AUTHENTICATION=\$\{CEDAR_AUTHENTICATION:-\}/);
 		// And the app from the same interpolation, not only through `env_file`:
-		// a shell variable or `--env-file` would otherwise reach the agent alone
-		// (review).
+		// a shell variable or `--env-file` would otherwise reach the agent alone.
 		expect(compose).toMatch(/- CEDAR_AUTHENTICATION=\$\{CEDAR_AUTHENTICATION:-\}/);
 	});
 

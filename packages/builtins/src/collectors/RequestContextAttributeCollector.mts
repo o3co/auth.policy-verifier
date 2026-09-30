@@ -53,16 +53,17 @@ export type RequestContextAttributeCollectorConfig = AttributeMappingCollectorCo
  * type is dropped rather than passed along.
  *
  * A mapping's `to` may not name a key any package has reserved: core's five —
- * `scopes`, `permissions`, `roles`, `userId`, `clientId` — and whatever the
- * loaded packages reserved at module load (cedar's four `request*` keys). The
- * check is a lookup in core's registry. Those keys are what the engine decides
- * from, written by the deployment, and the request body must not join them:
- * `AttributePipeline` unions array-valued attributes, so
- * `{ from = "groups", to = "scopes" }` would quietly add to the token's scopes;
- * a scalar key written with a different value throws `AttributeConflictError`
- * and denies, and where its owner writes it only sometimes (cedar's
- * `requestResourceId` for an id-less resource) the caller's value stands
- * unopposed. Such a mapping is a configuration error, refused at construction
+ * `scopes`, `permissions`, `roles`, `userId`, `clientId` — and whatever other
+ * packages reserved before this collector is constructed (cedar's four
+ * `request*` keys, once it is imported). The check is a lookup in core's
+ * registry at construction; a later reservation is not seen. Those keys are
+ * what the engine decides from, written by the deployment, and the request
+ * body must not join them: `AttributePipeline` unions array-valued attributes,
+ * so `{ from = "groups", to = "scopes" }` would quietly add to the token's
+ * scopes; a scalar key written with a different value throws
+ * `AttributeConflictError` and denies, and where its owner writes it only
+ * sometimes (cedar's `requestResourceId` for an id-less resource) the
+ * caller's value stands unopposed. Such a mapping is a configuration error, refused at construction
  * so the deployment fails at boot. Only the attribute key is reserved:
  * `{ from = "scopes", to = "requestedScopes" }` is fine.
  *

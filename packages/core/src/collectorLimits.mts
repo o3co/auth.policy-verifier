@@ -311,12 +311,12 @@ export async function runCollectors<T>(
  * the queue would refuse work that had not yet begun.
  *
  * A collector whose decision is already lost is **not invoked at all**. An
- * aborted signal is not enough: a collector that passes its signal to `fetch`
- * without checking `signal.aborted` first would already have put the request
- * on the wire — an outbound call for an answer nobody will read, often against
- * the dependency whose slowness abandoned the decision. Refusing to start is
- * the point of a concurrency bound; starting and then cancelling only bounds
- * how long the amplification lasts.
+ * aborted signal is not enough: `fetch` refuses one before connecting, but a
+ * driver call that takes no signal, or whatever a collector does before its
+ * first signal-aware call, still goes out — an outbound call for an answer
+ * nobody will read, often against the dependency whose slowness abandoned the
+ * decision. Refusing to start is the point of a concurrency bound; starting
+ * and then cancelling only bounds how long the amplification lasts.
  */
 async function runOne<T>(
 	collector: Collecting<T>,
@@ -386,11 +386,12 @@ async function runOne<T>(
  * never settles, plus the way to unsubscribe it once the race is over.
  *
  * **Precondition: `signal` is not yet aborted** — a listener added to an
- * aborted signal never fires, so the promise would hang. Its one caller
- * creates the controller just above and refuses an abandoned fan-out before
- * that. There is no defensive branch: it would be unreachable, and so
- * untested. A caller that cannot honour the precondition should reject before
- * calling.
+ * aborted signal never fires, so the promise would hang. Both callers create
+ * the controller just above, having refused what was already lost: `runOne`
+ * an abandoned fan-out, `evaluate`'s `runAsyncRule` an aborted caller or a
+ * spent rule phase. There is no defensive branch: it would be unreachable,
+ * and so untested. A caller that cannot honour the precondition should reject
+ * before calling.
  */
 export function rejectOnAbort(signal: AbortSignal): {
 	promise: Promise<never>;

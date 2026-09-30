@@ -124,13 +124,16 @@ export interface VerifyRouterConfig {
 	 */
 	maxContextValueLength?: number | string;
 	/**
-	 * Sink for the router's failure events (`jwt_token_rejected`,
-	 * `jwt_verification_unavailable`, `verify_internal_error`, and the
-	 * `collector_timeout` / `rule_timeout` / `attribute_conflict` denies — the
-	 * last four carrying a `category`) and for the per-decision `decision` audit
-	 * line. Defaults to the console-backed logger so neither is ever silent in a
-	 * deployment that wires nothing. The decision line is emitted at `info`, so
-	 * `logging.level` is the one switch that turns it off.
+	 * Sink for the router's failure events (`verify_internal_error` and the
+	 * `collector_timeout` / `rule_timeout` / `attribute_conflict` denies, all
+	 * four carrying a `category`), for `verify_caller_gone`, and for the
+	 * per-decision `decision` audit line. `jwt_token_rejected` and
+	 * `jwt_verification_unavailable` are the authenticator's and go to the
+	 * logger it was built with (`createTokenAuthenticator(jwt, logger)`;
+	 * `createApp` hands both the same one). Defaults to the console-backed
+	 * logger so none of these is ever silent in a deployment that wires nothing.
+	 * The decision line is emitted at `info`, so `logging.level` is the one
+	 * switch that turns it off.
 	 */
 	logger?: EventLogger;
 	/**
@@ -448,15 +451,18 @@ function callerSignal(res: express.Response): AbortSignal {
  *
  * Every decision — one per `/verify` call, one per entry of a batch — emits a
  * `decision` event at info and, when `metrics` is wired, increments the
- * decision counters. Requests that never reached the evaluator (401, 400) emit
- * neither, so the log stream and the metric agree on what a decision is. See
- * `observability/decisionEvent.mts` for what the line does and does not carry.
+ * decision counters. The deny answered for a collector timeout, rule timeout or
+ * attribute conflict is a decision and emits both; a request refused before
+ * any decision (400, 401, 413, 415) emits neither, nor does a decision that
+ * could not be made (the 500), so the log stream and the metric agree on what a
+ * decision is. See `observability/decisionEvent.mts` for what the line does and
+ * does not carry.
  *
  * A caller-sent `x-request-id` is echoed on every response the router
- * writes and carried on the `decision` line, on every failure line and to
- * collectors on `CollectorContext.headers` — when it is a bounded token of a
- * safe charset (`acceptRequestId`). Any other value is treated as absent, and
- * none is minted.
+ * writes and carried on the `decision` line, on `verify_internal_error`, on the
+ * three deny lines and to collectors on `CollectorContext.headers` — when it is
+ * a bounded token of a safe charset (`acceptRequestId`). Any other value is
+ * treated as absent, and none is minted.
  */
 export function createVerifyRouter(config: VerifyRouterConfig): express.Router {
 	// Resolved rather than defaulted with `??`: this is the boundary a

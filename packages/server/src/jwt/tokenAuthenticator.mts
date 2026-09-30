@@ -44,7 +44,8 @@ import { NUMERIC_BOUNDS, resolveBound } from "../config/bounds.mjs";
 export interface JwtTimeClaimConfig {
 	/**
 	 * Ceiling on `now - iat`, in seconds. Positive integer; defaults to
-	 * `DEFAULT_MAX_TOKEN_AGE_SECONDS`. Setting it makes `iat` required.
+	 * `DEFAULT_MAX_TOKEN_AGE_SECONDS`. `iat` is required because this bound
+	 * always applies.
 	 */
 	maxTokenAgeSeconds?: number | string;
 	/**

@@ -214,7 +214,8 @@ function checkEntry(
  * 1. `AppConfigSchema` types the field `z.array(...).optional()`, which rejects
  *    `null` before this function is reached. Accepting it here would give a
  *    hand-built config a different answer than a parsed one.
- * 2. No other optional key in the `oauth.jwt` block has a `null` spelling.
+ * 2. In `AppConfigSchema`, no other optional key in the `oauth.jwt` block has a
+ *    `null` spelling.
  * 3. A `null` in a config was almost certainly produced, not written (an
  *    unrendered template value, a missing env var, a serializer emitting the
  *    key anyway). Reading it as "nothing is being rotated" boots a verifier that

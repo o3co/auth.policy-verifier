@@ -203,7 +203,7 @@ describe("createApp", () => {
 
 	// The next two shapes (an empty issuer array, a missing tokenType) are
 	// refused at this boundary, naming the oauth.jwt.* key the operator wrote,
-	// rather than one call later inside the router.
+	// rather than one call later, inside `createTokenAuthenticator`.
 	it("throws when a hand-built config pins issuer to an empty array", async () => {
 		const handBuilt = {
 			...testConfig,
@@ -1538,8 +1538,8 @@ describe("createApp — token authenticator registry", () => {
 	});
 
 	it("still refuses the removed wire keys and an unknown mode through the built-in jwt factory", async () => {
-		// The built-in jwt factory maps `oauth.jwt` onto the router; its
-		// refusals read as createApp's own.
+		// The built-in jwt factory maps `oauth.jwt` onto the authenticator's
+		// config; its refusals read as createApp's own.
 		await expect(
 			createApp({
 				pathResolver: (s: string) => s,

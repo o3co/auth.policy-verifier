@@ -201,9 +201,10 @@ export type EvaluatedRevision =
  * `determiningPoliciesOmitted` only ever stands beside `determiningPolicies`;
  * `evaluate()` refuses it alone. The type leaves both optional rather than
  * saying so, because the stricter union would stop `{ status, revision }` with
- * a `"completed" | "failed"` status from type-checking. A reporter's
- * {@link ReportRuleEvaluation.boundDeterminingPolicies} returns the pair in
- * the shape the check wants ({@link BoundDeterminingPolicies}).
+ * a `"completed" | "failed"` status from type-checking, and a rule written
+ * against a core without determining policies may build its report that way.
+ * A reporter's {@link ReportRuleEvaluation.boundDeterminingPolicies} returns
+ * the pair in the shape the check wants ({@link BoundDeterminingPolicies}).
  */
 export interface DeterminingPolicies {
 	readonly determiningPolicies?: readonly string[];
@@ -346,14 +347,17 @@ export interface ReportRuleEvaluation {
  * Cedar over HTTP. It cannot be a {@link Rule}: `verify` is synchronous and,
  * by contract, does no I/O. Otherwise it is held to the same contract: the
  * same `ruleType` grouping, `code` / `message` on deny and reporting in the
- * decision's `reason`, and an answer that is a function of `attrs` alone (the
- * purity conformance suite checks `decide` exactly as it checks `verify`).
+ * decision's `reason`, and an answer that is a function of `attrs` alone: a
+ * `CollectorContext` retained from collect time may no more be read here than
+ * in `verify`, its `signal` and `credential` included (the purity conformance
+ * suite checks `decide` exactly as it checks `verify`).
  *
- * `decide` runs under a deadline (`evaluate()`'s `ruleTimeoutMs`) and is
- * handed a `signal` that aborts when that budget — or the caller — ends; pass
- * it to `fetch`. A rule that does not answer in time fails the decision as a
- * deny of its own, `RuleTimeoutError`, never as a pass. See docs/extending.md,
- * "Writing an asynchronous rule".
+ * `decide` runs under a deadline — `evaluate()`'s `ruleTimeoutMs`, or what is
+ * left of its `evaluateDeadlineMs` when that is shorter; once the phase is
+ * spent the rule is not started — and is handed a `signal` that aborts when
+ * that deadline or the caller ends; pass it to `fetch`. A rule that does not
+ * answer in time fails the decision as a deny of its own, `RuleTimeoutError`,
+ * never as a pass. See docs/extending.md, "Writing an asynchronous rule".
  */
 export interface AsyncRule {
 	ruleType: string;

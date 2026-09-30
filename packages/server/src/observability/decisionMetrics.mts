@@ -45,8 +45,9 @@ export interface CollectorFailureObservation {
 export interface DecisionMetrics {
 	observe(observation: DecisionObservation): void;
 	/**
-	 * Called once per collector failure the router logs — a
-	 * `collector_timeout` deny, or a `verify_internal_error` a collector threw.
+	 * Called once per collector failure logged — a `collector_timeout` deny (by
+	 * `createDecider`) or a `verify_internal_error` a collector threw (by the
+	 * route).
 	 * Optional: an implementation without it still satisfies the seam and does
 	 * not count them.
 	 */
