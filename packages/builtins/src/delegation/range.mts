@@ -101,17 +101,22 @@ export function rangeContains(entry: string, path: string): boolean {
 }
 
 /**
- * The claim's entries of `type`, or `null` when it carries none: a token with
- * no entry of the type has no range. An entry of the type counts however
- * malformed its path, so a token cannot shed its range by spelling it badly.
+ * The claim's entries of `type`, or `null` when the token has no range: the
+ * claim is absent, or a list of RFC 9396 entries none of which is of the type.
+ * A token cannot shed its range by spelling it badly: an entry of the type
+ * counts however malformed its path, and a claim present in another shape — not
+ * a list, or a list holding something that is not an entry object — is a range
+ * with no entries, which contains nothing.
  */
 export function entriesOfType(claim: unknown, type: string): object[] | null {
-	if (!Array.isArray(claim)) return null;
-	const entries = claim.filter(
-		(entry): entry is object =>
-			typeof entry === "object" && entry !== null && (entry as { type?: unknown }).type === type,
-	);
+	if (claim === undefined) return null;
+	if (!Array.isArray(claim) || !claim.every(isEntryObject)) return [];
+	const entries = claim.filter((entry) => (entry as { type?: unknown }).type === type);
 	return entries.length > 0 ? entries : null;
+}
+
+function isEntryObject(entry: unknown): entry is object {
+	return typeof entry === "object" && entry !== null && !Array.isArray(entry);
 }
 
 /** The entries' paths that are in the grammar; the rest are left out, which narrows the range. */
