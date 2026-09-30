@@ -105,24 +105,25 @@ scope クレームについては `PayloadScopeCollector { claim = "scp" }` を�
 - パスは `(type(:id)?.)*action`。`type` と `action` は `[a-z][a-z0-9_]*`、`id` は `[A-Za-z0-9_~-]` で、それ以外の文字は大文字の 16 進でパーセントエンコードします。
 - エントリがパスの先頭からセグメント単位の接頭辞になっていれば、そのエントリはパスを含みます。id を持たないエントリのセグメントは、同じ type の任意の id を含みます。`project:p1.report` は `project:p1.report:r7.run` を含みます。
 
-range をポリシーと合わせて判定するには、同じ `type` で 2 つを設定します:
+range をポリシーと合わせて判定するには、1 か所から読んだ同じ `type` で 2 つを設定します:
 
 ```hocon
 attribute { collectors = [
   { collector = "PayloadScopeCollector" }
-  { collector = "DelegationRangeCollector", type = "<issuer の委任 type>" }
+  # issuer の委任 type。未設定なら両方のエントリに `type` がなく、起動が拒否される
+  { collector = "DelegationRangeCollector", type = ${?DELEGATION_TYPE} }
   # 動いている client。ポリシーから参照する場合
   { collector = "PayloadClaimAttributeCollector", attributes = [ { from = "act.sub", to = "actorId" } ] }
 ] }
 rule { collectors = [
   { collector = "ResourceActionScopeRuleCollector" }
-  { collector = "DelegationRangeRuleCollector", type = "<issuer の委任 type>" }
+  { collector = "DelegationRangeRuleCollector", type = ${?DELEGATION_TYPE} }
 ] }
 ```
 
-- `DelegationRangeCollector` はエントリのパスを `ATTR_DELEGATION_RANGE`（`"delegationRange"`、このパッケージが予約）に書きます。文法外のパスは除外され、range が狭まる方向に働きます。その type のエントリはあるが読めるパスがないトークンは空の range になり、何も含みません。
-- `DelegationRangeRuleCollector` は、トークンがその type のエントリを持つとき、リクエストのパス（`<resource.raw>.<action>`。`resource: "project:p1.report:r7"` と `action: "run"` なら `project:p1.report:r7.run`）について [`WithinDelegationRange`](#withindelegationrange) ルールを 1 つ生成し、持たないときは何も生成しません。action は文法上の 1 つの action でなければなりません。複数の要素からなる action（`report.delete`）は結合したパスの区切りを変えてしまい、親へのリクエストが range に含まれる子へのリクエストとして読めてしまうので、その場合ルールは fail します。このルールは独立したグループなので、委任トークンは range とポリシーの両方が許すものだけを許され、range のないトークンはこの 2 つがない場合と同じく判定されます。
-- 2 つには同じ `type` と `claim`（既定 `authorization_details`）を与えてください。食い違うとルールは生成されるのに range が見つからず、リクエストは deny されます。
+- `DelegationRangeCollector` はエントリのパスを `ATTR_DELEGATION_RANGE`（`"delegationRange"`、このパッケージが予約）に書きます。文法外のパスは除外され、range が狭まる方向に働きます。その type のエントリはあるが読めるパスがないトークンは空の range になり、何も含みません。クレームが別の形（リストでない、またはエントリのオブジェクト以外を含むリスト）で存在するトークンも同じです。
+- `DelegationRangeRuleCollector` は、トークンが range を持つとき（その type のエントリがあるか、クレームが別の形で存在するとき）、リクエストのパス（`<resource.raw>.<action>`。`resource: "project:p1.report:r7"` と `action: "run"` なら `project:p1.report:r7.run`）について [`WithinDelegationRange`](#withindelegationrange) ルールを 1 つ生成し、持たないときは何も生成しません。action は文法上の 1 つの action でなければなりません。複数の要素からなる action（`report.delete`）は結合したパスの区切りを変えてしまい、親へのリクエストが range に含まれる子へのリクエストとして読めてしまうので、その場合ルールは fail します。このルールは独立したグループなので、委任トークンは range とポリシーの両方が許すものだけを許され、range のないトークンはこの 2 つがない場合と同じく判定されます。
+- 2 つには同じ `type` と `claim`（既定 `authorization_details`）を与えてください。一致しているかを確かめる仕組みはありません。食い違うと、2 通りに壊れます。ルール collector がトークンのエントリを見つけ、属性 collector が見つけない場合は、ルールが range を見つけられず、リクエストは deny されます。逆の場合はルールが生成されず、**range は適用されません**。
 - リクエストが名指すリソースは、親の連鎖も含めて呼び出し元の主張です。連鎖に依拠するポリシー（包含、`in`）は、その連鎖を保存しているストアを読む独自の collector で、使う前に確かめる必要があります（[docs/extending.md](../../docs/extending.md#writing-a-custom-attributecollector)）。
 
 ## Rules

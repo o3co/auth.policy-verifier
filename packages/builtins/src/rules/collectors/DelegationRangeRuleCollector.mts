@@ -31,15 +31,17 @@ export interface DelegationRangeRuleCollectorConfig {
  * Emits one `WithinDelegationRange` rule for the requested path — the raw
  * resource, then the action, joined by `.` (`requestedRangePath`, which
  * refuses an action that is not one action of the grammar, so the rule
- * fails) — when the token carries an
- * `authorization_details` entry of the configured type, and none otherwise.
+ * fails) — when the token carries a range (`entriesOfType`: an entry of the
+ * configured type, or the claim in another shape), and none otherwise.
  * The rule is a group of its own, so it is decided together with the
  * policies: a delegated token is allowed only what both allow, and a token
  * without a range is decided as it would be without this collector.
  *
  * The range itself is read by `DelegationRangeCollector`, which must be
- * configured with the same `type` and `claim`. Configured apart, the rule is
- * emitted and finds no range, and the request is denied.
+ * configured with the same `type` and `claim`; nothing checks that they agree.
+ * Where only this collector finds the token's entries, the rule finds no
+ * range and the request is denied; where only that one does, no rule is
+ * emitted and the range is not enforced.
  */
 export class DelegationRangeRuleCollector implements RuleCollector {
 	private readonly type: string;

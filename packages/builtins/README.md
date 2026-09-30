@@ -120,24 +120,25 @@ A token a delegation grant issued — a client acting for a subject — carries 
 - a path is `(type(:id)?.)*action`: `type` and `action` are `[a-z][a-z0-9_]*`, and `id` is `[A-Za-z0-9_~-]`, anything else percent-encoded in upper-case hex;
 - an entry contains a path when it is a segment-wise prefix of it, and an entry segment that names no id contains the same type with any id: `project:p1.report` contains `project:p1.report:r7.run`.
 
-To decide the range together with the policies, configure the pair with the same `type`:
+To decide the range together with the policies, configure the pair with the same `type`, read from one place:
 
 ```hocon
 attribute { collectors = [
   { collector = "PayloadScopeCollector" }
-  { collector = "DelegationRangeCollector", type = "<the issuer's delegation type>" }
+  # the issuer's delegation type; unset, both entries lack `type` and boot is refused
+  { collector = "DelegationRangeCollector", type = ${?DELEGATION_TYPE} }
   # the acting client, for policies that name it
   { collector = "PayloadClaimAttributeCollector", attributes = [ { from = "act.sub", to = "actorId" } ] }
 ] }
 rule { collectors = [
   { collector = "ResourceActionScopeRuleCollector" }
-  { collector = "DelegationRangeRuleCollector", type = "<the issuer's delegation type>" }
+  { collector = "DelegationRangeRuleCollector", type = ${?DELEGATION_TYPE} }
 ] }
 ```
 
-- `DelegationRangeCollector` writes the entries' paths to `ATTR_DELEGATION_RANGE` (`"delegationRange"`, reserved by this package). A path outside the grammar is left out, which narrows the range; a token with entries of the type but no readable path gets an empty range, which contains nothing.
-- `DelegationRangeRuleCollector` emits one [`WithinDelegationRange`](#withindelegationrange) rule for the requested path — `<resource.raw>.<action>`, so `resource: "project:p1.report:r7"` with `action: "run"` is `project:p1.report:r7.run` — when the token carries an entry of the type, and no rule otherwise. The action must be one action of the grammar: one of several elements (`report.delete`) would re-split the joined path, so a request on the parent would read as one on a child the range contains, and the rule fails instead. The rule is a group of its own, so a delegated token is allowed only what the range and the policies both allow, and a token without a range is decided as it is without the pair.
-- Give both the same `type` and `claim` (default `authorization_details`). Configured apart, the rule is emitted and finds no range, and the request is denied.
+- `DelegationRangeCollector` writes the entries' paths to `ATTR_DELEGATION_RANGE` (`"delegationRange"`, reserved by this package). A path outside the grammar is left out, which narrows the range; a token with entries of the type but no readable path gets an empty range, which contains nothing, and so does a token whose claim is there in another shape — not a list, or a list holding something other than entry objects.
+- `DelegationRangeRuleCollector` emits one [`WithinDelegationRange`](#withindelegationrange) rule for the requested path — `<resource.raw>.<action>`, so `resource: "project:p1.report:r7"` with `action: "run"` is `project:p1.report:r7.run` — when the token carries a range (an entry of the type, or the claim in another shape), and no rule otherwise. The action must be one action of the grammar: one of several elements (`report.delete`) would re-split the joined path, so a request on the parent would read as one on a child the range contains, and the rule fails instead. The rule is a group of its own, so a delegated token is allowed only what the range and the policies both allow, and a token without a range is decided as it is without the pair.
+- Give both the same `type` and `claim` (default `authorization_details`); nothing checks that they agree. Configured apart, the pair fails one of two ways. Where the rule collector finds the token's entries and the attribute collector does not, the rule finds no range and the request is denied. The other way round, no rule is emitted and **the range is not enforced**.
 - The resource a request names is the caller's claim, its parent chain included. A policy that relies on the chain — containment, `in` — needs it confirmed first, by a collector of your own that reads the store it lives in ([docs/extending.md](../../docs/extending.md#writing-a-custom-attributecollector)).
 
 ## Rules

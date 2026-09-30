@@ -37,7 +37,8 @@ export interface DelegationRangeCollectorConfig {
  * `authorization_details` entries of the configured type into a `string[]`
  * under `ATTR_DELEGATION_RANGE`. A path outside the grammar is left out,
  * which narrows the range; a token with entries of the type but no readable
- * path gets an empty range, which contains nothing. A token with no entry of
+ * path gets an empty range, which contains nothing, and so does a token whose
+ * claim is there in another shape (`entriesOfType`). A token with no entry of
  * the type gets no range at all, and `DelegationRangeRuleCollector` then
  * emits no rule for it.
  */
