@@ -1,14 +1,13 @@
-# The base image is pinned by digest, not just by tag: `node:24-alpine` is a
-# moving pointer, so the same source produced a different image on every
-# rebuild. The digest is the multi-arch index, so amd64 and arm64 both resolve
+# The base image is pinned by digest, not just by tag: a tag is a moving
+# pointer, so the same source would build a different image on each rebuild. The digest is the multi-arch index, so amd64 and arm64 both resolve
 # from it. Dependabot's `docker` ecosystem keeps the pair in step — bump the
 # tag and the digest together, never the tag alone.
 FROM node:26-alpine@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80 AS node-base
 
 ENV HOME=/home/node
 
-# corepack is pinned too. `npm install -g corepack --force` resolved whatever
-# was latest at build time, which is a mutable dependency of every build. The
+# corepack is pinned too. An unpinned `npm install -g corepack` resolves
+# whatever is latest at build time, a mutable dependency of every build. The
 # pnpm version itself comes from the `packageManager` field in package.json,
 # which corepack reads.
 RUN apk add --no-cache tini \
@@ -23,7 +22,7 @@ FROM node-base AS deps
 # pnpm-lock.yaml is a required build input: `create-auth-policy-verifier`
 # generates it at scaffold time and the project commits it. Without it this
 # COPY fails, which is the intended outcome — a build that silently re-resolves
-# every dependency range is the thing this file stopped doing.
+# every dependency range is what requiring it prevents.
 COPY --chown=node:node package.json pnpm-lock.yaml ./
 
 USER node
