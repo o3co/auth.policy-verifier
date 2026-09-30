@@ -64,9 +64,10 @@ export interface ResourceActionScopeRuleCollectorConfig {
  *
  * Flows where the IdP issues no scope claim (e.g. DID-grant tokens) must opt
  * out explicitly with `{ scopeless: "skip" }`, and only in a pipeline where
- * another rule group authorizes the request — otherwise the request is left
- * with no applicable rule, which the evaluator denies by default and allows
- * under `onEmptyRuleSet: "allow"`. A pipeline that serves only scopeless
+ * another granting rule group authorizes the request — otherwise the request
+ * is left with no applicable rule, which the evaluator denies by default and
+ * allows under `onEmptyRuleSet: "allow"`. A restricting rule, such as the
+ * delegation range, authorizes nothing. A pipeline that serves only scopeless
  * flows should derive rules from identity claims (DID, `sub`, role) instead.
  */
 export class ResourceActionScopeRuleCollector implements RuleCollector {

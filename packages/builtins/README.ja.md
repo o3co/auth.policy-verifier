@@ -288,8 +288,9 @@ new AttrPairCompare({ a: string, op: "lt" | "le" | "gt" | "ge", b: string, group
 `ResourceActionScopeRuleCollector` は `{ scopeless?: "deny" | "skip", allowBareScopeRewrite?: boolean, claim?: string }` を受け取ります — `claim` はトークンが scope を主張していることを示す claim の名前です（既定 `scope`。`PayloadScopeCollector` が読むもの、例えば `scp` に合わせる）。
 
 - `scopeless`（既定 `"deny"`）: 既定ではリクエストごとに必ず `HasScope` ルールを生成するため、scope claim（`scope`、または `claim` が指す claim）を持たない
-  トークンはこのルールに落ちます。`"skip"` は scopeless トークンに対してルールを生成しませんが、ルールが 1 つも集まらない
-  リクエストは deny されるため、別のルールグループが認可を担うパイプラインでのみ使ってください。
+  トークンはこのルールに落ちます。`"skip"` は scopeless トークンに対してルールを生成しませんが、許可するルールが 1 つも集まらない
+  リクエストは deny されるため、許可する別のルールグループが認可を担うパイプラインでのみ使ってください。
+  [`WithinDelegationRange`](#withindelegationrange) のような絞るルールは認可になりません。
 - `allowBareScopeRewrite`（既定 `false`）: [`HasScope`](#hasscope) へそのまま渡されます。issuer が `{action}:{resourceType}`
   形式（`read:project`）ではなくプレフィックスなしのリソース名（`project`）を発行する場合にのみ `true` にしてください。
 

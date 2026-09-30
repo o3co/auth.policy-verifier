@@ -304,8 +304,9 @@ Every attribute comparison rule reads each field of its config once, validates i
 `ResourceActionScopeRuleCollector` accepts `{ scopeless?: "deny" | "skip", allowBareScopeRewrite?: boolean, claim?: string }` — `claim` names the claim whose presence says the token asserted scopes (default `scope`; set it to what `PayloadScopeCollector` reads, e.g. `scp`).
 
 - `scopeless` (default `"deny"`): it emits the `HasScope` rule for every request, so a token carrying no scope
-  claim (`scope`, or the claim `claim` names) fails it. `"skip"` emits no rule for a scopeless token — only use it in a pipeline where another rule
-  group authorizes the request, since a request that collects no rule at all is denied.
+  claim (`scope`, or the claim `claim` names) fails it. `"skip"` emits no rule for a scopeless token — only use it in a pipeline where another granting
+  rule group authorizes the request, since a request that collects no granting rule is denied: a restricting rule such as
+  [`WithinDelegationRange`](#withindelegationrange) does not authorize it.
 - `allowBareScopeRewrite` (default `false`): forwarded to [`HasScope`](#hasscope). Set it to `true` only if your
   issuer emits bare resource names (`project`) rather than `{action}:{resourceType}` scopes (`read:project`).
 
