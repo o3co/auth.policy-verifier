@@ -411,19 +411,22 @@ describe("evaluate — restricting rules", () => {
 			makeRule("scope", "invalid_scope", true),
 			restricting("range", "outside_range", true),
 		]);
-		expect(granted.reason.groups).toEqual([
-			expect.not.objectContaining({ restricts: expect.anything() }),
-			expect.objectContaining({ ruleType: "range", restricts: true }),
+		expect(granted.reason.groups[0]).not.toHaveProperty("restricts");
+		expect(granted.reason.groups[1]).toMatchObject({ ruleType: "range", restricts: true });
+
+		// Allowed by onEmptyRuleSet, not granted: every group says it restricts.
+		const letThrough = await evaluate(new Map(), [restricting("range", "outside_range", true)], {
+			onEmptyRuleSet: "allow",
+		});
+		expect(letThrough.decision).toBe("allow");
+		expect(letThrough.reason.groups).toEqual([
+			expect.objectContaining({ ruleType: "range", passed: true, restricts: true }),
 		]);
 
-		const restrictedOnly = await evaluate(
-			new Map(),
-			[restricting("range", "outside_range", false)],
-			{
-				onEmptyRuleSet: "allow",
-			},
-		);
-		expect(restrictedOnly.reason.groups).toEqual([
+		const refused = await evaluate(new Map(), [restricting("range", "outside_range", false)], {
+			onEmptyRuleSet: "allow",
+		});
+		expect(refused.reason.groups).toEqual([
 			expect.objectContaining({ ruleType: "range", passed: false, restricts: true }),
 		]);
 	});
@@ -455,7 +458,9 @@ describe("evaluate — restricting rules", () => {
 		expect(decide).not.toHaveBeenCalled();
 
 		const beside: AnyRule[] = [makeRule("scope", "invalid_scope", true), rule];
-		expect((await evaluate(new Map(), beside)).decision).toBe("allow");
+		const decided = await evaluate(new Map(), beside);
+		expect(decided.decision).toBe("allow");
+		expect(decided.reason.groups[1]).toMatchObject({ restricts: true });
 		expect(decide).toHaveBeenCalledTimes(1);
 	});
 });

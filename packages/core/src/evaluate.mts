@@ -137,8 +137,8 @@ export async function evaluate(
 
 	// Group rules by ruleType — rules within a group are alternatives (OR).
 	const groups = Map.groupBy(rules, (rule) => rule.ruleType);
-	const restricting = restrictingGroups(groups, options?.failures);
-	const granting = restricting.size < groups.size;
+	const restrictingTypes = restrictingGroups(groups, options?.failures);
+	const granting = restrictingTypes.size < groups.size;
 
 	// No granting rule → default-deny unless the deployment opted out. One that
 	// opted out is still held to the restricting rules, evaluated below.
@@ -156,7 +156,7 @@ export async function evaluate(
 			await evaluateGroup(
 				ruleType,
 				groupRules,
-				restricting.has(ruleType),
+				restrictingTypes.has(ruleType),
 				attrs,
 				budget,
 				options?.signal,
@@ -173,9 +173,9 @@ export async function evaluate(
  * The `ruleType`s of the groups whose rules restrict, reading each rule's
  * marker once; every other group grants. A group that mixes the two kinds is
  * refused: it is an OR, so a restricting rule that passed would satisfy it in
- * place of the grant beside it. The group is named
- * by the failure source, not the message — a `ruleType` may be derived from
- * the request, and the message is logged as it is.
+ * place of the grant beside it. The group is named by the failure source,
+ * not the message — a `ruleType` may be derived from the request, and the
+ * message is logged as it is.
  */
 function restrictingGroups(
 	groups: Map<string, AnyRule[]>,
