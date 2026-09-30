@@ -3,7 +3,14 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { evaluate } from "../evaluate.mjs";
-import type { AnyRule, AsyncRule, Attributes, Rule } from "../types.mjs";
+import { FailureRecord } from "../failureSource.mjs";
+import {
+	type AnyRule,
+	type AsyncRule,
+	type Attributes,
+	isRestrictingRule,
+	type Rule,
+} from "../types.mjs";
 
 const makeRule = (ruleType: string, code: string, result: boolean): Rule => ({
 	ruleType,
@@ -335,9 +342,46 @@ describe("evaluate — restricting rules", () => {
 			restricting("scope", "outside_range", true),
 		];
 
-		await expect(evaluate(new Map(), rules)).rejects.toThrow(TypeError);
-		await expect(evaluate(new Map(), rules)).rejects.toThrow(/"scope"/);
+		const failures = new FailureRecord();
+		const error = await evaluate(new Map(), rules, { failures }).catch((cause: unknown) => cause);
+
+		expect(error).toBeInstanceOf(TypeError);
 		expect(verify).not.toHaveBeenCalled();
+		// The group is named by the failure source, which the server checks
+		// before it logs a ruleType, and not by the message, which it logs as is.
+		expect(failures.sourceOf(error)).toEqual({
+			kind: "rule",
+			ruleType: "scope",
+			code: "invalid_scope",
+		});
+		expect((error as Error).message).not.toContain("scope");
+	});
+
+	it("reads each rule's marker once, so a rule cannot be restricting to one check and granting to the next", async () => {
+		let reads = 0;
+		const rule = makeRule("range", "outside_range", true);
+		Object.defineProperty(rule, "restricts", {
+			get() {
+				reads += 1;
+				return reads === 1 ? true : undefined;
+			},
+		});
+
+		const result = await evaluate(new Map(), [rule]);
+
+		expect(result).toMatchObject({ decision: "deny", code: "no_applicable_rule" });
+		expect(reads).toBe(1);
+	});
+
+	it("names the strict reading isRestrictingRule", () => {
+		expect(isRestrictingRule(restricting("range", "outside_range", true))).toBe(true);
+		expect(isRestrictingRule(makeRule("scope", "invalid_scope", true))).toBe(false);
+		expect(
+			isRestrictingRule({
+				...makeRule("scope", "invalid_scope", true),
+				restricts: 1,
+			} as unknown as Rule),
+		).toBe(false);
 	});
 
 	it("reads only `restricts: true` as restricting", async () => {
