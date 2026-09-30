@@ -17,8 +17,9 @@ import { ATTR_DELEGATION_RANGE } from "../keys.mjs";
  * path fails, and so does a requested path outside the grammar, or none at
  * all — `null`, a request whose action is not one action of the grammar
  * (`requestedRangePath`). The rule restricts: it narrows what the policies
- * allow and is no reason to allow, so a request no policy rule applies to is
- * decided by `onEmptyRuleSet`, not by the range.
+ * allow and is no reason to allow, so a request no policy rule applies to goes
+ * to `onEmptyRuleSet` and is never allowed by the range alone (under
+ * `"allow"` it is still held to it).
  */
 export class WithinDelegationRange implements Rule {
 	readonly ruleType = "delegation_range";

@@ -121,7 +121,7 @@ rule { collectors = [
 ] }
 ```
 
-- `DelegationRangeCollector` はエントリのパスを `ATTR_DELEGATION_RANGE`（`"delegationRange"`、このパッケージが予約）に書きます。文法外のパスは除外され、range が狭まる方向に働きます。その type のエントリはあるが読めるパスがないトークンは空の range になり、何も含みません。クレームが別の形（リストでない、またはエントリのオブジェクト以外を含むリスト）で存在するトークンも同じです。
+- `DelegationRangeCollector` はエントリのパスを `ATTR_DELEGATION_RANGE`（`"delegationRange"`、このパッケージが予約）に書きます。文法外のパスは除外され、range が狭まる方向に働きます。その type のエントリはあるが読めるパスがないトークンは空の range になり、何も含みません。クレームが別の形（リストでない、またはエントリのオブジェクト以外を含むリスト）で存在するトークンも、エントリがどの type を名指すかにかかわらず同じです。`authorization_details` をほかの RFC 9396 の type と共有するトークンは、エントリのオブジェクトのリストとして持たないと、すべて deny されます。
 - `DelegationRangeRuleCollector` は、トークンが range を持つとき（その type のエントリがあるか、クレームが別の形で存在するとき）、リクエストのパス（`<resource.raw>.<action>`。`resource: "project:p1.report:r7"` と `action: "run"` なら `project:p1.report:r7.run`）について [`WithinDelegationRange`](#withindelegationrange) ルールを 1 つ生成し、持たないときは何も生成しません。action は文法上の 1 つの action でなければなりません。複数の要素からなる action（`report.delete`）は結合したパスの区切りを変えてしまい、親へのリクエストが range に含まれる子へのリクエストとして読めてしまうので、その場合ルールは fail します。このルールは独立したグループで、絞るルール（`restricts: true`）なので、委任トークンは range とポリシーの両方が許すものだけを許されます。ポリシーのルールが 1 つも適用されない委任トークンは、range だけで判定されることはなく、`rule.onEmptyRuleSet`（既定では `no_applicable_rule`）で判定されます。range のないトークンは、この 2 つがない場合と同じく判定されます。
 - 2 つには同じ `type` と `claim`（既定 `authorization_details`）を与えてください。一致しているかを確かめる仕組みはありません。食い違うと、2 通りに壊れます。ルール collector がトークンのエントリを見つけ、属性 collector が見つけない場合は、ルールが range を見つけられず、リクエストは deny されます。逆の場合はルールが生成されず、**range は適用されません**。
 - リクエストのパスは、設定したリソースパーサーにかかわらず、呼び出し元が送ったリソース文字列から作られます。別の文法で書かれたリソース（`projects/p1/reports/r7`）はパスとして読めず、委任されたリクエストはすべて deny されます。

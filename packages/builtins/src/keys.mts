@@ -33,5 +33,5 @@ reserveAttributeKeys({
 	owner: BUILTINS_ATTRIBUTE_KEY_OWNER,
 	keys: [ATTR_DELEGATION_RANGE],
 	reason:
-		"a delegated token's range, written by DelegationRangeCollector from the verified subject and read by WithinDelegationRange",
+		"a delegated token's range, written by DelegationRangeCollector from the authenticated subject and read by WithinDelegationRange",
 });
