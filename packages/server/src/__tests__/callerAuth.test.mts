@@ -109,7 +109,8 @@ describe("resolveCallerAuth", () => {
 		["an ideographic space only", "\u3000"],
 		["a byte-order mark", "\ufeffs3cret"],
 		["a curly quote", "s3cret\u2019"],
-		// Blank however it is spelled, as the issue's "empty after trimming" reads.
+		// Blank however it is spelled. A Latin-1 client could send this one, but
+		// whitespace is a mistake, not a credential.
 		["no-break spaces only", "\u00a0\u00a0"],
 	])("rejects a token with %s, which no request can present", (_label, token) => {
 		expect(() => resolveCallerAuth({ callerAuth: { token } }, context)).toThrow(

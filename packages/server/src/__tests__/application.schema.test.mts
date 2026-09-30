@@ -987,9 +987,11 @@ describe("AppConfigSchema — http.callerAuth", () => {
 		expect(result.success).toBe(false);
 	});
 
-	// `HTTP_CALLER_AUTH_TOKEN="   "`, or a secret stored with its trailing
-	// newline, boots a gate no request can pass: HTTP strips the whitespace
-	// around a header value and refuses a control character in one.
+	// `HTTP_CALLER_AUTH_TOKEN="   "`, a secret stored with its trailing
+	// newline, or one holding a character above U+00FF boots a gate no request
+	// can pass: HTTP strips the whitespace around a header value, refuses a
+	// control character in one, and reads its bytes as Latin-1. A blank token
+	// is refused too, however it is spelled.
 	it.each([
 		["   "],
 		["s3cret "],
