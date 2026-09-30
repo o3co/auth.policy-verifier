@@ -68,4 +68,21 @@ describe("DelegationRangeRuleCollector", () => {
 			/DelegationRangeRuleCollector: type/,
 		);
 	});
+
+	// The action is one element of the grammar. An action that is several —
+	// `report.delete` — would re-split the joined path, and a request on the
+	// parent would read as one on a child the range contains.
+	it.each([["report.delete"], ["report:1.delete"], ["Run"], [""]])(
+		"denies an action that is not one action of the grammar (%j), whatever the range",
+		async (action) => {
+			const rules = await new DelegationRangeRuleCollector({ type: TYPE }).collect(
+				contextWith({ authorization_details: [{ type: TYPE, path: "a:1.report" }] }, "a:1", action),
+			);
+
+			expect(rules).toHaveLength(1);
+			expect(rules[0].verify(new Map([[ATTR_DELEGATION_RANGE, ["a:1.report", "a:1"]]]))).toBe(
+				false,
+			);
+		},
+	);
 });

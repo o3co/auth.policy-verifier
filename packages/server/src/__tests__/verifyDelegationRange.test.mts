@@ -92,6 +92,22 @@ describe("/verify with a delegated token's range", () => {
 		expect(res.body.code).toBe("outside_delegation_range");
 	});
 
+	// A dotted action would re-split the joined path: `project:p1` with
+	// `report.delete` would read as `project:p1.report.delete`, within the
+	// range `project:p1.report`, though it acts on the parent project.
+	it("denies an action that is several elements of the grammar, though the joined path would lie within the range", async () => {
+		const res = await request(app)
+			.post("/verify")
+			.set(
+				"Authorization",
+				`Bearer ${await tokenWith({ scope: "report.delete:project", authorization_details: [{ type: TYPE, path: "project:p1.report" }] })}`,
+			)
+			.send({ resource: "project:p1", action: "report.delete" });
+
+		expect(res.status).toBe(403);
+		expect(res.body.code).toBe("outside_delegation_range");
+	});
+
 	it("decides a token without a range as the policies alone do", async () => {
 		const res = await verify(await tokenWith({}), "project:p2.report:r7");
 
