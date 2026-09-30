@@ -999,6 +999,13 @@ describe("AppConfigSchema — http.callerAuth", () => {
 				http: { callerAuth: { token } },
 			});
 			expect(result.success).toBe(false);
+			// The key and the words the runtime guard uses: one shared check.
+			expect(result.error?.issues).toEqual([
+				expect.objectContaining({
+					path: ["http", "callerAuth", "token"],
+					message: expect.stringMatching(/^token must /),
+				}),
+			]);
 		},
 	);
 
@@ -1011,6 +1018,12 @@ describe("AppConfigSchema — http.callerAuth", () => {
 				http: { callerAuth: { header, token: "s3cret" } },
 			});
 			expect(result.success).toBe(false);
+			expect(result.error?.issues).toEqual([
+				expect.objectContaining({
+					path: ["http", "callerAuth", "header"],
+					message: expect.stringMatching(/^header must /),
+				}),
+			]);
 		},
 	);
 });

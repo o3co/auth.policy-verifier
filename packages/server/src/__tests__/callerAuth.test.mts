@@ -114,9 +114,9 @@ describe("resolveCallerAuth", () => {
 		["an inner space", "x caller"],
 		["a colon", "x-caller-token:"],
 	])("rejects a header name with %s, which no request can carry", (_label, header) => {
-		expect(() =>
-			resolveCallerAuth({ callerAuth: { header, token: "s3cret" } }, context),
-		).toThrow(/^createApp: http\.callerAuth\.header /);
+		expect(() => resolveCallerAuth({ callerAuth: { header, token: "s3cret" } }, context)).toThrow(
+			/^createApp: http\.callerAuth\.header /,
+		);
 	});
 });
 
@@ -201,12 +201,12 @@ describe("createCallerAuthMiddleware", () => {
 	});
 
 	it("refuses to be constructed with a credential no request can present", () => {
-		expect(() =>
-			createCallerAuthMiddleware({ header: "x-caller-token", token: "   " }),
-		).toThrow(/^createCallerAuthMiddleware: config\.token /);
-		expect(() =>
-			createCallerAuthMiddleware({ header: "x caller", token: "s3cret" }),
-		).toThrow(/^createCallerAuthMiddleware: config\.header /);
+		expect(() => createCallerAuthMiddleware({ header: "x-caller-token", token: "   " })).toThrow(
+			/^createCallerAuthMiddleware: config\.token /,
+		);
+		expect(() => createCallerAuthMiddleware({ header: "x caller", token: "s3cret" })).toThrow(
+			/^createCallerAuthMiddleware: config\.header /,
+		);
 	});
 
 	it("refuses to be constructed with an empty credential", () => {

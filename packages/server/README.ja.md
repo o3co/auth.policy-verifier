@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.server
 
-最終更新: 2026-09-28
+最終更新: 2026-09-30
 
 auth.policy-verifier 向けの Express HTTP サーバーです。モジュールと設定からアプリケーションを組み立てる `createApp` と、認可判定を行う `POST /verify` / `POST /verify/batch` を提供します。
 
@@ -122,7 +122,7 @@ HOCON の `${?VAR}` 置換が渡す文字列のいずれかで到着し、その
 これを抑えるのが次の 2 つの設定です。
 
 - **`http.hostname` の既定値は `127.0.0.1`。** 本プロジェクトが想定するのはサイドカー構成 — enforcement 層が verifier と同居し、ループバック経由で到達する形です。全インターフェースへの bind は明示的なオプトイン（`http.hostname = "0.0.0.0"`）であり、コンテナデプロイではこれを設定しない限り到達できません。
-- **`http.callerAuth.token` は呼び出し元サービスを認証します。** 設定すると、`/verify` と `/verify/batch` への全リクエストがその値を `http.callerAuth.header`（既定 `x-caller-token`。`Authorization` を避けているのは意図的）にそのまま載せる必要があります。比較は定数時間で、body のパースより前・パイプライン処理より前に走るため、未認証のピアはプロセスの処理時間を消費できません。資格情報の欠落と誤りは同一の `401 { decision: "deny", code: "caller_unauthenticated", message: "Caller authentication failed" }` を返します — 推測した値が正しい形だったかを探索者に教えてはならないからです。`GET /_healthcheck` は常に非ゲートで、オーケストレーターの probe はそのまま動作します。
+- **`http.callerAuth.token` は呼び出し元サービスを認証します。** 設定すると、`/verify` と `/verify/batch` への全リクエストがその値を `http.callerAuth.header`（既定 `x-caller-token`。`Authorization` を避けているのは意図的）にそのまま載せる必要があります。どのリクエストにも載せられない値は、全呼び出し元を拒否する代わりに起動時に拒否します: 空のトークン、空白やタブで始まるか終わるトークン、制御文字を含むトークン（末尾の改行ごと保存したシークレットを含む）、そして RFC 9110 の token 文字以外を含むヘッダ名です。比較は定数時間で、body のパースより前・パイプライン処理より前に走るため、未認証のピアはプロセスの処理時間を消費できません。資格情報の欠落と誤りは同一の `401 { decision: "deny", code: "caller_unauthenticated", message: "Caller authentication failed" }` を返します — 推測した値が正しい形だったかを探索者に教えてはならないからです。`GET /_healthcheck` は常に非ゲートで、オーケストレーターの probe はそのまま動作します。
 
 caller 認証は**本リリースでは任意**です。未設定かつ bind がループバックでない場合、`createApp` は `unauthenticated_non_loopback_bind` を warn で記録します。ログには関係する 2 つの設定・何が晒されているか・どう対処するかが載ります:
 

@@ -11,6 +11,7 @@
 import { z } from "zod";
 import { checkAudienceClaim, DEFAULT_AUDIENCE_CLAIM } from "./audienceClaim.mjs";
 import { type BoundSpec, NUMERIC_BOUNDS, resolveBound } from "./bounds.mjs";
+import { checkCallerAuthHeader, checkCallerAuthToken } from "./callerAuth.mjs";
 import {
 	DEFAULT_BATCH_CONCURRENCY,
 	DEFAULT_CALLER_AUTH_HEADER,
@@ -432,11 +433,25 @@ export const AppConfigSchema = z.object({
 			 */
 			callerAuth: z
 				.object({
-					header: z.string().min(1).default(DEFAULT_CALLER_AUTH_HEADER),
-					// `.min(1)` and not `.optional()`-with-empty: `HTTP_CALLER_AUTH_TOKEN=`
-					// substitutes an empty string, and booting unauthenticated because a
-					// credential was exported empty would be a silent failure.
-					token: z.string().min(1).optional(),
+					header: z.string().default(DEFAULT_CALLER_AUTH_HEADER),
+					token: z.string().optional(),
+				})
+				// `checkCallerAuthToken` refuses an empty token rather than reading it
+				// as "not configured": `HTTP_CALLER_AUTH_TOKEN=` substitutes an empty
+				// string, and booting unauthenticated because a credential was
+				// exported empty would be a silent failure. It and
+				// `checkCallerAuthHeader` refuse a value no request can present too,
+				// which would boot a gate that refuses every caller.
+				.superRefine((block, ctx) => {
+					const checks = [
+						["header", checkCallerAuthHeader(block.header)],
+						["token", block.token === undefined ? null : checkCallerAuthToken(block.token)],
+					] as const;
+					for (const [key, check] of checks) {
+						if (check !== null && !check.ok) {
+							ctx.addIssue({ code: z.ZodIssueCode.custom, message: check.message, path: [key] });
+						}
+					}
 				})
 				.optional(),
 		})

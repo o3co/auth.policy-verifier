@@ -22,9 +22,17 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { consoleLogger, type EventLogger } from "@o3co/auth.policy-verifier.core";
 import type express from "express";
+import {
+	type CallerAuthFieldCheck,
+	checkCallerAuthHeader,
+	checkCallerAuthToken,
+} from "../config/callerAuth.mjs";
 import { DEFAULT_CALLER_AUTH_HEADER } from "../config/defaults.mjs";
 
-/** Resolved caller-authentication parameters. Both fields are non-empty by construction. */
+/**
+ * Resolved caller-authentication parameters. Both fields are values a request
+ * can carry by construction — see `config/callerAuth.mts`.
+ */
 export interface CallerAuthConfig {
 	/** Request header carrying the credential. Compared case-insensitively, as HTTP requires. */
 	header: string;
@@ -45,15 +53,16 @@ export interface CallerAuthErrorContext {
 	path: string;
 }
 
-/** Throws unless `value` is a non-empty string, naming the field the operator wrote. */
-function assertNonEmptyString(
-	value: unknown,
-	field: string,
-	{ caller, path }: CallerAuthErrorContext,
-): asserts value is string {
-	if (typeof value !== "string" || value === "") {
-		throw new Error(`${caller}: ${path}.${field} must be a non-empty string`);
+/**
+ * The checked value, or a throw naming the caller and the config path in front
+ * of the shared check's message — the schema reports the same message at the
+ * same key.
+ */
+function checked(check: CallerAuthFieldCheck, { caller, path }: CallerAuthErrorContext): string {
+	if (!check.ok) {
+		throw new Error(`${caller}: ${path}.${check.message}`);
 	}
+	return check.value;
 }
 
 /**
@@ -67,7 +76,8 @@ function assertNonEmptyString(
  *
  * A malformed block throws rather than silently disabling the gate: an empty
  * credential is a configuration mistake, and reading it as "caller auth is off"
- * is the silent failure this endpoint cannot afford.
+ * is the silent failure this endpoint cannot afford. So does a token or a
+ * header name no request can present, which would refuse every caller.
  */
 export function resolveCallerAuth(
 	http: object,
@@ -89,12 +99,11 @@ export function resolveCallerAuth(
 	if (token === undefined) {
 		return undefined;
 	}
-	assertNonEmptyString(token, "token", context);
+	const checkedToken = checked(checkCallerAuthToken(token), context);
 	if (header === undefined) {
-		return { header: DEFAULT_CALLER_AUTH_HEADER, token };
+		return { header: DEFAULT_CALLER_AUTH_HEADER, token: checkedToken };
 	}
-	assertNonEmptyString(header, "header", context);
-	return { header, token };
+	return { header: checked(checkCallerAuthHeader(header), context), token: checkedToken };
 }
 
 /**
@@ -129,9 +138,8 @@ export function createCallerAuthMiddleware(
 	logger: EventLogger = consoleLogger,
 ): express.RequestHandler {
 	const context: CallerAuthErrorContext = { caller: "createCallerAuthMiddleware", path: "config" };
-	assertNonEmptyString(config.header, "header", context);
-	assertNonEmptyString(config.token, "token", context);
-	const { header, token } = config;
+	const header = checked(checkCallerAuthHeader(config.header), context);
+	const token = checked(checkCallerAuthToken(config.token), context);
 
 	return (req, res, next) => {
 		// `req.get` is case-insensitive, so an operator may spell the configured
