@@ -204,11 +204,13 @@ export function decisionEvent({
 
 	if (decision.decision === "allow") {
 		// Every group passed — AND across groups is what an allow means — so each
-		// one names the rule that satisfied it. Reporting a single "the" rule
-		// would have to pick one arbitrarily. An empty array is the honest answer
-		// for a deployment running `onEmptyRuleSet = "allow"`: nothing decided.
+		// granting one names the rule that satisfied it. Reporting a single "the"
+		// rule would have to pick one arbitrarily. A restricting group narrowed
+		// the allow and granted nothing, so it is left out: an empty array is the
+		// honest answer for an allow `onEmptyRuleSet = "allow"` let through,
+		// whether or not restricting groups ran.
 		event.satisfiedBy = decision.reason.groups.flatMap((group) => {
-			const rule = satisfyingRule(group);
+			const rule = group.restricts === true ? undefined : satisfyingRule(group);
 			return rule ? [rule] : [];
 		});
 		return event;
