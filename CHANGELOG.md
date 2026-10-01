@@ -6,6 +6,152 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
+## [0.16.0] - 2026-10-01
+
+This release has breaking changes. Upgrade every
+`@o3co/auth.policy-verifier.*` package together to 0.16.0, explicitly: a
+caret range on 0.15.x, which is what `@o3co/create-auth-policy-verifier`
+writes into a scaffolded project, does not admit 0.16.0, and each package
+pins the ones it depends on exactly (`.builtins`, `.cedar` and `.server` on
+`.core`; `.cedar-wasm` on `.cedar`). A deployment that fetches its keys from a
+JWKS endpoint answers differently during a key-set outage: read Changed
+before upgrading one.
+
+### Added
+
+- **Delegated tokens are decided against their range** (`.builtins`,
+  [#300](https://github.com/o3co/auth.policy-verifier/issues/300),
+  [#301](https://github.com/o3co/auth.policy-verifier/pull/301)). A token a
+  delegation grant issued carries its range as RFC 9396
+  `authorization_details` entries of one type, each `{ "type", "path" }`, in
+  the claims contract's grammar `(type(:id)?.)*action`; an entry contains a
+  path it is a segment-wise prefix of, and an entry segment without an id
+  contains the same type with any id. `DelegationRangeCollector { type,
+  claim? }` writes the entries' paths to `ATTR_DELEGATION_RANGE`
+  (`"delegationRange"`, reserved by `.builtins`). `DelegationRangeRuleCollector
+  { type, claim? }` emits one `WithinDelegationRange` rule for the requested
+  path `<resource>.<action>` when the token carries a range, and none
+  otherwise. The rule restricts (see the next entry): a delegated token is
+  allowed only what its range **and** the policies allow, never by its range
+  alone, and a token without a range is decided as before. Fails closed: a
+  path outside the grammar is left out of the range, a claim in another shape
+  is a range that contains nothing, and an action of more than one element
+  (`report.delete`) fails the rule. The resource string is the caller's, read
+  in that grammar whatever resource parser is configured, so resources
+  written in another grammar deny every delegated request; its parent chain
+  is the caller's claim, to be confirmed by a collector of your own before a
+  policy relies on it. The acting client (`act.sub`, RFC 8693 §4.1) reaches
+  policies through `PayloadClaimAttributeCollector`
+  (`{ from = "act.sub", to = "actorId" }`). New exports: `DelegationRangeCollector`,
+  `DelegationRangeRuleCollector`, `WithinDelegationRange` (`ruleType`
+  `delegation_range`, `code` `outside_delegation_range`), `parseRangePath`,
+  `rangeContains`, `RangeElement`, `ATTR_DELEGATION_RANGE` and
+  `BUILTINS_ATTRIBUTE_KEY_OWNER`; both collectors are registered by the
+  builtins module. **What to do:** configure the pair with the same `type`
+  (and `claim`, if overridden) — nothing checks that they agree, and where
+  only the rule collector misses the token's entries the range is not
+  enforced. See the builtins README, "Delegated tokens: range and actor".
+
+- **Restricting rules** (`.core`,
+  [#302](https://github.com/o3co/auth.policy-verifier/pull/302),
+  [#303](https://github.com/o3co/auth.policy-verifier/pull/303)). A rule
+  marked `restricts: true` narrows what the granting rules allow and is never
+  a reason to allow on its own. `evaluate()` counts only granting rules when it
+  asks whether any rule applied, so a request only restricting rules apply to
+  goes to `onEmptyRuleSet` and, under `"allow"`, is still held to its
+  restrictions. A group mixing restricting and granting rules is refused with a
+  `TypeError` before any rule runs (a group is an OR, so a restriction would
+  satisfy it in place of the grant); recorded in `failures` under its
+  `ruleType`. A restricting group's `RuleGroupOutcome` carries
+  `restricts: true`. An unmarked rule grants, as every rule did, so no
+  existing decision changes. New export: `isRestrictingRule`.
+
+- **`restricts` on the wire and in the decision log** (`.server`,
+  [#304](https://github.com/o3co/auth.policy-verifier/pull/304)).
+  `reason.groups[].restricts` is `true` on a group of restricting rules and
+  absent on a granting one; the wire contract (`responseEnvelopes.json`)
+  declares it the one optional key of a group. The `decision` line's
+  `satisfiedBy` names the rules of granting groups only, so an allow
+  `onEmptyRuleSet = "allow"` let through past restricting groups carries an
+  empty list. A mixed group answers `500`, logged as `rule_threw` naming the
+  group. **What to do:** a client that reads `reason.groups` to find what
+  granted an allow must leave restricting groups out; one that decodes groups
+  strictly must accept the key.
+
+### Changed
+
+- **BREAKING (JWKS-backed deployments, wire): a key set that cannot be
+  fetched is `503 verification_unavailable`, not `401 invalid_token`**
+  (`.server`, [#298](https://github.com/o3co/auth.policy-verifier/issues/298),
+  [#299](https://github.com/o3co/auth.policy-verifier/pull/299)). While the
+  keys a token needs are not cached and cannot be fetched — a JWKS fetch that
+  fails or times out, a JWKS endpoint answering non-200 or unparseable JSON,
+  any other non-JOSE error — `/verify` and `/verify/batch` answer `503` with
+  the deny envelope `{"decision":"deny","code":"verification_unavailable",
+  "message":"Token verification is unavailable"}`, the batch as a whole. A
+  token that fails verification is still `401 invalid_token`, and so is a
+  fetched key set with no key for the `kid`. The wire answer now agrees with
+  the `jwt_verification_unavailable` log line, which already covered the same
+  cases. A token whose key is cached verifies through an outage, as before;
+  no `Retry-After` is sent. The wire contract gains
+  `status.verificationUnavailable` and `codes.verificationUnavailable`.
+  **What to do:** whatever keys on the verifier's statuses sees an IdP outage
+  as 5xx now — the HTTP histogram's `status="503"`, SLOs and alerts, mesh
+  outlier detection, retry-on-5xx. A PEP that treated 401 as "invalid
+  token" stops doing so for an outage; `protobuf.interceptors` already
+  reports any status but 2xx, 401 and 403 as an authorization-service error.
+
+- **BREAKING (types): `AuthenticationResult`'s failure `code` gains
+  `verification_unavailable`** (`.server`,
+  [#299](https://github.com/o3co/auth.policy-verifier/pull/299)). Code that
+  switches exhaustively over it, or maps it with a `Record`, sees one more
+  member. A registered `TokenAuthenticator` may return it, for "could not
+  tell whether the credential is good", and gets a `503`.
+
+- **BREAKING (registered key resolvers): a refusal must be a jose error
+  about the token** (`.server`,
+  [#299](https://github.com/o3co/auth.policy-verifier/pull/299)). A key
+  resolver's get-key function that refuses a token must throw a jose error —
+  `JWKSNoMatchingKey` for an unknown `kid`. Any other throw is read as the keys
+  being unavailable: `503` and an error-level line, where it was `401`. The
+  token chooses the `kid`, so a resolver throwing a plain `Error` for an
+  unknown one lets any caller produce both. The built-in resolvers already
+  throw `JWKSNoMatchingKey`. Documented on `VerifyingJwtConfig.key` and in
+  `docs/extending`.
+
+- **BREAKING (a mapping onto `delegationRange`): the key is reserved**
+  (`.builtins`, [#301](https://github.com/o3co/auth.policy-verifier/pull/301)).
+  `PayloadClaimAttributeCollector` and `RequestContextAttributeCollector`
+  refuse a mapping onto it when they are constructed, naming
+  `@o3co/auth.policy-verifier.builtins` as its owner: list keys are unioned, so
+  a mapping would widen the range `DelegationRangeCollector` read. **What to
+  do:** a deployment that mapped a claim or request field to `delegationRange`
+  renames its key.
+
+- **The standalone template's base image** moves to a newer
+  `node:26-alpine` digest.
+
+### Fixed
+
+- **BREAKING (boot): a caller-auth token or header no request can present is
+  refused at boot** (`.server`,
+  [#295](https://github.com/o3co/auth.policy-verifier/issues/295),
+  [#296](https://github.com/o3co/auth.policy-verifier/pull/296)). Such a value
+  used to boot, and every `/verify` and `/verify/batch` was then answered
+  `401 caller_unauthenticated`. Both boundaries — `AppConfigSchema` and
+  `resolveCallerAuth` / `createCallerAuthMiddleware` — now refuse a
+  `http.callerAuth.token` that is empty or blank (however spelled), begins or
+  ends with a space or tab (Node strips them from a header value), holds a
+  control character other than a tab (a secret stored with its trailing `\n`
+  is the common case), or holds a character above U+00FF (Node reads header
+  bytes as Latin-1); and a `http.callerAuth.header` that is not an RFC 9110
+  token, whether or not a token is set. A bad header and a bad token are
+  reported together. **What to do:** a deployment that started and refused
+  every request now fails at boot naming the field — fix the value. The one
+  deployment that works today and stops starting sets
+  `HTTP_CALLER_AUTH_HEADER` to a name outside RFC 9110 token characters (`X
+  Caller`) with no token, so the gate was off: unset the header or correct it.
+
 ## [0.15.0] - 2026-09-28
 
 This release has breaking changes. Upgrade every
