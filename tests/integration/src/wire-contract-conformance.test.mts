@@ -130,7 +130,9 @@ const failableCollector: AttributeCollector = {
 /**
  * A second rule group, driven by a request-context attribute, so a deny can
  * carry a passing group beside a failing one — which is what the `satisfiedBy`
- * case needs to see in one response.
+ * case needs to see in one response. It restricts, as a tenant check does:
+ * the scope group grants and this one narrows, so every decision carries a
+ * group with `restricts` beside one without.
  */
 const tenantRuleCollector: RuleCollector = {
 	async collect() {
@@ -138,6 +140,7 @@ const tenantRuleCollector: RuleCollector = {
 			ruleType: "tenant",
 			code: "wrong_tenant",
 			message: "Request is not for the acme tenant",
+			restricts: true,
 			verify: (attrs: Attributes) => attrs.get("tenantId") === "acme",
 		};
 		return [rule];
@@ -502,5 +505,22 @@ describe("the fixture's evaluation table is core's own", () => {
 		expect([...evaluation.evaluated.statuses, "not_invoked"].sort()).toEqual(
 			[...evaluation.statuses].sort(),
 		);
+	});
+});
+
+// The suite above permits `restricts` and checks it is `true` where it
+// appears; this pins that the deployment sends it, on the group that restricts
+// and on no other.
+describe("the reference deployment marks its restricting group on the wire", () => {
+	it("carries restricts on the tenant group and on no other", async () => {
+		const res = await request(deployment({}))
+			.post("/verify")
+			.set("Authorization", `Bearer ${await mintToken(SUBJECT)}`)
+			.send(allowed);
+
+		expect(res.body.decision).toBe("allow");
+		const groups = res.body.reason.groups as Record<string, unknown>[];
+		expect(groups.find((group) => group.ruleType === "tenant")).toMatchObject({ restricts: true });
+		expect(groups.find((group) => group.ruleType === "scope")).not.toHaveProperty("restricts");
 	});
 });

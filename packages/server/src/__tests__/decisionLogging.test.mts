@@ -326,6 +326,41 @@ describe("decisionEvent: empty values are absent values", () => {
 	});
 });
 
+describe("decisionEvent: satisfiedBy names what granted", () => {
+	const outcome = (code: string) => ({ code, message: "m", passed: true });
+	const scope = {
+		ruleType: "scope",
+		passed: true as const,
+		evaluated: [outcome("invalid_scope")],
+		satisfiedBy: outcome("invalid_scope"),
+	};
+	const range = {
+		ruleType: "delegation_range",
+		passed: true as const,
+		evaluated: [outcome("outside_delegation_range")],
+		satisfiedBy: outcome("outside_delegation_range"),
+		restricts: true as const,
+	};
+	const event = (groups: Decision["reason"]["groups"]) =>
+		decisionEvent({
+			decision: { decision: "allow", reason: { groups } },
+			resource: "project",
+			action: "read",
+			durationMs: 1,
+		});
+
+	it("leaves a restricting group out: it narrowed the allow, it did not grant it", () => {
+		expect(event([scope, range]).satisfiedBy).toEqual([
+			{ ruleType: "scope", code: "invalid_scope" },
+		]);
+	});
+
+	it("answers an empty list for an allow onEmptyRuleSet let through past restricting groups only", () => {
+		// The same answer as an allow with no group at all: nothing granted it.
+		expect(event([range]).satisfiedBy).toEqual([]);
+	});
+});
+
 describe("what the decision log deliberately does not carry", () => {
 	it("never logs the bearer token or the full claim set", async () => {
 		const { events, logger } = captureEvents();

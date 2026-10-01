@@ -29,7 +29,9 @@ import type { NamedRule } from "./decisionEvent.mjs";
  *   one scalar key. No one collector is answerable, so none is named.
  * - `rule_timeout` — an asynchronous rule overran `ruleTimeoutMs`, or the rule
  *   phase overran `evaluateDeadlineMs`.
- * - `rule_threw` — a rule's `verify` threw or its `decide` rejected.
+ * - `rule_threw` — a rule's `verify` threw or its `decide` rejected, or its
+ *   `ruleType` group mixed restricting and granting rules (named by that
+ *   `ruleType` and the `code` of the group's first rule).
  * - `body_rejected` — the JSON body parser failed in a way the deny envelope
  *   does not map to a 4xx (a stream something upstream already read or set an
  *   encoding on, a length mismatch).

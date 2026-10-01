@@ -1,6 +1,6 @@
 # @o3co/auth-policy-verifier-standalone
 
-最終更新: 2026-09-30
+最終更新: 2026-10-01
 
 auth.policy-verifier のデプロイ可能なサーバーテンプレートです。このパッケージはコンポジションルートとして機能し、設定の読み込み・モジュールのロード・Express サーバーの起動を担います。`@o3co/create-auth-policy-verifier` によって生成されます。
 
@@ -77,7 +77,7 @@ OAUTH_JWT_SECRET=$(openssl rand -hex 32) \
 | `OAUTH_JWT_AUDIENCE_CLAIM` | `aud` | audience を読む claim。`azp`（Clerk）、`client_id`（Cognito）。`aud` 以外を指定すると `aud` は一切見ない |
 | `OAUTH_AUTHENTICATOR` | `jwt` | subject を確立する token authenticator。他の名前は `main.mts` で module が登録したものでなければならない |
 | `OAUTH_JWT_MODE` | `verify` | `verify` はトークンを完全検証。明示的な `insecure-decode`（テスト専用）は署名検証なしでデコードする — `exp`/`nbf` は引き続き強制される |
-| `RULE_ON_EMPTY_RULE_SET` | `deny` | ルールが 1 つも集まらなかったときの決定（`deny` \| `allow`） |
+| `RULE_ON_EMPTY_RULE_SET` | `deny` | 許可するルールが 1 つも集まらなかったときの決定（`deny` \| `allow`） |
 | `VERIFY_MAX_BATCH_SIZE` | `50` | `POST /verify/batch` の件数上限 |
 | `VERIFY_CREDENTIAL_TO_COLLECTORS` | `never` | `expose` は生の資格情報を `context.credential` として collector に渡す — subject として下流 API を呼ぶ collector のためだけの設定。既定では collector は検証済みクレームだけを扱う。資格情報はリプレイ可能であり、context がログに出ればそれが漏れる |
 | `VERIFY_EVALUATION_IN_RESPONSE` | `omit` | `include` にすると、policy を背後に持つ各 Rule の `evaluation`（status、評価した policy revision（#244）、完了した answer ではそれを決めた policy（#199））を決定の response に載せる。どの revision が操作を許可したかを記録する呼び出し側サービス向け。`decision` ログイベントにはどちらの設定でも載る。受理される token の保持者全員に「policy set がいつ変わったか」「各 answer をどの policy が決めたか」を伝えることになるので、それが問題になる環境では `HTTP_CALLER_AUTH_TOKEN` と併用する |
@@ -157,7 +157,7 @@ Authorization: Bearer <jwt>
 | `resource` / `action` | 呼び出し元が送ったそのままの値 |
 | `decision` | `allow` または `deny` |
 | `code` | deny のみ — 呼び出し元がワイヤ上で受け取ったコードと同じ |
-| `satisfiedBy` | allow のみ — 各グループを満たしたルールの `{ruleType, code}` |
+| `satisfiedBy` | allow のみ — 許可する各グループを満たしたルールの `{ruleType, code}`。`onEmptyRuleSet = "allow"` が通したときは空 |
 | `deniedBy` | deny のみ — 最初に失敗したグループと、そこで拒否した全代替ルール |
 | `requestId` | 呼び出し元が送った `x-request-id`（サーバーが受け入れる形のもの。[失敗イベント](#失敗イベント) を参照）。無い場合は省略される |
 | `durationMs` | Collector パイプラインと evaluator に費やした時間。HTTP の往復時間ではない |
@@ -193,7 +193,7 @@ Authorization: Bearer <jwt>
 | `collector_threw` | コレクターが reject / throw した |
 | `attribute_conflict` | 2 つの attribute コレクターが同じスカラーキーに異なる値を書いた |
 | `rule_timeout` | 非同期ルールが予算を、またはルールフェーズがデッドラインを超えた |
-| `rule_threw` | ルールの `verify` が throw した、または `decide` が reject した |
+| `rule_threw` | ルールの `verify` が throw した、`decide` が reject した、またはその `ruleType` のグループに絞るルールと許可するルールが混在した |
 | `body_rejected` | JSON body parser が、deny エンベロープが 4xx に対応付けていない形で失敗した |
 | `internal` | decision 自身の collect や評価から出てきたのではないもの — throw した resource parser や authenticator（何を throw したかによらず） |
 
@@ -289,7 +289,7 @@ resource parser を 1 つ（`DotNotationResourceParser`）登録します。各�
 リクエスト対象の resource と action に対して `<action>:<resourceType>` を bearer
 トークンが持っているときにちょうど許可されます。スコープを発行する IdP があれば
 認可ストアを別途立てなくてもそのまま機能し、かつ fail-closed です — スコープを
-持たないトークンや誤ったスコープは拒否され、ルールが 1 つも集まらなかった
+持たないトークンや誤ったスコープは拒否され、許可するルールが 1 つも集まらなかった
 リクエストも拒否されます（`rule.onEmptyRuleSet = "deny"`）。
 
 ルールは種類ごとにグループ化され、**すべてのグループが通る必要があります**。

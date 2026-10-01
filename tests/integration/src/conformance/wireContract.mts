@@ -193,7 +193,7 @@ interface ResponseEnvelopes {
 		allowNeverCarries: string[];
 	};
 	batch: { keys: string[] };
-	ruleGroup: { required: string[]; onlyOnAPassingGroup: string[] };
+	ruleGroup: { required: string[]; optional: string[]; onlyOnAPassingGroup: string[] };
 	ruleOutcome: { required: string[]; optional: string[] };
 	evaluation: {
 		statuses: string[];
@@ -409,9 +409,15 @@ export function describeWireContractConformance(adapter: WireContractAdapter): v
 		const groups = (decision.reason as { groups: Record<string, unknown>[] }).groups;
 		expect(Array.isArray(groups)).toBe(true);
 		for (const group of groups) {
-			const permittedGroupKeys = new Set([...ruleGroup.required, ...ruleGroup.onlyOnAPassingGroup]);
+			const permittedGroupKeys = new Set([
+				...ruleGroup.required,
+				...ruleGroup.optional,
+				...ruleGroup.onlyOnAPassingGroup,
+			]);
 			for (const key of ruleGroup.required) expect(Object.keys(group)).toContain(key);
 			expect(Object.keys(group).filter((key) => !permittedGroupKeys.has(key))).toEqual([]);
+			// A marker: present only as `true`.
+			if ("restricts" in group) expect(group.restricts).toBe(true);
 			const permittedOutcomeKeys = new Set([...ruleOutcome.required, ...ruleOutcome.optional]);
 			for (const outcome of group.evaluated as Record<string, unknown>[]) {
 				for (const key of ruleOutcome.required) expect(Object.keys(outcome)).toContain(key);

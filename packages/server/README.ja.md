@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.server
 
-最終更新: 2026-09-30
+最終更新: 2026-10-01
 
 auth.policy-verifier 向けの Express HTTP サーバーです。モジュールと設定からアプリケーションを組み立てる `createApp` と、認可判定を行う `POST /verify` / `POST /verify/batch` を提供します。
 
@@ -60,7 +60,7 @@ npm install @o3co/auth.policy-verifier.server
 
 - `authenticator` — **必須**。subject を確立するために router が実行する構築済みの `TokenAuthenticator` です (#219)。router 自身は authenticator を構築しません (#259)。port の定義は [`src/auth/tokenAuthenticator.mts`](src/auth/tokenAuthenticator.mts) にあります。`createApp` は `oauth.authenticator` が選ぶものを渡します。router を自分でマウントする場合は、別の方法で subject を確立する独自の authenticator を渡すか、組み込みの bearer-JWT authenticator を `createTokenAuthenticator(jwt, logger)` で構築して渡します。その際 router と同じ `logger` を渡すと、`jwt_token_rejected` / `jwt_verification_unavailable` の行が同じ出力先に届きます。`jwt` は [`src/jwt/tokenAuthenticator.mts`](src/jwt/tokenAuthenticator.mts) の `VerifyRouterJwtConfig` で、`validate` で判別されます: `validate: true` は `key`（`KeyResolverFactory` が返す鍵）、`algorithms`、`issuer`、`audience`、任意の `audienceClaim`（既定 `"aud"`）、`tokenType`（`"*"` は何も pin しない）を持ち、`validate: false` は `allowInsecureDecode: true` を必須とするテスト専用です。どちらの枝も `maxTokenAgeSeconds`（既定 86400）と `clockToleranceSeconds`（0–300、既定 0）を取ります。authenticator のない config（`null` を含む）と、削除された `jwt` オプションをまだ持つ config は構築時に拒否され、後者のエラーはこの移行方法を示します。
 - `resourceParser`、`attributePipeline`、`rulePipeline` — 必須。collector の上限（`collectorTimeoutMs`、`collectorDeadlineMs`、`collectorConcurrency`）は pipeline 側のもので、この config には含まれません。
-- `evaluateOptions` — 評価セマンティクスの上書き。省略時は空 rule set を deny。`ruleTimeoutMs`・`evaluateDeadlineMs`・`failures` をここに含めると構築時に拒否されます: 期限はこの config 自身のフィールドであり、router は判定ごとに 1 つの failure record を持つので (#200)、渡された `failures` はすべての判定で共有されてしまうためです。`signal` は呼び出し元のものと合成され、置き換えられることはありません。
+- `evaluateOptions` — 評価セマンティクスの上書き。省略時は、許可する Rule が集まらなければ deny。`ruleTimeoutMs`・`evaluateDeadlineMs`・`failures` をここに含めると構築時に拒否されます: 期限はこの config 自身のフィールドであり、router は判定ごとに 1 つの failure record を持つので (#200)、渡された `failures` はすべての判定で共有されてしまうためです。`signal` は呼び出し元のものと合成され、置き換えられることはありません。
 - `maxBatchSize`（既定 50）— `POST /verify/batch` が 1 リクエストで判定する件数の上限。
 - `batchConcurrency`（既定 8）— バッチのうち同時に判定する entry 数 (#183)。
 - `ruleTimeoutMs`（既定 2000）/ `evaluateDeadlineMs`（既定 5000）— 非同期 Rule 1 つの予算と、1 判定の非同期 Rule 全体の予算 (#225)。超過は `rule_timeout` の deny。
@@ -86,7 +86,7 @@ npm install @o3co/auth.policy-verifier.server
 8. `200 { decision: "allow" }` または `403 { decision: "deny", code, message }` を返す。
 9. collector または fan-out が時間切れになった場合は `403 { decision: "deny", code: "collector_timeout" }` を返す (#115)。評価器には到達させない — 一部の Rule しか集まらないことはポリシーが弱いことであり、1 つも集まらなければ `rule.onEmptyRuleSet = "allow"` では allow になるため。タイムアウトは deny にしかなり得ない。詳細は呼び出し側ではなく `collector_timeout` ログ行に出る — `category: "collector_timeout"` と、予算を超えた `collector`（`attribute.collectors[1] (EntitlementStoreCollector)`）、pipeline のデッドラインを超えた場合はリストそのもの（`attribute.collectors`）(#200)。
 10. 非同期 Rule が `verify.ruleTimeoutMs` 以内に応答しなかった場合 (#225)、または非同期 Rule 全体で `verify.evaluateDeadlineMs` を超えた場合は `403 { decision: "deny", code: "rule_timeout" }` を返す — 同じ deny だが専用の code を持つので、運用者は停止したのがエンジンなのか collector なのかを区別できる。`rule_timeout` ログ行は `category` と `rule`（`{ ruleType, code }`）を持つ。
-11. 予期しないエラーが発生した場合は `500 { decision: "deny", code: "internal_error" }` を返し、`verify_internal_error` としてログに出す。行は `endpoint`、ID があれば `requestId`、そして `category` を持つ (#200): `collector` を名指しする `collector_threw`、`rule` を名指しする `rule_threw`、エンベロープが対応付けていない body parser の失敗の `body_rejected`、decision から出てきたのではないものの `internal`。collector と rule は router が decision ごとに持つ `FailureRecord` に記録されたもので、エラーから読んだ名前ではない。ルールの `ruleType` と `code` は識別子の形の場合だけ記録され、それ以外は `redacted` になる。閉じた集合は `FAILURE_CATEGORIES` として export され、そのうちコレクターの失敗は `DecisionMetrics.observeCollectorFailure` で計上される（`createApp` では `auth_collector_failures_total{collector,category}`）。
+11. 予期しないエラーが発生した場合は `500 { decision: "deny", code: "internal_error" }` を返し、`verify_internal_error` としてログに出す。行は `endpoint`、ID があれば `requestId`、そして `category` を持つ (#200): `collector` を名指しする `collector_threw`、`rule`（例外を投げたルール、または絞るルールと許可するルールが混在したグループ）を名指しする `rule_threw`、エンベロープが対応付けていない body parser の失敗の `body_rejected`、decision から出てきたのではないものの `internal`。collector と rule は router が decision ごとに持つ `FailureRecord` に記録されたもので、エラーから読んだ名前ではない。ルールの `ruleType` と `code` は識別子の形の場合だけ記録され、それ以外は `redacted` になる。閉じた集合は `FAILURE_CATEGORIES` として export され、そのうちコレクターの失敗は `DecisionMetrics.observeCollectorFailure` で計上される（`createApp` では `auth_collector_failures_total{collector,category}`）。
 
 ### AppConfigSchema / AppConfig
 
@@ -97,7 +97,7 @@ npm install @o3co/auth.policy-verifier.server
 - `http` — どこで listen し、誰が呼べるか: `hostname`（既定 `127.0.0.1`。[信頼境界](#信頼境界) を参照）、`port`（既定 3000）、`pathPrefix`、任意の `callerAuth`（`header` — 既定 `x-caller-token` — と `token`）。ブロックごと省略できます。
 - `oauth` — subject をどう認証するか。`authenticator` が token authenticator を名指しします（既定 `"jwt"`、またはモジュールが登録した名前、#219）。`"jwt"` のときは `jwt` ブロックが必須で、組み込みの bearer-JWT 経路を設定します — アルゴリズムと鍵素材、`mode`（`"verify"` またはテスト専用の `"insecure-decode"`）、`issuer` / `audience` / `audienceClaim` / `tokenType`、トークン寿命の上限。それ以外の名前では `jwt` ブロックは拒否され、その authenticator 自身のサブブロック（`oauth.<name>`）はパースされずにそのまま渡り、ファクトリが検証します。
 - `attribute.collectors` / `rule.collectors` — 必須の collector エントリのリスト。下記を参照。
-- `rule.onEmptyRuleSet` — `"deny"`（既定）または `"allow"`: Rule が 1 つも集まらなかったときの判定。
+- `rule.onEmptyRuleSet` — `"deny"`（既定）または `"allow"`: 許可する Rule が 1 つも集まらなかったときの判定。`"allow"` でも、集まった絞る Rule にはリクエストを従わせます。
 - `resource.parser` — 登録済みの resource parser 名（既定 `DotNotationResourceParser`）。
 - `verify` — 判定エンドポイントの上限と開示範囲。`createApp` は collector の上限（`collectorTimeoutMs`、`collectorDeadlineMs`、`collectorConcurrency`）を自身が組み立てる pipeline に渡し、残り — `maxBatchSize`、`batchConcurrency`、リクエストの上限、`ruleTimeoutMs` / `evaluateDeadlineMs`、`credentialToCollectors`、`evaluationInResponse` — を [`createVerifyRouter`](#createverifyrouter) に渡します。各 knob の意味は上のリストを参照してください。ブロックごと省略でき、すべての knob に既定値があります。
 - `logging.level` — コンソールロガーの閾値（既定 `info`）。
@@ -204,7 +204,8 @@ HTTP/1.1 403 Forbidden
 通過グループは最初に通ったルールで打ち切るため、`evaluated` は先に試して失敗した代替ルールに続けて
 そのルールで終わり、決め手となったルールは `satisfiedBy`（通過グループにのみ存在し、失敗グループには
 付きません）として明示されます。
-`code` / `message` は従来どおり最初に失敗したグループから取ります。
+`code` / `message` は従来どおり最初に失敗したグループから取ります。絞るルールのグループは `restricts: true` を持ちます。
+ないときは、許可するグループか、そのキーより古い verifier です。
 
 **`evaluation`（#244）。** policy evaluator を背後に持つ Rule（`CedarPolicyRuleCollector`）は、answer ごとに
 「evaluator が走ったか」「どの policy revision を評価したか」と、完了した answer ではそれを決めた policy (#199) を報告し、その outcome には `passed` の隣に
