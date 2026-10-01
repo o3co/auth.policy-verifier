@@ -13,9 +13,14 @@ This release has breaking changes. Upgrade every
 caret range on 0.15.x, which is what `@o3co/create-auth-policy-verifier`
 writes into a scaffolded project, does not admit 0.16.0, and each package
 pins the ones it depends on exactly (`.builtins`, `.cedar` and `.server` on
-`.core`; `.cedar-wasm` on `.cedar`). A deployment that fetches its keys from a
-JWKS endpoint answers differently during a key-set outage: read Changed
-before upgrading one.
+`.core`; `.cedar-wasm` on `.cedar`). Do not run `.builtins` 0.16.0 under a
+`.server` older than 0.16.0: that server evaluates with its own copy of
+`.core`, which does not know `restricts`, so `WithinDelegationRange` counts
+there as a granting rule — a delegated token no policy rule applies to is
+allowed by its range alone — and a group mixing restricting and granting
+rules is not refused. A deployment that fetches its keys from a JWKS endpoint
+answers differently during a key-set outage: read Changed before upgrading
+one.
 
 ### Added
 
@@ -50,7 +55,8 @@ before upgrading one.
   builtins module. **What to do:** configure the pair with the same `type`
   (and `claim`, if overridden) — nothing checks that they agree, and where
   only the rule collector misses the token's entries the range is not
-  enforced. See the builtins README, "Delegated tokens: range and actor".
+  enforced — and give them the `type` the issuer writes: a token whose
+  entries are of any other type is decided as a token without a range. See the builtins README, "Delegated tokens: range and actor".
 
 - **Restricting rules** (`.core`,
   [#302](https://github.com/o3co/auth.policy-verifier/pull/302),
@@ -84,20 +90,26 @@ before upgrading one.
   fetched is `503 verification_unavailable`, not `401 invalid_token`**
   (`.server`, [#298](https://github.com/o3co/auth.policy-verifier/issues/298),
   [#299](https://github.com/o3co/auth.policy-verifier/pull/299)). While the
-  keys a token needs are not cached and cannot be fetched — a JWKS fetch that
-  fails or times out, a JWKS endpoint answering non-200 or unparseable JSON,
-  any other non-JOSE error — `/verify` and `/verify/batch` answer `503` with
-  the deny envelope `{"decision":"deny","code":"verification_unavailable",
-  "message":"Token verification is unavailable"}`, the batch as a whole. A
-  token that fails verification is still `401 invalid_token`, and so is a
-  fetched key set with no key for the `kid`. The wire answer now agrees with
-  the `jwt_verification_unavailable` log line, which already covered the same
-  cases. A token whose key is cached verifies through an outage, as before;
-  no `Retry-After` is sent. The wire contract gains
+  keys a token needs cannot be had from cache and cannot be fetched — a JWKS
+  fetch that fails or times out, a JWKS endpoint answering non-200,
+  unparseable JSON or a document that is not a key set, any other non-JOSE
+  error — `/verify` and `/verify/batch` answer `503` with the deny envelope
+  `{"decision":"deny","code":"verification_unavailable","message":"Token
+  verification is unavailable"}`, the batch as a whole. A token that fails
+  verification is still `401 invalid_token`, and so is one whose `kid` the
+  fetched key set does not hold, within `oauth.jwt.jwksCooldownMs` of the
+  last successful fetch; past it the unknown `kid` fetches the set again, and
+  a fetch that fails is `503`. A cached key verifies through an outage only
+  until the cached set is `oauth.jwt.jwksCacheMaxAgeMs` old (default 10
+  minutes): from then until a fetch succeeds, every token verified against
+  the JWKS is answered `503`, where 0.15.0 answered `401`. The wire answer now
+  agrees with the `jwt_verification_unavailable` log line, which already
+  covered the same cases. No `Retry-After` is sent. The wire contract gains
   `status.verificationUnavailable` and `codes.verificationUnavailable`.
   **What to do:** whatever keys on the verifier's statuses sees an IdP outage
   as 5xx now — the HTTP histogram's `status="503"`, SLOs and alerts, mesh
-  outlier detection, retry-on-5xx. A PEP that treated 401 as "invalid
+  outlier detection, retry-on-5xx. Mesh outlier detection that ejects on 5xx
+  ejects every replica once an IdP outage outlasts `jwksCacheMaxAgeMs`. A PEP that treated 401 as "invalid
   token" stops doing so for an outage; `protobuf.interceptors` already
   reports any status but 2xx, 401 and 403 as an authorization-service error.
 
@@ -145,12 +157,15 @@ before upgrading one.
   control character other than a tab (a secret stored with its trailing `\n`
   is the common case), or holds a character above U+00FF (Node reads header
   bytes as Latin-1); and a `http.callerAuth.header` that is not an RFC 9110
-  token, whether or not a token is set. A bad header and a bad token are
-  reported together. **What to do:** a deployment that started and refused
-  every request now fails at boot naming the field — fix the value. The one
-  deployment that works today and stops starting sets
-  `HTTP_CALLER_AUTH_HEADER` to a name outside RFC 9110 token characters (`X
-  Caller`) with no token, so the gate was off: unset the header or correct it.
+  token, whether or not a token is set. `AppConfigSchema` reports a bad header
+  and a bad token together. **What to do:** a deployment that started and
+  refused every request now fails at boot naming the field — fix the value.
+  The deployments that work today and stop starting set a header name that is
+  not an RFC 9110 token and no token, so the gate was off:
+  `HTTP_CALLER_AUTH_HEADER` outside token characters (`X Caller`), or a
+  hand-built `createApp` / `resolveCallerAuth` config whose tokenless
+  `callerAuth.header` is empty, not a string, or outside token characters.
+  Unset the header or correct it.
 
 ## [0.15.0] - 2026-09-28
 
