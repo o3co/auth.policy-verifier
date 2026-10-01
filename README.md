@@ -386,7 +386,7 @@ attribute {
 }
 
 rule {
-  onEmptyRuleSet = "deny"       # deny | allow — decision when no rule is collected
+  onEmptyRuleSet = "deny"       # deny | allow — decision when no granting rule is collected
   onEmptyRuleSet = ${?RULE_ON_EMPTY_RULE_SET}
   collectors = [
     { collector = "ResourceActionScopeRuleCollector" }

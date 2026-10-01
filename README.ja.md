@@ -379,7 +379,7 @@ attribute {
 }
 
 rule {
-  onEmptyRuleSet = "deny"       # deny | allow — ルールが集まらなかったときの決定
+  onEmptyRuleSet = "deny"       # deny | allow — 許可するルールが集まらなかったときの決定
   onEmptyRuleSet = ${?RULE_ON_EMPTY_RULE_SET}
   collectors = [
     { collector = "ResourceActionScopeRuleCollector" }

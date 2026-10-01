@@ -79,7 +79,7 @@ Individual values can also be overridden with environment variables.
 | `OAUTH_JWT_AUDIENCE_CLAIM` | `aud` | Claim the audience is read from: `azp` (Clerk), `client_id` (Cognito). Anything but `aud` means `aud` is not consulted at all |
 | `OAUTH_AUTHENTICATOR` | `jwt` | Which token authenticator establishes the subject; another name must be registered by a module in `main.mts` |
 | `OAUTH_JWT_MODE` | `verify` | `verify` fully verifies tokens; the explicit `insecure-decode` (test-only) decodes without signature verification — `exp`/`nbf` are still enforced |
-| `RULE_ON_EMPTY_RULE_SET` | `deny` | Decision when no rule is collected (`deny` \| `allow`) |
+| `RULE_ON_EMPTY_RULE_SET` | `deny` | Decision when no granting rule is collected (`deny` \| `allow`) |
 | `VERIFY_MAX_BATCH_SIZE` | `50` | Cap on `POST /verify/batch` entries |
 | `VERIFY_CREDENTIAL_TO_COLLECTORS` | `never` | `expose` hands collectors the raw credential as `context.credential` — only for a collector that calls a downstream API as the subject. The default keeps collectors on verified claims; the credential is replayable and a logged context would leak it |
 | `VERIFY_EVALUATION_IN_RESPONSE` | `omit` | `include` puts each policy-backed rule's `evaluation` — its status, the policy revision it evaluated (#244) and, for a completed answer, the policies that determined it (#199) — on the decision response, for a calling service that records which revision authorized an operation. The `decision` log event carries it either way. It tells any holder of an accepted token when the policy set changed and which policies determined each answer, so pair it with `HTTP_CALLER_AUTH_TOKEN` where that matters |
@@ -195,7 +195,7 @@ A decision that could not be made is logged at `error` (level 50), and the line 
 | `collector_threw` | A collector rejected or threw |
 | `attribute_conflict` | Two attribute collectors wrote different values to one scalar key |
 | `rule_timeout` | An asynchronous rule overran its budget, or the rule phase its deadline |
-| `rule_threw` | A rule's `verify` threw or its `decide` rejected |
+| `rule_threw` | A rule's `verify` threw or its `decide` rejected, or its `ruleType` group mixed restricting and granting rules |
 | `body_rejected` | The JSON body parser failed in a way the deny envelope does not map to a 4xx |
 | `internal` | Anything that did not come out of a decision's own collect or evaluation — a resource parser or authenticator that threw, whatever it threw |
 
@@ -293,7 +293,7 @@ else: a request is allowed exactly when the bearer token carries
 `<action>:<resourceType>` for the resource and action it asks about. It is
 functional against any issuer that mints scopes, with no authorization store to
 stand up first, and it is fail-closed — a token with no scope, or the wrong one,
-is denied, and so is a request that collects no rule at all
+is denied, and so is a request that collects no granting rule
 (`rule.onEmptyRuleSet = "deny"`).
 
 Rules are grouped by kind and **every group must pass**. A rule collector enabled
