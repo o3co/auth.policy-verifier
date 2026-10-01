@@ -406,6 +406,34 @@ describe("verify_internal_error names what failed", () => {
 		expect((event.obj.err as Error).message).toBe("entitlement store is down");
 	});
 
+	it("names a rule group that mixes restricting and granting rules, as a rule that threw", async () => {
+		// The scope rule grants; a restricting rule under the same ruleType would
+		// satisfy the group in its place, so core refuses the group.
+		const restrictingScope: RuleCollector = {
+			collect: async () => [
+				{
+					ruleType: "scope",
+					code: "outside_range",
+					message: "Outside the range",
+					restricts: true,
+					verify: () => true,
+				},
+			],
+		};
+		const { app, events } = createTestApp({
+			ruleCollectors: [new ResourceActionScopeRuleCollector(), restrictingScope],
+		});
+
+		const res = await decide(app);
+
+		expect(res.status).toBe(500);
+		expect(res.body).toMatchObject({ decision: "deny", code: "internal_error" });
+		expect(named(events, "verify_internal_error")[0].obj).toMatchObject({
+			category: "rule_threw",
+			rule: { ruleType: "scope" },
+		});
+	});
+
 	it("names the rule collector that threw, on POST /verify/batch", async () => {
 		const failing: RuleCollector = {
 			collect: () => Promise.reject(new Error("rule store is down")),
