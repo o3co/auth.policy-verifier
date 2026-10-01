@@ -130,7 +130,9 @@ const failableCollector: AttributeCollector = {
 /**
  * A second rule group, driven by a request-context attribute, so a deny can
  * carry a passing group beside a failing one — which is what the `satisfiedBy`
- * case needs to see in one response.
+ * case needs to see in one response. It restricts, as a tenant check does:
+ * the scope group grants and this one narrows, so every decision carries a
+ * group with `restricts` beside one without.
  */
 const tenantRuleCollector: RuleCollector = {
 	async collect() {
@@ -138,6 +140,7 @@ const tenantRuleCollector: RuleCollector = {
 			ruleType: "tenant",
 			code: "wrong_tenant",
 			message: "Request is not for the acme tenant",
+			restricts: true,
 			verify: (attrs: Attributes) => attrs.get("tenantId") === "acme",
 		};
 		return [rule];
