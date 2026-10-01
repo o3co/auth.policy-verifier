@@ -53,7 +53,12 @@
 		"that, or in a shape it could not carry, is counted in `determiningPoliciesOmitted`, present",
 		"only beside the list and only when it is not zero. Beside `revision: null` the ids are as",
 		"unconfirmed as the revision. A `failed` or `not_invoked` evaluation carries neither key:",
-		"no policy decided that answer. ABSENT means the rule did not say."
+		"no policy decided that answer. ABSENT means the rule did not say.",
+		"`restricts` is the one OPTIONAL key of a rule group: `true` on a group of restricting",
+		"rules, which narrow what the other groups allow and never allow on their own. An allow",
+		"whose groups all carry it was granted by none of them — `rule.onEmptyRuleSet = \"allow\"`",
+		"let it through. ABSENT means a granting group, or a verifier older than the key: a client",
+		"that tells the two allows apart must not read absence from an older verifier as a grant."
 	],
 	"error": {
 		"keys": ["decision", "code", "message"],
@@ -71,6 +76,7 @@
 	},
 	"ruleGroup": {
 		"required": ["ruleType", "passed", "evaluated"],
+		"optional": ["restricts"],
 		"onlyOnAPassingGroup": ["satisfiedBy"]
 	},
 	"ruleOutcome": {
