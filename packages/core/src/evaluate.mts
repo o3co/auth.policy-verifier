@@ -137,7 +137,8 @@ export async function evaluate(
 
 	// Group rules by ruleType — rules within a group are alternatives (OR).
 	const groups = Map.groupBy(rules, (rule) => rule.ruleType);
-	const granting = refuseMixedGroupsAndFindGrant(groups, options?.failures);
+	const restrictingTypes = restrictingGroups(groups, options?.failures);
+	const granting = restrictingTypes.size < groups.size;
 
 	// No granting rule → default-deny unless the deployment opted out. One that
 	// opted out is still held to the restricting rules, evaluated below.
@@ -152,7 +153,15 @@ export async function evaluate(
 	const outcomes: RuleGroupOutcome[] = [];
 	for (const [ruleType, groupRules] of groups) {
 		outcomes.push(
-			await evaluateGroup(ruleType, groupRules, attrs, budget, options?.signal, options?.failures),
+			await evaluateGroup(
+				ruleType,
+				groupRules,
+				restrictingTypes.has(ruleType),
+				attrs,
+				budget,
+				options?.signal,
+				options?.failures,
+			),
 		);
 	}
 
@@ -161,17 +170,18 @@ export async function evaluate(
 }
 
 /**
- * Refuses a group that mixes the two kinds and answers whether any group
- * grants, reading each rule's marker once. A mixed group is refused: it is an OR, so a restricting rule that
- * passed would satisfy it in place of the grant beside it. The group is named
- * by the failure source, not the message — a `ruleType` may be derived from
- * the request, and the message is logged as it is.
+ * The `ruleType`s of the groups whose rules restrict, reading each rule's
+ * marker once; every other group grants. A group that mixes the two kinds is
+ * refused: it is an OR, so a restricting rule that passed would satisfy it in
+ * place of the grant beside it. The group is named by the failure source,
+ * not the message — a `ruleType` may be derived from the request, and the
+ * message is logged as it is.
  */
-function refuseMixedGroupsAndFindGrant(
+function restrictingGroups(
 	groups: Map<string, AnyRule[]>,
 	failures: FailureRecord | undefined,
-): boolean {
-	let granting = false;
+): Set<string> {
+	const restrictingTypes = new Set<string>();
 	for (const [ruleType, groupRules] of groups) {
 		const restricting = groupRules.filter(isRestrictingRule).length;
 		if (restricting > 0 && restricting < groupRules.length) {
@@ -184,9 +194,9 @@ function refuseMixedGroupsAndFindGrant(
 			failures?.record(error, { kind: "rule", ruleType, code: groupRules[0].code });
 			throw error;
 		}
-		if (restricting === 0) granting = true;
+		if (restricting > 0) restrictingTypes.add(ruleType);
 	}
-	return granting;
+	return restrictingTypes;
 }
 
 /** A deny names the FIRST failing group; reason carries all. */
@@ -218,16 +228,19 @@ interface RuleBudget {
  * the first passing rule. `evaluated` reports exactly the rules that ran, in
  * order — on a pass that is every tried-and-failed alternative followed by the
  * passing rule (named again as `satisfiedBy`); on a fail, every alternative.
+ * A restricting group says so on its outcome.
  */
 async function evaluateGroup(
 	ruleType: string,
 	rules: AnyRule[],
+	restricts: boolean,
 	attrs: Attributes,
 	budget: RuleBudget,
 	caller: AbortSignal | undefined,
 	failures: FailureRecord | undefined,
 ): Promise<RuleGroupOutcome> {
 	const evaluated: RuleOutcome[] = [];
+	const kind = restricts ? { restricts: true as const } : {};
 	for (const rule of rules) {
 		const { passed, evaluation } = isAsyncRule(rule)
 			? await runAsyncRule(rule, attrs, budget, caller, failures)
@@ -243,9 +256,9 @@ async function evaluateGroup(
 			...(evaluation !== undefined ? { evaluation } : {}),
 		};
 		evaluated.push(outcome);
-		if (passed) return { ruleType, passed: true, evaluated, satisfiedBy: outcome };
+		if (passed) return { ruleType, passed: true, evaluated, satisfiedBy: outcome, ...kind };
 	}
-	return { ruleType, passed: false, evaluated };
+	return { ruleType, passed: false, evaluated, ...kind };
 }
 
 /** How a `FailureRecord` names a rule: by the two things an operator finds it by in config. */
