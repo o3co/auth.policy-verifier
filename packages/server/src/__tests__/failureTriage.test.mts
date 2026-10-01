@@ -430,7 +430,8 @@ describe("verify_internal_error names what failed", () => {
 		expect(res.body).toMatchObject({ decision: "deny", code: "internal_error" });
 		expect(named(events, "verify_internal_error")[0].obj).toMatchObject({
 			category: "rule_threw",
-			rule: { ruleType: "scope" },
+			// The group, named by its ruleType and its first rule's code.
+			rule: { ruleType: "scope", code: "invalid_scope" },
 		});
 	});
 

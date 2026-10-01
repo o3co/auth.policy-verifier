@@ -507,3 +507,20 @@ describe("the fixture's evaluation table is core's own", () => {
 		);
 	});
 });
+
+// The suite above permits `restricts` and checks it is `true` where it
+// appears; this pins that the deployment sends it, on the group that restricts
+// and on no other.
+describe("the reference deployment marks its restricting group on the wire", () => {
+	it("carries restricts on the tenant group and on no other", async () => {
+		const res = await request(deployment({}))
+			.post("/verify")
+			.set("Authorization", `Bearer ${await mintToken(SUBJECT)}`)
+			.send(allowed);
+
+		expect(res.body.decision).toBe("allow");
+		const groups = res.body.reason.groups as Record<string, unknown>[];
+		expect(groups.find((group) => group.ruleType === "tenant")).toMatchObject({ restricts: true });
+		expect(groups.find((group) => group.ruleType === "scope")).not.toHaveProperty("restricts");
+	});
+});
