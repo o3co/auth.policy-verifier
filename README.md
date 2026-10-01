@@ -612,7 +612,7 @@ One structured event per decision, named `decision`, at `info`:
 {"msg":"decision","requestId":"6f1c…","sub":"user-42","resource":"project:7","action":"read","decision":"deny","code":"invalid_scope","deniedBy":{"ruleType":"scope","refused":["invalid_scope"]},"durationMs":0.412}
 ```
 
-`satisfiedBy` replaces `deniedBy` on an allow, naming the rule that satisfied each group. A `POST /verify/batch` of N entries emits N lines sharing one `requestId`. `durationMs` is time in the pipelines and the evaluator, not the HTTP round trip.
+`satisfiedBy` replaces `deniedBy` on an allow, naming the rule that satisfied each granting group; a restricting group narrowed the allow and granted nothing, so it is left out, and an allow `rule.onEmptyRuleSet = "allow"` let through carries an empty list. A `POST /verify/batch` of N entries emits N lines sharing one `requestId`. `durationMs` is time in the pipelines and the evaluator, not the HTTP round trip.
 
 When a rule reports the evaluation behind its answer (#244) — `packages/cedar` does — the line also carries `evaluations`, one entry per reporting rule in evaluation order: `{"ruleType":"cedar","code":"cedar_deny","passed":false,"evaluation":{"status":"completed","revision":"sha256:9f2c…","determiningPolicies":["30-forbid-contractors"]}}` — a completed Cedar answer names the policies that determined it (#199). `passed` is there because a group is an OR: a rule that forbade, followed by one that permitted, is an allow whose line lists both, and the first is the revision that *refused*. See [Recording which policy revision decided](#recording-which-policy-revision-decided). A deployment with no policy-backed rule writes the line it always wrote.
 

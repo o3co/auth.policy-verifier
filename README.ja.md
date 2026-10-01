@@ -602,7 +602,7 @@ oauth.jwt {
 {"msg":"decision","requestId":"6f1c…","sub":"user-42","resource":"project:7","action":"read","decision":"deny","code":"invalid_scope","deniedBy":{"ruleType":"scope","refused":["invalid_scope"]},"durationMs":0.412}
 ```
 
-allow のときは `deniedBy` の代わりに `satisfiedBy` が入り、各グループを満たしたルールを示します。N 件の `POST /verify/batch` は同一 `requestId` を持つ N 行を出力します。`durationMs` はパイプラインと evaluator に費やした時間であり、HTTP の往復時間ではありません。
+allow のときは `deniedBy` の代わりに `satisfiedBy` が入り、許可する各グループを満たしたルールを示します。絞るグループは allow を絞っただけで何も許可していないので含まれず、`rule.onEmptyRuleSet = "allow"` が通した allow では空のリストになります。N 件の `POST /verify/batch` は同一 `requestId` を持つ N 行を出力します。`durationMs` はパイプラインと evaluator に費やした時間であり、HTTP の往復時間ではありません。
 
 Rule が answer の背後にある evaluation を報告する場合（#244。`packages/cedar` は報告します）、この行には `evaluations` も入ります。報告した Rule ごとに 1 件、評価順です: `{"ruleType":"cedar","code":"cedar_deny","passed":false,"evaluation":{"status":"completed","revision":"sha256:9f2c…","determiningPolicies":["30-forbid-contractors"]}}`（完了した Cedar の answer は、それを決めた policy を挙げます。#199）。`passed` があるのは group が OR だからです。forbid した Rule の後に permit した Rule が続くと allow になり、行には両方が並びますが、前者は *拒否した* revision です。[どの policy revision が決めたかを記録する](#どの-policy-revision-が決めたかを記録する) を参照してください。policy を背後に持つ Rule が無いデプロイでは、行はこれまでと同じです。
 

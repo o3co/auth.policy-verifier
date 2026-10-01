@@ -1,6 +1,6 @@
 # @o3co/auth-policy-verifier-standalone
 
-最終更新: 2026-09-30
+最終更新: 2026-10-01
 
 auth.policy-verifier のデプロイ可能なサーバーテンプレートです。このパッケージはコンポジションルートとして機能し、設定の読み込み・モジュールのロード・Express サーバーの起動を担います。`@o3co/create-auth-policy-verifier` によって生成されます。
 
@@ -157,7 +157,7 @@ Authorization: Bearer <jwt>
 | `resource` / `action` | 呼び出し元が送ったそのままの値 |
 | `decision` | `allow` または `deny` |
 | `code` | deny のみ — 呼び出し元がワイヤ上で受け取ったコードと同じ |
-| `satisfiedBy` | allow のみ — 各グループを満たしたルールの `{ruleType, code}` |
+| `satisfiedBy` | allow のみ — 許可する各グループを満たしたルールの `{ruleType, code}`。`onEmptyRuleSet = "allow"` が通したときは空 |
 | `deniedBy` | deny のみ — 最初に失敗したグループと、そこで拒否した全代替ルール |
 | `requestId` | 呼び出し元が送った `x-request-id`（サーバーが受け入れる形のもの。[失敗イベント](#失敗イベント) を参照）。無い場合は省略される |
 | `durationMs` | Collector パイプラインと evaluator に費やした時間。HTTP の往復時間ではない |
