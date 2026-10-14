@@ -20,8 +20,8 @@
 		"@o3co/auth.policy-verifier.builtins": "workspace:*",
 		"@o3co/auth.policy-verifier.server": "workspace:*",
 		"@o3co/ts.hocon": "^1.13.0",
-		"express": "^5.2.1",
-		"pino": "^10.3.1"
+		"express": "^5.3.0",
+		"pino": "^10.4.0"
 	},
 	"devDependencies": {
 		"@types/node": "^26.6.3",
