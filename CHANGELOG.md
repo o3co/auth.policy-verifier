@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
+## [0.16.1] - 2026-10-20
+
+### Changed
+
+- **Dependencies.** `.server` now requires `express ^5.3.0` (was `^5.0.0`)
+  and `zod ^4.6.6` (was `^4.6.5`). The standalone template, which
+  `create-auth-policy-verifier` generates apps from, now requires
+  `express ^5.3.0` and `pino ^10.4.0`. No code, wire or configuration change.
+
 ## [0.16.0] - 2026-10-01
 
 This release has breaking changes. Upgrade every
