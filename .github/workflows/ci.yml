@@ -21,7 +21,12 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          # The minor line, not the patch: check-latest resolves it to the newest
+          # 24.22.x at run time, so a security patch on the line reaches CI without
+          # an edit here. Without it, a runner image that caches an older 24.22.x
+          # would satisfy '24.22' from the cache.
+          node-version: '24.22'
+          check-latest: true
 
       - name: Get pnpm store path
         id: pnpm-store
@@ -196,7 +201,8 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '24.22'
+          check-latest: true
 
       - name: Read the Cedar version the wasm engine is pinned to
         id: cedar
@@ -266,7 +272,8 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '24.22'
+          check-latest: true
 
       - name: Read the cedar-agent image and the Cedar it runs
         id: agent
@@ -403,7 +410,8 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '24.22'
+          check-latest: true
 
       - name: Get pnpm store path
         id: pnpm-store
@@ -428,7 +436,8 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '24.22'
+          check-latest: true
 
       - name: Get pnpm store path
         id: pnpm-store
