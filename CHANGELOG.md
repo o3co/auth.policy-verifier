@@ -6,6 +6,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
+## [0.16.2] - 2026-10-22
+
+### Security
+
+- **The standalone template builds its image on Node.js 26.12.1**
+  (`@o3co/create-auth-policy-verifier`,
+  [#313](https://github.com/o3co/auth.policy-verifier/pull/313)). The
+  template's `Dockerfile` moves from
+  `node:26-alpine@sha256:0b36e8c1…` (Node 26.10.0) to `node:26.12-alpine`,
+  the line that carries the
+  [2026-10-21 Node.js security release](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases).
+  It fixes these vulnerabilities in the 26.x line:
+  - High: CVE-2026-111497 (Brotli decoder out-of-bounds write, remote code
+    execution), CVE-2026-105483 and CVE-2026-106069 (TLS certificate
+    hostname bypasses), CVE-2026-105482 (`dns.resolve` truncates names at a
+    NUL character).
+  - Medium: CVE-2026-105481 (keep-alive socket processes a response written
+    before the request was sent), CVE-2026-106072 (DNS SANs authenticate IP
+    endpoints given as non-canonical IPv4), CVE-2026-106074 (`randomUUID()` /
+    `randomInt()` entropy caches saved into startup snapshots and SEAs).
+  - Low: CVE-2026-106070 (ZipFile returns attacker-controlled prefix bytes),
+    CVE-2026-106071 and CVE-2026-106073 (Permission Model filesystem
+    bypasses).
+
+  **Action:** an app generated with 0.16.1 or earlier keeps the base image it
+  was generated with. Regenerate it, or change its `FROM` line to
+  `FROM node:26.12-alpine AS node-base`, then rebuild with `--pull`
+  (`docker build --pull …` or `docker compose build --pull`). The library
+  packages are republished at 0.16.2 with no change.
+
+### Changed
+
+- **The template's base image tracks the Node.js minor line, not a digest**
+  ([#313](https://github.com/o3co/auth.policy-verifier/pull/313)). A rebuild
+  of `node:26.12-alpine` takes that line's newest patch release, security
+  fixes included; moving to another minor is a deliberate edit of the `FROM`
+  line.
+- **Development only.** CI and the release workflow run Node.js 24.22 with
+  `check-latest`, so they resolve to the newest 24.22.x (24.22.1 today).
+  Development dependencies are refreshed (biome, `@types/node`, vitest,
+  supertest, vite, brace-expansion, markdown-it); the template's
+  development dependencies follow. No code, wire or configuration change.
+
 ## [0.16.1] - 2026-10-20
 
 ### Changed
