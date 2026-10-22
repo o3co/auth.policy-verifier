@@ -42,7 +42,8 @@ services:
   # above), and nothing outside the pair can reach it at all —
   # the same trust boundary the verifier's own bind address draws. The
   # verifier pushes its config/policies into the agent at boot; nothing is
-  # mounted here. Pinned by digest for the reason the base image is.
+  # mounted here. Pinned by digest: a tag is a moving pointer, so the same
+  # compose file would otherwise run a different agent on each pull.
   cedar-engine:
     image: permitio/cedar-agent:0.2.2@sha256:2a7713bce95220eb2ad870ba311f1ae8a4d6e607d13720747d75b96cb0c551ca
     profiles: ["cedar"]
