@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.builtins
 
-最終更新: 2026-10-01
+最終更新: 2026-10-23
 
 auth.policy-verifier 向けの組み込み attribute collector、rule collector、および resource parser です。
 
@@ -10,7 +10,7 @@ auth.policy-verifier 向けの組み込み attribute collector、rule collector�
 
 core のインターフェースを実装した、小さな既製のセットです: attribute collector、rule、rule collector、resource parser、そしてそれらを server の `createApp` などのホストに登録する `builtinCollectorsModule`。依存は `@o3co/auth.policy-verifier.core` だけです。`templates/standalone` がこれを組み込み、`server` はテストでのみ使います（`devDependencies`）。
 
-- **所有するもの:** これらの実装が何を読み、何を書き、どう照合するか — JWT クレーム（`sub`、`azp`、`scope`、宣言したクレーム）から属性キーへの対応（#170）、`HasScope` / `HasPermission` と比較ルールの照合規則、ドット記法のリソース文法、クレーム契約の委任 range の文法と包含ルールの実装（契約そのものは umbrella リポジトリのもの）。
+- **所有するもの:** これらの実装が何を読み、何を書き、どう照合するか — JWT クレーム（`sub`、`client_id`、`azp`、`scope`、宣言したクレーム）から属性キーへの対応（#170）、`HasScope` / `HasPermission` と比較ルールの照合規則、ドット記法のリソース文法、クレーム契約の委任 range の文法と包含ルールの実装（契約そのものは umbrella リポジトリのもの）。
 - **所有しないもの:** パイプライン、グルーピング、判定（core）、認証や HTTP（`server`）、ポリシーエンジンや `AsyncRule`（`cedar`）、I/O を行う collector（利用側が書くもの。[docs/extending.ja.md](../../docs/extending.ja.md)）。
 - **core と別パッケージである理由:** core はエンジン中立の契約で、subject のフィールドを一切名指ししません（#170）。クレームの語彙と具体的な照合はその線の反対側、つまりここに置きます（[AGENTS.md — Core Vocabulary Scope](../../AGENTS.md#core-vocabulary-scope)）。また任意導入でもあります: builtins は意図的に基本セットであってカタログではない（[docs/extending.ja.md](../../docs/extending.ja.md)）ので、collector と rule を自前で書くデプロイメントはインストール不要で、core もこれに合わせて肥大化しません。
 
@@ -31,12 +31,14 @@ npm install @o3co/auth.policy-verifier.builtins
 | 名前 | 読み取り元 | 出力 | コンストラクタ引数 |
 | --- | --- | --- | --- |
 | `PayloadScopeCollector` | scope クレーム — 既定は `subject.scope`。スペース区切り文字列または文字列の配列 | `ATTR_SCOPES: string[]` | `{ claim?: string }`（#219: Okta なら `"scp"`、Auth0 なら `"permissions"`） |
-| `PayloadSubjectIdCollector` | `subject.sub`、`subject.azp` | `ATTR_USER_ID`、`ATTR_CLIENT_ID` | なし |
+| `PayloadSubjectIdCollector` | `subject.sub`、`subject.client_id`、`subject.azp` | `ATTR_USER_ID`、`ATTR_CLIENT_ID` | なし |
 | `StaticPermissionCollector` | — | `ATTR_PERMISSIONS: string[]` | `{ permissions: string[] }` |
 | `StaticRoleCollector` | — | `ATTR_ROLES: Role[]` | `{ roles: Role[] }` |
 | `RequestContextAttributeCollector` | `requestContext` の宣言済みフィールド | 運用者が決めたキー | `{ attributes: Mapping[] }` |
 | `PayloadClaimAttributeCollector` | 検証済み `subject` の宣言済みクレーム | 運用者が決めたキー、または core の 5 キー | `{ attributes: Mapping[] }` (#219) |
 | `DelegationRangeCollector` | トークンの `authorization_details` のうち、設定した type のエントリのパス | `ATTR_DELEGATION_RANGE: string[]` | `{ type: string, claim?: string }` — [委任トークン](#委任トークン-range-と-actor) |
+
+`PayloadSubjectIdCollector` は、クライアントを運ぶ 2 つのクレームの両方からクライアントを読みます: RFC 9068 のアクセストークンがクライアントを示す `client_id`（RFC 9068 §2.2）と、OIDC の綴りである `azp` です。どちらも他方に優先しません。`ATTR_CLIENT_ID` が設定されるのは、トークンが持つものがいずれも空でない文字列で、同じクライアントを示しているときです。両者が食い違うとき、またはどちらかがそれ以外の値で存在するときは設定されません。そのようなトークンはどのクライアントかを示しておらず、collector は推測しません。したがって、クライアントを読む Rule にとっては、クライアントを示さないトークンも 2 つ示すトークンも同じ「不在」に見えます。クライアントで許可する Rule は、不在に対して fail-closed になります。許可リストとして書いた制限（「クライアントは … のいずれか」）も fail-closed になります。「クライアント X ではない」と書いた制限はそうならないので、クライアントの制限は許可リストとして書いてください。
 
 `StaticPermissionCollector` と `StaticRoleCollector` は、リクエストのコンテキストに関わらず、コンストラクタに渡した値を常に出力します。渡された値は構築時にコピーされます — 配列、そして `StaticRoleCollector` では各 `Role` とその `permissions` も — ので、構築後に config を変更しても出力は変わりません（#255）。`permissions` と `roles` は配列でなければなりません。それ以外の値は、文字列も含めて（`["posts.*"]` のつもりで `permissions = "posts.*"` と書いた場合など）構築時に `TypeError` で拒否され、デプロイは起動時に失敗します（#264）。
 

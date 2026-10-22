@@ -75,7 +75,7 @@ That test is executable, not rhetorical. `describeRulePurityConformance` in [`te
 | JWT claim | Read by | Attribute key |
 | --- | --- | --- |
 | `sub` | `PayloadSubjectIdCollector` (builtins) | `ATTR_USER_ID` |
-| `azp` | `PayloadSubjectIdCollector` (builtins) | `ATTR_CLIENT_ID` |
+| `client_id` (RFC 9068) and `azp` (OIDC) — set only when the ones present agree | `PayloadSubjectIdCollector` (builtins) | `ATTR_CLIENT_ID` |
 | `scope` (or the configured `claim`, e.g. `scp`) | `PayloadScopeCollector`, `ResourceActionScopeRuleCollector` (builtins) | `ATTR_SCOPES` |
 | any declared claim (#219) | `PayloadClaimAttributeCollector` (builtins) | the operator's own keys, or core's five |
 | `authorization_details` entries of the configured delegation type | `DelegationRangeCollector`, `DelegationRangeRuleCollector` (builtins) | `ATTR_DELEGATION_RANGE` — the builtins' own key, not core's: the range's grammar is this stack's claims contract, not a standard |

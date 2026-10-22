@@ -1,6 +1,6 @@
 # Collectors
 
-Last updated: 2026-10-01
+Last updated: 2026-10-23
 
 The built-in attribute collectors: the layer that reads the request and writes the
 attributes the rules decide from.
@@ -13,7 +13,7 @@ attributes the rules decide from.
   writes one slice of the `Attributes` map, under core's keys or the operator's own.
 - **Owns.** The reading of each source and the narrowing of what is promoted. This is where
   claim vocabulary lives: `SubjectAttributes` is a bag of unknowns to core, and these
-  collectors turn `sub`, `azp` and `scope` into `ATTR_USER_ID`, `ATTR_CLIENT_ID` and
+  collectors turn `sub`, `client_id` / `azp` and `scope` into `ATTR_USER_ID`, `ATTR_CLIENT_ID` and
   `ATTR_SCOPES`, and a delegated token's `authorization_details` into the builtins'
   own `ATTR_DELEGATION_RANGE` — the table in
   [AGENTS.md — Core Vocabulary Scope](../../../../AGENTS.md#core-vocabulary-scope).
@@ -68,6 +68,9 @@ from `../rules/` or `../resource/`. The one edge into this directory from elsewh
 - The claim collectors read the subject bag and never `requestContext`; the request-context
   collector reads nothing but `requestContext` (documented, not tested).
 - Nothing undeclared, mistyped or inherited is promoted — the two mapping collectors' tests.
+- The client is read from `client_id` and `azp` alike and promoted only when the ones present
+  agree; when they differ, or one is not a non-empty string, `ATTR_CLIENT_ID` stays unset —
+  [`PayloadSubjectIdCollector.test.mts`](../__tests__/collectors/PayloadSubjectIdCollector.test.mts).
 - A claim that is not a non-empty string is not an identity; a scope claim that is not a
   scope list asserts no capability; an `authorization_details` claim that is not a list of
   entry objects is a range that contains nothing, since a range narrows and a token must not

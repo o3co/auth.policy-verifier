@@ -350,7 +350,7 @@ export const introspectionAuthenticatorModule: Module<ServerModuleContext> = {
             return { ok: false, code: "invalid_token", message: "Invalid token" };
           }
           // `subject` に入れたものが collector の読むもの。builtins は、トークンが
-          // 持っていれば `sub`・`azp`・`scope` を読むことを期待している。
+          // 持っていれば `sub`・`client_id` または `azp`・`scope` を読むことを期待している。
           return { ok: true, subject: { ...body, authScheme: "Bearer" }, credential: token };
         },
       };

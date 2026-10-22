@@ -33,7 +33,57 @@ describe("PayloadSubjectIdCollector", () => {
 		expect(attrs.get(ATTR_CLIENT_ID)).toBe("c1");
 	});
 
-	it("returns empty map when neither sub nor azp present", async () => {
+	it("extracts clientId from subject.client_id", async () => {
+		const attrs = await collector.collect(makeContext({ client_id: "c1" }));
+		expect(attrs.get(ATTR_CLIENT_ID)).toBe("c1");
+	});
+
+	it("reads an RFC 9068 access token, which names its client in client_id and has no azp", async () => {
+		// RFC 9068 §2.2: the claim set an RFC 9068 issuer writes, with no `azp` and no `sid`.
+		const attrs = await collector.collect(
+			makeContext({
+				iss: "https://issuer.example",
+				sub: "u1",
+				aud: "https://api.example",
+				client_id: "c1",
+				scope: "read:project",
+				exp: 1_900_000_000,
+				iat: 1_800_000_000,
+				jti: "j1",
+			}),
+		);
+		expect(attrs).toEqual(
+			new Map([
+				[ATTR_USER_ID, "u1"],
+				[ATTR_CLIENT_ID, "c1"],
+			]),
+		);
+	});
+
+	it("extracts clientId when client_id and azp name the same client", async () => {
+		const attrs = await collector.collect(makeContext({ client_id: "c1", azp: "c1" }));
+		expect(attrs.get(ATTR_CLIENT_ID)).toBe("c1");
+	});
+
+	it("leaves clientId unset when client_id and azp name different clients", async () => {
+		// Neither claim outranks the other, so either value would be a guess.
+		const attrs = await collector.collect(makeContext({ sub: "u1", client_id: "c1", azp: "c2" }));
+		expect(attrs.has(ATTR_CLIENT_ID)).toBe(false);
+		expect(attrs.get(ATTR_USER_ID)).toBe("u1");
+	});
+
+	it.each([
+		["client_id is not a string", { client_id: 42, azp: "c1" }],
+		["client_id is empty", { client_id: "", azp: "c1" }],
+		["client_id is null", { client_id: null, azp: "c1" }],
+		["azp is not a string", { client_id: "c1", azp: ["c1"] }],
+		["azp is empty", { client_id: "c1", azp: "" }],
+	])("leaves clientId unset when %s beside a valid claim", async (_label, subject) => {
+		const attrs = await collector.collect(makeContext(subject));
+		expect(attrs.has(ATTR_CLIENT_ID)).toBe(false);
+	});
+
+	it("returns empty map when neither sub nor a client claim is present", async () => {
 		const attrs = await collector.collect(makeContext({}));
 		expect(attrs.size).toBe(0);
 	});
@@ -42,12 +92,12 @@ describe("PayloadSubjectIdCollector", () => {
 		// `SubjectAttributes` is a bag of unknowns: the claim vocabulary
 		// and its narrowing are this collector's, so a `sub` that is not a string
 		// must not become an identity attribute.
-		const attrs = await collector.collect(makeContext({ sub: 42, azp: ["c1"] }));
+		const attrs = await collector.collect(makeContext({ sub: 42, azp: ["c1"], client_id: 7 }));
 		expect(attrs.size).toBe(0);
 	});
 
 	it("promotes neither claim when its value is an empty string", async () => {
-		const attrs = await collector.collect(makeContext({ sub: "", azp: "" }));
+		const attrs = await collector.collect(makeContext({ sub: "", azp: "", client_id: "" }));
 		expect(attrs.size).toBe(0);
 	});
 });

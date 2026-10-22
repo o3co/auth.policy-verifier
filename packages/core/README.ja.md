@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.core
 
-最終更新: 2026-10-01
+最終更新: 2026-10-23
 
 auth.policy-verifier の型定義・評価エンジン・モジュール基盤。コレクター、ルール、モジュールが実装すべきインターフェースを定義するパッケージです。
 
@@ -94,7 +94,7 @@ fan-out には上限があります — [コレクターの上限](#コレクタ
 - [`src/types.mts`](src/types.mts) — 判定の契約。
   - `Resource`（パース済みリソース: 元の `raw` 文字列、`resourceType`、任意の `resourceId`）と、生の文字列をそれに変換する `ResourceParser`。自分が扱う構文でない文字列には `ResourceParseError` をスローします。
   - `CollectorContext` — すべてのコレクターに渡される入力: 検証済みの `subject`、`resource`、`action`、コレクター専用の `signal`、そして任意でトランスポートが設定した `headers`、呼び出し側の `requestContext`、生の `credential`（コンポジションが opt-in したときだけ。ログに出してはいけません）。`CollectorRequest` は pipeline に渡されるもので、コレクター単位の `signal` を除いたものに、pipeline が自分の signal に連結する呼び出し側キャンセル用の任意の `signal` を加えたものです。
-  - `SubjectAttributes` — トランスポートが設定する、サブジェクトの検証済み属性。core はフィールドを定めません。デフォルト server の組み込み authenticator の下では、検証済み JWT のクレーム（`sub`、`azp`、`scope` …）と `authScheme`（トークンが載っていた `Authorization` のスキーム。クレームではない）です。
+  - `SubjectAttributes` — トランスポートが設定する、サブジェクトの検証済み属性。core はフィールドを定めません。デフォルト server の組み込み authenticator の下では、検証済み JWT のクレーム（`sub`、`client_id`、`scope` …）と `authScheme`（トークンが載っていた `Authorization` のスキーム。クレームではない）です。
   - `Attributes` — コレクターが組み立て `AttributePipeline` がマージする、変更可能な属性マップ。`ReadonlyAttributes` — ルールが判定に使う読み取り専用のビュー。評価器は同じライブなマップをすべてのルールに渡すため、ルールが書き込むと後続のすべてのグループの入力が変わってしまいます。
   - `AttributeCollector` と `RuleCollector` — 2 種類のコレクターのインターフェース。rule collector は `Rule`、`AsyncRule`、またはその両方（`AnyRule`）を返せます。
   - `Rule` — `ruleType`、`code`、`message` と、属性についての決定的で副作用のない関数でなければならない `verify`。`AsyncRule` — 同じ契約を、デッドラインの下で非同期の `decide` で答えるもの (#225)。`isAsyncRule` で見分けます。[AGENTS.md — Collector / Rule / Attribute Contract](../../AGENTS.md#collector--rule--attribute-contract) を参照。
@@ -116,7 +116,7 @@ fan-out には上限があります — [コレクターの上限](#コレクタ
 - `ATTR_PERMISSIONS` — 明示的なパーミッション
 - `ATTR_ROLES` — ロール
 - `ATTR_USER_ID` — サブジェクトのユーザー ID（JWT `sub`）
-- `ATTR_CLIENT_ID` — クライアント ID（JWT `azp`）
+- `ATTR_CLIENT_ID` — クライアント ID（JWT `client_id` または `azp`）
 
 ### 属性キーのレジストリ
 
