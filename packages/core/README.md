@@ -122,7 +122,7 @@ The `ATTR_*` constants, defined in [`src/keys.mts`](src/keys.mts), are limited t
 - `ATTR_PERMISSIONS` — explicit permissions
 - `ATTR_ROLES` — roles
 - `ATTR_USER_ID` — the subject user ID (JWT `sub`)
-- `ATTR_CLIENT_ID` — the client ID (JWT `client_id` or `azp`)
+- `ATTR_CLIENT_ID` — the client ID (JWT `client_id` and `azp`, when they agree)
 
 ### The attribute key registry
 

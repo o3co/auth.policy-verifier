@@ -116,7 +116,7 @@ fan-out には上限があります — [コレクターの上限](#コレクタ
 - `ATTR_PERMISSIONS` — 明示的なパーミッション
 - `ATTR_ROLES` — ロール
 - `ATTR_USER_ID` — サブジェクトのユーザー ID（JWT `sub`）
-- `ATTR_CLIENT_ID` — クライアント ID（JWT `client_id` または `azp`）
+- `ATTR_CLIENT_ID` — クライアント ID（JWT `client_id` と `azp`。両方あるときは一致する場合のみ）
 
 ### 属性キーのレジストリ
 

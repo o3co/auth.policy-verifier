@@ -39,7 +39,7 @@ describe("PayloadSubjectIdCollector", () => {
 	});
 
 	it("reads an RFC 9068 access token, which names its client in client_id and has no azp", async () => {
-		// RFC 9068 §2.2: the claim set an RFC 9068 issuer writes, with no `azp` and no `sid`.
+		// The claim set RFC 9068 §2.2 defines, which includes no `azp` and no `sid`.
 		const attrs = await collector.collect(
 			makeContext({
 				iss: "https://issuer.example",
@@ -81,6 +81,20 @@ describe("PayloadSubjectIdCollector", () => {
 	])("leaves clientId unset when %s beside a valid claim", async (_label, subject) => {
 		const attrs = await collector.collect(makeContext(subject));
 		expect(attrs.has(ATTR_CLIENT_ID)).toBe(false);
+	});
+
+	it("promotes no claim the subject only inherits", async () => {
+		const inherited = Object.create({ sub: "u1", client_id: "c1", azp: "c1" }) as SubjectAttributes;
+		const attrs = await collector.collect(makeContext(inherited));
+		expect(attrs.size).toBe(0);
+	});
+
+	it("does not let an inherited client claim contradict the token's own", async () => {
+		const subject = Object.assign(Object.create({ client_id: "c2" }), {
+			azp: "c1",
+		}) as SubjectAttributes;
+		const attrs = await collector.collect(makeContext(subject));
+		expect(attrs.get(ATTR_CLIENT_ID)).toBe("c1");
 	});
 
 	it("returns empty map when neither sub nor a client claim is present", async () => {

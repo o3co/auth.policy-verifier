@@ -69,7 +69,8 @@ from `../rules/` or `../resource/`. The one edge into this directory from elsewh
   collector reads nothing but `requestContext` (documented, not tested).
 - Nothing undeclared, mistyped or inherited is promoted — the two mapping collectors' tests.
 - The client is read from `client_id` and `azp` alike and promoted only when the ones present
-  agree; when they differ, or one is not a non-empty string, `ATTR_CLIENT_ID` stays unset —
+  agree; when they differ, or one is not a non-empty string, `ATTR_CLIENT_ID` stays unset.
+  Only the subject's own properties are claims —
   [`PayloadSubjectIdCollector.test.mts`](../__tests__/collectors/PayloadSubjectIdCollector.test.mts).
 - A claim that is not a non-empty string is not an identity; a scope claim that is not a
   scope list asserts no capability; an `authorization_details` claim that is not a list of
