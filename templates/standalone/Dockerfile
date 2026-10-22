@@ -4,7 +4,7 @@
 # it. The digest is the multi-arch index, so amd64 and arm64 both resolve
 # from it. Dependabot's `docker` ecosystem keeps the pair in step — bump the
 # tag and the digest together, never the tag alone.
-FROM node:26.12-alpine@sha256:ae8e1c19d56886270987e99b3cfcef13a919f0655b376ae322bc64ada76f88cd AS node-base
+FROM node:26.12-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS node-base
 
 ENV HOME=/home/node
 
