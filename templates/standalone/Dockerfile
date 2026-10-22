@@ -1,8 +1,7 @@
-# The base image is pinned by digest, not just by tag: a tag is a moving
-# pointer, so the same source would build a different image on each rebuild. The digest is the multi-arch index, so amd64 and arm64 both resolve
-# from it. Dependabot's `docker` ecosystem keeps the pair in step — bump the
-# tag and the digest together, never the tag alone.
-FROM node:26-alpine@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80 AS node-base
+# The base image names a Node.js minor line, not a patch or a digest: a rebuild
+# takes the line's newest patch release, security fixes included, without an
+# edit here. Moving to another minor is a deliberate change to this line.
+FROM node:26.12-alpine AS node-base
 
 ENV HOME=/home/node
 

@@ -22,7 +22,13 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          # The minor line, not the patch: check-latest resolves it to the newest
+          # 24.22.x at run time, so a patch release on 24.22 reaches CI without an
+          # edit here. Without it, a runner image that caches an older 24.22.x
+          # would satisfy '24.22' from the cache. A new 24.x minor is not picked
+          # up: nothing bumps this value, so it is raised by hand.
+          node-version: '24.22'
+          check-latest: true
 
       - name: Get pnpm store path
         id: pnpm-store
