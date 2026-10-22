@@ -14,12 +14,12 @@ const future = "2999-01-01T00:00:00Z";
 describe("checkHs256Rotation — the absent case", () => {
 	it("treats an omitted previousSecrets as no rotation", () => {
 		const result = checkHs256Rotation({ secret: SECRET, previousSecrets: undefined });
-		expect(result).toEqual({ ok: true, previousSecrets: [] });
+		expect(result).toEqual({ ok: true, secretEncoding: "utf8", previousSecrets: [] });
 	});
 
 	it("accepts an explicit empty list", () => {
 		const result = checkHs256Rotation({ secret: SECRET, previousSecrets: [] });
-		expect(result).toEqual({ ok: true, previousSecrets: [] });
+		expect(result).toEqual({ ok: true, secretEncoding: "utf8", previousSecrets: [] });
 	});
 
 	it("refuses null — it is not a second spelling for omitted", () => {
@@ -37,7 +37,7 @@ describe("checkHs256Rotation — the absent case", () => {
 
 	it("carries a kid through even with no previous secrets", () => {
 		const result = checkHs256Rotation({ secret: SECRET, kid: "v1", previousSecrets: [] });
-		expect(result).toEqual({ ok: true, kid: "v1", previousSecrets: [] });
+		expect(result).toEqual({ ok: true, secretEncoding: "utf8", kid: "v1", previousSecrets: [] });
 	});
 });
 
@@ -50,6 +50,7 @@ describe("checkHs256Rotation — shape", () => {
 		});
 		expect(result).toEqual({
 			ok: true,
+			secretEncoding: "utf8",
 			kid: "v1",
 			previousSecrets: [{ kid: "v0", secret: OLD_SECRET, expiresAt: future }],
 		});
@@ -306,6 +307,7 @@ describe("parseHs256Rotation", () => {
 				previousSecrets: [{ kid: "v0", secret: OLD_SECRET, expiresAt: future }],
 			}),
 		).toEqual({
+			secretEncoding: "utf8",
 			kid: "v1",
 			previousSecrets: [{ kid: "v0", secret: OLD_SECRET, expiresAt: future }],
 		});

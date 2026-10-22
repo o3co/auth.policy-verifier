@@ -39,6 +39,7 @@ import {
 } from "./evaluationInResponse.mjs";
 import { checkHs256Rotation } from "./hs256Rotation.mjs";
 import { checkJwksUri } from "./jwks.mjs";
+import { checkSecretEncoding, DEFAULT_SECRET_ENCODING } from "./secretEncoding.mjs";
 import {
 	checkTokenAuthenticatorSelection,
 	JWT_TOKEN_AUTHENTICATOR,
@@ -151,6 +152,16 @@ const OAuthJwtSchema = z
 		 * algorithms have no use for it.
 		 */
 		secret: z.string().optional(),
+		/**
+		 * How `secret` and every `previousSecrets[].secret` becomes HMAC key
+		 * bytes: `"utf8"` (the default, the text's own bytes), `"hex"` or
+		 * `"base64"`. Name the reading the issuer applies to the same string;
+		 * auth.provider's `keys.signing.secret-encoding` reads the same three.
+		 * HS256 only, and harmless under the asymmetric algorithms, like `kid`.
+		 * Read as `unknown` so `checkHs256Rotation` decides what a reading is
+		 * at both boundaries.
+		 */
+		secretEncoding: z.unknown().optional(),
 		/**
 		 * Names the HS256 secret the issuer currently signs with, the same
 		 * `kid` auth.provider stamps into every token it mints.
@@ -400,9 +411,11 @@ const OAuthJwtSchema = z
 		// the default the operator relied on. The refinement above already
 		// refused a malformed value; the fallback only keeps the type honest.
 		const audienceClaim = checkAudienceClaim(data.audienceClaim);
+		const secretEncoding = checkSecretEncoding(data.secretEncoding);
 		return {
 			...data,
 			audienceClaim: audienceClaim.ok ? audienceClaim.claim : DEFAULT_AUDIENCE_CLAIM,
+			secretEncoding: secretEncoding.ok ? secretEncoding.encoding : DEFAULT_SECRET_ENCODING,
 		};
 	});
 

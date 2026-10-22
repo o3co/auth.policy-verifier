@@ -23,6 +23,7 @@ import type { KeyResolver, KeyResolverFactory } from "../auth/keyResolver.mjs";
 import type { ServerModuleContext } from "../auth/serverModuleContext.mjs";
 import { type Hs256RotationConfig, parseHs256Rotation } from "../config/hs256Rotation.mjs";
 import { type JwksFetchConfig, parseJwksUri, resolveJwksFetchBounds } from "../config/jwks.mjs";
+import { decodeSecret, type SecretEncoding } from "../config/secretEncoding.mjs";
 
 interface JwtFactoryInput extends JwksFetchConfig, Hs256RotationConfig {
 	secret?: string;
@@ -65,9 +66,17 @@ interface Hs256Key {
 	expiresAtMs?: number;
 }
 
-/** Turns a configured secret string into an HMAC key. */
-function toSecretKey(secret: string): KeyObject {
-	return createSecretKey(new TextEncoder().encode(secret));
+/**
+ * Turns a configured secret string into an HMAC key, reading it as
+ * `encoding` names. The encoding has already been checked against the string
+ * by `parseHs256Rotation`, so a failed decode here is a broken invariant.
+ */
+function toSecretKey(secret: string, encoding: SecretEncoding): KeyObject {
+	const bytes = decodeSecret(secret, encoding);
+	if (bytes === undefined) {
+		throw new Error(`an HS256 secret is not ${encoding}, which secretEncoding names`);
+	}
+	return createSecretKey(bytes);
 }
 
 /**
@@ -167,8 +176,8 @@ export const HS256KeyResolverFactory: KeyResolverFactory = async (config: JwtFac
 	// Checked here as well as in `AppConfigSchema`, through the one shared
 	// function, as for the JWKS URI above — see AGENTS.md, "Two-Boundary Config
 	// Validation".
-	const { kid, previousSecrets } = parseHs256Rotation(config);
-	const current = toSecretKey(config.secret);
+	const { kid, previousSecrets, secretEncoding } = parseHs256Rotation(config);
+	const current = toSecretKey(config.secret, secretEncoding);
 	if (kid === undefined && previousSecrets.length === 0) {
 		return { key: current, algorithms: ["HS256"] };
 	}
@@ -179,7 +188,7 @@ export const HS256KeyResolverFactory: KeyResolverFactory = async (config: JwtFac
 		{ kid: kid as string, key: current },
 		...previousSecrets.map((previous) => ({
 			kid: previous.kid,
-			key: toSecretKey(previous.secret),
+			key: toSecretKey(previous.secret, secretEncoding),
 			expiresAtMs: Date.parse(previous.expiresAt),
 		})),
 	];

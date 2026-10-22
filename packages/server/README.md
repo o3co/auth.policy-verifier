@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.server
 
-Last updated: 2026-10-01
+Last updated: 2026-10-22
 
 Express HTTP server for auth.policy-verifier. Provides `createApp` to assemble the application from modules and config, and `POST /verify` / `POST /verify/batch` for authorization decisions.
 
@@ -116,7 +116,7 @@ refused for the same reason.
 
 Each entry in `attribute.collectors` and `rule.collectors` requires a `collector` field (the registered factory name). Additional fields are passed through to the factory as configuration.
 
-**HS256 secrets must carry at least 32 bytes (256 bits) of key material.** The floor applies to `oauth.jwt.secret` and to every `oauth.jwt.previousSecrets[].secret` in one rule, since a retired secret verifies for its whole overlap window and can mint tokens exactly as the current one can. It is measured on decoded material at the smallest plausible reading, so 64 hex characters pass (32 bytes) and 32 hex characters do not (16 bytes); generate one with `openssl rand -hex 32`. `AppConfigSchema` rejects a short secret at config-parse time and the HS256 `KeyResolverFactory` repeats the check for hand-built configs. `measureSecretEntropyBytes` / `describeWeakSecret` / `MIN_SECRET_ENTROPY_BYTES` are exported for consumers registering their own HS256 key resolver; `createTokenAuthenticator` takes key material directly and does not apply the floor, so a caller wiring a `KeyObject` by hand owns that check.
+**HS256 secrets must carry at least 32 bytes (256 bits) of key material.** The floor applies to `oauth.jwt.secret` and to every `oauth.jwt.previousSecrets[].secret` in one rule, since a retired secret verifies for its whole overlap window and can mint tokens exactly as the current one can. It is measured on decoded material at the smallest plausible reading, so 64 hex characters pass (32 bytes) and 32 hex characters do not (16 bytes); generate one with `openssl rand -hex 32`. `AppConfigSchema` rejects a short secret at config-parse time and the HS256 `KeyResolverFactory` repeats the check for hand-built configs. `measureSecretEntropyBytes` / `describeWeakSecret` / `MIN_SECRET_ENTROPY_BYTES` are exported for consumers registering their own HS256 key resolver; `oauth.jwt.secretEncoding` (`"utf8"` by default, `"hex"` or `"base64"`) names how each of those strings is read as HMAC key bytes, `secret` and every `previousSecrets[].secret` alike, and under `hex` and `base64` the floor is judged on the decoded bytes (under the default `utf8` it keeps the smallest-plausible reading above). It is the reading auth.provider's `keys.signing.secret-encoding` applies, so an issuer that decodes its secret (auth.provider 0.18 reads hex, else base64, when unset) is paired by naming the same encoding on both sides; `checkSecretEncoding` / `decodeSecret` are exported for a custom HS256 key resolver; `decodeSecret` only decodes, so validate with `parseHs256Rotation` / `checkHs256Rotation` (which returns `secretEncoding`) first. `createTokenAuthenticator` takes key material directly and does not apply the floor, so a caller wiring a `KeyObject` by hand owns that check.
 
 ### Trust boundary
 

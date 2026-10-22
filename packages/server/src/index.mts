@@ -53,6 +53,15 @@ export {
 	parseJwksUri,
 	resolveJwksFetchBounds,
 } from "./config/jwks.mjs";
+// How an HS256 secret string is read as key bytes (`oauth.jwt.secretEncoding`).
+export {
+	checkSecretEncoding,
+	DEFAULT_SECRET_ENCODING,
+	decodeSecret,
+	SECRET_ENCODINGS,
+	type SecretEncoding,
+	type SecretEncodingCheck,
+} from "./config/secretEncoding.mjs";
 // The HS256 entropy floor's measurement, exported so a consumer that
 // accepts its own operator secrets — a custom key resolver, a composition root
 // building a JWT config by hand — applies the identical reading rather than a

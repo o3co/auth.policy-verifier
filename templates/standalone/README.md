@@ -69,6 +69,7 @@ Individual values can also be overridden with environment variables.
 | `HTTP_CALLER_AUTH_TOKEN` | (unset) | Shared credential the calling service must present. Unset means any caller who can reach the port may ask for decisions |
 | `HTTP_CALLER_AUTH_HEADER` | `x-caller-token` | Header carrying that credential |
 | `OAUTH_JWT_SECRET` | (required) | HMAC-HS256 JWT signing secret. At least 32 decoded bytes — see [HS256 secret strength](#hs256-secret-strength) |
+| `OAUTH_JWT_SECRET_ENCODING` | `utf8` | How `OAUTH_JWT_SECRET` is read as key bytes: `utf8` (its own bytes), `hex` or `base64`. Must match the issuer's reading of the same string — see [HS256 secret strength](#hs256-secret-strength) |
 | `OAUTH_JWT_ISSUER` | (required) | Issuer this deployment accepts — RFC 9068 §4 `iss` |
 | `OAUTH_JWT_AUDIENCE` | (required) | Audience identifying this resource server — RFC 9068 §4 `aud` |
 | `OAUTH_JWT_JWKS_URI` | — | JWKS endpoint for RS256/ES256/EdDSA. Must be `https://`; plaintext `http://` is accepted only for loopback hosts (`localhost`, `127.0.0.0/8`, `[::1]`) |
@@ -103,6 +104,10 @@ The measurement is on **decoded** material at the smallest plausible reading, wh
 - A passphrase containing punctuation is measured on its UTF-8 length, so 32 characters passes.
 
 The same floor applies to every `previousSecrets[].secret` in the rotation block — a retired secret verifies for its whole overlap window and can mint tokens exactly as the current one can.
+
+`OAUTH_JWT_SECRET_ENCODING` decides how the string becomes the key bytes: `utf8` (the default; the string's own bytes), `hex` (whole bytes of hex) or `base64` (padded standard base64). A value that is not of the reading named is refused at boot, and under `hex` and `base64` the floor is judged on the decoded bytes (64 hex characters are 32 bytes under `hex`); under the default `utf8` the smallest-plausible reading above still applies. It applies to every `previousSecrets[].secret` as well.
+
+The issuer must read the string the same way. auth.provider 0.18 reads `keys.signing.secret` as its `keys.signing.secret-encoding` names, and when that is unset reads hex if the value is whole bytes of hex, else base64. Pairing it with this verifier on one string therefore needs the same encoding on both sides: `OAUTH_JWT_SECRET_ENCODING=hex` (or `base64`) here, or `secret-encoding = utf8` on the provider. A mismatch does not fail boot on either side; every token is answered `401`.
 
 Length is all the check can see. A 40-character sentence measures 40 bytes and carries far less; generate the value randomly.
 

@@ -1,6 +1,6 @@
 # auth.policy-verifier
 
-Last updated: 2026-10-01
+Last updated: 2026-10-22
 
 [![CI](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth.policy-verifier.core)](https://www.npmjs.com/package/@o3co/auth.policy-verifier.core)
@@ -125,7 +125,7 @@ OAUTH_JWT_SECRET=$(openssl rand -hex 32) \
   pnpm start
 ```
 
-The HS256 secret must carry at least **32 bytes (256 bits)** of key material or the process refuses to boot — see [Rotating the HS256 secret](#rotating-the-hs256-secret). Use the same value auth.provider signs with.
+The HS256 secret must carry at least **32 bytes (256 bits)** of key material or the process refuses to boot — see [Rotating the HS256 secret](#rotating-the-hs256-secret). Use the same value auth.provider signs with, and name how both sides read it — see [How the secret string is read](#how-the-secret-string-is-read).
 
 ```bash
 curl -X POST http://localhost:3000/verify \
@@ -338,6 +338,7 @@ oauth {
 
     # ---- HS256 only. Keep exactly one of these two groups. --------------
     secret = ${?OAUTH_JWT_SECRET}            # >= 32 decoded bytes — `openssl rand -hex 32`
+    secretEncoding = ${?OAUTH_JWT_SECRET_ENCODING} # how secret is read as key bytes: utf8 (default) | hex | base64
     kid = ${?OAUTH_JWT_KID}                  # names the secret above; unset means the token header is not consulted
     # previousSecrets — retired secrets still inside their overlap window,
     # max 3. Omitted here on purpose: the key is REFUSED at boot under
@@ -566,6 +567,20 @@ Generate one with `openssl rand -hex 32` (or `openssl rand -base64 32`). The mea
 Length is all this can see: a 40-character English sentence measures 40 bytes and carries far less. Generate the secret randomly; the check is a floor, not a review.
 
 The floor applies to `secret` and to every entry of `previousSecrets` below, in one rule — a retired secret verifies for its whole overlap window, so it can mint tokens exactly as the current one can.
+
+### How the secret string is read
+
+`oauth.jwt.secretEncoding` (`OAUTH_JWT_SECRET_ENCODING`) says how each configured secret string becomes the HMAC key bytes. It applies to `secret` and to every `previousSecrets[].secret`.
+
+| `secretEncoding` | The key bytes are | Refused at boot when |
+| --- | --- | --- |
+| `utf8` (default) | the string's own UTF-8 bytes | never refused for its form (any string has UTF-8 bytes); this is the reading every earlier release applied |
+| `hex` | the bytes the string spells in hex | the value is not whole bytes of hex |
+| `base64` | the bytes the string spells in standard base64 | the value is not padded standard base64 |
+
+The 32-byte floor is judged on those bytes: 64 hex characters are 32 bytes under `hex`. Under the default `utf8` the floor reads as described above.
+
+The two services must derive the same key bytes from the string they share. auth.provider (0.18 and later) reads `keys.signing.secret` as `keys.signing.secret-encoding` names (`hex`, `base64` or `utf8`), and when that is unset reads hex if the value is whole bytes of hex, else base64. This verifier's default is `utf8`, so pairing it with such an issuer on the same string needs the same encoding on both sides: set `secretEncoding = "hex"` or `"base64"` here, or set `secret-encoding = utf8` on the provider. A mismatch is not a boot error on either side; every token is answered `401`.
 
 ### Rotating the HS256 secret
 

@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.server
 
-最終更新: 2026-10-01
+最終更新: 2026-10-22
 
 auth.policy-verifier 向けの Express HTTP サーバーです。モジュールと設定からアプリケーションを組み立てる `createApp` と、認可判定を行う `POST /verify` / `POST /verify/batch` を提供します。
 
@@ -113,7 +113,7 @@ HOCON の `${?VAR}` 置換が渡す文字列のいずれかで到着し、その
 
 `attribute.collectors` と `rule.collectors` の各エントリには `collector` フィールド（登録済みファクトリ名）が必須です。追加フィールドはファクトリへの設定としてそのまま渡されます。
 
-**HS256 のシークレットは鍵素材として 32 バイト（256 ビット）以上を持つこと。** この下限は `oauth.jwt.secret` と `oauth.jwt.previousSecrets[].secret` の全件に 1 つのルールとして適用されます — 退役したシークレットも重複期間中は検証鍵であり、現行と同じようにトークンを発行できるからです。判定はデコード後の素材に対してもっとも小さく読める解釈で行うため、16 進 64 文字は通り（32 バイト）、16 進 32 文字は通りません（16 バイト）。生成は `openssl rand -hex 32`。`AppConfigSchema` が config パース時に拒否し、HS256 の `KeyResolverFactory` が hand-built config のために同じ検査を繰り返します。独自の HS256 key resolver を登録する利用者向けに `measureSecretEntropyBytes` / `describeWeakSecret` / `MIN_SECRET_ENTROPY_BYTES` を公開しています。`createTokenAuthenticator` は鍵素材を直接受け取るため下限を適用しません — `KeyObject` を自分で組み立てる呼び出し側がその検査を負います。
+**HS256 のシークレットは鍵素材として 32 バイト（256 ビット）以上を持つこと。** この下限は `oauth.jwt.secret` と `oauth.jwt.previousSecrets[].secret` の全件に 1 つのルールとして適用されます — 退役したシークレットも重複期間中は検証鍵であり、現行と同じようにトークンを発行できるからです。判定はデコード後の素材に対してもっとも小さく読める解釈で行うため、16 進 64 文字は通り（32 バイト）、16 進 32 文字は通りません（16 バイト）。生成は `openssl rand -hex 32`。`AppConfigSchema` が config パース時に拒否し、HS256 の `KeyResolverFactory` が hand-built config のために同じ検査を繰り返します。独自の HS256 key resolver を登録する利用者向けに `measureSecretEntropyBytes` / `describeWeakSecret` / `MIN_SECRET_ENTROPY_BYTES` を公開しています。`oauth.jwt.secretEncoding`（既定 `"utf8"`、`"hex"` / `"base64"`）が、`secret` と全ての `previousSecrets[].secret` を HMAC の鍵バイトにどう読むかを指定し、`hex` / `base64` では下限をデコード後のバイト列で判定します（既定の `utf8` は上記の最小の妥当な解釈のまま）。auth.provider の `keys.signing.secret-encoding` と同じ読み方なので、シークレットをデコードして使う発行側（auth.provider 0.18 は未設定なら hex、そうでなければ base64 として読む）とは両側で同じ encoding を指定して組み合わせます。独自の HS256 key resolver 向けに `checkSecretEncoding` / `decodeSecret` も公開しています（`decodeSecret` はデコードのみなので、先に `parseHs256Rotation` / `checkHs256Rotation` で検証してください）。`createTokenAuthenticator` は鍵素材を直接受け取るため下限を適用しません — `KeyObject` を自分で組み立てる呼び出し側がその検査を負います。
 
 ### 信頼境界
 

@@ -1,6 +1,6 @@
 # auth.policy-verifier
 
-最終更新: 2026-10-01
+最終更新: 2026-10-22
 
 [![CI](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth.policy-verifier.core)](https://www.npmjs.com/package/@o3co/auth.policy-verifier.core)
@@ -123,7 +123,7 @@ OAUTH_JWT_SECRET=$(openssl rand -hex 32) \
   pnpm start
 ```
 
-HS256 シークレットは鍵素材として **32 バイト（256 ビット）以上**を要求し、これを下回ると起動を拒否する — 詳細は [HS256 シークレットのローテーション](#hs256-シークレットのローテーション)。auth.provider が署名に使うのと同じ値を設定すること。
+HS256 シークレットは鍵素材として **32 バイト（256 ビット）以上**を要求し、これを下回ると起動を拒否する — 詳細は [HS256 シークレットのローテーション](#hs256-シークレットのローテーション)。auth.provider が署名に使うのと同じ値を設定し、両者がその文字列をどう読むかを揃えること — [シークレット文字列の読み方](#シークレット文字列の読み方)。
 
 ```bash
 curl -X POST http://localhost:3000/verify \
@@ -332,6 +332,7 @@ oauth {
 
     # ---- HS256 専用。以下 2 グループのどちらか一方だけを使うこと。 --------
     secret = ${?OAUTH_JWT_SECRET}            # デコード後 32 バイト以上 — `openssl rand -hex 32`
+    secretEncoding = ${?OAUTH_JWT_SECRET_ENCODING} # secret を鍵バイトに読む方法: utf8（既定）| hex | base64
     kid = ${?OAUTH_JWT_KID}                  # 上の secret に名前を付ける。未設定ならトークンヘッダを参照しない
     # previousSecrets — 重複期間中の旧シークレット、最大 3 件。ここにあえて
     # 書いていない: このキーは RS256/ES256/EdDSA では（空リストであっても）
@@ -556,6 +557,20 @@ oauth.jwt {
 見えるのは長さだけで、40 文字の英文は 40 バイトと数えられるが実際の強度ははるかに低い。シークレットは必ずランダムに生成すること。この検査は下限であって審査ではない。
 
 下限は `secret` と下記 `previousSecrets` の全エントリに 1 つのルールとして適用される — 退役したシークレットも重複期間中は検証鍵であり、現行と同じようにトークンを発行できるからである。
+
+### シークレット文字列の読み方
+
+`oauth.jwt.secretEncoding`（`OAUTH_JWT_SECRET_ENCODING`）は、設定した各シークレット文字列を HMAC の鍵バイトにどう読むかを指定する。`secret` と全ての `previousSecrets[].secret` に適用される。
+
+| `secretEncoding` | 鍵バイト | 起動を拒否する場合 |
+| --- | --- | --- |
+| `utf8`（既定） | 文字列自身の UTF-8 バイト | なし。これまでの全リリースが適用してきた読み方 |
+| `hex` | 16 進で綴られたバイト | 値が 16 進の整数バイト列でない |
+| `base64` | 標準 base64 で綴られたバイト | 値がパディング付きの標準 base64 でない |
+
+32 バイトの下限はそのバイト列に対して判定される（`hex` では 16 進 64 文字が 32 バイト）。既定の `utf8` では上記の判定のまま。
+
+両サービスは共有する文字列から同じ鍵バイトを導く必要がある。auth.provider（0.18 以降）は `keys.signing.secret` を `keys.signing.secret-encoding` の指定（`hex` / `base64` / `utf8`）で読み、未設定なら 16 進の整数バイト列であれば hex、そうでなければ base64 として読む。この verifier の既定は `utf8` なので、同じ文字列で組み合わせるには両側で同じ encoding にする: こちらで `secretEncoding = "hex"` または `"base64"` にするか、provider 側を `secret-encoding = utf8` にする。食い違っても両側とも起動時エラーにならず、全トークンが `401` になる。
 
 ### HS256 シークレットのローテーション
 
