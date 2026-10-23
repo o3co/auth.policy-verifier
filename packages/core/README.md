@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.core
 
-Last updated: 2026-10-01
+Last updated: 2026-10-23
 
 Types, evaluation engine, and module infrastructure for auth.policy-verifier. This package defines the interfaces that collectors, rules, and modules implement.
 
@@ -100,7 +100,7 @@ The remaining contract types, grouped by the file that defines them:
 - [`src/types.mts`](src/types.mts) — the decision contract.
   - `Resource` (a parsed resource: its `raw` string, `resourceType` and optional `resourceId`) and `ResourceParser`, which turns a raw string into one and throws `ResourceParseError` for a string outside the syntax it parses.
   - `CollectorContext` — what every collector is handed: the verified `subject`, the `resource`, the `action`, its own `signal`, and optionally the `headers` the transport set, the caller's `requestContext`, and the raw `credential` (only when the composition opted in; never log it). `CollectorRequest` is what a pipeline is handed: the same without the per-collector `signal`, plus an optional caller-side `signal` the pipeline links into its own.
-  - `SubjectAttributes` — the verified attributes of the subject, populated by the transport. Core names no field; under the default server's built-in authenticator they are the verified JWT's claims (`sub`, `azp`, `scope`, …) plus `authScheme` (the `Authorization` scheme the token arrived under, not a claim).
+  - `SubjectAttributes` — the verified attributes of the subject, populated by the transport. Core names no field; under the default server's built-in authenticator they are the verified JWT's claims (`sub`, `client_id`, `scope`, …) plus `authScheme` (the `Authorization` scheme the token arrived under, not a claim).
   - `Attributes` — the mutable attribute map collectors build and `AttributePipeline` merges; `ReadonlyAttributes` — the read-only view a rule is judged against. The evaluator hands the same live map to every rule, so a rule that wrote into it would change the inputs of every group after it.
   - `AttributeCollector` and `RuleCollector` — the two collector interfaces; a rule collector may return `Rule`s, `AsyncRule`s, or both (`AnyRule`).
   - `Rule` — `ruleType`, `code`, `message` and a `verify` that must be a deterministic, side-effect-free function of the attributes; `AsyncRule` — the same contract answered through an asynchronous `decide` under a deadline (#225), told apart by `isAsyncRule`. See [AGENTS.md — Collector / Rule / Attribute Contract](../../AGENTS.md#collector--rule--attribute-contract).
@@ -122,7 +122,7 @@ The `ATTR_*` constants, defined in [`src/keys.mts`](src/keys.mts), are limited t
 - `ATTR_PERMISSIONS` — explicit permissions
 - `ATTR_ROLES` — roles
 - `ATTR_USER_ID` — the subject user ID (JWT `sub`)
-- `ATTR_CLIENT_ID` — the client ID (JWT `azp`)
+- `ATTR_CLIENT_ID` — the client ID (JWT `client_id` and `azp`, when they agree)
 
 ### The attribute key registry
 

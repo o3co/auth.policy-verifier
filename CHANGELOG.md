@@ -6,6 +6,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
+## [0.16.3] - 2026-10-23
+
+### Fixed
+
+- **`PayloadSubjectIdCollector` reads the client from `client_id` as well
+  as `azp`** (`.builtins`,
+  [#317](https://github.com/o3co/auth.policy-verifier/issues/317),
+  [#318](https://github.com/o3co/auth.policy-verifier/pull/318)). Before
+  this release it set `ATTR_CLIENT_ID` from `azp` only. An RFC 9068 JWT
+  access token names its client in `client_id` (RFC 9068 §2.2) and usually
+  carries no `azp`, so for such tokens `ATTR_CLIENT_ID` was never set.
+  Tokens of that shape include those from auth.provider 0.18 and later,
+  and Cognito access tokens. A rule that reads the client saw nothing for
+  them. Such tokens now set the client, and rules that read it are
+  evaluated against it. A grant-by-client rule that used to deny them may
+  now allow them, as intended. Tokens that carry only `azp`, Clerk session
+  tokens included, behave as before.
+
+  Neither claim takes precedence. `ATTR_CLIENT_ID` is set when the client
+  claims a token carries are non-empty strings that name the same client.
+  It stays unset when `client_id` and `azp` disagree, or when either one is
+  present with any other value. The collector does not guess which one is
+  meant. Only the subject's own properties count as claims.
+
+  **Action:** for most deployments, none.
+  - The tighter behaviour applies only to tokens whose two client claims
+    disagree, or where one of them is malformed. Before this release such a
+    token took its client from `azp`; now its client is unset.
+  - The builtin comparison rules deny on an unset client, `AttrLiteralNotEqual`
+    and `AttrLiteralNotIn` included.
+  - A restriction that acts only when the client *is* X lets an unset client
+    through. Examples are a hand-written restricting rule whose `verify` is
+    `attrs.get(ATTR_CLIENT_ID) !== "X"`, or a Cedar `forbid` guarded by
+    `has`. Write restrictions on the client as allowlists ("the client is
+    one of …"), or with a builtin rule.
+  - A deployment that maps `client_id` onto `clientId` with
+    `PayloadClaimAttributeCollector` gets no new conflict, because an
+    identical second write is accepted. If such a token also carries a
+    different `azp`, it is no longer refused with `AttributeConflictError`:
+    the mapping alone sets `clientId` to the `client_id` value.
+
 ## [0.16.2] - 2026-10-22
 
 ### Security

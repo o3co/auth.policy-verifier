@@ -1,6 +1,6 @@
 # auth.policy-verifier
 
-最終更新: 2026-10-22
+最終更新: 2026-10-23
 
 [![CI](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth.policy-verifier.core)](https://www.npmjs.com/package/@o3co/auth.policy-verifier.core)
@@ -277,7 +277,7 @@ RuleCollector だけではポリシーになりません。ルールグループ
 | Okta のカスタム authorization server | `typ` が `JWT`。scope は `scp` 配列 | `algorithm = RS256`, `jwksUri = https://<org>.okta.com/oauth2/<as>/v1/keys`, `issuer` / `audience` はサーバー側の設定どおり, `tokenType = "JWT"`。scope は `scp` 配列で届く: `PayloadScopeCollector { claim = "scp" }` と `ResourceActionScopeRuleCollector { claim = "scp" }`（下記の collector を参照） |
 | Cognito のアクセストークン | `typ` ヘッダがない。アプリは `aud` ではなく `client_id` で束縛される | `algorithm = RS256`, `jwksUri = https://cognito-idp.<region>.amazonaws.com/<pool>/.well-known/jwks.json`, `audienceClaim = "client_id"`, `audience = "<app client id>"`, `tokenType = "*"` |
 
-署名が検証できたら、次は Rule が読むものを collector が見つけられなければなりません。builtins が読むのは `scope`（スペース区切りの文字列）、`sub`、`azp` ですが、外部 IdP は scope や role を別の場所に置きます:
+署名が検証できたら、次は Rule が読むものを collector が見つけられなければなりません。builtins が読むのは `scope`（スペース区切りの文字列）、`sub`、そしてクライアントを示す `client_id` と `azp`（両方あるときは一致する場合のみ）ですが、外部 IdP は scope や role を別の場所に置きます:
 
 ```hocon
 attribute {

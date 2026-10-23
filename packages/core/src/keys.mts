@@ -62,8 +62,8 @@ const reservedKeys = new Set<string>();
  * taken at module scope misses every package that loads after yours.
  *
  * A reserved key's value is the deployment's to write, never the caller's.
- * Under the default server, `scope`, `sub` and `azp` of the signature-verified
- * token become {@link ATTR_SCOPES}, {@link ATTR_USER_ID} and
+ * Under the default server, `scope`, `sub` and `client_id` / `azp` of the
+ * signature-verified token become {@link ATTR_SCOPES}, {@link ATTR_USER_ID} and
  * {@link ATTR_CLIENT_ID} (AGENTS.md tabulates the mapping).
  * `AttributePipeline` unions array-valued entries across collectors, so a
  * caller-supplied write to one of these keys silently extends the deployment's

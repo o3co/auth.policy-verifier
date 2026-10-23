@@ -350,7 +350,7 @@ export const introspectionAuthenticatorModule: Module<ServerModuleContext> = {
             return { ok: false, code: "invalid_token", message: "Invalid token" };
           }
           // What you put in `subject` is what the collectors read: the builtins
-          // expect `sub`, `azp` and `scope` where the token carries them.
+          // expect `sub`, `client_id` or `azp`, and `scope` where the token carries them.
           return { ok: true, subject: { ...body, authScheme: "Bearer" }, credential: token };
         },
       };

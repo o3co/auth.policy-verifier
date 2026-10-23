@@ -35,7 +35,7 @@ export type PayloadClaimAttributeCollectorConfig = AttributeMappingCollectorConf
 
 /**
  * Promotes declared claims of the verified subject into attributes. The
- * builtins read `scope`, `sub` and `azp`; an external IdP puts what a rule
+ * builtins read `scope`, `sub`, `client_id` and `azp`; an external IdP puts what a rule
  * needs elsewhere — Clerk's org role under `o.rol`, Auth0's roles under a
  * namespaced `https://example.com/roles`, Okta's groups under `groups`. This
  * is the declaration `RequestContextAttributeCollector` takes, pointed at

@@ -1,6 +1,6 @@
 # @o3co/auth.policy-verifier.builtins
 
-Last updated: 2026-10-01
+Last updated: 2026-10-23
 
 Built-in attribute collectors, rule collectors, and resource parser for auth.policy-verifier.
 
@@ -15,7 +15,7 @@ a host such as the server's `createApp`. It depends on `@o3co/auth.policy-verifi
 (`devDependencies`).
 
 - **Owns** what these implementations read, write and match: the mapping from JWT claims
-  (`sub`, `azp`, `scope`, declared claims) to attribute keys (#170), the matching rules of
+  (`sub`, `client_id`, `azp`, `scope`, declared claims) to attribute keys (#170), the matching rules of
   `HasScope` / `HasPermission` and the comparison rules, the dot-notation resource
   grammar, and the implementation of the claims contract's delegation-range grammar and
   containment rule (the contract itself is the umbrella repository's).
@@ -47,12 +47,14 @@ All collectors implement `AttributeCollector`.
 | Name | Reads from | Emits | Constructor args |
 | --- | --- | --- | --- |
 | `PayloadScopeCollector` | the scope claim — `subject.scope` by default, a space-separated string or an array of strings | `ATTR_SCOPES: string[]` | `{ claim?: string }` (#219: `"scp"` for Okta, `"permissions"` for Auth0) |
-| `PayloadSubjectIdCollector` | `subject.sub`, `subject.azp` | `ATTR_USER_ID`, `ATTR_CLIENT_ID` | none |
+| `PayloadSubjectIdCollector` | `subject.sub`, `subject.client_id`, `subject.azp` | `ATTR_USER_ID`, `ATTR_CLIENT_ID` | none |
 | `StaticPermissionCollector` | — | `ATTR_PERMISSIONS: string[]` | `{ permissions: string[] }` |
 | `StaticRoleCollector` | — | `ATTR_ROLES: Role[]` | `{ roles: Role[] }` |
 | `RequestContextAttributeCollector` | declared fields of `requestContext` | the operator's own keys | `{ attributes: Mapping[] }` |
 | `PayloadClaimAttributeCollector` | declared claims of the verified `subject` | the operator's own keys, or core's five | `{ attributes: Mapping[] }` (#219) |
 | `DelegationRangeCollector` | the paths of the token's `authorization_details` entries of the configured type | `ATTR_DELEGATION_RANGE: string[]` | `{ type: string, claim?: string }` — [Delegated tokens](#delegated-tokens-range-and-actor) |
+
+`PayloadSubjectIdCollector` reads the client from both claims that carry it: `client_id`, where an RFC 9068 access token names it (RFC 9068 §2.2), and `azp`, the OIDC spelling. Neither outranks the other. `ATTR_CLIENT_ID` is set when the ones the token carries are non-empty strings naming the same client, and stays unset when they disagree, or when one is present with any other value: such a token does not say which client it is, and the collector does not guess. A rule that reads the client therefore sees the same absence for a token that names no client and for one that names two. The builtin comparison rules deny on it, `AttrLiteralNotEqual` and `AttrLiteralNotIn` included. A restriction that only acts when the client *is* X lets it through: a hand-written restricting rule whose `verify` is `attrs.get(ATTR_CLIENT_ID) !== "X"`, or a Cedar `forbid` guarded by `has` so that it reads the client only when there is one. Write such a restriction as an allowlist ("the client is one of …"), or with a builtin rule. A `PayloadClaimAttributeCollector` mapping of `client_id` onto `clientId` still writes that claim on its own, so a deployment with one does not get this check for that claim.
 
 `StaticPermissionCollector` and `StaticRoleCollector` always emit the values supplied at construction time, regardless of request context. They copy what they were given at construction — the array, and for `StaticRoleCollector` each `Role` and its `permissions` — so mutating the config afterwards changes nothing they emit (#255). `permissions` and `roles` must be arrays: anything else, a string included (`permissions = "posts.*"` where `["posts.*"]` was meant), is refused with a `TypeError` at construction, so the deployment fails at boot (#264).
 
