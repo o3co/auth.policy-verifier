@@ -420,3 +420,75 @@ describe("secretEncoding — a config-shape check in every mode and algorithm", 
 		expect(encodingIssues(jwt)).toHaveLength(1);
 	});
 });
+
+describe("secretEncoding — the same verdict at createApp in every mode and algorithm", () => {
+	const base = { issuer: "https://issuer.test", audience: "https://api.test", tokenType: "at+jwt" };
+	const stubs = {
+		name: "stubs",
+		async init(context: ReturnType<typeof makeContext>) {
+			context.attributeCollectorRegistry.register("S", () => ({
+				async collect() {
+					return new Map();
+				},
+			}));
+			context.ruleCollectorRegistry.register("R", () => ({
+				async collect() {
+					return [];
+				},
+			}));
+			context.resourceParserRegistry.register("P", () => ({
+				parse: (raw: string) => ({ raw, resourceType: raw, resourceId: undefined }),
+			}));
+		},
+	};
+	/** Boots a hand-built config that never met the schema; resolves to the refusal, if any. */
+	async function bootMessage(jwt: Record<string, unknown>): Promise<string | undefined> {
+		try {
+			const parsed = AppConfigSchema.parse({
+				oauth: { jwt: { mode: "insecure-decode" } },
+				attribute: { collectors: [{ collector: "S" }] },
+				rule: { collectors: [{ collector: "R" }] },
+				resource: { parser: "P" },
+			});
+			await createApp({
+				pathResolver: (s: string) => s,
+				config: { ...parsed, oauth: { jwt } } as unknown as typeof parsed,
+				modules: [builtinKeyResolversModule, stubs],
+			});
+			return undefined;
+		} catch (cause) {
+			return (cause as Error).message;
+		}
+	}
+	function schemaMessage(jwt: Record<string, unknown>): string | undefined {
+		const result = AppConfigSchema.safeParse({
+			oauth: { jwt },
+			attribute: { collectors: [] },
+			rule: { collectors: [] },
+		});
+		return result.success
+			? undefined
+			: result.error.issues
+					.filter((i) => i.path.join(".") === "oauth.jwt.secretEncoding")
+					.map((i) => i.message)
+					.join("\n");
+	}
+
+	it.each([
+		["insecure-decode", { mode: "insecure-decode" }],
+		["RS256", { ...base, algorithm: "RS256", publicKey: "pem" }],
+		["HS256", { ...base, algorithm: "HS256", secret: AS_HEX }],
+	])(
+		"refuses an unknown encoding under %s at both boundaries, in the same words",
+		async (_l, jwt) => {
+			const config = { ...jwt, secretEncoding: "hexx" };
+			const schema = schemaMessage(config);
+			expect(schema).toMatch(/^secretEncoding must be one of/);
+			expect(await bootMessage(config)).toBe(`createApp: oauth.jwt.${schema}`);
+		},
+	);
+
+	it("boots decode-only with a named encoding, as the template sets one in every mode", async () => {
+		expect(await bootMessage({ mode: "insecure-decode", secretEncoding: "utf8" })).toBeUndefined();
+	});
+});

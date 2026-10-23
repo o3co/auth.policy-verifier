@@ -14,6 +14,7 @@ import {
 } from "../config/application.schema.mjs";
 import { assertConfigObject } from "../config/assertConfigObject.mjs";
 import { checkAudienceClaim } from "../config/audienceClaim.mjs";
+import { checkSecretEncoding } from "../config/secretEncoding.mjs";
 import { JWT_TOKEN_AUTHENTICATOR } from "../config/tokenAuthenticatorSelection.mjs";
 import {
 	assertVerifyRouterJwtConfig,
@@ -74,6 +75,12 @@ export const JwtTokenAuthenticatorFactory: TokenAuthenticatorFactory = async (
 	const audienceClaim = checkAudienceClaim(jwtWire.audienceClaim);
 	if (!audienceClaim.ok) {
 		throw new Error(`createApp: oauth.jwt.${audienceClaim.message}`);
+	}
+	// The same holds for `secretEncoding`: the schema refuses a malformed value
+	// in every mode and algorithm, while only the HS256 key resolver reads it.
+	const secretEncoding = checkSecretEncoding(jwtWire.secretEncoding);
+	if (!secretEncoding.ok) {
+		throw new Error(`createApp: oauth.jwt.${secretEncoding.message}`);
 	}
 	const bounds = {
 		maxTokenAgeSeconds: timeClaims.maxTokenAge,
