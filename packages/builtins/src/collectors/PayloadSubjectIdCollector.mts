@@ -35,7 +35,7 @@ export class PayloadSubjectIdCollector implements AttributeCollector {
 	async collect(context: CollectorContext): Promise<Attributes> {
 		const attrs: Attributes = new Map();
 		const claim = (name: string): unknown =>
-			Object.hasOwn(context.subject, name) ? context.subject[name] : undefined;
+			Object.hasOwn(context.subject, name) ? context.subject[name] : ABSENT;
 		const sub = claim("sub");
 		if (isIdentity(sub)) {
 			attrs.set(ATTR_USER_ID, sub);
@@ -48,11 +48,14 @@ export class PayloadSubjectIdCollector implements AttributeCollector {
 	}
 }
 
+/** A claim the subject does not carry as its own property; any value it does carry is present. */
+const ABSENT: unique symbol = Symbol("absent");
+
 const isIdentity = (value: unknown): value is string => typeof value === "string" && value !== "";
 
 /** The one client the present claims agree on, or undefined when they name none or disagree. */
 function clientOf(...claims: readonly unknown[]): string | undefined {
-	const present = claims.filter((claim) => claim !== undefined);
+	const present = claims.filter((claim) => claim !== ABSENT);
 	const [first] = present;
 	if (!isIdentity(first)) return undefined;
 	return present.every((claim) => claim === first) ? first : undefined;

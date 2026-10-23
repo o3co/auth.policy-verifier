@@ -76,6 +76,8 @@ describe("PayloadSubjectIdCollector", () => {
 		["client_id is not a string", { client_id: 42, azp: "c1" }],
 		["client_id is empty", { client_id: "", azp: "c1" }],
 		["client_id is null", { client_id: null, azp: "c1" }],
+		["client_id is an own property valued undefined", { client_id: undefined, azp: "c1" }],
+		["azp is an own property valued undefined", { client_id: "c1", azp: undefined }],
 		["azp is not a string", { client_id: "c1", azp: ["c1"] }],
 		["azp is empty", { client_id: "c1", azp: "" }],
 	])("leaves clientId unset when %s beside a valid claim", async (_label, subject) => {
