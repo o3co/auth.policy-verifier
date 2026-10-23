@@ -1,6 +1,6 @@
 # auth.policy-verifier
 
-Last updated: 2026-10-01
+Last updated: 2026-10-23
 
 [![CI](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth.policy-verifier.core)](https://www.npmjs.com/package/@o3co/auth.policy-verifier.core)
@@ -283,7 +283,7 @@ The built-in bearer-JWT path is pinned to RFC 9068 as [auth.provider](https://gi
 | Okta custom authorization server | `typ` is `JWT`; scopes are the `scp` array | `algorithm = RS256`, `jwksUri = https://<org>.okta.com/oauth2/<as>/v1/keys`, `issuer` / `audience` as configured on the server, `tokenType = "JWT"`. Scopes arrive as the `scp` array: `PayloadScopeCollector { claim = "scp" }` and `ResourceActionScopeRuleCollector { claim = "scp" }` (see the collectors below) |
 | Cognito access token | no `typ` header; the app is bound in `client_id`, not `aud` | `algorithm = RS256`, `jwksUri = https://cognito-idp.<region>.amazonaws.com/<pool>/.well-known/jwks.json`, `audienceClaim = "client_id"`, `audience = "<app client id>"`, `tokenType = "*"` |
 
-Once the signature verifies, the collectors have to find what the rules read. The builtins read `scope` (a space-delimited string), `sub` and `azp`; an external IdP puts scopes and roles elsewhere:
+Once the signature verifies, the collectors have to find what the rules read. The builtins read `scope` (a space-delimited string), `sub`, and the client from `client_id` and `azp` when they agree; an external IdP puts scopes and roles elsewhere:
 
 ```hocon
 attribute {
