@@ -6,6 +6,69 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
+## [0.17.0] - 2026-10-23
+
+### Added
+
+- **`oauth.jwt.secretEncoding` names how the HS256 secret becomes key
+  bytes** (`.server`,
+  [#315](https://github.com/o3co/auth.policy-verifier/issues/315),
+  [#316](https://github.com/o3co/auth.policy-verifier/pull/316)). It takes
+  `"utf8"`, `"hex"` or `"base64"`, and it applies to `secret` and to every
+  `previousSecrets[].secret`. The default, `"utf8"`, is the text's own bytes,
+  the reading this verifier has always applied, so a deployment that does not
+  set the key behaves as before. `"hex"` accepts whole bytes of hex only, and
+  `"base64"` accepts strict, padded, standard base64 only. The standalone
+  template also reads it from `OAUTH_JWT_SECRET_ENCODING`. Under `"hex"` and
+  `"base64"` the 32-byte floor is judged on the decoded bytes. A secret that
+  does not decode under the named encoding refuses boot, and the message
+  names the key without echoing the value.
+
+  A `secretEncoding` outside the three values refuses boot in every mode and
+  algorithm, `insecure-decode` and the asymmetric algorithms included, so a
+  typo never becomes `"utf8"`. A config file (`AppConfigSchema`) and a
+  hand-built config passed to `createApp` are refused in the same words. The
+  key is new, so no existing config is affected.
+
+  New exports, for a custom key resolver that wants the same reading:
+  `checkSecretEncoding`, `decodeSecret`, `SECRET_ENCODINGS`,
+  `DEFAULT_SECRET_ENCODING`, and the types `SecretEncoding` and
+  `SecretEncodingCheck`. `decodeSecret` only decodes; validate the secret with
+  `parseHs256Rotation` or `checkHs256Rotation` first. `describeWeakSecret`
+  takes the encoding as an optional third argument.
+
+  **Action, for a deployment that verifies HS256 tokens from auth.provider
+  0.18 or later:** set `secretEncoding` to the reading the provider applies,
+  or every token is answered `401` with nothing at boot to say why.
+  - auth.provider 0.18 reads `keys.signing.secret` as its
+    `keys.signing.secret-encoding` names. When that key is unset, it reads the
+    secret as hex if the value is whole bytes of hex, and as base64
+    otherwise. This verifier reads the same string as `"utf8"` unless told
+    otherwise, so the same secret gives two different keys.
+  - If the provider sets `secret-encoding`, set the same value here.
+  - If it leaves it unset, set `"hex"` for a secret that is whole bytes of
+    hex and `"base64"` otherwise. Or set `secret-encoding = utf8` on the
+    provider and leave this key unset.
+  - A deployment paired with an issuer that signs with the string's own
+    bytes, auth.provider 0.17 included, needs nothing.
+
+### Changed
+
+- **BREAKING (types): `Hs256Rotation` gains a required `secretEncoding`**
+  (`.server`, [#316](https://github.com/o3co/auth.policy-verifier/pull/316)).
+  `parseHs256Rotation` and `checkHs256Rotation` now return the resolved
+  encoding with the rotation, `"utf8"` when the config omits it.
+  - Code that builds an `Hs256Rotation` as an object literal fails
+    typecheck until it adds `secretEncoding`. `"utf8"` keeps the old reading.
+  - Code that compares their result by exact equality (`toEqual`,
+    `deepStrictEqual`) sees one more field.
+  - The parsed config changes the same way. In the `AppConfig` type,
+    `oauth.jwt.secretEncoding` is required, as `audienceClaim` already is. A
+    TypeScript caller that builds an `AppConfig` literal for `createApp` adds
+    `secretEncoding: "utf8"`. A config parsed through `AppConfigSchema` gets
+    the key filled in, so an exact-equality comparison on the parsed
+    `oauth.jwt` also sees one more key.
+
 ## [0.16.3] - 2026-10-23
 
 ### Fixed
