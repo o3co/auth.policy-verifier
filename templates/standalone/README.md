@@ -59,16 +59,18 @@ take precedence over `application.conf`. The scaffold ships with
 create a file such as `config/staging.conf` and set `CONFIG_ENV=staging`.
 A missing `{ENV}.conf` is a boot-time error.
 
-The files are strict HOCON, and two things a lenient reader would let
-through are refused at boot instead:
+The loader is strict: it refuses at boot two things a lenient reader would
+let through.
 
-- **A `+` outside quotes.** Quote any value that carries one:
+- **A `+` outside quotes**, which HOCON reserves. Quote any value that
+  carries one (quoting every timestamp is the safe habit):
   `tokenType = "at+jwt"`, `expiresAt = "2026-09-01T09:00:00+09:00"`. A value
   substituted from an environment variable (`${?VAR}`) is never parsed, so it
   can carry a `+` as it is — a base64 secret, say.
 - **A key named `__proto__`, `constructor` or `prototype`**, anywhere in the
   config. A `__proto__` key would otherwise drop out of the parsed object
-  without a word; the other two are refused with it so the rule is one.
+  without a word; the other two are refused along with it, so one rule
+  covers all three.
 
 Individual values can also be overridden with environment variables.
 

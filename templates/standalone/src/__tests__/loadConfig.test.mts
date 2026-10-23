@@ -11,11 +11,12 @@
  * development overlay too; only this file asserts what each shipped overlay
  * resolves to.
  */
-import { copyFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { ParseError } from "@o3co/ts.hocon";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { loadAppConfig } from "../loadConfig.js";
 
 const configDirPath = fileURLToPath(new URL("../../config/", import.meta.url));
@@ -436,16 +437,47 @@ rule { collectors = [ { collector = ResourceActionScopeRuleCollector } ] }
 	});
 });
 
+/** Directories made by {@link shippedWithOverlay}, removed after the file runs. */
+const overlayDirs: string[] = [];
+
+afterAll(() => {
+	for (const dir of overlayDirs) {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 /**
  * A config directory holding the shipped `application.conf` under `overlay` as
  * the development overlay — the shape a deployment edits.
  */
 function shippedWithOverlay(overlay: string): string {
 	const dir = mkdtempSync(path.join(tmpdir(), "policy-verifier-config-"));
+	overlayDirs.push(dir);
 	copyFileSync(path.join(configDirPath, "application.conf"), path.join(dir, "application.conf"));
 	writeFileSync(path.join(dir, "development.conf"), overlay);
 	return dir;
 }
+
+/** The error `load` throws; fails the test when it throws nothing. */
+function errorFrom(load: () => unknown): unknown {
+	try {
+		load();
+	} catch (error) {
+		return error;
+	}
+	throw new Error("expected the config to be refused, and it loaded");
+}
+
+/** An overlay opening an HS256 rotation window whose `expiresAt` is `expiresAt` as written. */
+const rotationOverlay = (expiresAt: string): string =>
+	"oauth.jwt {\n" +
+	'  kid = "v1"\n' +
+	"  previousSecrets = [{\n" +
+	'    kid = "v0"\n' +
+	`    secret = "${"22".repeat(32)}"\n` +
+	`    expiresAt = ${expiresAt}\n` +
+	"  }]\n" +
+	"}\n";
 
 describe("loadAppConfig — values that carry a '+'", () => {
 	/*
@@ -501,25 +533,27 @@ describe("loadAppConfig — values that carry a '+'", () => {
 		expect(config.oauth.jwt?.publicKey).toBe(pem);
 	});
 
+	it.each(["2026-09-01T00:00:00Z", "2026-09-01T00:00:00-05:00"])(
+		"reads the unquoted timestamp %s, which carries no '+'",
+		(expiresAt) => {
+			setRequiredEnv();
+
+			const config = loadAppConfig(shippedWithOverlay(rotationOverlay(expiresAt)), "development");
+
+			expect(config.oauth.jwt?.previousSecrets?.[0]?.expiresAt).toBe(expiresAt);
+		},
+	);
+
 	it.each([
 		["a token type", "oauth.jwt.tokenType = at+jwt\n"],
-		[
-			"a timestamp with a positive UTC offset",
-			"oauth.jwt {\n" +
-				'  kid = "v1"\n' +
-				"  previousSecrets = [{\n" +
-				'    kid = "v0"\n' +
-				`    secret = "${"22".repeat(32)}"\n` +
-				"    expiresAt = 2026-09-01T09:00:00+09:00\n" +
-				"  }]\n" +
-				"}\n",
-		],
+		["a timestamp with a positive UTC offset", rotationOverlay("2026-09-01T09:00:00+09:00")],
 	])("refuses to boot on %s written unquoted with a '+'", (_label, overlay) => {
 		setRequiredEnv();
 
-		expect(() => loadAppConfig(shippedWithOverlay(overlay), "development")).toThrow(
-			/reserved character '\+'/,
-		);
+		const error = errorFrom(() => loadAppConfig(shippedWithOverlay(overlay), "development"));
+
+		expect(error).toBeInstanceOf(ParseError);
+		expect(String(error)).toMatch(/reserved character '\+'/);
 	});
 });
 
@@ -535,14 +569,23 @@ describe("loadAppConfig — keys that name an object's prototype", () => {
 		(key) => {
 			setRequiredEnv();
 
-			expect(() =>
+			const error = errorFrom(() =>
 				loadAppConfig(
 					shippedWithOverlay(
 						`attribute.collectors = [ { collector = "PayloadScopeCollector", "${key}" { a = 1 } } ]\n`,
 					),
 					"development",
 				),
-			).toThrow(new RegExp(`${key}.{0,4} names an object's prototype`));
+			);
+
+			expect(error).toMatchObject({
+				issues: expect.arrayContaining([
+					expect.objectContaining({
+						path: ["attribute", "collectors", 0],
+						params: expect.objectContaining({ key }),
+					}),
+				]),
+			});
 		},
 	);
 });
