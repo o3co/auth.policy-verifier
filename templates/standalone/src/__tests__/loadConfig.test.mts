@@ -11,11 +11,12 @@
  * development overlay too; only this file asserts what each shipped overlay
  * resolves to.
  */
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { ParseError } from "@o3co/ts.hocon";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { loadAppConfig } from "../loadConfig.js";
 
 const configDirPath = fileURLToPath(new URL("../../config/", import.meta.url));
@@ -55,6 +56,7 @@ const envKeys = [
 	"VERIFY_COLLECTOR_CONCURRENCY",
 	"VERIFY_RULE_TIMEOUT_MS",
 	"VERIFY_EVALUATE_DEADLINE_MS",
+	"OAUTH_JWT_TOKEN_TYPE",
 ] as const;
 
 /** application.conf leaves issuer/audience unset, so every load must supply them. */
@@ -433,4 +435,157 @@ rule { collectors = [ { collector = ResourceActionScopeRuleCollector } ] }
 
 		expect(omitted.verify).toEqual(shipped.verify);
 	});
+});
+
+/** Directories made by {@link shippedWithOverlay}, removed after the file runs. */
+const overlayDirs: string[] = [];
+
+afterAll(() => {
+	for (const dir of overlayDirs) {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+/**
+ * A config directory holding the shipped `application.conf` under `overlay` as
+ * the development overlay — the shape a deployment edits.
+ */
+function shippedWithOverlay(overlay: string): string {
+	const dir = mkdtempSync(path.join(tmpdir(), "policy-verifier-config-"));
+	overlayDirs.push(dir);
+	copyFileSync(path.join(configDirPath, "application.conf"), path.join(dir, "application.conf"));
+	writeFileSync(path.join(dir, "development.conf"), overlay);
+	return dir;
+}
+
+/** The error `load` throws; fails the test when it throws nothing. */
+function errorFrom(load: () => unknown): unknown {
+	try {
+		load();
+	} catch (error) {
+		return error;
+	}
+	throw new Error("expected the config to be refused, and it loaded");
+}
+
+/** An overlay opening an HS256 rotation window whose `expiresAt` is `expiresAt` as written. */
+const rotationOverlay = (expiresAt: string): string =>
+	"oauth.jwt {\n" +
+	'  kid = "v1"\n' +
+	"  previousSecrets = [{\n" +
+	'    kid = "v0"\n' +
+	`    secret = "${"22".repeat(32)}"\n` +
+	`    expiresAt = ${expiresAt}\n` +
+	"  }]\n" +
+	"}\n";
+
+describe("loadAppConfig — values that carry a '+'", () => {
+	/*
+	 * HOCON reserves `+` outside quotes, and the loader holds config files to
+	 * that: an unquoted value carrying one fails to parse instead of being read
+	 * as some string. What reaches the config through `${?VAR}` is never lexed,
+	 * so the environment-variable path the shipped config documents carries
+	 * a `+` as written.
+	 */
+
+	it.each([
+		// Standard base64 uses `+` and `/`; 32 decoded bytes clears the floor.
+		["OAUTH_JWT_SECRET", "q+/Zq+/Zq+/Zq+/Zq+/Zq+/Zq+/Zq+/Zq+/Zq+/Zq+8=", "secret"],
+		["OAUTH_JWT_TOKEN_TYPE", "application/at+jwt", "tokenType"],
+	] as const)("reads %s=%s from the environment as written", (key, value, field) => {
+		setRequiredEnv();
+		process.env.OAUTH_JWT_SECRET_ENCODING = "base64";
+		if (key !== "OAUTH_JWT_SECRET") {
+			process.env.OAUTH_JWT_SECRET = Buffer.alloc(32, 7).toString("base64");
+		}
+		process.env[key] = value;
+
+		const config = loadAppConfig(configDirPath, "development");
+
+		expect(config.oauth.jwt?.[field]).toBe(value);
+	});
+
+	it("reads a quoted value carrying a '+' from a config file", () => {
+		setRequiredEnv();
+
+		const config = loadAppConfig(
+			shippedWithOverlay('oauth.jwt.tokenType = "application/at+jwt"\n'),
+			"development",
+		);
+
+		expect(config.oauth.jwt?.tokenType).toBe("application/at+jwt");
+	});
+
+	it("reads a PEM public key written in a triple-quoted string", () => {
+		const pem = [
+			"-----BEGIN PUBLIC KEY-----",
+			"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEwMFJRjtqtW+PUvQubb8HQ1wwmBvX",
+			"VLs/erIGF9twkzgeQScrIps+Vd5AvTz7+NQmPg8L+1OgX4R+PMT4mOB0uQ==",
+			"-----END PUBLIC KEY-----",
+		].join("\n");
+		setRequiredEnv();
+
+		const config = loadAppConfig(
+			shippedWithOverlay(`oauth.jwt {\n  algorithm = "ES256"\n  publicKey = """${pem}"""\n}\n`),
+			"development",
+		);
+
+		expect(config.oauth.jwt?.publicKey).toBe(pem);
+	});
+
+	it.each(["2026-09-01T00:00:00Z", "2026-09-01T00:00:00-05:00"])(
+		"reads the unquoted timestamp %s, which carries no '+'",
+		(expiresAt) => {
+			setRequiredEnv();
+
+			const config = loadAppConfig(shippedWithOverlay(rotationOverlay(expiresAt)), "development");
+
+			expect(config.oauth.jwt?.previousSecrets?.[0]?.expiresAt).toBe(expiresAt);
+		},
+	);
+
+	it.each([
+		["a token type", "oauth.jwt.tokenType = at+jwt\n"],
+		["a timestamp with a positive UTC offset", rotationOverlay("2026-09-01T09:00:00+09:00")],
+	])("refuses to boot on %s written unquoted with a '+'", (_label, overlay) => {
+		setRequiredEnv();
+
+		const error = errorFrom(() => loadAppConfig(shippedWithOverlay(overlay), "development"));
+
+		expect(error).toBeInstanceOf(ParseError);
+		expect(String(error)).toMatch(/reserved character '\+'/);
+	});
+});
+
+describe("loadAppConfig — keys that name an object's prototype", () => {
+	/*
+	 * `__proto__`, `constructor` and `prototype` are refused as keys anywhere
+	 * in the config. A `__proto__` key would otherwise be dropped without a
+	 * word, so a configured value would silently be absent.
+	 */
+
+	it.each(["__proto__", "constructor", "prototype"])(
+		"refuses to boot on a collector entry carrying a %s key",
+		(key) => {
+			setRequiredEnv();
+
+			const error = errorFrom(() =>
+				loadAppConfig(
+					shippedWithOverlay(
+						`attribute.collectors = [ { collector = "PayloadScopeCollector", "${key}" { a = 1 } } ]\n`,
+					),
+					"development",
+				),
+			);
+
+			expect(error).toMatchObject({
+				issues: expect.arrayContaining([
+					expect.objectContaining({
+						path: ["attribute", "collectors", 0],
+						params: expect.objectContaining({ key }),
+					}),
+				]),
+			});
+		},
+	);
 });
