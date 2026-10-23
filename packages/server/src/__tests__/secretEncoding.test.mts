@@ -381,3 +381,42 @@ describe("HS256 secretEncoding — the entropy floor is judged on decoded bytes"
 		expect(checkHs256Rotation({ secret: AS_HEX, secretEncoding: "utf8" }).ok).toBe(true);
 	});
 });
+
+describe("secretEncoding — a config-shape check in every mode and algorithm", () => {
+	const base = {
+		issuer: "https://issuer.test",
+		audience: "https://api.test",
+	};
+	const wire = (jwt: Record<string, unknown>) => ({
+		oauth: { jwt },
+		attribute: { collectors: [] },
+		rule: { collectors: [] },
+	});
+	const encodingIssues = (jwt: Record<string, unknown>) => {
+		const result = AppConfigSchema.safeParse(wire(jwt));
+		return result.success
+			? []
+			: result.error.issues.filter((i) => i.path.join(".") === "oauth.jwt.secretEncoding");
+	};
+
+	it.each([
+		["RS256", { ...base, algorithm: "RS256", publicKey: "pem" }],
+		["a custom algorithm", { ...base, algorithm: "HS512", secret: AS_HEX }],
+		["insecure-decode", { mode: "insecure-decode" }],
+	])("refuses an unknown encoding under %s rather than reading it as utf8", (_label, jwt) => {
+		expect(encodingIssues({ ...jwt, secretEncoding: "hexx" })).toHaveLength(1);
+	});
+
+	it.each([
+		["RS256", { ...base, algorithm: "RS256", publicKey: "pem" }],
+		["insecure-decode", { mode: "insecure-decode" }],
+	])("accepts a named encoding under %s, as the template sets one in every mode", (_label, jwt) => {
+		const result = AppConfigSchema.safeParse(wire({ ...jwt, secretEncoding: "utf8" }));
+		expect(result.success).toBe(true);
+	});
+
+	it("reports an unknown encoding once under HS256 verification", () => {
+		const jwt = { ...base, algorithm: "HS256", secret: AS_HEX, secretEncoding: "hexx" };
+		expect(encodingIssues(jwt)).toHaveLength(1);
+	});
+});

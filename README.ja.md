@@ -560,7 +560,7 @@ oauth.jwt {
 
 ### シークレット文字列の読み方
 
-`oauth.jwt.secretEncoding`（`OAUTH_JWT_SECRET_ENCODING`）は、設定した各シークレット文字列を HMAC の鍵バイトにどう読むかを指定する。`secret` と全ての `previousSecrets[].secret` に適用される。
+`oauth.jwt.secretEncoding`（`OAUTH_JWT_SECRET_ENCODING`）は、設定した各シークレット文字列を HMAC の鍵バイトにどう読むかを指定する。`secret` と全ての `previousSecrets[].secret` に適用される。下表の 3 つ以外の値は、アルゴリズムやモードに関係なく起動を拒否する — 書き損じが既定値として読まれることはない。
 
 | `secretEncoding` | 鍵バイト | 起動を拒否する場合 |
 | --- | --- | --- |

@@ -570,7 +570,7 @@ The floor applies to `secret` and to every entry of `previousSecrets` below, in 
 
 ### How the secret string is read
 
-`oauth.jwt.secretEncoding` (`OAUTH_JWT_SECRET_ENCODING`) says how each configured secret string becomes the HMAC key bytes. It applies to `secret` and to every `previousSecrets[].secret`.
+`oauth.jwt.secretEncoding` (`OAUTH_JWT_SECRET_ENCODING`) says how each configured secret string becomes the HMAC key bytes. It applies to `secret` and to every `previousSecrets[].secret`. Any value but the three below refuses boot, under every algorithm and mode, so a typo is never read as the default.
 
 | `secretEncoding` | The key bytes are | Refused at boot when |
 | --- | --- | --- |

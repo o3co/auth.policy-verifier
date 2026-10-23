@@ -157,9 +157,10 @@ const OAuthJwtSchema = z
 		 * bytes: `"utf8"` (the default, the text's own bytes), `"hex"` or
 		 * `"base64"`. Name the reading the issuer applies to the same string;
 		 * auth.provider's `keys.signing.secret-encoding` reads the same three.
-		 * HS256 only, and harmless under the asymmetric algorithms, like `kid`.
-		 * Read as `unknown` so `checkHs256Rotation` decides what a reading is
-		 * at both boundaries.
+		 * Read only under HS256, but a value outside the three is refused in
+		 * every mode and algorithm, so a typo never becomes the default. Read
+		 * as `unknown` so `checkSecretEncoding` decides what a reading is at
+		 * both boundaries.
 		 */
 		secretEncoding: z.unknown().optional(),
 		/**
@@ -309,6 +310,18 @@ const OAuthJwtSchema = z
 				code: z.ZodIssueCode.custom,
 				message: audienceClaim.message,
 				path: ["audienceClaim"],
+			});
+		}
+		// Also a config-shape check in every mode, so the transform below never
+		// reads a malformed value as the default. Under HS256 verification
+		// `checkHs256Rotation` reports it, with the secrets it decides how to read.
+		const hs256Verify = data.mode !== "insecure-decode" && data.algorithm === "HS256";
+		const secretEncoding = checkSecretEncoding(data.secretEncoding);
+		if (!secretEncoding.ok && !hs256Verify) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message: secretEncoding.message,
+				path: ["secretEncoding"],
 			});
 		}
 		if (data.mode === "insecure-decode") {
