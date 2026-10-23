@@ -24,6 +24,7 @@
  */
 
 import { MIN_SECRET_ENTROPY_BYTES } from "./defaults.mjs";
+import type { SecretEncoding } from "./secretEncoding.mjs";
 
 /** Decoded byte length if `value` is a well-formed hex string, else undefined. */
 function hexByteLength(value: string): number | undefined {
@@ -98,7 +99,19 @@ export function measureSecretEntropyBytes(secret: string): number {
  * rejected value cannot be echoed: this message is destined for stdout, a
  * container log, and quite possibly a pasted bug report.
  */
-export function describeWeakSecret(field: string, actualBytes: number): string {
+export function describeWeakSecret(
+	field: string,
+	actualBytes: number,
+	encoding: SecretEncoding = "utf8",
+): string {
+	if (encoding !== "utf8") {
+		return (
+			`${field} must carry at least ${MIN_SECRET_ENTROPY_BYTES} bytes ` +
+			`(${MIN_SECRET_ENTROPY_BYTES * 8} bits) of key material, but carries ${actualBytes} ` +
+			`once read as ${encoding} (secretEncoding) — generate one with ` +
+			`\`openssl rand -${encoding} ${MIN_SECRET_ENTROPY_BYTES}\`.`
+		);
+	}
 	return (
 		`${field} must carry at least ${MIN_SECRET_ENTROPY_BYTES} bytes ` +
 		`(${MIN_SECRET_ENTROPY_BYTES * 8} bits) of key material, but carries ${actualBytes} — ` +

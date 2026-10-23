@@ -28,6 +28,7 @@ const TEST_SECRET = "11".repeat(32);
 
 const envKeys = [
 	"OAUTH_JWT_SECRET",
+	"OAUTH_JWT_SECRET_ENCODING",
 	"OAUTH_JWT_ISSUER",
 	"OAUTH_JWT_AUDIENCE",
 	"OAUTH_JWT_MODE",
@@ -177,6 +178,22 @@ describe("loadAppConfig", () => {
 		process.env.OAUTH_JWT_MODE = "false";
 
 		expect(() => loadAppConfig(configDirPath, "development")).toThrow();
+	});
+
+	it("reads the HS256 secret as utf8 unless OAUTH_JWT_SECRET_ENCODING says otherwise", () => {
+		setRequiredEnv();
+		expect(loadAppConfig(configDirPath, "development").oauth.jwt?.secretEncoding).toBe("utf8");
+
+		process.env.OAUTH_JWT_SECRET_ENCODING = "hex";
+		expect(loadAppConfig(configDirPath, "development").oauth.jwt?.secretEncoding).toBe("hex");
+	});
+
+	it("refuses a secret that is not of the encoding OAUTH_JWT_SECRET_ENCODING names", () => {
+		setRequiredEnv();
+		process.env.OAUTH_JWT_SECRET = "zz".repeat(32);
+		process.env.OAUTH_JWT_SECRET_ENCODING = "hex";
+
+		expect(() => loadAppConfig(configDirPath, "development")).toThrow(/secret is not hex/);
 	});
 
 	it("rejects an HS256 config with no secret in the environment", () => {

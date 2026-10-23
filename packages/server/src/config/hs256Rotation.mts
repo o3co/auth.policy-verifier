@@ -22,6 +22,13 @@
  * exactly as the current one can, and one rule over both keeps either from
  * quietly becoming the laxer half.
  *
+ * `oauth.jwt.secretEncoding` says how every one of those strings becomes key
+ * bytes (`config/secretEncoding.mts`). It is checked first, and the floor is
+ * then judged on the bytes the encoding yields: under `hex` and `base64` that is
+ * the decoded length, under the default `utf8` the smallest plausible reading
+ * (`config/secretEntropy.mts`). A string that does not decode is refused here,
+ * naming its key, so no boundary has to decode a value it cannot read.
+ *
  * Dependency-free: `AppConfigSchema` imports it so a malformed rotation block
  * fails at config-parse time (at boot) rather than at the first request, and
  * config-only consumers of the schema must not pull jose or express in behind
@@ -31,6 +38,7 @@
  */
 
 import { MAX_PREVIOUS_SECRETS, MIN_SECRET_ENTROPY_BYTES } from "./defaults.mjs";
+import { checkSecretEncoding, decodeSecret, type SecretEncoding } from "./secretEncoding.mjs";
 import { describeWeakSecret, measureSecretEntropyBytes } from "./secretEntropy.mjs";
 
 /**
@@ -78,6 +86,12 @@ export interface Hs256RotationConfig {
 	 */
 	kid?: string;
 	previousSecrets?: unknown;
+	/**
+	 * How `secret` and every `previousSecrets[].secret` is read as key bytes.
+	 * `unknown` because a hand-built config is not held to its static type;
+	 * absent means `"utf8"`.
+	 */
+	secretEncoding?: unknown;
 }
 
 /** One rejected field, at the path inside the JWT block where it was written. */
@@ -90,6 +104,8 @@ export interface Hs256RotationIssue {
 
 /** The narrowed rotation config, once every check has passed. */
 export interface Hs256Rotation {
+	/** The reading that turns each secret string into key bytes. */
+	secretEncoding: SecretEncoding;
 	kid?: string;
 	previousSecrets: Hs256PreviousSecret[];
 }
@@ -121,15 +137,27 @@ function clearsEntropyFloor(
 	secret: string,
 	field: string,
 	path: (string | number)[],
+	encoding: SecretEncoding,
 	issues: Hs256RotationIssue[],
 ): boolean {
-	const actualBytes = measureSecretEntropyBytes(secret);
+	let actualBytes: number;
+	if (encoding === "utf8") {
+		actualBytes = measureSecretEntropyBytes(secret);
+	} else {
+		const decoded = decodeSecret(secret, encoding);
+		if (decoded === undefined) {
+			// Names the reading, never the value, for the same reason as below.
+			issues.push({ path, message: `${field} is not ${encoding}, which secretEncoding names` });
+			return false;
+		}
+		actualBytes = decoded.length;
+	}
 	if (actualBytes >= MIN_SECRET_ENTROPY_BYTES) {
 		return true;
 	}
 	// The message carries the measurement, never the value: unlike `expiresAt`
 	// below, echoing this back would put the secret in a log line.
-	issues.push({ path, message: describeWeakSecret(field, actualBytes) });
+	issues.push({ path, message: describeWeakSecret(field, actualBytes, encoding) });
 	return false;
 }
 
@@ -140,6 +168,7 @@ function clearsEntropyFloor(
 function checkEntry(
 	entry: unknown,
 	index: number,
+	encoding: SecretEncoding | undefined,
 	issues: Hs256RotationIssue[],
 ): Hs256PreviousSecret | undefined {
 	const at = (field?: string): (string | number)[] =>
@@ -165,8 +194,9 @@ function checkEntry(
 	// that is not a string has nothing to measure, and saying so twice would make
 	// one mistake look like two.
 	if (
+		encoding !== undefined &&
 		isNonEmptyString(raw.secret) &&
-		!clearsEntropyFloor(raw.secret, `${label}.secret`, at("secret"), issues)
+		!clearsEntropyFloor(raw.secret, `${label}.secret`, at("secret"), encoding, issues)
 	) {
 		ok = false;
 	}
@@ -226,6 +256,15 @@ export function checkHs256Rotation(config: Hs256RotationConfig): Hs256RotationCh
 	const issues: Hs256RotationIssue[] = [];
 	const { kid, secret } = config;
 
+	// First, because it decides how every secret below is read. A value that is
+	// not a reading leaves nothing to decode with, so the secrets are not
+	// measured and the one mistake is reported once.
+	const encodingCheck = checkSecretEncoding(config.secretEncoding);
+	if (!encodingCheck.ok) {
+		issues.push({ path: ["secretEncoding"], message: encodingCheck.message });
+	}
+	const encoding = encodingCheck.ok ? encodingCheck.encoding : undefined;
+
 	if (kid !== undefined && !isNonEmptyString(kid)) {
 		issues.push({ path: ["kid"], message: "kid must be a non-empty string" });
 	}
@@ -234,8 +273,8 @@ export function checkHs256Rotation(config: Hs256RotationConfig): Hs256RotationCh
 	// Absent or empty is somebody else's issue — `AppConfigSchema` and the HS256
 	// `KeyResolverFactory` each say `secret is required for HS256` — so this adds
 	// nothing there rather than reporting one missing key twice.
-	if (isNonEmptyString(secret)) {
-		clearsEntropyFloor(secret, "secret", ["secret"], issues);
+	if (encoding !== undefined && isNonEmptyString(secret)) {
+		clearsEntropyFloor(secret, "secret", ["secret"], encoding, issues);
 	}
 
 	const raw = config.previousSecrets;
@@ -263,7 +302,10 @@ export function checkHs256Rotation(config: Hs256RotationConfig): Hs256RotationCh
 		} else {
 			const seen = new Set<string>(isNonEmptyString(kid) ? [kid] : []);
 			for (const [index, entry] of raw.entries()) {
-				const checked = checkEntry(entry, index, issues);
+				// Without a usable encoding the entries are still shape-checked, but
+				// their secrets are not measured: the refusal above already fails the
+				// whole config.
+				const checked = checkEntry(entry, index, encoding, issues);
 				if (checked === undefined) {
 					continue;
 				}
@@ -294,7 +336,11 @@ export function checkHs256Rotation(config: Hs256RotationConfig): Hs256RotationCh
 	if (issues.length > 0) {
 		return { ok: false, issues };
 	}
-	return kid === undefined ? { ok: true, previousSecrets } : { ok: true, kid, previousSecrets };
+	// `encoding` is defined here: an invalid one put an issue in the list above.
+	const resolved = encoding as SecretEncoding;
+	return kid === undefined
+		? { ok: true, secretEncoding: resolved, previousSecrets }
+		: { ok: true, secretEncoding: resolved, kid, previousSecrets };
 }
 
 /**

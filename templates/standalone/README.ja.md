@@ -67,6 +67,7 @@ OAUTH_JWT_SECRET=$(openssl rand -hex 32) \
 | `HTTP_CALLER_AUTH_TOKEN` | （未設定） | 呼び出し元サービスが提示する共有資格情報。未設定の場合、ポートに到達できる任意の相手が判定を要求できる |
 | `HTTP_CALLER_AUTH_HEADER` | `x-caller-token` | その資格情報を載せるヘッダ |
 | `OAUTH_JWT_SECRET` | （必須） | HMAC-HS256 JWT 署名シークレット。デコード後 32 バイト以上 — [HS256 シークレットの強度](#hs256-シークレットの強度)を参照 |
+| `OAUTH_JWT_SECRET_ENCODING` | `utf8` | `OAUTH_JWT_SECRET` を鍵バイトに読む方法: `utf8`（文字列自身のバイト）、`hex`、`base64`。発行側が同じ文字列を読む方法と一致させる — [HS256 シークレットの強度](#hs256-シークレットの強度)を参照 |
 | `OAUTH_JWT_ISSUER` | （必須） | この deployment が受け入れる issuer — RFC 9068 §4 `iss` |
 | `OAUTH_JWT_AUDIENCE` | （必須） | この resource server を指す audience — RFC 9068 §4 `aud` |
 | `OAUTH_JWT_JWKS_URI` | — | RS256/ES256/EdDSA の JWKS エンドポイント。`https://` 必須。平文 `http://` はループバックホスト（`localhost`, `127.0.0.0/8`, `[::1]`）のみ許可 |
@@ -101,6 +102,10 @@ OAUTH_JWT_SECRET=$(openssl rand -base64 32)   # 44 文字 / 32 バイト
 - 記号を含むパスフレーズは UTF-8 長で測られるため、32 文字なら通る。
 
 同じ下限がローテーションブロックの `previousSecrets[].secret` 全件にも適用されます — 退役したシークレットも重複期間中は検証鍵であり、現行と同じようにトークンを発行できるからです。
+
+`OAUTH_JWT_SECRET_ENCODING` は文字列を鍵バイトにどう読むかを決めます: `utf8`（既定、文字列自身のバイト）、`hex`（16 進の整数バイト列）、`base64`（パディング付き標準 base64）。指定した読み方に合わない値は起動時に拒否され、`hex` / `base64` では下限をデコード後のバイト列で判定します（`hex` では 16 進 64 文字が 32 バイト）。既定の `utf8` は上記の最小の妥当な解釈のままです。`previousSecrets[].secret` にも同じ指定が適用されます。
+
+発行側も同じ読み方でなければなりません。auth.provider 0.18 は `keys.signing.secret` を `keys.signing.secret-encoding` の指定で読み、未設定なら 16 進の整数バイト列であれば hex、そうでなければ base64 として読みます。そのため同じ文字列で組み合わせるには両側で同じ encoding にします: こちらで `OAUTH_JWT_SECRET_ENCODING=hex`（または `base64`）にするか、provider 側を `secret-encoding = utf8` にします。食い違っても両側とも起動時エラーにならず、全トークンが `401` になります。
 
 この検査で見えるのは長さだけです。40 文字の英文は 40 バイトと数えられますが実際の強度ははるかに低いので、値は必ずランダムに生成してください。
 
