@@ -6,6 +6,65 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
+## [0.18.0] - 2026-10-25
+
+### Security
+
+- **body-parser 2.4.0 for GHSA-27r3-jxmh-p828** (`.server`,
+  [#322](https://github.com/o3co/auth.policy-verifier/issues/322),
+  [#323](https://github.com/o3co/auth.policy-verifier/pull/323)).
+  `body-parser` 2.0.0–2.3.x is affected by
+  [GHSA-27r3-jxmh-p828](https://github.com/advisories/GHSA-27r3-jxmh-p828)
+  (CVE-2026-111181, high): denial of service via trailing bytes after a
+  compressed request body. It reaches `.server` through `express ^5.3.0`,
+  whose `body-parser ^2.3.0` range already admits the fixed 2.4.0. This
+  repository's lockfile, and so the release build and the standalone
+  template built from it, now resolve 2.4.0 (and `qs` 6.16.1, which 2.4.0
+  pulls in). No code change.
+
+  **Action, for every deployment that serves HTTP, on any version:** the
+  dependency ranges `.server` publishes are unchanged, so upgrading this
+  package does not by itself move `body-parser`. Your own lockfile decides.
+  - Refresh it so that `body-parser` resolves to 2.4.0 or later
+    (`pnpm update body-parser`, or the equivalent for your package manager),
+    then rebuild. An image built with `pnpm install --frozen-lockfile`, as
+    the template's `Dockerfile` does, keeps the old version until the
+    lockfile changes.
+  - `pnpm audit --prod` reports the advisory while 2.3.x is still resolved.
+  - An app scaffolded today already resolves 2.4.0.
+
+### Changed
+
+- **BREAKING (operator-written config): the standalone template's loader
+  refuses an unquoted `+` and keys named `__proto__`, `constructor` or
+  `prototype` at boot** (`@o3co/create-auth-policy-verifier`,
+  [#321](https://github.com/o3co/auth.policy-verifier/pull/321)). The
+  template now depends on `@o3co/ts.hocon` `^1.14.3` (was `^1.13.0`), and
+  `.server` on `zod` `^4.6.7` (was `^4.6.6`). The template also declares
+  `zod` directly, because ts.hocon's Zod entry point imports it at runtime.
+  - A `+` outside quotes is a parse error (`ParseError: reserved character
+    '+' is not allowed outside quotes`). HOCON reserves it there. Examples:
+    `oauth.jwt.tokenType = at+jwt`, or
+    `expiresAt = 2026-09-01T09:00:00+09:00` in a rotation overlay. Before,
+    each read as a string.
+  - A key named `__proto__`, `constructor` or `prototype`, anywhere in the
+    config (collector entries and a custom authenticator's sub-block
+    included), is a `ZodError` naming the key. Before, `__proto__` was
+    silently dropped and the other two were kept.
+  - A numeric literal that overflows, such as `verify.maxBodyBytes = 1e999`,
+    is now refused with a parse error instead of the bound's message. It
+    was refused before as well.
+  - The shipped `application.conf` and every `${?ENV}` path it documents
+    read value for value as before. A value substituted from an environment
+    variable is never parsed, so it can carry a `+` as it is.
+
+  **Action:** in an operator-written config file, quote every value that
+  carries a `+` (quoting every timestamp is the safe habit), and rename any
+  key named `__proto__`, `constructor` or `prototype`. An app scaffolded
+  with 0.17.0 that refreshes its lockfile already resolves ts.hocon 1.14.3,
+  since 1.14.3 is inside `^1.13.0`, so these refusals reach it without this
+  release.
+
 ## [0.17.0] - 2026-10-23
 
 ### Added
