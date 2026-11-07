@@ -1,7 +1,7 @@
 # The base image names a Node.js minor line, not a patch or a digest: a rebuild
 # takes the line's newest patch release, security fixes included, without an
 # edit here. Moving to another minor is a deliberate change to this line.
-FROM node:26.12-alpine AS node-base
+FROM node:26.13-alpine AS node-base
 
 ENV HOME=/home/node
 
