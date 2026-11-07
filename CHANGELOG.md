@@ -6,6 +6,56 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
+## [0.18.1] - 2026-11-07
+
+### Security
+
+- **qs 6.16.1 for GHSA-6pq8-jhm2-2vcw** (`.server`,
+  [#327](https://github.com/o3co/auth.policy-verifier/pull/327)).
+  `qs` 6.7.0–6.16.0 is affected by
+  [GHSA-6pq8-jhm2-2vcw](https://github.com/advisories/GHSA-6pq8-jhm2-2vcw)
+  (moderate): `qs.stringify` with `arrayFormat: 'comma'` throws an uncaught
+  `TypeError` on an array element whose own `toString` is not callable, a
+  denial of service. It reaches `.server` through `express ^5.3.0`, whose
+  `qs ^6.16.0` range already admits the fix. This repository's lockfile, and
+  so the release build and the standalone template built from it, now
+  resolve 6.16.1. No code change.
+
+  **Action, for every deployment that serves HTTP, on any version:** the
+  override lives in this repository's `pnpm-workspace.yaml` and is not
+  published, so upgrading `.server` does not by itself move `qs`. Your own
+  lockfile decides. Refresh it so that `qs` resolves to 6.16.1 or later
+  (`pnpm update qs`, or the equivalent for your package manager), then
+  rebuild; an image built with `pnpm install --frozen-lockfile`, as the
+  template's `Dockerfile` does, keeps the old version until the lockfile
+  changes. An app scaffolded today already resolves a fixed version.
+- **Development only: glob 14.0.4 and minimatch 11.0.5 under rimraf**
+  ([#332](https://github.com/o3co/auth.policy-verifier/pull/332)). `rimraf`
+  moves to `^6.1.4`, which closes GHSA-3g3m-2fjr-6pw4 (`glob`) and
+  GHSA-g3hv-75wg-m249 (`minimatch`), both moderate, in the `prebuild` step.
+  No published package depends on `rimraf`. `typedoc`, which builds the API
+  docs, still resolves `minimatch` 10.2.5 and only expands this repository's
+  own entry-point patterns.
+
+### Changed
+
+- **`.cedar-wasm` pins `@cedar-policy/cedar-wasm` 4.14.0** (was 4.13.0,
+  [#326](https://github.com/o3co/auth.policy-verifier/pull/326)). The Cedar
+  CLI and agent equivalence suites pass on it unchanged.
+- **`.server` and the standalone template depend on `jose` `^6.2.14`** (was
+  `^6.2.12`,
+  [#326](https://github.com/o3co/auth.policy-verifier/pull/326),
+  [#330](https://github.com/o3co/auth.policy-verifier/pull/330)).
+- **The standalone template's image is built on `node:26.13-alpine`** (was
+  `node:26.12-alpine`,
+  [#328](https://github.com/o3co/auth.policy-verifier/pull/328)).
+- **Development only**
+  ([#325](https://github.com/o3co/auth.policy-verifier/pull/325),
+  [#329](https://github.com/o3co/auth.policy-verifier/pull/329)).
+  `@biomejs/biome` moves to 2.6.4, with `biome.json` migrated and the Markdown
+  formatter that 2.6 turns on left off; `vitest` and `@vitest/coverage-v8`
+  move to 5.0.5 and `@types/node` to 26.6.6.
+
 ## [0.18.0] - 2026-10-25
 
 ### Security
