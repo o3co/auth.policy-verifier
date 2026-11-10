@@ -16,7 +16,7 @@
 		"docs": "typedoc"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.6.4",
+		"@biomejs/biome": "^2.6.6",
 		"rimraf": "^6.1.4",
 		"typedoc": "^0.28.20",
 		"typescript": "^5.9.3"
