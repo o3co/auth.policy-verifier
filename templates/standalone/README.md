@@ -437,6 +437,17 @@ packages; `make build` builds that stage with `--no-cache-filter=runtime`,
 since a cached layer would keep the packages of an earlier build. Moving to
 another minor is a deliberate edit of the `FROM` line.
 
+### No package manager but apk
+
+The runtime stage runs `node dist/main.mjs` under `tini` and never a package
+manager, so it removes the ones its base carries: npm and npx (with the cache
+npm left installing corepack), corepack with the `pnpm`, `pnpx`, `yarn` and
+`yarnpkg` shims `corepack enable` put on `PATH`, and any yarn of the Node
+image. `docker exec <container> npm …` therefore fails, and a scanner that
+reads the image's filesystem finds none of the packages they bundle. The files
+stay in the lower layers the runtime stage builds on, so a scanner that reads
+every layer still lists them. The `test` and `develop` stages keep pnpm.
+
 ### What the HEALTHCHECK reports
 
 The container healthcheck probes the container's **own routable address**, not

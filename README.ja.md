@@ -722,6 +722,8 @@ docker run -p 3000:3000 \
 
 `make build` は `runtime` 段を `--pull --no-cache-filter=runtime` でビルドするので、
 ビルドのたびに Node 系列の最新 patch と Alpine の現在のパッケージを取り込みます。
+runtime イメージは apk 以外のパッケージマネージャーを持ちません。ビルドで使った
+npm・npx・corepack・pnpm を取り除くので、そこでは `docker exec … npm` は動きません。
 スキャフォルダーが `pnpm-lock.yaml` を生成します。イメージは
 `--frozen-lockfile` でビルドするため、lockfile が無いとビルドできません。
 
