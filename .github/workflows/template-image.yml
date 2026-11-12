@@ -1,0 +1,142 @@
+name: Template image
+
+# Builds the standalone template's runtime image the way a user does (never
+# pushed) and runs the image checks on it: see the script for what they check.
+# With `scan`, it also scans the image with Trivy.
+#
+# A scaffold pins the workspace packages at a published version, which
+# `pnpm install` inside the image fetches from the registry, so the scaffolder
+# is built with the workspace stamped at that version, as release.yml stamps
+# it at the tag.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Ref to build (empty for the caller's)
+        type: string
+        default: ''
+      version:
+        description: Published version the scaffold pins (empty for the newest)
+        type: string
+        default: ''
+      scan:
+        description: Scan the image with Trivy
+        type: boolean
+        default: false
+      timeout-minutes:
+        type: number
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  template-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      IMAGE: auth-policy-verifier-template:ci
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Name the scanned ref
+        if: inputs.scan
+        env:
+          REF: ${{ inputs.ref }}
+        run: echo "## Image scan of \`$REF\` ($(git rev-parse --short HEAD))" >> "$GITHUB_STEP_SUMMARY"
+
+      # A ref without the image checks takes them from the caller's ref.
+      - name: Take the image checks from the caller's ref
+        if: hashFiles('.github/scripts/image-smoke.sh') == ''
+        uses: actions/checkout@v4
+        with:
+          path: .image-checks
+          sparse-checkout: .github/scripts
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22'
+          check-latest: true
+
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Scaffold an app from the template
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="${VERSION:-$(npm view @o3co/auth.policy-verifier.server version)}"
+          pnpm -r exec pnpm version "$version" --no-git-tag-version --no-commit-hooks
+          pnpm --filter @o3co/create-auth-policy-verifier run build
+          cd "$RUNNER_TEMP"
+          node "$GITHUB_WORKSPACE/create-app/dist/cli.mjs" app
+          # The scaffolder only warns when it cannot write the lockfile, and
+          # the image does not build without it.
+          test -f app/pnpm-lock.yaml
+
+      - name: Build the runtime image
+        id: build
+        working-directory: ${{ runner.temp }}/app
+        run: docker build --pull --no-cache-filter=runtime --target runtime --tag "$IMAGE" .
+
+      - name: Check the image
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=.github/scripts/image-smoke.sh
+          if [ ! -f "$script" ]; then
+            echo "::notice::the built ref has no $script; running the copy from the caller's ref"
+            script=".image-checks/$script"
+          fi
+          "$script" "$IMAGE"
+
+      # Trivy 0.76.1, pinned by the digest of its multi-platform image index.
+      # It reads the image from the runner's Docker daemon. Exit code 1 means
+      # findings; anything else means the scan did not finish.
+      - name: Scan the image
+        if: ${{ inputs.scan && !cancelled() && steps.build.outcome == 'success' }}
+        shell: bash
+        env:
+          TRIVY: aquasec/trivy@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+        run: |
+          set -uo pipefail
+          report="$RUNNER_TEMP/trivy.json"
+          status=0
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$RUNNER_TEMP:/out" \
+            "$TRIVY" image --quiet \
+            --scanners vuln --pkg-types os,library \
+            --severity HIGH,CRITICAL --ignore-unfixed \
+            --format json --output /out/trivy.json --exit-code 1 \
+            "$IMAGE" || status=$?
+          if [ "$status" -gt 1 ] || [ ! -s "$report" ]; then
+            echo "Trivy did not finish (exit code $status)." >> "$GITHUB_STEP_SUMMARY"
+            exit 2
+          fi
+          {
+            echo "### HIGH and CRITICAL vulnerabilities with a fix available"
+            jq -r '
+              [.Results[]? | .Target as $target | .Vulnerabilities[]?
+                | "| \(.Severity) | [\(.VulnerabilityID)](\(.PrimaryURL // "")) | \(.PkgName) | \(.InstalledVersion) | \(.FixedVersion) | \(.PkgPath // $target) |"]
+              | if length == 0 then "None."
+                else (["| Severity | Vulnerability | Package | Installed | Fixed in | Where |", "|---|---|---|---|---|---|"] + .) | join("\n")
+                end
+            ' "$report"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "$status"

@@ -385,58 +385,15 @@ jobs:
         if: failure()
         run: docker logs cedar-agent || true
 
-  # Builds the standalone template's runtime image the way a user does (never
-  # pushed) and runs it: see the script for what it checks. A scaffold pins the
-  # workspace packages at a published version, which `pnpm install` inside the
-  # image fetches from the registry, so the scaffolder is built with the
-  # workspace stamped at the newest published version, as release.yml stamps
-  # it at the tag.
+  # Builds the standalone template's runtime image the way a user does and
+  # checks it: see template-image.yml.
   template-image:
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
     permissions:
       contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24.22'
-          check-latest: true
-
-      - name: Get pnpm store path
-        id: pnpm-store
-        shell: bash
-        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/cache@v4
-        with:
-          path: ${{ steps.pnpm-store.outputs.path }}
-          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: pnpm-store-
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Scaffold an app from the template
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="$(npm view @o3co/auth.policy-verifier.server version)"
-          pnpm -r exec pnpm version "$version" --no-git-tag-version --no-commit-hooks
-          pnpm --filter @o3co/create-auth-policy-verifier run build
-          cd "$RUNNER_TEMP"
-          node "$GITHUB_WORKSPACE/create-app/dist/cli.mjs" app
-          # The scaffolder only warns when it cannot write the lockfile, and
-          # the image does not build without it.
-          test -f app/pnpm-lock.yaml
-
-      - name: Build the runtime image
-        working-directory: ${{ runner.temp }}/app
-        run: docker build --pull --no-cache-filter=runtime --target runtime --tag auth-policy-verifier-template:ci .
-
-      - name: Check the image
-        run: .github/scripts/image-smoke.sh auth-policy-verifier-template:ci
+    uses: ./.github/workflows/template-image.yml
+    with:
+      timeout-minutes: 15
 
   # Simulates the post-publish state: tarball every package `pnpm -r publish`
   # would offer to the registry, then build the scaffold a consumer actually
