@@ -6,6 +6,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
+## [0.18.2] - 2026-11-13
+
+### Security
+
+- **The standalone template's image takes Alpine's current packages at each
+  build** (`create-auth-policy-verifier`,
+  [#336](https://github.com/o3co/auth.policy-verifier/pull/336)). The official
+  Node image is rebuilt only some time after Alpine publishes a fix, so
+  `--pull` alone does not bring Alpine's fixes in: on 2026-11-13
+  `node:26.13-alpine` (Alpine 3.24.4) still held `zlib-1.3.2-r1`, which image
+  scanners report as CVE-2026-4738 (critical), while the Alpine 3.24
+  repository already had `zlib-1.4-r0`. In the image only apk links that
+  library; Node links its own zlib, which a Node patch changes and `--pull`
+  brings in. The template's `runtime` stage now runs `apk upgrade --no-cache`,
+  and `make build` builds with `--pull --no-cache-filter=runtime`, since a
+  cached `apk upgrade` layer keeps the packages of an earlier build.
+
+  **Action, for an app scaffolded before this release:** the scaffold copied
+  the template once, so upgrading does not change your `Dockerfile` or
+  `Makefile`. Add `RUN apk upgrade --no-cache` to the `runtime` stage, as
+  root, before `USER node`; build with
+  `docker build --pull --no-cache-filter=runtime --target runtime` (compose:
+  `build: { pull: true, no_cache: true }`; `docker/build-push-action`:
+  `pull: true` and `no-cache-filters: runtime`); then redeploy. A running
+  image is not fixed by changing the file. An app scaffolded from this
+  release already does this.
+
+### Fixed
+
+- **The README's Docker command builds the runtime image**
+  ([#336](https://github.com/o3co/auth.policy-verifier/pull/336)). It read
+  `docker build -t my-verifier .`, which has no `--target` and so built the
+  last stage, `develop` (`pnpm run debug`). It now reads
+  `make build IMAGE=my-verifier`.
+
+### Changed
+
+- **Development only: CI builds the template's image and fails on an Alpine
+  package older than the repository's**
+  ([#337](https://github.com/o3co/auth.policy-verifier/pull/337)).
+
 ## [0.18.1] - 2026-11-07
 
 ### Security
