@@ -1,6 +1,6 @@
 # @o3co/auth-policy-verifier-standalone
 
-最終更新: 2026-10-23
+最終更新: 2026-11-13
 
 auth.policy-verifier のデプロイ可能なサーバーテンプレートです。このパッケージはコンポジションルートとして機能し、設定の読み込み・モジュールのロード・Express サーバーの起動を担います。`@o3co/create-auth-policy-verifier` によって生成されます。
 
@@ -421,9 +421,14 @@ verifier の `http` engine は `http://127.0.0.1:8180` でそれを見つけま�
 `pnpm install` を一度実行してその結果をコミットします。
 
 したがって依存更新は lockfile の変更です: `pnpm update` → commit → 再ビルド。
-ベースイメージは例外です: `node:26.12-alpine` は Node.js の minor 系列を指すので、
+ベースイメージは例外です: `FROM` 行は Node.js の minor 系列を指す
+（`node:<major>.<minor>-alpine`）ので、`make build` と同じく `--pull` を付けた
 再ビルドはその系列の最新 patch（セキュリティ修正を含む）を取り込みます。
-別の minor に移るのは `FROM` 行を意図的に書き換える変更です。
+Alpine の修正がこのタグに入るのは Alpine が公開したより後になるので、runtime 段は
+`apk upgrade` を実行し、Alpine のリポジトリにある現在のパッケージを取り込みます。
+キャッシュされた層は以前のビルドのパッケージのままになるので、`make build` は
+この段を `--no-cache-filter=runtime` でビルドします。別の minor に移るのは
+`FROM` 行を意図的に書き換える変更です。
 
 ### HEALTHCHECK が報告するもの
 

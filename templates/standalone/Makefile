@@ -9,4 +9,4 @@ test:
 	docker compose -f docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from test
 
 build:
-	docker build --target runtime -t $(IMAGE) .
+	docker build --pull --no-cache-filter=runtime --target runtime -t $(IMAGE) .

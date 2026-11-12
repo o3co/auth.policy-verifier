@@ -1,6 +1,6 @@
 # auth.policy-verifier
 
-Last updated: 2026-10-23
+Last updated: 2026-11-13
 
 [![CI](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth.policy-verifier.core)](https://www.npmjs.com/package/@o3co/auth.policy-verifier.core)
@@ -724,12 +724,14 @@ pnpm -r test     # test all packages
 ```bash
 npx @o3co/create-auth-policy-verifier my-verifier
 cd my-verifier
-docker build -t my-verifier .
+make build IMAGE=my-verifier
 docker run -p 3000:3000 \
   -e HTTP_HOSTNAME=0.0.0.0 -e HTTP_CALLER_AUTH_TOKEN=<secret> \
   -e OAUTH_JWT_SECRET=$(openssl rand -hex 32) my-verifier
 ```
 
+`make build` builds the `runtime` stage with `--pull --no-cache-filter=runtime`,
+so each build takes the Node line's newest patch and Alpine's current packages.
 The scaffolder generates `pnpm-lock.yaml`; the image builds with
 `--frozen-lockfile` and will not build without it.
 
