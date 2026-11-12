@@ -1,6 +1,7 @@
 # The base image names a Node.js minor line, not a patch or a digest: a rebuild
-# takes the line's newest patch release, security fixes included, without an
-# edit here. Moving to another minor is a deliberate change to this line.
+# with `--pull` takes the line's newest patch release, security fixes included,
+# without an edit here. Moving to another minor is a deliberate change to this
+# line.
 FROM node:26.13-alpine AS node-base
 
 ENV HOME=/home/node
@@ -61,6 +62,12 @@ RUN pnpm prune --prod
 FROM node-base AS runtime
 
 ENV NODE_ENV=production
+
+# The Node image is rebuilt only some time after Alpine publishes a fix, so
+# the runtime takes the Alpine repository's current packages itself. Build
+# this stage without the cache (`make build` does), or a cached layer keeps
+# the packages of an earlier build.
+RUN apk upgrade --no-cache
 
 COPY --from=deps /home/node/package.json /home/node/pnpm-lock.yaml ./
 COPY --from=prod-deps /home/node/node_modules/ ./node_modules/

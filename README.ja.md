@@ -1,6 +1,6 @@
 # auth.policy-verifier
 
-最終更新: 2026-10-23
+最終更新: 2026-11-13
 
 [![CI](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.policy-verifier/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth.policy-verifier.core)](https://www.npmjs.com/package/@o3co/auth.policy-verifier.core)
@@ -714,12 +714,14 @@ pnpm -r test     # 全テスト実行
 ```bash
 npx @o3co/create-auth-policy-verifier my-verifier
 cd my-verifier
-docker build -t my-verifier .
+make build IMAGE=my-verifier
 docker run -p 3000:3000 \
   -e HTTP_HOSTNAME=0.0.0.0 -e HTTP_CALLER_AUTH_TOKEN=<secret> \
   -e OAUTH_JWT_SECRET=$(openssl rand -hex 32) my-verifier
 ```
 
+`make build` は `runtime` 段を `--pull --no-cache-filter=runtime` でビルドするので、
+ビルドのたびに Node 系列の最新 patch と Alpine の現在のパッケージを取り込みます。
 スキャフォルダーが `pnpm-lock.yaml` を生成します。イメージは
 `--frozen-lockfile` でビルドするため、lockfile が無いとビルドできません。
 
