@@ -430,6 +430,17 @@ Alpine の修正がこのタグに入るのは Alpine が公開したより後�
 この段を `--no-cache-filter=runtime` でビルドします。別の minor に移るのは
 `FROM` 行を意図的に書き換える変更です。
 
+### apk 以外のパッケージマネージャーを持たない
+
+runtime 段は `tini` の下で `node dist/main.mjs` を動かし、パッケージマネージャーは
+実行しません。そのため土台が持つものを取り除きます: npm と npx（corepack の
+インストールで npm が残したキャッシュも）、corepack と `corepack enable` が
+`PATH` に置いた `pnpm`・`pnpx`・`yarn`・`yarnpkg` の shim、Node イメージの yarn
+（あれば）です。したがって `docker exec <container> npm …` は失敗し、イメージの
+ファイルシステムを読むスキャナーはそれらが同梱するパッケージを見つけません。
+ファイルは runtime 段が積み重なる下の層に残るので、すべての層を読むスキャナーは
+なお挙げます。`test` 段と `develop` 段は pnpm を持ちます。
+
 ### HEALTHCHECK が報告するもの
 
 コンテナの healthcheck は `127.0.0.1` ではなく、**コンテナ自身の到達可能

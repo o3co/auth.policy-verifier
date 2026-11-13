@@ -732,6 +732,8 @@ docker run -p 3000:3000 \
 
 `make build` builds the `runtime` stage with `--pull --no-cache-filter=runtime`,
 so each build takes the Node line's newest patch and Alpine's current packages.
+The runtime image holds no package manager but apk: it drops the npm, npx,
+corepack and pnpm the build used, so `docker exec … npm` does not work there.
 The scaffolder generates `pnpm-lock.yaml`; the image builds with
 `--frozen-lockfile` and will not build without it.
 

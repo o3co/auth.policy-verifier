@@ -69,6 +69,17 @@ ENV NODE_ENV=production
 # the packages of an earlier build.
 RUN apk upgrade --no-cache
 
+# The runtime runs node under tini and never a package manager, so the ones
+# `node-base` carries go: npm (and npx, and the cache it left installing
+# corepack), corepack with the shims `corepack enable` put on PATH, and any
+# yarn of the base image. The dependencies they bundle are code the process
+# never loads that scanners would still report against the image. apk and
+# tini stay.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-v* \
+      /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+      /usr/local/bin/pnpm /usr/local/bin/pnpx /usr/local/bin/yarn /usr/local/bin/yarnpkg \
+      /home/node/.npm
+
 COPY --from=deps /home/node/package.json /home/node/pnpm-lock.yaml ./
 COPY --from=prod-deps /home/node/node_modules/ ./node_modules/
 COPY --from=builder /home/node/dist/ ./dist/
