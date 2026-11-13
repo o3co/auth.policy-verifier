@@ -1,0 +1,54 @@
+name: Image scan
+
+# Builds the standalone template's runtime image from the latest release, runs
+# the image checks on it, and scans it with Trivy. A rebuild of an unchanged
+# tag takes the Node minor's newest patch and Alpine's current packages, but
+# not a fix that ships only in a newer Node minor or in an npm package the
+# image carries; this run finds those. Trivy reports only vulnerabilities that
+# have a fix (`--ignore-unfixed`): one with no fix yet gives nothing to rebuild
+# with, and would keep the run red until a fix ships. A `schedule` event runs
+# the copy of this file on the default branch, develop.
+#
+# It builds only the latest release: no input selects another ref, so no code
+# but a release tag's runs here. It restores and saves no cache.
+on:
+  schedule:
+    - cron: '41 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # GitHub's latest release is never a prerelease or a draft. Its tag is `v`
+  # + the version it published, which the scaffold names.
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ref: ${{ steps.ref.outputs.ref }}
+      version: ${{ steps.ref.outputs.version }}
+    steps:
+      - name: Resolve the latest release
+        id: ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::the latest release's tag is not vX.Y.Z: '$tag'"
+            exit 1
+          fi
+          echo "ref=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+  image-scan:
+    needs: resolve
+    uses: ./.github/workflows/template-image.yml
+    with:
+      ref: ${{ needs.resolve.outputs.ref }}
+      version: ${{ needs.resolve.outputs.version }}
+      scan: true
+      cache: false
+      timeout-minutes: 20
