@@ -7,23 +7,20 @@ name: Image scan
 # carries, or in an Alpine package Alpine has not fixed yet; this run finds
 # those. A `schedule` event runs the copy of this file on the default branch,
 # develop.
+#
+# It builds only the latest release: no input selects another ref, so no code
+# but a release tag's runs here. It restores and saves no cache.
 on:
   schedule:
     - cron: '41 4 * * *'
   workflow_dispatch:
-    inputs:
-      ref:
-        description: Tag, branch or commit to build and scan (empty for the latest release)
-        required: false
-        type: string
 
 permissions:
   contents: read
 
 jobs:
-  # GitHub's latest release is never a prerelease or a draft. A release tag
-  # is `v` + the version it published; any other ref scaffolds against the
-  # newest published version.
+  # GitHub's latest release is never a prerelease or a draft. Its tag is `v`
+  # + the version it published, which the scaffold pins.
   resolve:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -31,22 +28,19 @@ jobs:
       ref: ${{ steps.ref.outputs.ref }}
       version: ${{ steps.ref.outputs.version }}
     steps:
-      - name: Resolve the ref
+      - name: Resolve the latest release
         id: ref
         env:
           GH_TOKEN: ${{ github.token }}
-          REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
-          if [ -z "$REF" ]; then
-            REF="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::the latest release's tag is not vX.Y.Z: '$tag'"
+            exit 1
           fi
-          version=""
-          if [[ "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-            version="${REF#v}"
-          fi
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "ref=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
   image-scan:
     needs: resolve
@@ -55,4 +49,5 @@ jobs:
       ref: ${{ needs.resolve.outputs.ref }}
       version: ${{ needs.resolve.outputs.version }}
       scan: true
+      cache: false
       timeout-minutes: 20

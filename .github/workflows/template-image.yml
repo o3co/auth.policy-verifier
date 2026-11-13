@@ -24,6 +24,10 @@ on:
         description: Scan the image with Trivy
         type: boolean
         default: false
+      cache:
+        description: Restore and save the pnpm store cache
+        type: boolean
+        default: true
       timeout-minutes:
         type: number
         required: true
@@ -48,8 +52,8 @@ jobs:
           REF: ${{ inputs.ref }}
         run: echo "## Image scan of \`$REF\` ($(git rev-parse --short HEAD))" >> "$GITHUB_STEP_SUMMARY"
 
-      # The caller's own scripts: the Node release check, and the image checks
-      # for a ref that has none.
+      # The Node release check, which release tags do not carry, comes from
+      # the caller's own ref.
       - name: Take the scripts from the caller's ref
         uses: actions/checkout@v4
         with:
@@ -62,12 +66,16 @@ jobs:
           node-version: '24.22'
           check-latest: true
 
+      # Without `cache`, the job neither restores nor saves a cache; the
+      # actions above cache nothing by default.
       - name: Get pnpm store path
+        if: inputs.cache
         id: pnpm-store
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/cache@v4
+      - if: inputs.cache
+        uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
@@ -96,15 +104,7 @@ jobs:
         run: docker build --pull --no-cache-filter=runtime --target runtime --tag "$IMAGE" .
 
       - name: Check the image
-        shell: bash
-        run: |
-          set -euo pipefail
-          script=.github/scripts/image-smoke.sh
-          if [ ! -f "$script" ]; then
-            echo "::notice::the built ref has no $script; running the copy from the caller's ref"
-            script=".image-checks/$script"
-          fi
-          "$script" "$IMAGE"
+        run: .github/scripts/image-smoke.sh "$IMAGE"
 
       # Not part of the image checks: it reads nodejs.org, which runs without
       # `scan` do not depend on.
