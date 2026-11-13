@@ -9,8 +9,8 @@ name: Template image
 # range (`^X.Y.Z`), which `pnpm install` inside the image resolves against the
 # registry, so the scaffolder is built with the workspace stamped at that
 # version, as release.yml stamps it at the tag. The range takes the newest
-# published patch of that minor; image-scan passes the latest release's
-# version, so the image holds that release's packages.
+# published patch of that minor; image-scan passes a release tag's version, the
+# newest of its minor, so the image holds that release's packages.
 on:
   workflow_call:
     inputs:
