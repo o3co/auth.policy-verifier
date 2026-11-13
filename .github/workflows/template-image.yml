@@ -5,10 +5,12 @@ name: Template image
 # With `scan`, it also checks the image's Node release against Node's release
 # index and scans the image with Trivy.
 #
-# A scaffold pins the workspace packages at a published version, which
-# `pnpm install` inside the image fetches from the registry, so the scaffolder
-# is built with the workspace stamped at that version, as release.yml stamps
-# it at the tag.
+# A scaffold names the workspace packages at a published version as a caret
+# range (`^X.Y.Z`), which `pnpm install` inside the image resolves against the
+# registry, so the scaffolder is built with the workspace stamped at that
+# version, as release.yml stamps it at the tag. The range takes the newest
+# published patch of that minor; image-scan passes the latest release's
+# version, so the image holds that release's packages.
 on:
   workflow_call:
     inputs:
@@ -17,7 +19,7 @@ on:
         type: string
         default: ''
       version:
-        description: Published version the scaffold pins (empty for the newest)
+        description: Published version the scaffold names (empty for the newest)
         type: string
         default: ''
       scan:
