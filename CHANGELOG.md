@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version sections follow the release labeling policy in
 [`docs/release-policy.md`](docs/release-policy.md).
 
+## [0.18.3] - 2026-11-13
+
+### Security
+
+- **The standalone template's runtime image carries no package manager but
+  apk** (`create-auth-policy-verifier`,
+  [#340](https://github.com/o3co/auth.policy-verifier/pull/340)). The npm that
+  `node:26.13-alpine` bundles (11.20.0) contains brace-expansion 5.0.9
+  (CVE-2026-102276, CVE-2026-102278) and undici 6.28.0 (CVE-2026-109383,
+  CVE-2026-109869, CVE-2026-19534, CVE-2026-87018), which Trivy reports as 6
+  HIGH in an image built from the 0.18.2 template. The verifier runs
+  `node dist/main.mjs` and never calls npm, so the template's `runtime` stage
+  now deletes npm, npx, the npm cache under `/home/node/.npm`, corepack with
+  its `pnpm`/`pnpx`/`yarn`/`yarnpkg` shims, and any `/opt/yarn-v*`. The
+  `test` and `develop` stages keep pnpm. The files stay in the lower layers,
+  so a scanner that reads every layer still lists them; one that reads the
+  final filesystem, as Trivy does by default, no longer does.
+  `docker exec <container> npm …` (or `npx`, `pnpm`, `corepack`) now fails;
+  debug with the `develop` target or another image.
+
+  **Action, for an app scaffolded before this release:** the scaffold copied
+  the template once, so upgrading does not change your `Dockerfile`. Copy the
+  new `RUN` from the template's `runtime` stage into yours, as root, before
+  `USER node`; build with
+  `docker build --pull --no-cache-filter=runtime --target runtime`; then
+  redeploy. An app scaffolded from this release already does this.
+
+### Changed
+
+- **Development only: the `template-image` CI job fails when the runtime
+  image holds any package manager but apk**
+  ([#340](https://github.com/o3co/auth.policy-verifier/pull/340)).
+
 ## [0.18.2] - 2026-11-13
 
 ### Security
